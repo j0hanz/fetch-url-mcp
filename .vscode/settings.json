@@ -1,0 +1,228 @@
+{
+  "chat.mcp.serverSampling": {
+    "playwright/.vscode/mcp.json: exa": {
+      "allowedModels": [
+        "copilot/claude-opus-4.5",
+        "copilot/claude-sonnet-4.5",
+        "copilot/gemini-3-pro-preview"
+      ]
+    },
+    "playwright/.vscode/mcp.json: github": {
+      "allowedModels": [
+        "copilot/claude-opus-4.5",
+        "copilot/claude-sonnet-4.5",
+        "copilot/gemini-3-pro-preview"
+      ]
+    },
+    "playwright/.vscode/mcp.json: context7": {
+      "allowedModels": [
+        "copilot/claude-opus-4.5",
+        "copilot/claude-sonnet-4.5",
+        "copilot/gemini-3-pro-preview"
+      ]
+    },
+    "playwright/.vscode/mcp.json: memory": {
+      "allowedModels": [
+        "copilot/claude-opus-4.5",
+        "copilot/claude-sonnet-4.5",
+        "copilot/gemini-3-pro-preview"
+      ]
+    },
+    "playwright/.vscode/mcp.json: apify": {
+      "allowedModels": [
+        "copilot/claude-opus-4.5",
+        "copilot/claude-sonnet-4.5",
+        "copilot/gemini-3-pro-preview"
+      ]
+    },
+    "playwright/.vscode/mcp.json: playwright": {
+      "allowedModels": [
+        "copilot/claude-opus-4.5",
+        "copilot/claude-sonnet-4.5",
+        "copilot/gemini-3-pro-preview"
+      ]
+    },
+    "playwright/.vscode/mcp.json: mui-mcp": {
+      "allowedModels": [
+        "copilot/claude-opus-4.5",
+        "copilot/claude-sonnet-4.5",
+        "copilot/gemini-3-pro-preview"
+      ]
+    },
+    "playwright/.vscode/mcp.json: Ref": {
+      "allowedModels": [
+        "copilot/claude-opus-4.5",
+        "copilot/claude-sonnet-4.5",
+        "copilot/gemini-3-pro-preview"
+      ]
+    },
+    "playwright/.vscode/mcp.json: markitdown": {
+      "allowedModels": [
+        "copilot/claude-opus-4.5",
+        "copilot/claude-sonnet-4.5",
+        "copilot/gemini-3-pro-preview"
+      ]
+    },
+    "playwright/.vscode/mcp.json: sequential-thinking": {
+      "allowedModels": [
+        "copilot/claude-opus-4.5",
+        "copilot/claude-sonnet-4.5",
+        "copilot/gemini-3-pro-preview"
+      ]
+    },
+    "playwright/.vscode/mcp.json: filesystem": {
+      "allowedModels": [
+        "copilot/claude-opus-4.5",
+        "copilot/claude-sonnet-4.5",
+        "copilot/gemini-3-pro-preview"
+      ]
+    },
+    "playwright/.vscode/mcp.json: brave-search": {
+      "allowedModels": [
+        "copilot/claude-opus-4.5",
+        "copilot/claude-sonnet-4.5",
+        "copilot/gemini-3-pro-preview"
+      ]
+    },
+    "playwright/.vscode/mcp.json: shadcn": {
+      "allowedModels": [
+        "copilot/claude-opus-4.5",
+        "copilot/claude-sonnet-4.5",
+        "copilot/gemini-3-pro-preview"
+      ]
+    },
+    "playwright/.vscode/mcp.json: everything": {
+      "allowedModels": [
+        "copilot/claude-opus-4.5",
+        "copilot/claude-sonnet-4.5",
+        "copilot/gemini-3-pro-preview"
+      ]
+    },
+    "playwright/.vscode/mcp.json: microsoft.docs.mcp": {
+      "allowedModels": [
+        "copilot/claude-opus-4.5",
+        "copilot/claude-sonnet-4.5",
+        "copilot/gemini-3-pro-preview"
+      ]
+    },
+    "playwright/.vscode/mcp.json: gemini": {
+      "allowedModels": [
+        "copilot/claude-opus-4.5",
+        "copilot/claude-sonnet-4.5",
+        "copilot/gemini-3-pro-preview"
+      ]
+    },
+    "superFetch/.vscode/mcp.json: exa": {
+      "allowedModels": [
+        "copilot/claude-opus-4.5",
+        "copilot/claude-sonnet-4.5",
+        "copilot/gemini-3-pro-preview"
+      ]
+    },
+    "superFetch/.vscode/mcp.json: github": {
+      "allowedModels": [
+        "copilot/claude-opus-4.5",
+        "copilot/claude-sonnet-4.5",
+        "copilot/gemini-3-pro-preview"
+      ]
+    },
+    "superFetch/.vscode/mcp.json: context7": {
+      "allowedModels": [
+        "copilot/claude-opus-4.5",
+        "copilot/claude-sonnet-4.5",
+        "copilot/gemini-3-pro-preview"
+      ]
+    },
+    "superFetch/.vscode/mcp.json: memory": {
+      "allowedModels": [
+        "copilot/claude-opus-4.5",
+        "copilot/claude-sonnet-4.5",
+        "copilot/gemini-3-pro-preview"
+      ]
+    },
+    "superFetch/.vscode/mcp.json: apify": {
+      "allowedModels": [
+        "copilot/claude-opus-4.5",
+        "copilot/claude-sonnet-4.5",
+        "copilot/gemini-3-pro-preview"
+      ]
+    },
+    "superFetch/.vscode/mcp.json: playwright": {
+      "allowedModels": [
+        "copilot/claude-opus-4.5",
+        "copilot/claude-sonnet-4.5",
+        "copilot/gemini-3-pro-preview"
+      ]
+    },
+    "superFetch/.vscode/mcp.json: mui-mcp": {
+      "allowedModels": [
+        "copilot/claude-opus-4.5",
+        "copilot/claude-sonnet-4.5",
+        "copilot/gemini-3-pro-preview"
+      ]
+    },
+    "superFetch/.vscode/mcp.json: Ref": {
+      "allowedModels": [
+        "copilot/claude-opus-4.5",
+        "copilot/claude-sonnet-4.5",
+        "copilot/gemini-3-pro-preview"
+      ]
+    },
+    "superFetch/.vscode/mcp.json: markitdown": {
+      "allowedModels": [
+        "copilot/claude-opus-4.5",
+        "copilot/claude-sonnet-4.5",
+        "copilot/gemini-3-pro-preview"
+      ]
+    },
+    "superFetch/.vscode/mcp.json: sequential-thinking": {
+      "allowedModels": [
+        "copilot/claude-opus-4.5",
+        "copilot/claude-sonnet-4.5",
+        "copilot/gemini-3-pro-preview"
+      ]
+    },
+    "superFetch/.vscode/mcp.json: filesystem": {
+      "allowedModels": [
+        "copilot/claude-opus-4.5",
+        "copilot/claude-sonnet-4.5",
+        "copilot/gemini-3-pro-preview"
+      ]
+    },
+    "superFetch/.vscode/mcp.json: brave-search": {
+      "allowedModels": [
+        "copilot/claude-opus-4.5",
+        "copilot/claude-sonnet-4.5",
+        "copilot/gemini-3-pro-preview"
+      ]
+    },
+    "superFetch/.vscode/mcp.json: shadcn": {
+      "allowedModels": [
+        "copilot/claude-opus-4.5",
+        "copilot/claude-sonnet-4.5",
+        "copilot/gemini-3-pro-preview"
+      ]
+    },
+    "superFetch/.vscode/mcp.json: everything": {
+      "allowedModels": [
+        "copilot/claude-opus-4.5",
+        "copilot/claude-sonnet-4.5",
+        "copilot/gemini-3-pro-preview"
+      ]
+    },
+    "superFetch/.vscode/mcp.json: microsoft.docs.mcp": {
+      "allowedModels": [
+        "copilot/claude-opus-4.5",
+        "copilot/claude-sonnet-4.5",
+        "copilot/gemini-3-pro-preview"
+      ]
+    },
+    "superFetch/.vscode/mcp.json: gemini": {
+      "allowedModels": [
+        "copilot/claude-opus-4.5",
+        "copilot/claude-sonnet-4.5",
+        "copilot/gemini-3-pro-preview"
+      ]
+    }
+  }
+}
