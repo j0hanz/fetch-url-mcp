@@ -1,4 +1,7 @@
-import { UrlValidationError } from '../errors/app-error.js';
+import { UrlValidationError, ValidationError } from '../errors/app-error.js';
+
+// Maximum URL length to prevent DoS attacks
+const MAX_URL_LENGTH = 2048;
 
 // Blocked hosts to prevent SSRF attacks
 const BLOCKED_HOSTS = new Set([
@@ -9,6 +12,8 @@ const BLOCKED_HOSTS = new Set([
   '169.254.169.254', // AWS metadata endpoint
   'metadata.google.internal', // GCP metadata
   'metadata.azure.com', // Azure metadata
+  '100.100.100.200', // Alibaba Cloud metadata
+  'instance-data', // Common cloud metadata hostname
 ]);
 
 // Blocked IP patterns (private networks)
@@ -21,6 +26,10 @@ const BLOCKED_IP_PATTERNS: readonly RegExp[] = [
   /^169\.254\./, // Link-local
   /^fc00:/i, // IPv6 unique local
   /^fe80:/i, // IPv6 link-local
+  /^::ffff:127\./, // IPv4-mapped IPv6 loopback
+  /^::ffff:10\./, // IPv4-mapped IPv6 private
+  /^::ffff:172\.(1[6-9]|2\d|3[01])\./, // IPv4-mapped IPv6 private
+  /^::ffff:192\.168\./, // IPv4-mapped IPv6 private
 ];
 
 /**
@@ -32,32 +41,64 @@ function isBlockedIp(hostname: string): boolean {
 
 /**
  * Validates and normalizes a URL, blocking SSRF attack vectors
+ * @throws {ValidationError} if URL is empty or too long
  * @throws {UrlValidationError} if URL is invalid or blocked
  */
 export function validateAndNormalizeUrl(urlString: string): string {
+  // Check for empty or whitespace-only input
+  if (!urlString || typeof urlString !== 'string') {
+    throw new ValidationError('URL is required');
+  }
+
+  const trimmedUrl = urlString.trim();
+  if (!trimmedUrl) {
+    throw new ValidationError('URL cannot be empty');
+  }
+
+  // Check URL length to prevent DoS
+  if (trimmedUrl.length > MAX_URL_LENGTH) {
+    throw new ValidationError(
+      `URL exceeds maximum length of ${MAX_URL_LENGTH} characters`,
+      { length: trimmedUrl.length, maxLength: MAX_URL_LENGTH }
+    );
+  }
+
   let url: URL;
 
   try {
-    url = new URL(urlString);
+    url = new URL(trimmedUrl);
   } catch {
-    throw new UrlValidationError(`Invalid URL format`, urlString);
+    throw new UrlValidationError(`Invalid URL format`, trimmedUrl);
   }
 
   // Only allow HTTP(S) protocols
   if (url.protocol !== 'http:' && url.protocol !== 'https:') {
     throw new UrlValidationError(
       `Invalid protocol: ${url.protocol}. Only http: and https: are allowed`,
-      urlString
+      trimmedUrl
+    );
+  }
+
+  // Block URLs with credentials (user:pass@host)
+  if (url.username || url.password) {
+    throw new UrlValidationError(
+      'URLs with embedded credentials are not allowed',
+      trimmedUrl
     );
   }
 
   const hostname = url.hostname.toLowerCase();
 
+  // Block empty hostname
+  if (!hostname) {
+    throw new UrlValidationError('URL must have a valid hostname', trimmedUrl);
+  }
+
   // Block known internal/metadata hosts
   if (BLOCKED_HOSTS.has(hostname)) {
     throw new UrlValidationError(
       `Blocked host: ${hostname}. Internal hosts are not allowed`,
-      urlString
+      trimmedUrl
     );
   }
 
@@ -65,7 +106,15 @@ export function validateAndNormalizeUrl(urlString: string): string {
   if (isBlockedIp(hostname)) {
     throw new UrlValidationError(
       `Blocked IP range: ${hostname}. Private IPs are not allowed`,
-      urlString
+      trimmedUrl
+    );
+  }
+
+  // Block hostnames that look like they might resolve to internal addresses
+  if (hostname.endsWith('.local') || hostname.endsWith('.internal')) {
+    throw new UrlValidationError(
+      `Blocked hostname pattern: ${hostname}. Internal domain suffixes are not allowed`,
+      trimmedUrl
     );
   }
 

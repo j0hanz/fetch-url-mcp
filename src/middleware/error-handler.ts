@@ -26,7 +26,8 @@ export function errorHandler(
   const isAppError = err instanceof AppError;
   const statusCode = isAppError ? err.statusCode : 500;
   const code = isAppError ? err.code : 'INTERNAL_ERROR';
-  const message = isAppError && err.isOperational ? err.message : 'Internal Server Error';
+  const message =
+    isAppError && err.isOperational ? err.message : 'Internal Server Error';
 
   // Log error (full details for non-operational errors)
   logError(`HTTP ${statusCode}: ${err.message}`, err);

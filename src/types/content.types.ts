@@ -1,5 +1,5 @@
 // Content block types for JSONL output
-export type ContentBlockType =
+type ContentBlockType =
   | 'metadata'
   | 'heading'
   | 'paragraph'

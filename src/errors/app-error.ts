@@ -22,15 +22,6 @@ export class AppError extends Error {
 }
 
 /**
- * Not found error (404)
- */
-export class NotFoundError extends AppError {
-  constructor(resource: string) {
-    super(`${resource} not found`, 404, 'NOT_FOUND');
-  }
-}
-
-/**
  * Validation error (400)
  */
 export class ValidationError extends AppError {
@@ -65,36 +56,6 @@ export class FetchError extends AppError {
     super(message, httpStatus ?? 502, 'FETCH_ERROR');
     this.url = url;
     this.httpStatus = httpStatus;
-  }
-}
-
-/**
- * Content extraction error
- */
-export class ExtractionError extends AppError {
-  public readonly url: string;
-
-  constructor(message: string, url: string) {
-    super(message, 422, 'EXTRACTION_ERROR');
-    this.url = url;
-  }
-}
-
-/**
- * Unauthorized error (401)
- */
-export class UnauthorizedError extends AppError {
-  constructor(message = 'Unauthorized') {
-    super(message, 401, 'UNAUTHORIZED');
-  }
-}
-
-/**
- * Forbidden error (403)
- */
-export class ForbiddenError extends AppError {
-  constructor(message = 'Forbidden') {
-    super(message, 403, 'FORBIDDEN');
   }
 }
 

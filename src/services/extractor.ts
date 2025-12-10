@@ -1,26 +1,28 @@
 import { JSDOM } from 'jsdom';
 import { Readability } from '@mozilla/readability';
 import type { ExtractedArticle } from '../types/index.js';
-import { logError } from './logger.js';
+import { logError, logWarn } from './logger.js';
 
-/**
- * Metadata extracted from HTML document
- */
-export interface ExtractedMetadata {
+// Maximum HTML size to process (10MB)
+const MAX_HTML_SIZE = 10 * 1024 * 1024;
+
+/** Metadata extracted from HTML document (internal) */
+interface ExtractedMetadata {
   title?: string;
   description?: string;
   author?: string;
 }
 
-/**
- * Combined extraction result from a single JSDOM parse
- */
-export interface ExtractionResult {
+/** Combined extraction result (internal) */
+interface ExtractionResult {
   article: ExtractedArticle | null;
   metadata: ExtractedMetadata;
 }
 
-function getMetaContent(document: Document, selectors: string[]): string | undefined {
+function getMetaContent(
+  document: Document,
+  selectors: string[]
+): string | undefined {
   for (const selector of selectors) {
     const content = document.querySelector(selector)?.getAttribute('content');
     if (content) return content;
@@ -36,7 +38,9 @@ function extractMetadataFromDocument(document: Document): ExtractedMetadata {
     getMetaContent(document, [
       'meta[property="og:title"]',
       'meta[name="twitter:title"]',
-    ]) ?? document.querySelector('title')?.textContent ?? undefined;
+    ]) ??
+    document.querySelector('title')?.textContent ??
+    undefined;
 
   const description = getMetaContent(document, [
     'meta[property="og:description"]',
@@ -55,7 +59,9 @@ function extractMetadataFromDocument(document: Document): ExtractedMetadata {
 /**
  * Extracts article content from a pre-parsed Document using Readability
  */
-function extractArticleFromDocument(document: Document): ExtractedArticle | null {
+function extractArticleFromDocument(
+  document: Document
+): ExtractedArticle | null {
   // Clone the document since Readability mutates it
   const clonedDoc = document.cloneNode(true) as Document;
   const reader = new Readability(clonedDoc);
@@ -76,10 +82,34 @@ function extractArticleFromDocument(document: Document): ExtractedArticle | null
 /**
  * Extracts both article content and metadata from HTML in a single JSDOM parse.
  * This is more efficient than calling extractArticle and extractMetadata separately.
+ * @param html - HTML string to extract content from
+ * @param url - URL of the page (used for resolving relative links)
+ * @returns Extraction result with article and metadata
  */
 export function extractContent(html: string, url: string): ExtractionResult {
+  // Input validation
+  if (!html || typeof html !== 'string') {
+    logWarn('extractContent called with invalid HTML input');
+    return { article: null, metadata: {} };
+  }
+
+  if (!url || typeof url !== 'string') {
+    logWarn('extractContent called with invalid URL');
+    return { article: null, metadata: {} };
+  }
+
+  // Size validation to prevent memory issues
+  let processedHtml = html;
+  if (html.length > MAX_HTML_SIZE) {
+    logWarn('HTML content exceeds maximum size for extraction, truncating', {
+      size: html.length,
+      maxSize: MAX_HTML_SIZE,
+    });
+    processedHtml = html.substring(0, MAX_HTML_SIZE);
+  }
+
   try {
-    const dom = new JSDOM(html, { url });
+    const dom = new JSDOM(processedHtml, { url });
     const document = dom.window.document;
 
     // Extract metadata first (non-destructive)
@@ -90,35 +120,10 @@ export function extractContent(html: string, url: string): ExtractionResult {
 
     return { article, metadata };
   } catch (error) {
-    logError('Failed to extract content', error instanceof Error ? error : undefined);
+    logError(
+      'Failed to extract content',
+      error instanceof Error ? error : undefined
+    );
     return { article: null, metadata: {} };
-  }
-}
-
-/**
- * Extracts main article content using Mozilla Readability
- * @deprecated Use extractContent() for better performance when you need both article and metadata
- */
-export function extractArticle(html: string, url: string): ExtractedArticle | null {
-  try {
-    const dom = new JSDOM(html, { url });
-    return extractArticleFromDocument(dom.window.document);
-  } catch (error) {
-    logError('Failed to extract article', error instanceof Error ? error : undefined);
-    return null;
-  }
-}
-
-/**
- * Extracts metadata from HTML
- * @deprecated Use extractContent() for better performance when you need both article and metadata
- */
-export function extractMetadata(html: string): ExtractedMetadata {
-  try {
-    const { document } = new JSDOM(html).window;
-    return extractMetadataFromDocument(document);
-  } catch (error) {
-    logError('Failed to extract metadata', error instanceof Error ? error : undefined);
-    return {};
   }
 }
