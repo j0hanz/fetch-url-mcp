@@ -1,0 +1,20 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-10-17/server.schema.json",
+  "name": "io.github.j0hanz/superfetch",
+  "description": "Intelligent web content fetcher MCP server that converts HTML to clean, AI-readable JSONL format",
+  "repository": {
+    "url": "https://github.com/j0hanz/super-fetch-mcp-server",
+    "source": "github"
+  },
+  "version": "1.0.1",
+  "packages": [
+    {
+      "registryType": "npm",
+      "identifier": "@j0hanz/superfetch",
+      "version": "1.0.1",
+      "transport": {
+        "type": "stdio"
+      }
+    }
+  ]
+}
