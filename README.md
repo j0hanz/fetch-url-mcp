@@ -1,11 +1,6 @@
 # 🚀 superFetch
 
-[![npm version](https://img.shields.io/npm/v/@j0hanz/superfetch.svg)](https://www.npmjs.com/package/@j0hanz/superfetch)
-[![MCP Registry](https://img.shields.io/badge/MCP_Registry-io.github.j0hanz%2Fsuperfetch-8B5CF6)](https://registry.modelcontextprotocol.io/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Node.js](https://img.shields.io/badge/Node.js-≥18.0.0-339933?logo=nodedotjs&logoColor=white)](https://nodejs.org/)
-[![TypeScript](https://img.shields.io/badge/TypeScript-5.9-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
-[![MCP SDK](https://img.shields.io/badge/MCP_SDK-1.0.4-8B5CF6)](https://modelcontextprotocol.io/)
+[![npm version](https://img.shields.io/npm/v/@j0hanz/superfetch.svg)](https://www.npmjs.com/package/@j0hanz/superfetch)[![MCP Registry](https://img.shields.io/badge/MCP_Registry-io.github.j0hanz%2Fsuperfetch-8B5CF6)](https://registry.modelcontextprotocol.io/)[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)[![Node.js](https://img.shields.io/badge/Node.js-≥18.0.0-339933?logo=nodedotjs&logoColor=white)](https://nodejs.org/)[![TypeScript](https://img.shields.io/badge/TypeScript-5.9-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)[![MCP SDK](https://img.shields.io/badge/MCP_SDK-1.0.4-8B5CF6)](https://modelcontextprotocol.io/)
 
 A [Model Context Protocol](https://modelcontextprotocol.io/) (MCP) server that fetches, extracts, and transforms web content into AI-optimized formats using Mozilla Readability.
 
