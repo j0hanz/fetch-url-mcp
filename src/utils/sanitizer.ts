@@ -1,11 +1,8 @@
 /**
- * Sanitizes text content by removing extra whitespace and special characters
+ * Sanitizes text content by collapsing whitespace and trimming
  */
 export function sanitizeText(text: string): string {
-  return text
-    .replace(/\s+/g, ' ') // Replace multiple spaces with single space
-    .replace(/\n\s*\n/g, '\n') // Remove empty lines
-    .trim();
+  return text.replace(/\s+/g, ' ').trim();
 }
 
 /**

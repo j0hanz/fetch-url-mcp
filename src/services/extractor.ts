@@ -20,7 +20,10 @@ export interface ExtractionResult {
   metadata: ExtractedMetadata;
 }
 
-function getMetaContent(document: Document, selectors: string[]): string | undefined {
+function getMetaContent(
+  document: Document,
+  selectors: string[]
+): string | undefined {
   for (const selector of selectors) {
     const content = document.querySelector(selector)?.getAttribute('content');
     if (content) return content;
@@ -36,7 +39,9 @@ function extractMetadataFromDocument(document: Document): ExtractedMetadata {
     getMetaContent(document, [
       'meta[property="og:title"]',
       'meta[name="twitter:title"]',
-    ]) ?? document.querySelector('title')?.textContent ?? undefined;
+    ]) ??
+    document.querySelector('title')?.textContent ??
+    undefined;
 
   const description = getMetaContent(document, [
     'meta[property="og:description"]',
@@ -55,7 +60,9 @@ function extractMetadataFromDocument(document: Document): ExtractedMetadata {
 /**
  * Extracts article content from a pre-parsed Document using Readability
  */
-function extractArticleFromDocument(document: Document): ExtractedArticle | null {
+function extractArticleFromDocument(
+  document: Document
+): ExtractedArticle | null {
   // Clone the document since Readability mutates it
   const clonedDoc = document.cloneNode(true) as Document;
   const reader = new Readability(clonedDoc);
@@ -90,7 +97,10 @@ export function extractContent(html: string, url: string): ExtractionResult {
 
     return { article, metadata };
   } catch (error) {
-    logError('Failed to extract content', error instanceof Error ? error : undefined);
+    logError(
+      'Failed to extract content',
+      error instanceof Error ? error : undefined
+    );
     return { article: null, metadata: {} };
   }
 }
@@ -99,12 +109,18 @@ export function extractContent(html: string, url: string): ExtractionResult {
  * Extracts main article content using Mozilla Readability
  * @deprecated Use extractContent() for better performance when you need both article and metadata
  */
-export function extractArticle(html: string, url: string): ExtractedArticle | null {
+export function extractArticle(
+  html: string,
+  url: string
+): ExtractedArticle | null {
   try {
     const dom = new JSDOM(html, { url });
     return extractArticleFromDocument(dom.window.document);
   } catch (error) {
-    logError('Failed to extract article', error instanceof Error ? error : undefined);
+    logError(
+      'Failed to extract article',
+      error instanceof Error ? error : undefined
+    );
     return null;
   }
 }
@@ -118,7 +134,10 @@ export function extractMetadata(html: string): ExtractedMetadata {
     const { document } = new JSDOM(html).window;
     return extractMetadataFromDocument(document);
   } catch (error) {
-    logError('Failed to extract metadata', error instanceof Error ? error : undefined);
+    logError(
+      'Failed to extract metadata',
+      error instanceof Error ? error : undefined
+    );
     return {};
   }
 }

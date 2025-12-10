@@ -47,16 +47,22 @@ function createFrontmatter(metadata: MetadataBlock): string {
   const lines = ['---'];
 
   if (metadata.title) lines.push(`title: ${escapeYamlValue(metadata.title)}`);
-  if (metadata.description) lines.push(`description: ${escapeYamlValue(metadata.description)}`);
-  if (metadata.author) lines.push(`author: ${escapeYamlValue(metadata.author)}`);
+  if (metadata.description)
+    lines.push(`description: ${escapeYamlValue(metadata.description)}`);
+  if (metadata.author)
+    lines.push(`author: ${escapeYamlValue(metadata.author)}`);
   if (metadata.url) lines.push(`url: ${escapeYamlValue(metadata.url)}`);
-  if (metadata.fetchedAt) lines.push(`fetched_at: ${escapeYamlValue(metadata.fetchedAt)}`);
+  if (metadata.fetchedAt)
+    lines.push(`fetched_at: ${escapeYamlValue(metadata.fetchedAt)}`);
 
   lines.push('---');
   return lines.join('\n');
 }
 
-function tableToMarkdown(table: { headers?: string[]; rows: string[][] }): string {
+function tableToMarkdown(table: {
+  headers?: string[];
+  rows: string[][];
+}): string {
   let markdown = '';
 
   if (table.headers && table.headers.length > 0) {

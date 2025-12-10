@@ -18,7 +18,11 @@ function extractAndConvertToMarkdown(
   // Use the optimized extractContent that parses JSDOM only once
   const { article, metadata: extractedMeta } = extractContent(html, url);
 
-  if (options.extractMainContent && config.extraction.extractMainContent && article) {
+  if (
+    options.extractMainContent &&
+    config.extraction.extractMainContent &&
+    article
+  ) {
     const metadata =
       options.includeMetadata && config.extraction.includeMetadata
         ? {

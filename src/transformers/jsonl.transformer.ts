@@ -9,19 +9,31 @@ function truncateBlock(block: ContentBlockUnion): ContentBlockUnion {
   switch (block.type) {
     case 'paragraph':
     case 'heading':
-    case 'code':
-      return { ...block, text: truncateText(block.text, maxLength) };
-    case 'list':
-      return {
-        ...block,
-        items: block.items.map((item) => truncateText(item, maxLength)),
-      };
+    case 'code': {
+      const truncated = truncateText(block.text, maxLength);
+      // Avoid creating new object if no truncation occurred
+      return truncated === block.text ? block : { ...block, text: truncated };
+    }
+    case 'list': {
+      const truncatedItems = block.items.map((item) =>
+        truncateText(item, maxLength)
+      );
+      // Check if any items were truncated by comparing lengths
+      const hasChanges = truncatedItems.some(
+        (item, i) => item !== block.items[i]
+      );
+      // Avoid creating new object if no truncation occurred
+      return hasChanges ? { ...block, items: truncatedItems } : block;
+    }
     default:
       return block;
   }
 }
 
-export function toJsonl(blocks: ContentBlockUnion[], metadata?: MetadataBlock): string {
+export function toJsonl(
+  blocks: ContentBlockUnion[],
+  metadata?: MetadataBlock
+): string {
   const lines: string[] = [];
 
   if (metadata) lines.push(JSON.stringify(metadata));
@@ -41,7 +53,10 @@ export function fromJsonl(jsonl: string): ContentBlockUnion[] {
     try {
       blocks.push(JSON.parse(line) as ContentBlockUnion);
     } catch (error) {
-      logError('Failed to parse JSONL line', error instanceof Error ? error : undefined);
+      logError(
+        'Failed to parse JSONL line',
+        error instanceof Error ? error : undefined
+      );
     }
   }
 

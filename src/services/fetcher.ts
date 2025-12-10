@@ -1,4 +1,6 @@
 import axios, { AxiosRequestConfig } from 'axios';
+import http from 'http';
+import https from 'https';
 import { config } from '../config/index.js';
 import { FetchError, TimeoutError } from '../errors/app-error.js';
 
@@ -32,13 +34,20 @@ function calculateBackoff(attempt: number, maxDelay = 10000): number {
   return Math.round(baseDelay + jitter);
 }
 
+// HTTP/HTTPS agents with connection pooling for better performance
+const httpAgent = new http.Agent({ keepAlive: true, maxSockets: 25 });
+const httpsAgent = new https.Agent({ keepAlive: true, maxSockets: 25 });
+
 const client = axios.create({
   timeout: config.fetcher.timeout,
   maxRedirects: config.fetcher.maxRedirects,
   maxContentLength: config.fetcher.maxContentLength,
+  httpAgent,
+  httpsAgent,
   headers: {
     'User-Agent': config.fetcher.userAgent,
-    Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+    Accept:
+      'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
     'Accept-Language': 'en-US,en;q=0.5',
     'Accept-Encoding': 'gzip, deflate, br',
     Connection: 'keep-alive',

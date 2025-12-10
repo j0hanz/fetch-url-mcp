@@ -47,7 +47,10 @@ export function logWarn(message: string, meta?: Record<string, unknown>): void {
   if (config.logging.enabled) logger.warn(message, meta);
 }
 
-export function logDebug(message: string, meta?: Record<string, unknown>): void {
+export function logDebug(
+  message: string,
+  meta?: Record<string, unknown>
+): void {
   if (config.logging.enabled) logger.debug(message, meta);
 }
 

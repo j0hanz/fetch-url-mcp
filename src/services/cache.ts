@@ -36,12 +36,12 @@ export function set(cacheKey: string, content: string): void {
   if (!config.cache.enabled) return;
   if (content.length > maxContentSize) return;
 
-  const now = new Date();
+  const nowMs = Date.now();
   const entry: CacheEntry = {
     url: cacheKey,
     content,
-    fetchedAt: now.toISOString(),
-    expiresAt: new Date(now.getTime() + config.cache.ttl * 1000).toISOString(),
+    fetchedAt: new Date(nowMs).toISOString(),
+    expiresAt: new Date(nowMs + config.cache.ttl * 1000).toISOString(),
   };
 
   // Use cache key directly for better performance and debuggability

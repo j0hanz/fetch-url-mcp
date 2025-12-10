@@ -41,7 +41,9 @@ function extractLinksFromHtml(
       }
       seenUrls.add(absoluteUrl);
 
-      const type = isInternalUrl(absoluteUrl, baseUrl) ? 'internal' : 'external';
+      const type = isInternalUrl(absoluteUrl, baseUrl)
+        ? 'internal'
+        : 'external';
 
       // Filter based on options
       if (type === 'internal' && !options.includeInternal) return;

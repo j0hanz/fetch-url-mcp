@@ -29,7 +29,11 @@ function extractContentFromHtml(
   // Use the optimized extractContent that parses JSDOM only once
   const { article, metadata: extractedMeta } = extractContent(html, url);
 
-  if (options.extractMainContent && config.extraction.extractMainContent && article) {
+  if (
+    options.extractMainContent &&
+    config.extraction.extractMainContent &&
+    article
+  ) {
     const contentBlocks = parseHtml(article.content);
     const metadata =
       options.includeMetadata && config.extraction.includeMetadata
@@ -87,14 +91,21 @@ export async function fetchUrlToolHandler(input: FetchUrlInput) {
 
     const html = await fetchUrlWithRetry(url, input.customHeaders);
 
-    const { contentBlocks, metadata, title } = extractContentFromHtml(html, url, {
-      extractMainContent: input.extractMainContent ?? true,
-      includeMetadata: input.includeMetadata ?? true,
-    });
+    const { contentBlocks, metadata, title } = extractContentFromHtml(
+      html,
+      url,
+      {
+        extractMainContent: input.extractMainContent ?? true,
+        includeMetadata: input.includeMetadata ?? true,
+      }
+    );
 
     let jsonlContent = toJsonl(contentBlocks, metadata);
 
-    if (input.maxContentLength && jsonlContent.length > input.maxContentLength) {
+    if (
+      input.maxContentLength &&
+      jsonlContent.length > input.maxContentLength
+    ) {
       jsonlContent =
         jsonlContent.substring(0, input.maxContentLength) + '\n...[truncated]';
     }

@@ -24,7 +24,10 @@ function parseHeading($: CheerioAPI, element: Element): HeadingBlock | null {
   };
 }
 
-function parseParagraph($: CheerioAPI, element: Element): ParagraphBlock | null {
+function parseParagraph(
+  $: CheerioAPI,
+  element: Element
+): ParagraphBlock | null {
   const text = sanitizeText($(element).text());
   if (!text || text.length < config.extraction.minParagraphLength) return null;
 

@@ -1,5 +1,9 @@
 #!/usr/bin/env node
-import express, { type Request, type Response, type NextFunction } from 'express';
+import express, {
+  type Request,
+  type Response,
+  type NextFunction,
+} from 'express';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
 import { config } from './config/index.js';
@@ -53,7 +57,10 @@ if (isStdioMode) {
     ) {
       res.header('Access-Control-Allow-Origin', origin ?? '*');
       res.header('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
-      res.header('Access-Control-Allow-Headers', 'Content-Type, mcp-session-id');
+      res.header(
+        'Access-Control-Allow-Headers',
+        'Content-Type, mcp-session-id'
+      );
     }
 
     if (req.method === 'OPTIONS') {
@@ -85,7 +92,9 @@ if (isStdioMode) {
       let transport: StreamableHTTPServerTransport;
 
       // Debug logging
-      const body = req.body as { method?: string; id?: string | number } | undefined;
+      const body = req.body as
+        | { method?: string; id?: string | number }
+        | undefined;
       logInfo('[MCP POST]', {
         method: body?.method,
         id: body?.id,
@@ -94,7 +103,9 @@ if (isStdioMode) {
         sessionCount: transports.size,
       });
 
-      const existingTransport = sessionId ? transports.get(sessionId) : undefined;
+      const existingTransport = sessionId
+        ? transports.get(sessionId)
+        : undefined;
       if (existingTransport) {
         // Reuse existing session
         transport = existingTransport;
@@ -124,7 +135,11 @@ if (isStdioMode) {
         // Invalid request - no session and not an initialize request
         res.status(400).json({
           jsonrpc: '2.0',
-          error: { code: -32000, message: 'Bad Request: Missing session ID or not an initialize request' },
+          error: {
+            code: -32000,
+            message:
+              'Bad Request: Missing session ID or not an initialize request',
+          },
           id: null,
         });
         return;
@@ -157,16 +172,19 @@ if (isStdioMode) {
   );
 
   // DELETE endpoint for session cleanup
-  app.delete('/mcp', asyncHandler(async (req: Request, res: Response) => {
-    const sessionId = req.headers['mcp-session-id'] as string | undefined;
-    const transport = sessionId ? transports.get(sessionId) : undefined;
+  app.delete(
+    '/mcp',
+    asyncHandler(async (req: Request, res: Response) => {
+      const sessionId = req.headers['mcp-session-id'] as string | undefined;
+      const transport = sessionId ? transports.get(sessionId) : undefined;
 
-    if (transport) {
-      await transport.handleRequest(req, res);
-    } else {
-      res.status(204).end();
-    }
-  }));
+      if (transport) {
+        await transport.handleRequest(req, res);
+      } else {
+        res.status(204).end();
+      }
+    })
+  );
 
   // Error handling middleware (must be last)
   app.use(errorHandler);
