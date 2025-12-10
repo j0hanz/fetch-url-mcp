@@ -13,6 +13,13 @@ dist/
 .env.local
 .env.*.local
 
+# MCP Registry auth tokens
+.mcpregistry_*
+
+# MCP Publisher CLI
+mcp-publisher.exe
+mcp-publisher
+
 # Logs
 *.log
 npm-debug.log*
