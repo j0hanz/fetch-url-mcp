@@ -5,6 +5,11 @@ import {
 import { fetchUrlWithRetry } from '../../services/fetcher.js';
 import * as cache from '../../services/cache.js';
 import * as cheerio from 'cheerio';
+import { logError } from '../../services/logger.js';
+import {
+  createToolErrorResponse,
+  handleToolError,
+} from '../../utils/tool-error-handler.js';
 import type { FetchLinksInput, ExtractedLink } from '../../types/index.js';
 
 export const FETCH_LINKS_TOOL_NAME = 'fetch-links';
@@ -67,17 +72,47 @@ function extractLinksFromHtml(
  */
 export async function fetchLinksToolHandler(input: FetchLinksInput) {
   try {
+    // Validate URL input
+    if (!input.url) {
+      return createToolErrorResponse('URL is required', '', 'VALIDATION_ERROR');
+    }
+
     const url = validateAndNormalizeUrl(input.url);
     const cacheKey = cache.createCacheKey('links', url);
 
-    const cached = cache.get(cacheKey);
-    if (cached) {
-      return {
-        content: [{ type: 'text' as const, text: cached.content }],
-      };
+    // Check cache first
+    if (cacheKey) {
+      const cached = cache.get(cacheKey);
+      if (cached) {
+        // Parse the cached content to return as structuredContent
+        try {
+          const structuredContent = JSON.parse(cached.content) as {
+            url: string;
+            linkCount: number;
+            links: ExtractedLink[];
+          };
+          return {
+            content: [{ type: 'text' as const, text: cached.content }],
+            structuredContent,
+          };
+        } catch {
+          return {
+            content: [{ type: 'text' as const, text: cached.content }],
+          };
+        }
+      }
     }
 
     const html = await fetchUrlWithRetry(url);
+
+    // Validate HTML content was received
+    if (!html) {
+      return createToolErrorResponse(
+        'No content received from URL',
+        url,
+        'EMPTY_CONTENT'
+      );
+    }
 
     // Extract links
     const links = extractLinksFromHtml(html, url, {
@@ -85,31 +120,28 @@ export async function fetchLinksToolHandler(input: FetchLinksInput) {
       includeExternal: input.includeExternal ?? true,
     });
 
-    const output = {
+    const structuredContent = {
       url,
       linkCount: links.length,
       links,
     };
 
-    const outputText = JSON.stringify(output, null, 2);
+    const outputText = JSON.stringify(structuredContent, null, 2);
 
-    cache.set(cacheKey, outputText);
+    // Cache the result
+    if (cacheKey) {
+      cache.set(cacheKey, outputText);
+    }
 
     return {
       content: [{ type: 'text' as const, text: outputText }],
+      structuredContent,
     };
   } catch (error) {
-    return {
-      content: [
-        {
-          type: 'text' as const,
-          text: JSON.stringify({
-            error: `Failed to extract links: ${error instanceof Error ? error.message : 'Unknown error'}`,
-            url: input.url,
-          }),
-        },
-      ],
-      isError: true,
-    };
+    logError(
+      'fetch-links tool error',
+      error instanceof Error ? error : undefined
+    );
+    return handleToolError(error, input.url, 'Failed to extract links');
   }
 }

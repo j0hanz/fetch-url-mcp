@@ -17,6 +17,12 @@ const DEFAULT_OPTIONS: RateLimiterOptions = {
   cleanupIntervalMs: 60000,
 };
 
+// Validation bounds for options
+const MIN_MAX_REQUESTS = 1;
+const MAX_MAX_REQUESTS = 10000;
+const MIN_WINDOW_MS = 1000; // 1 second
+const MAX_WINDOW_MS = 3600000; // 1 hour
+
 class RateLimiter {
   private readonly store = new Map<string, RateLimitEntry>();
   private readonly maxRequests: number;
@@ -25,14 +31,20 @@ class RateLimiter {
 
   constructor(options: Partial<RateLimiterOptions> = {}) {
     const opts = { ...DEFAULT_OPTIONS, ...options };
-    this.maxRequests = opts.maxRequests;
-    this.windowMs = opts.windowMs;
+
+    // Validate and clamp options within bounds
+    this.maxRequests = Math.min(
+      Math.max(opts.maxRequests, MIN_MAX_REQUESTS),
+      MAX_MAX_REQUESTS
+    );
+    this.windowMs = Math.min(
+      Math.max(opts.windowMs, MIN_WINDOW_MS),
+      MAX_WINDOW_MS
+    );
+    const cleanupInterval = Math.max(opts.cleanupIntervalMs, MIN_WINDOW_MS);
 
     // Start cleanup interval
-    this.cleanupInterval = setInterval(
-      () => this.cleanup(),
-      opts.cleanupIntervalMs
-    );
+    this.cleanupInterval = setInterval(() => this.cleanup(), cleanupInterval);
 
     // Ensure interval doesn't prevent process exit
     this.cleanupInterval.unref();
@@ -92,23 +104,32 @@ class RateLimiter {
   /**
    * Get key for request (IP address)
    * Handles proxy configurations and provides fallback
+   * Sanitizes IP to prevent cache key injection
    */
   private getKey(req: Request): string {
+    let ip: string;
+
     // Priority: X-Real-IP > first X-Forwarded-For > req.ip > socket
     const realIp = req.headers['x-real-ip'];
     if (typeof realIp === 'string' && realIp) {
-      return realIp;
-    }
-
-    const forwardedFor = req.headers['x-forwarded-for'];
-    if (typeof forwardedFor === 'string') {
-      const firstIp = forwardedFor.split(',')[0]?.trim();
-      if (firstIp) {
-        return firstIp;
+      ip = realIp;
+    } else {
+      const forwardedFor = req.headers['x-forwarded-for'];
+      if (typeof forwardedFor === 'string') {
+        const firstIp = forwardedFor.split(',')[0]?.trim();
+        if (firstIp) {
+          ip = firstIp;
+        } else {
+          ip = req.ip ?? req.socket.remoteAddress ?? 'unknown';
+        }
+      } else {
+        ip = req.ip ?? req.socket.remoteAddress ?? 'unknown';
       }
     }
 
-    return req.ip ?? req.socket.remoteAddress ?? 'unknown';
+    // Sanitize IP - remove any characters that shouldn't be in an IP
+    // This prevents potential cache key injection attacks
+    return ip.replace(/[^a-fA-F0-9.:]/g, '').substring(0, 45) || 'unknown';
   }
 
   /**

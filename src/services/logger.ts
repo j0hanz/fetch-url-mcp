@@ -1,8 +1,18 @@
 import winston from 'winston';
+import fs from 'fs';
 import { config } from '../config/index.js';
 import path from 'path';
 
 const logsDir = path.join(process.cwd(), 'logs');
+
+// Ensure logs directory exists
+try {
+  if (!fs.existsSync(logsDir)) {
+    fs.mkdirSync(logsDir, { recursive: true });
+  }
+} catch {
+  // If we can't create logs dir, file transports will fail gracefully
+}
 
 const logger = winston.createLogger({
   level: config.logging.level,
@@ -43,15 +53,15 @@ export function logInfo(message: string, meta?: Record<string, unknown>): void {
   if (config.logging.enabled) logger.info(message, meta);
 }
 
-export function logWarn(message: string, meta?: Record<string, unknown>): void {
-  if (config.logging.enabled) logger.warn(message, meta);
-}
-
 export function logDebug(
   message: string,
   meta?: Record<string, unknown>
 ): void {
   if (config.logging.enabled) logger.debug(message, meta);
+}
+
+export function logWarn(message: string, meta?: Record<string, unknown>): void {
+  if (config.logging.enabled) logger.warn(message, meta);
 }
 
 export function logError(

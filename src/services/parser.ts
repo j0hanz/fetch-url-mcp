@@ -3,6 +3,7 @@ import type { CheerioAPI } from 'cheerio';
 import type { AnyNode, Element } from 'domhandler';
 import { sanitizeText } from '../utils/sanitizer.js';
 import { config } from '../config/index.js';
+import { logWarn } from './logger.js';
 import type {
   HeadingBlock,
   ParagraphBlock,
@@ -12,6 +13,9 @@ import type {
   ImageBlock,
   ContentBlockUnion,
 } from '../types/index.js';
+
+// Maximum HTML size to parse (10MB)
+const MAX_HTML_SIZE = 10 * 1024 * 1024;
 
 function parseHeading($: CheerioAPI, element: Element): HeadingBlock | null {
   const text = sanitizeText($(element).text());
@@ -169,19 +173,47 @@ function filterBlocks(blocks: ContentBlockUnion[]): ContentBlockUnion[] {
 
 /**
  * Parses HTML content and extracts semantic blocks
+ * @param html - HTML string to parse
+ * @returns Array of content blocks (empty array if parsing fails)
  */
 export function parseHtml(html: string): ContentBlockUnion[] {
-  const $ = cheerio.load(html);
-  const blocks: ContentBlockUnion[] = [];
+  // Input validation
+  if (!html || typeof html !== 'string') {
+    return [];
+  }
 
-  $('script, style, noscript, iframe, svg').remove();
-
-  $('body')
-    .find('h1, h2, h3, h4, h5, h6, p, ul, ol, pre, code, table, img')
-    .each((_, element) => {
-      const block = parseElement($, element);
-      if (block) blocks.push(block);
+  // Size validation to prevent memory issues
+  if (html.length > MAX_HTML_SIZE) {
+    logWarn('HTML content exceeds maximum size, truncating', {
+      size: html.length,
+      maxSize: MAX_HTML_SIZE,
     });
+    html = html.substring(0, MAX_HTML_SIZE);
+  }
 
-  return filterBlocks(blocks);
+  try {
+    const $ = cheerio.load(html);
+    const blocks: ContentBlockUnion[] = [];
+
+    $('script, style, noscript, iframe, svg').remove();
+
+    $('body')
+      .find('h1, h2, h3, h4, h5, h6, p, ul, ol, pre, code, table, img')
+      .each((_, element) => {
+        try {
+          const block = parseElement($, element);
+          if (block) blocks.push(block);
+        } catch {
+          // Skip individual element parsing errors
+        }
+      });
+
+    return filterBlocks(blocks);
+  } catch (error) {
+    logWarn('Failed to parse HTML', {
+      error: error instanceof Error ? error.message : 'Unknown error',
+      htmlLength: html.length,
+    });
+    return [];
+  }
 }

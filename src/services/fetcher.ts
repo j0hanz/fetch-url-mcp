@@ -1,8 +1,9 @@
-import axios, { AxiosRequestConfig } from 'axios';
+import axios, { AxiosRequestConfig, AxiosError } from 'axios';
 import http from 'http';
 import https from 'https';
 import { config } from '../config/index.js';
 import { FetchError, TimeoutError } from '../errors/app-error.js';
+import { logDebug, logError } from './logger.js';
 
 const BLOCKED_HEADERS = new Set([
   'host',
@@ -38,6 +39,15 @@ function calculateBackoff(attempt: number, maxDelay = 10000): number {
 const httpAgent = new http.Agent({ keepAlive: true, maxSockets: 25 });
 const httpsAgent = new https.Agent({ keepAlive: true, maxSockets: 25 });
 
+/**
+ * Destroys HTTP agents and closes all sockets
+ * Should be called during graceful shutdown
+ */
+export function destroyAgents(): void {
+  httpAgent.destroy();
+  httpsAgent.destroy();
+}
+
 const client = axios.create({
   timeout: config.fetcher.timeout,
   maxRedirects: config.fetcher.maxRedirects,
@@ -55,10 +65,67 @@ const client = axios.create({
   validateStatus: (status) => status >= 200 && status < 300,
 });
 
+// Request interceptor for logging and request enhancement
+client.interceptors.request.use(
+  (requestConfig) => {
+    logDebug('HTTP Request', {
+      method: requestConfig.method?.toUpperCase(),
+      url: requestConfig.url,
+    });
+    return requestConfig;
+  },
+  (error: AxiosError) => {
+    logError('HTTP Request Error', error);
+    return Promise.reject(error);
+  }
+);
+
+// Response interceptor for logging and consistent error transformation
+client.interceptors.response.use(
+  (response) => {
+    logDebug('HTTP Response', {
+      status: response.status,
+      url: response.config.url,
+      contentType: response.headers['content-type'],
+    });
+    return response;
+  },
+  (error: AxiosError) => {
+    const url = error.config?.url ?? 'unknown';
+
+    // Transform Axios errors to application errors
+    if (error.code === 'ECONNABORTED' || error.code === 'ETIMEDOUT') {
+      logError('HTTP Timeout', { url, timeout: config.fetcher.timeout });
+      return Promise.reject(new TimeoutError(config.fetcher.timeout, true));
+    }
+
+    if (error.response) {
+      const status = error.response.status;
+      const statusText = error.response.statusText;
+      logError('HTTP Error Response', { url, status, statusText });
+      return Promise.reject(
+        new FetchError(`HTTP ${status}: ${statusText}`, url, status)
+      );
+    }
+
+    if (error.request) {
+      logError('HTTP Network Error', { url, code: error.code });
+      return Promise.reject(
+        new FetchError(`Network error: Could not reach ${url}`, url)
+      );
+    }
+
+    logError('HTTP Unknown Error', { url, message: error.message });
+    return Promise.reject(new FetchError(error.message, url));
+  }
+);
+
 /**
- * Fetches HTML content from a URL
+ * Fetches HTML content from a URL (internal - use fetchUrlWithRetry for retry logic)
+ * @throws {FetchError} if request fails or returns non-HTML content
+ * @throws {TimeoutError} if request times out
  */
-export async function fetchUrl(
+async function fetchUrl(
   url: string,
   customHeaders?: Record<string, string>
 ): Promise<string> {
@@ -75,46 +142,59 @@ export async function fetchUrl(
 
   try {
     const response = await client.request<string>(requestConfig);
-    return response.data;
-  } catch (error) {
-    if (!axios.isAxiosError(error)) {
+
+    // Validate content type is HTML/text
+    const contentType = response.headers['content-type'] as string | undefined;
+    if (contentType && !isHtmlContentType(contentType)) {
       throw new FetchError(
-        `Unexpected error: ${error instanceof Error ? error.message : 'Unknown'}`,
+        `Unexpected content type: ${contentType}. Expected HTML content.`,
         url
       );
     }
 
-    if (error.code === 'ECONNABORTED' || error.code === 'ETIMEDOUT') {
-      throw new TimeoutError(config.fetcher.timeout, true);
+    return response.data;
+  } catch (error) {
+    // Re-throw our custom errors (from interceptors or content-type check)
+    if (error instanceof FetchError || error instanceof TimeoutError) {
+      throw error;
     }
 
-    if (error.response) {
-      throw new FetchError(
-        `HTTP ${error.response.status}: ${error.response.statusText}`,
-        url,
-        error.response.status
-      );
-    }
-
-    if (error.request) {
-      throw new FetchError(`Network error: Could not reach ${url}`, url);
-    }
-
-    throw new FetchError(error.message, url);
+    // Handle any unexpected errors
+    throw new FetchError(
+      `Unexpected error: ${error instanceof Error ? error.message : 'Unknown'}`,
+      url
+    );
   }
 }
 
 /**
+ * Checks if content type indicates HTML content
+ */
+function isHtmlContentType(contentType: string): boolean {
+  const normalized = contentType.toLowerCase();
+  return (
+    normalized.includes('text/html') ||
+    normalized.includes('application/xhtml') ||
+    normalized.includes('text/plain')
+  );
+}
+
+/**
  * Fetches URL with exponential backoff retry logic
+ * @param url - URL to fetch
+ * @param customHeaders - Optional custom headers
+ * @param maxRetries - Maximum retry attempts (1-10, defaults to 3)
  */
 export async function fetchUrlWithRetry(
   url: string,
   customHeaders?: Record<string, string>,
   maxRetries = 3
 ): Promise<string> {
+  // Validate maxRetries within bounds
+  const retries = Math.min(Math.max(1, maxRetries), 10);
   let lastError: Error | undefined;
 
-  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+  for (let attempt = 1; attempt <= retries; attempt++) {
     try {
       return await fetchUrl(url, customHeaders);
     } catch (error) {
@@ -128,7 +208,7 @@ export async function fetchUrlWithRetry(
         }
       }
 
-      if (attempt < maxRetries) {
+      if (attempt < retries) {
         const delay = calculateBackoff(attempt);
         await new Promise((resolve) => setTimeout(resolve, delay));
       }
@@ -136,7 +216,7 @@ export async function fetchUrlWithRetry(
   }
 
   throw new FetchError(
-    `Failed after ${maxRetries} attempts: ${lastError?.message ?? 'Unknown error'}`,
+    `Failed after ${retries} attempts: ${lastError?.message ?? 'Unknown error'}`,
     url
   );
 }

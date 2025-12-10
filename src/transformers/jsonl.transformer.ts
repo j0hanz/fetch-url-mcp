@@ -1,7 +1,6 @@
 import type { ContentBlockUnion, MetadataBlock } from '../types/index.js';
 import { config } from '../config/index.js';
 import { truncateText } from '../utils/sanitizer.js';
-import { logError } from '../services/logger.js';
 
 function truncateBlock(block: ContentBlockUnion): ContentBlockUnion {
   const maxLength = config.extraction.maxBlockLength;
@@ -11,18 +10,15 @@ function truncateBlock(block: ContentBlockUnion): ContentBlockUnion {
     case 'heading':
     case 'code': {
       const truncated = truncateText(block.text, maxLength);
-      // Avoid creating new object if no truncation occurred
       return truncated === block.text ? block : { ...block, text: truncated };
     }
     case 'list': {
       const truncatedItems = block.items.map((item) =>
         truncateText(item, maxLength)
       );
-      // Check if any items were truncated by comparing lengths
       const hasChanges = truncatedItems.some(
         (item, i) => item !== block.items[i]
       );
-      // Avoid creating new object if no truncation occurred
       return hasChanges ? { ...block, items: truncatedItems } : block;
     }
     default:
@@ -36,29 +32,27 @@ export function toJsonl(
 ): string {
   const lines: string[] = [];
 
-  if (metadata) lines.push(JSON.stringify(metadata));
-
-  for (const block of blocks) {
-    lines.push(JSON.stringify(truncateBlock(block)));
-  }
-
-  return lines.join('\n');
-}
-
-export function fromJsonl(jsonl: string): ContentBlockUnion[] {
-  const lines = jsonl.split('\n').filter((line) => line.trim());
-  const blocks: ContentBlockUnion[] = [];
-
-  for (const line of lines) {
+  // Minimal metadata - just title and URL for context
+  if (metadata) {
     try {
-      blocks.push(JSON.parse(line) as ContentBlockUnion);
-    } catch (error) {
-      logError(
-        'Failed to parse JSONL line',
-        error instanceof Error ? error : undefined
-      );
+      const minimal = {
+        type: metadata.type,
+        title: metadata.title,
+        url: metadata.url,
+      };
+      lines.push(JSON.stringify(minimal));
+    } catch {
+      // Skip invalid metadata
     }
   }
 
-  return blocks;
+  for (const block of blocks) {
+    try {
+      lines.push(JSON.stringify(truncateBlock(block)));
+    } catch {
+      // Skip blocks that fail to serialize
+    }
+  }
+
+  return lines.join('\n');
 }
