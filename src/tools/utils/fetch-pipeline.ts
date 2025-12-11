@@ -12,15 +12,15 @@ export interface FetchPipelineOptions<T> {
   /** Cache namespace (e.g., 'url', 'links', 'markdown') */
   cacheNamespace: string;
   /** Optional custom HTTP headers */
-  customHeaders?: Record<string, string>;
+  customHeaders?: Record<string, string> | undefined;
   /** Optional: number of retry attempts (1-10, defaults to 3) */
-  retries?: number;
+  retries?: number | undefined;
   /** Transform function to process HTML into desired format */
   transform: (html: string, url: string) => T;
   /** Optional: serialize result for caching (defaults to JSON.stringify) */
-  serialize?: (result: T) => string;
+  serialize?: ((result: T) => string) | undefined;
   /** Optional: deserialize cached content */
-  deserialize?: (cached: string) => T;
+  deserialize?: ((cached: string) => T) | undefined;
 }
 
 /**

@@ -7,8 +7,8 @@ interface ErrorResponse {
     message: string;
     code: string;
     statusCode: number;
-    details?: Record<string, unknown>;
-    stack?: string;
+    details?: Record<string, unknown> | undefined;
+    stack?: string | undefined;
   };
 }
 

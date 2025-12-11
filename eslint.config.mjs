@@ -1,110 +1,143 @@
 import eslint from '@eslint/js';
-import eslintConfigPrettier from 'eslint-config-prettier';
 import { defineConfig } from 'eslint/config';
+import eslintConfigPrettier from 'eslint-config-prettier';
 import tseslint from 'typescript-eslint';
 
 export default defineConfig(
-  // Global ignores
   {
-    ignores: ['dist/**', 'node_modules/**', 'test-results/**', 'reports/**'],
+    ignores: [
+      'dist/**',
+      'node_modules/**',
+      'test-results/**',
+      'reports/**',
+      'coverage/**',
+      '*.d.ts',
+    ],
   },
-
-  // Base JS recommended config
   eslint.configs.recommended,
-
-  // TypeScript recommended config
   ...tseslint.configs.recommended,
-
-  // TypeScript strict type-checked config for src files only
   {
     files: ['src/**/*.ts'],
-    extends: [tseslint.configs.strictTypeChecked],
+    extends: [
+      tseslint.configs.strictTypeChecked,
+      tseslint.configs.stylisticTypeChecked,
+    ],
     languageOptions: {
+      ecmaVersion: 2022,
+      sourceType: 'module',
       parserOptions: {
         projectService: true,
         tsconfigRootDir: import.meta.dirname,
       },
     },
     rules: {
-      // HIGH: TypeScript strict rules
       '@typescript-eslint/no-explicit-any': 'error',
       '@typescript-eslint/no-unsafe-assignment': 'error',
       '@typescript-eslint/no-unsafe-member-access': 'error',
       '@typescript-eslint/no-unsafe-call': 'error',
       '@typescript-eslint/no-unsafe-return': 'error',
+      '@typescript-eslint/no-unsafe-argument': 'error',
       '@typescript-eslint/no-non-null-assertion': 'error',
-
-      // MEDIUM: Clean code
       '@typescript-eslint/no-unused-vars': [
         'error',
-        { argsIgnorePattern: '^_', varsIgnorePattern: '^_' },
+        {
+          argsIgnorePattern: '^_',
+          varsIgnorePattern: '^_',
+          caughtErrorsIgnorePattern: '^_',
+        },
       ],
       'no-console': ['warn', { allow: ['warn', 'error'] }],
       '@typescript-eslint/no-require-imports': 'off',
-
-      // Allow floating promises in specific patterns (IIFE in setInterval)
+      '@typescript-eslint/consistent-type-imports': [
+        'error',
+        { prefer: 'type-imports', fixStyle: 'inline-type-imports' },
+      ],
+      '@typescript-eslint/consistent-type-exports': [
+        'error',
+        { fixMixedExportsWithInlineTypeSpecifier: true },
+      ],
       '@typescript-eslint/no-floating-promises': [
         'error',
-        { ignoreVoid: true },
+        { ignoreVoid: true, ignoreIIFE: true },
       ],
-
-      // Relax some rules for this project
-      '@typescript-eslint/restrict-template-expressions': 'off',
       '@typescript-eslint/no-misused-promises': [
         'error',
-        { checksVoidReturn: false },
+        { checksVoidReturn: { arguments: false, attributes: false } },
       ],
-
-      // Allow deprecated APIs (MCP SDK migration in progress)
+      '@typescript-eslint/promise-function-async': 'error',
+      '@typescript-eslint/restrict-template-expressions': [
+        'error',
+        {
+          allowNumber: true,
+          allowBoolean: true,
+          allowNullish: true,
+        },
+      ],
       '@typescript-eslint/no-deprecated': 'warn',
-
-      // Async handlers that return sync values are fine
       '@typescript-eslint/require-await': 'off',
-
-      // Allow spread on iterables in objects (intentional pattern)
       '@typescript-eslint/no-misused-spread': 'off',
-
-      // Allow void expressions in arrow functions for cleaner code
       '@typescript-eslint/no-confusing-void-expression': [
         'error',
-        { ignoreArrowShorthand: true },
+        { ignoreArrowShorthand: true, ignoreVoidOperator: true },
+      ],
+
+      '@typescript-eslint/prefer-nullish-coalescing': 'error',
+      '@typescript-eslint/prefer-optional-chain': 'error',
+      '@typescript-eslint/no-unnecessary-condition': [
+        'error',
+        { allowConstantLoopConditions: true },
       ],
     },
   },
-
-  // TypeScript config for test files and config files (no type-checking)
   {
-    files: ['tests/**/*.ts', '*.config.ts', '*.config.mjs'],
+    files: [
+      'tests/**/*.ts',
+      '**/*.config.ts',
+      '**/*.config.mjs',
+      '**/*.config.js',
+    ],
     rules: {
       '@typescript-eslint/no-unused-vars': [
         'error',
-        { argsIgnorePattern: '^_', varsIgnorePattern: '^_' },
+        {
+          argsIgnorePattern: '^_',
+          varsIgnorePattern: '^_',
+          caughtErrorsIgnorePattern: '^_',
+        },
       ],
       'no-console': 'off',
+      '@typescript-eslint/no-explicit-any': 'off',
+      '@typescript-eslint/no-require-imports': 'off',
     },
   },
-
-  // Node.js test scripts (ESM)
   {
-    files: ['test-*.mjs', 'tests/**/*.mjs'],
+    files: ['test-*.mjs', 'tests/**/*.mjs', '**/*.js'],
     languageOptions: {
+      ecmaVersion: 2022,
+      sourceType: 'module',
       globals: {
         console: 'readonly',
         process: 'readonly',
-        fetch: 'readonly',
+        __dirname: 'readonly',
+        __filename: 'readonly',
+        Buffer: 'readonly',
         setTimeout: 'readonly',
         clearTimeout: 'readonly',
         setInterval: 'readonly',
         clearInterval: 'readonly',
+        setImmediate: 'readonly',
+        clearImmediate: 'readonly',
         URL: 'readonly',
         URLSearchParams: 'readonly',
+        fetch: 'readonly',
+        Request: 'readonly',
+        Response: 'readonly',
+        Headers: 'readonly',
       },
     },
     rules: {
       'no-console': 'off',
     },
   },
-
-  // Prettier config (must be last to override formatting rules)
   eslintConfigPrettier
 );

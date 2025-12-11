@@ -31,12 +31,12 @@ const DEFAULT_CONCURRENCY = 3;
 interface SingleUrlResult {
   url: string;
   success: boolean;
-  title?: string;
-  content?: string;
-  contentBlocks?: number;
+  title?: string | undefined;
+  content?: string | undefined;
+  contentBlocks?: number | undefined;
   cached: boolean;
-  error?: string;
-  errorCode?: string;
+  error?: string | undefined;
+  errorCode?: string | undefined;
 }
 
 /**
@@ -47,7 +47,7 @@ async function processSingleUrl(
   options: {
     extractMainContent: boolean;
     includeMetadata: boolean;
-    maxContentLength?: number;
+    maxContentLength?: number | undefined;
     format: 'jsonl' | 'markdown';
   }
 ): Promise<SingleUrlResult> {
@@ -268,7 +268,7 @@ export async function fetchUrlsToolHandler(input: FetchUrlsInput) {
 
     // Create tasks for each URL
     const tasks = validUrls.map(
-      (url) => () =>
+      (url) => async () =>
         processSingleUrl(url, {
           extractMainContent: input.extractMainContent ?? true,
           includeMetadata: input.includeMetadata ?? true,
@@ -288,9 +288,9 @@ export async function fetchUrlsToolHandler(input: FetchUrlsInput) {
         // Promise rejection (shouldn't happen as processSingleUrl catches errors)
         const reason = result.reason as Error | undefined;
         return {
-          url: validUrls[index],
-          success: false,
-          cached: false,
+          url: validUrls[index] ?? 'unknown',
+          success: false as const,
+          cached: false as const,
           error: reason?.message ?? 'Unknown error',
           errorCode: 'PROMISE_REJECTED',
         };

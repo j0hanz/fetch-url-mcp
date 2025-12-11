@@ -8,9 +8,9 @@ const MAX_HTML_SIZE = 10 * 1024 * 1024;
 
 /** Metadata extracted from HTML document (internal) */
 interface ExtractedMetadata {
-  title?: string;
-  description?: string;
-  author?: string;
+  title?: string | undefined;
+  description?: string | undefined;
+  author?: string | undefined;
 }
 
 /** Combined extraction result (internal) */

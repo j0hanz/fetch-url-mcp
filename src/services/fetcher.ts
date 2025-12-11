@@ -1,4 +1,4 @@
-import axios, { AxiosRequestConfig, AxiosError } from 'axios';
+import axios, { type AxiosRequestConfig, type AxiosError } from 'axios';
 import http from 'http';
 import https from 'https';
 import { config } from '../config/index.js';
@@ -75,7 +75,7 @@ client.interceptors.request.use(
     });
     return requestConfig;
   },
-  (error: AxiosError) => {
+  async (error: AxiosError) => {
     logError('HTTP Request Error', error);
     return Promise.reject(error);
   }
@@ -91,7 +91,7 @@ client.interceptors.response.use(
     });
     return response;
   },
-  (error: AxiosError) => {
+  async (error: AxiosError) => {
     const url = error.config?.url ?? 'unknown';
 
     // Transform Axios errors to application errors

@@ -95,7 +95,7 @@ export async function fetchUrlToolHandler(input: FetchUrlInput) {
       retries: input.retries,
     });
 
-    const result = await executeFetchPipeline({
+    const result = await executeFetchPipeline<JsonlTransformResult>({
       url: input.url,
       cacheNamespace: 'url',
       customHeaders: input.customHeaders,

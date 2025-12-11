@@ -6,7 +6,7 @@ import {
 } from '../errors/index.js';
 
 /** MCP SDK-compatible error response (index signature required by SDK) */
-export type ToolErrorResponse = {
+export interface ToolErrorResponse {
   [x: string]: unknown;
   content: { type: 'text'; text: string }[];
   structuredContent: {
@@ -16,7 +16,7 @@ export type ToolErrorResponse = {
     errorCode: string;
   };
   isError: true;
-};
+}
 
 export function createToolErrorResponse(
   message: string,

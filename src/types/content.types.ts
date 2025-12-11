@@ -16,9 +16,9 @@ interface ContentBlock {
 // Metadata block
 export interface MetadataBlock extends ContentBlock {
   type: 'metadata';
-  title?: string;
-  description?: string;
-  author?: string;
+  title?: string | undefined;
+  description?: string | undefined;
+  author?: string | undefined;
   url: string;
   fetchedAt: string;
 }
@@ -46,14 +46,14 @@ export interface ListBlock extends ContentBlock {
 // Code block
 export interface CodeBlock extends ContentBlock {
   type: 'code';
-  language?: string;
+  language?: string | undefined;
   text: string;
 }
 
 // Table block
 export interface TableBlock extends ContentBlock {
   type: 'table';
-  headers?: string[];
+  headers?: string[] | undefined;
   rows: string[][];
 }
 
@@ -61,7 +61,7 @@ export interface TableBlock extends ContentBlock {
 export interface ImageBlock extends ContentBlock {
   type: 'image';
   src: string;
-  alt?: string;
+  alt?: string | undefined;
 }
 
 // Union type for all content blocks
@@ -76,12 +76,12 @@ export type ContentBlockUnion =
 
 // Extracted article
 export interface ExtractedArticle {
-  title?: string;
-  byline?: string;
+  title?: string | undefined;
+  byline?: string | undefined;
   content: string;
   textContent: string;
-  excerpt?: string;
-  siteName?: string;
+  excerpt?: string | undefined;
+  siteName?: string | undefined;
 }
 
 // Cache entry

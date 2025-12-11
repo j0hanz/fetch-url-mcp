@@ -23,8 +23,8 @@ interface ExtractLinksOptions {
   includeInternal: boolean;
   includeExternal: boolean;
   includeImages: boolean;
-  maxLinks?: number;
-  filterPattern?: RegExp;
+  maxLinks?: number | undefined;
+  filterPattern?: RegExp | undefined;
 }
 
 /**
@@ -93,7 +93,7 @@ function extractLinks(
   if (options.includeImages) {
     $('img[src]').each((_, element) => {
       const src = $(element).attr('src');
-      const alt = $(element).attr('alt')?.trim() || '';
+      const alt = $(element).attr('alt')?.trim() ?? '';
 
       if (!src || src.startsWith('data:')) {
         return;
@@ -175,7 +175,7 @@ export async function fetchLinksToolHandler(input: FetchLinksInput) {
       filterPattern: input.filterPattern,
     });
 
-    const result = await executeFetchPipeline({
+    const result = await executeFetchPipeline<LinksTransformResult>({
       url: input.url,
       cacheNamespace: 'links',
       customHeaders: input.customHeaders,

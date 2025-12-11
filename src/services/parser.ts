@@ -60,8 +60,8 @@ function parseCode($: CheerioAPI, element: Element): CodeBlock | null {
   const text = $(element).text().trim();
   if (!text) return null;
 
-  const className = $(element).attr('class') || '';
-  const languageMatch = className.match(/language-(\w+)/);
+  const className = $(element).attr('class') ?? '';
+  const languageMatch = /language-(\w+)/.exec(className);
 
   return {
     type: 'code',
@@ -119,7 +119,7 @@ function parseImage($: CheerioAPI, element: Element): ImageBlock | null {
   return {
     type: 'image',
     src,
-    alt: $(element).attr('alt') || undefined,
+    alt: $(element).attr('alt') ?? undefined,
   };
 }
 

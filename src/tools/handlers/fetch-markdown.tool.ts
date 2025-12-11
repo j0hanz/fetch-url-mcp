@@ -30,7 +30,7 @@ interface TransformOptions {
   extractMainContent: boolean;
   includeMetadata: boolean;
   generateToc: boolean;
-  maxContentLength?: number;
+  maxContentLength?: number | undefined;
 }
 
 /**
@@ -54,8 +54,11 @@ function extractToc(markdown: string): TocEntry[] {
   let match;
 
   while ((match = headingRegex.exec(markdown)) !== null) {
-    const level = match[1].length;
-    const text = match[2].trim();
+    const levelMatch = match[1];
+    const textMatch = match[2];
+    if (!levelMatch || !textMatch) continue;
+    const level = levelMatch.length;
+    const text = textMatch.trim();
     toc.push({
       level,
       text,
@@ -152,7 +155,7 @@ export async function fetchMarkdownToolHandler(input: FetchMarkdownInput) {
       maxContentLength,
     });
 
-    const result = await executeFetchPipeline({
+    const result = await executeFetchPipeline<MarkdownTransformResult>({
       url: input.url,
       cacheNamespace: 'markdown',
       customHeaders: input.customHeaders,

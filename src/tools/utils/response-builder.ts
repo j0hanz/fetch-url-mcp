@@ -5,8 +5,8 @@
 /** Standard MCP tool response structure with index signature for SDK compatibility */
 export interface ToolResponse<T = Record<string, unknown>> {
   [x: string]: unknown;
-  content: Array<{ type: 'text'; text: string }>;
-  structuredContent: T & { [x: string]: unknown };
+  content: { type: 'text'; text: string }[];
+  structuredContent: T & Record<string, unknown>;
 }
 
 /**
@@ -27,7 +27,7 @@ export function createSuccessResponse<T extends Record<string, unknown>>(
           : JSON.stringify(structuredContent),
       },
     ],
-    structuredContent: structuredContent as T & { [x: string]: unknown },
+    structuredContent: structuredContent as T & Record<string, unknown>,
   };
 }
 
@@ -45,7 +45,7 @@ export function createCachedResponse<T extends Record<string, unknown>>(
         text: JSON.stringify(structuredContent),
       },
     ],
-    structuredContent: structuredContent as T & { [x: string]: unknown },
+    structuredContent: structuredContent as T & Record<string, unknown>,
   };
 }
 
@@ -53,12 +53,12 @@ export function createCachedResponse<T extends Record<string, unknown>>(
 export interface BatchUrlResult {
   url: string;
   success: boolean;
-  title?: string;
-  content?: string;
-  contentBlocks?: number;
-  cached?: boolean;
-  error?: string;
-  errorCode?: string;
+  title?: string | undefined;
+  content?: string | undefined;
+  contentBlocks?: number | undefined;
+  cached?: boolean | undefined;
+  error?: string | undefined;
+  errorCode?: string | undefined;
 }
 
 /** Summary statistics for batch operations */

@@ -5,6 +5,8 @@ tools:
   [
     'vscode/vscodeAPI',
     'vscode/extensions',
+    'execute/getTerminalOutput',
+    'execute/runInTerminal',
     'read/problems',
     'read/readFile',
     'search/fileSearch',

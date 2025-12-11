@@ -25,7 +25,7 @@ export class AppError extends Error {
  * Validation error (400)
  */
 export class ValidationError extends AppError {
-  public readonly details?: Record<string, unknown>;
+  public readonly details: Record<string, unknown> | undefined;
 
   constructor(message: string, details?: Record<string, unknown>) {
     super(message, 400, 'VALIDATION_ERROR');
@@ -50,7 +50,7 @@ export class UrlValidationError extends AppError {
  */
 export class FetchError extends AppError {
   public readonly url: string;
-  public readonly httpStatus?: number;
+  public readonly httpStatus: number | undefined;
 
   constructor(message: string, url: string, httpStatus?: number) {
     super(message, httpStatus ?? 502, 'FETCH_ERROR');

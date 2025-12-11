@@ -14,7 +14,7 @@ export function createConcurrencyLimiter(limit: number): LimiterFn {
   const maxConcurrency = Math.min(Math.max(1, limit), 10);
 
   let active = 0;
-  const queue: Array<() => void> = [];
+  const queue: (() => void)[] = [];
 
   return async <T>(fn: () => Promise<T>): Promise<T> => {
     // Wait if at capacity
@@ -43,8 +43,8 @@ export function createConcurrencyLimiter(limit: number): LimiterFn {
  */
 export async function runWithConcurrency<T>(
   limit: number,
-  tasks: Array<() => Promise<T>>
+  tasks: (() => Promise<T>)[]
 ): Promise<PromiseSettledResult<T>[]> {
   const limiter = createConcurrencyLimiter(limit);
-  return Promise.allSettled(tasks.map((task) => limiter(task)));
+  return Promise.allSettled(tasks.map(async (task) => limiter(task)));
 }
