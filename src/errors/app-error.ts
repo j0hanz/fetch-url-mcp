@@ -1,6 +1,3 @@
-/**
- * Base application error class with status code support
- */
 export class AppError extends Error {
   public readonly statusCode: number;
   public readonly isOperational: boolean;
@@ -21,11 +18,8 @@ export class AppError extends Error {
   }
 }
 
-/**
- * Validation error (400)
- */
 export class ValidationError extends AppError {
-  public readonly details?: Record<string, unknown>;
+  public readonly details: Record<string, unknown> | undefined;
 
   constructor(message: string, details?: Record<string, unknown>) {
     super(message, 400, 'VALIDATION_ERROR');
@@ -33,9 +27,6 @@ export class ValidationError extends AppError {
   }
 }
 
-/**
- * URL validation error (400)
- */
 export class UrlValidationError extends AppError {
   public readonly url: string;
 
@@ -45,12 +36,9 @@ export class UrlValidationError extends AppError {
   }
 }
 
-/**
- * Fetch error - network/HTTP errors during URL fetching
- */
 export class FetchError extends AppError {
   public readonly url: string;
-  public readonly httpStatus?: number;
+  public readonly httpStatus: number | undefined;
 
   constructor(message: string, url: string, httpStatus?: number) {
     super(message, httpStatus ?? 502, 'FETCH_ERROR');
@@ -59,9 +47,6 @@ export class FetchError extends AppError {
   }
 }
 
-/**
- * Rate limit error (429)
- */
 export class RateLimitError extends AppError {
   public readonly retryAfter: number;
 
@@ -71,9 +56,6 @@ export class RateLimitError extends AppError {
   }
 }
 
-/**
- * Timeout error (408/504)
- */
 export class TimeoutError extends AppError {
   public readonly timeoutMs: number;
 

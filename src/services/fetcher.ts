@@ -1,8 +1,12 @@
-import axios, { AxiosRequestConfig, AxiosError } from 'axios';
+import axios, { type AxiosError, type AxiosRequestConfig } from 'axios';
 import http from 'http';
 import https from 'https';
+
 import { config } from '../config/index.js';
+
 import { FetchError, TimeoutError } from '../errors/app-error.js';
+
+import { getHtml, setHtml } from './cache.js';
 import { logDebug, logError } from './logger.js';
 
 const BLOCKED_HEADERS = new Set([
@@ -35,14 +39,9 @@ function calculateBackoff(attempt: number, maxDelay = 10000): number {
   return Math.round(baseDelay + jitter);
 }
 
-// HTTP/HTTPS agents with connection pooling for better performance
 const httpAgent = new http.Agent({ keepAlive: true, maxSockets: 25 });
 const httpsAgent = new https.Agent({ keepAlive: true, maxSockets: 25 });
 
-/**
- * Destroys HTTP agents and closes all sockets
- * Should be called during graceful shutdown
- */
 export function destroyAgents(): void {
   httpAgent.destroy();
   httpsAgent.destroy();
@@ -65,7 +64,6 @@ const client = axios.create({
   validateStatus: (status) => status >= 200 && status < 300,
 });
 
-// Request interceptor for logging and request enhancement
 client.interceptors.request.use(
   (requestConfig) => {
     logDebug('HTTP Request', {
@@ -74,13 +72,12 @@ client.interceptors.request.use(
     });
     return requestConfig;
   },
-  (error: AxiosError) => {
+  async (error: AxiosError) => {
     logError('HTTP Request Error', error);
     return Promise.reject(error);
   }
 );
 
-// Response interceptor for logging and consistent error transformation
 client.interceptors.response.use(
   (response) => {
     logDebug('HTTP Response', {
@@ -90,10 +87,9 @@ client.interceptors.response.use(
     });
     return response;
   },
-  (error: AxiosError) => {
+  async (error: AxiosError) => {
     const url = error.config?.url ?? 'unknown';
 
-    // Transform Axios errors to application errors
     if (error.code === 'ECONNABORTED' || error.code === 'ETIMEDOUT') {
       logError('HTTP Timeout', { url, timeout: config.fetcher.timeout });
       return Promise.reject(new TimeoutError(config.fetcher.timeout, true));
@@ -120,11 +116,6 @@ client.interceptors.response.use(
   }
 );
 
-/**
- * Fetches HTML content from a URL (internal - use fetchUrlWithRetry for retry logic)
- * @throws {FetchError} if request fails or returns non-HTML content
- * @throws {TimeoutError} if request times out
- */
 async function fetchUrl(
   url: string,
   customHeaders?: Record<string, string>
@@ -142,9 +133,16 @@ async function fetchUrl(
 
   try {
     const response = await client.request<string>(requestConfig);
+    const contentTypeHeader: unknown = response.headers['content-type'];
 
-    // Validate content type is HTML/text
-    const contentType = response.headers['content-type'] as string | undefined;
+    let contentType: string | undefined;
+    if (Array.isArray(contentTypeHeader)) {
+      const first: unknown = contentTypeHeader[0];
+      if (typeof first === 'string') contentType = first;
+    } else if (typeof contentTypeHeader === 'string') {
+      contentType = contentTypeHeader;
+    }
+
     if (contentType && !isHtmlContentType(contentType)) {
       throw new FetchError(
         `Unexpected content type: ${contentType}. Expected HTML content.`,
@@ -154,12 +152,10 @@ async function fetchUrl(
 
     return response.data;
   } catch (error) {
-    // Re-throw our custom errors (from interceptors or content-type check)
     if (error instanceof FetchError || error instanceof TimeoutError) {
       throw error;
     }
 
-    // Handle any unexpected errors
     throw new FetchError(
       `Unexpected error: ${error instanceof Error ? error.message : 'Unknown'}`,
       url
@@ -167,9 +163,6 @@ async function fetchUrl(
   }
 }
 
-/**
- * Checks if content type indicates HTML content
- */
 function isHtmlContentType(contentType: string): boolean {
   const normalized = contentType.toLowerCase();
   return (
@@ -179,30 +172,36 @@ function isHtmlContentType(contentType: string): boolean {
   );
 }
 
-/**
- * Fetches URL with exponential backoff retry logic
- * @param url - URL to fetch
- * @param customHeaders - Optional custom headers
- * @param maxRetries - Maximum retry attempts (1-10, defaults to 3)
- */
 export async function fetchUrlWithRetry(
   url: string,
   customHeaders?: Record<string, string>,
-  maxRetries = 3
-): Promise<string> {
-  // Validate maxRetries within bounds
+  maxRetries = 3,
+  skipCache = false
+): Promise<{ html: string; fromHtmlCache: boolean }> {
+  if (!skipCache) {
+    const cachedHtml = getHtml(url);
+    if (cachedHtml) {
+      logDebug('HTML Cache Hit', { url });
+      return { html: cachedHtml, fromHtmlCache: true };
+    }
+  }
+
   const retries = Math.min(Math.max(1, maxRetries), 10);
-  let lastError: Error | undefined;
+  let lastError: Error = new Error(`Failed to fetch ${url}`);
 
   for (let attempt = 1; attempt <= retries; attempt++) {
     try {
-      return await fetchUrl(url, customHeaders);
-    } catch (error) {
-      lastError = error instanceof Error ? error : new Error('Unknown error');
+      const html = await fetchUrl(url, customHeaders);
+      setHtml(url, html);
+      logDebug('HTML Cache Set', { url });
 
-      // Don't retry on client errors (4xx) except 429 (rate limited)
+      return { html, fromHtmlCache: false };
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error(String(error));
+
       if (error instanceof FetchError && error.httpStatus) {
         const status = error.httpStatus;
+        // Don't retry client errors (except 429 Too Many Requests)
         if (status >= 400 && status < 500 && status !== 429) {
           throw error;
         }
@@ -216,7 +215,7 @@ export async function fetchUrlWithRetry(
   }
 
   throw new FetchError(
-    `Failed after ${retries} attempts: ${lastError?.message ?? 'Unknown error'}`,
+    `Failed after ${retries} attempts: ${lastError.message}`,
     url
   );
 }

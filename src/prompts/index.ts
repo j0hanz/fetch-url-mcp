@@ -1,9 +1,7 @@
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 
-/**
- * Registers all prompts with the MCP server using the modern McpServer API
- */
+import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+
 export function registerPrompts(server: McpServer): void {
   // Register analyze-web-content prompt
   server.registerPrompt(

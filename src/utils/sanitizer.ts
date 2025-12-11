@@ -1,19 +1,12 @@
-/**
- * Sanitizes text content by collapsing whitespace and trimming
- * Returns empty string for null/undefined input
- */
+// Pre-compiled regex patterns for hot path optimization
+const WHITESPACE_REGEX = /\s+/g;
+
 export function sanitizeText(text: string | null | undefined): string {
   if (text == null) return '';
   if (typeof text !== 'string') return String(text);
-  return text.replace(/\s+/g, ' ').trim();
+  return text.replace(WHITESPACE_REGEX, ' ').trim();
 }
 
-/**
- * Truncates text to a maximum length with ellipsis
- * @param text - Text to truncate
- * @param maxLength - Maximum length (must be > 3 to accommodate ellipsis)
- * @returns Truncated text with ellipsis if needed
- */
 export function truncateText(text: string, maxLength: number): string {
   if (maxLength < 4) {
     return text.length > 0 ? text.charAt(0) : '';

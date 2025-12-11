@@ -1,54 +1,47 @@
-import { JSDOM } from 'jsdom';
+import * as cheerio from 'cheerio';
+import type { CheerioAPI } from 'cheerio';
+import { JSDOM, VirtualConsole } from 'jsdom';
+
 import { Readability } from '@mozilla/readability';
-import type { ExtractedArticle } from '../types/index.js';
+
+import type {
+  ExtractedArticle,
+  ExtractedMetadata,
+  ExtractionResult,
+} from '../config/types.js';
+
+import { preserveCardLinks } from './card-extractor.js';
 import { logError, logWarn } from './logger.js';
 
-// Maximum HTML size to process (10MB)
 const MAX_HTML_SIZE = 10 * 1024 * 1024;
 
-/** Metadata extracted from HTML document (internal) */
-interface ExtractedMetadata {
-  title?: string;
-  description?: string;
-  author?: string;
-}
-
-/** Combined extraction result (internal) */
-interface ExtractionResult {
-  article: ExtractedArticle | null;
-  metadata: ExtractedMetadata;
-}
-
-function getMetaContent(
-  document: Document,
-  selectors: string[]
-): string | undefined {
-  for (const selector of selectors) {
-    const content = document.querySelector(selector)?.getAttribute('content');
-    if (content) return content;
-  }
-  return undefined;
-}
-
 /**
- * Extracts metadata from a pre-parsed Document
+ * Extract metadata using Cheerio (fast, no full DOM)
+ * This avoids JSDOM overhead for simple meta tag extraction
  */
-function extractMetadataFromDocument(document: Document): ExtractedMetadata {
+function extractMetadataWithCheerio($: CheerioAPI): ExtractedMetadata {
+  const getMetaContent = (selectors: string[]): string | undefined => {
+    for (const selector of selectors) {
+      const content = $(selector).attr('content');
+      if (content) return content;
+    }
+    return undefined;
+  };
+
   const title =
-    getMetaContent(document, [
+    getMetaContent([
       'meta[property="og:title"]',
       'meta[name="twitter:title"]',
     ]) ??
-    document.querySelector('title')?.textContent ??
-    undefined;
+    ($('title').text() || undefined);
 
-  const description = getMetaContent(document, [
+  const description = getMetaContent([
     'meta[property="og:description"]',
     'meta[name="twitter:description"]',
     'meta[name="description"]',
   ]);
 
-  const author = getMetaContent(document, [
+  const author = getMetaContent([
     'meta[name="author"]',
     'meta[property="article:author"]',
   ]);
@@ -57,37 +50,51 @@ function extractMetadataFromDocument(document: Document): ExtractedMetadata {
 }
 
 /**
- * Extracts article content from a pre-parsed Document using Readability
+ * Extract article content using JSDOM + Readability
+ * Only called when extractMainContent is true (lazy loading)
  */
-function extractArticleFromDocument(
-  document: Document
+function extractArticleWithJsdom(
+  html: string,
+  url: string
 ): ExtractedArticle | null {
-  // Clone the document since Readability mutates it
-  const clonedDoc = document.cloneNode(true) as Document;
-  const reader = new Readability(clonedDoc);
-  const article = reader.parse();
+  try {
+    // virtualConsole suppresses CSS parsing warnings from modern CSS features
+    const virtualConsole = new VirtualConsole();
+    const dom = new JSDOM(html, { url, virtualConsole });
+    const document = dom.window.document;
 
-  if (!article) return null;
+    preserveCardLinks(document);
+    const reader = new Readability(document);
+    const article = reader.parse();
 
-  return {
-    title: article.title ?? undefined,
-    byline: article.byline ?? undefined,
-    content: article.content ?? '',
-    textContent: article.textContent ?? '',
-    excerpt: article.excerpt ?? undefined,
-    siteName: article.siteName ?? undefined,
-  };
+    if (!article) return null;
+
+    return {
+      title: article.title ?? undefined,
+      byline: article.byline ?? undefined,
+      content: article.content ?? '',
+      textContent: article.textContent ?? '',
+      excerpt: article.excerpt ?? undefined,
+      siteName: article.siteName ?? undefined,
+    };
+  } catch (error) {
+    logError(
+      'Failed to extract article with JSDOM',
+      error instanceof Error ? error : undefined
+    );
+    return null;
+  }
 }
 
 /**
- * Extracts both article content and metadata from HTML in a single JSDOM parse.
- * This is more efficient than calling extractArticle and extractMetadata separately.
- * @param html - HTML string to extract content from
- * @param url - URL of the page (used for resolving relative links)
- * @returns Extraction result with article and metadata
+ * Main extraction function - uses Cheerio for metadata (fast)
+ * and lazy-loads JSDOM only when article extraction is needed
  */
-export function extractContent(html: string, url: string): ExtractionResult {
-  // Input validation
+export function extractContent(
+  html: string,
+  url: string,
+  options: { extractArticle?: boolean } = { extractArticle: true }
+): ExtractionResult {
   if (!html || typeof html !== 'string') {
     logWarn('extractContent called with invalid HTML input');
     return { article: null, metadata: {} };
@@ -98,7 +105,6 @@ export function extractContent(html: string, url: string): ExtractionResult {
     return { article: null, metadata: {} };
   }
 
-  // Size validation to prevent memory issues
   let processedHtml = html;
   if (html.length > MAX_HTML_SIZE) {
     logWarn('HTML content exceeds maximum size for extraction, truncating', {
@@ -109,14 +115,14 @@ export function extractContent(html: string, url: string): ExtractionResult {
   }
 
   try {
-    const dom = new JSDOM(processedHtml, { url });
-    const document = dom.window.document;
+    // Fast path: Extract metadata with Cheerio (no full DOM parsing)
+    const $ = cheerio.load(processedHtml);
+    const metadata = extractMetadataWithCheerio($);
 
-    // Extract metadata first (non-destructive)
-    const metadata = extractMetadataFromDocument(document);
-
-    // Extract article (uses cloned document since Readability mutates)
-    const article = extractArticleFromDocument(document);
+    // Lazy path: Only use JSDOM when article extraction is requested
+    const article = options.extractArticle
+      ? extractArticleWithJsdom(processedHtml, url)
+      : null;
 
     return { article, metadata };
   } catch (error) {

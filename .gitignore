@@ -28,6 +28,8 @@ yarn-error.log*
 logs/
 
 # Editor directories and files
+.github/*
+!.github/workflows/
 .vscode/*
 !.vscode/extensions.json
 !.vscode/settings.json

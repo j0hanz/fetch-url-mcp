@@ -1,10 +1,16 @@
 # 🚀 superFetch
 
-[![npm version](https://img.shields.io/npm/v/@j0hanz/superfetch.svg)](https://www.npmjs.com/package/@j0hanz/superfetch)[![MCP Registry](https://img.shields.io/badge/MCP_Registry-io.github.j0hanz%2Fsuperfetch-8B5CF6)](https://registry.modelcontextprotocol.io/)[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)[![Node.js](https://img.shields.io/badge/Node.js-≥18.0.0-339933?logo=nodedotjs&logoColor=white)](https://nodejs.org/)[![TypeScript](https://img.shields.io/badge/TypeScript-5.9-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)[![MCP SDK](https://img.shields.io/badge/MCP_SDK-1.0.4-8B5CF6)](https://modelcontextprotocol.io/)
+[![npm version](https://img.shields.io/npm/v/@j0hanz/superfetch.svg)](https://www.npmjs.com/package/@j0hanz/superfetch)[![Node.js](https://img.shields.io/badge/Node.js-≥18.0.0-339933?logo=nodedotjs&logoColor=white)](https://nodejs.org/)[![TypeScript](https://img.shields.io/badge/TypeScript-5.9-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)[![MCP SDK](https://img.shields.io/badge/MCP_SDK-1.0.4-8B5CF6)](https://modelcontextprotocol.io/)
+
+## One-Click Install
+
+[![Install with NPX in VS Code](https://img.shields.io/badge/VS_Code-Install-0098FF?style=flat-square&logo=visualstudiocode&logoColor=white)](https://insiders.vscode.dev/redirect/mcp/install?name=superfetch&inputs=%5B%5D&config=%7B%22command%22%3A%22npx%22%2C%22args%22%3A%5B%22-y%22%2C%22%40j0hanz%2Fsuperfetch%40latest%22%2C%22--stdio%22%5D%7D)[![Install with NPX in VS Code Insiders](https://img.shields.io/badge/VS_Code_Insiders-Install-24bfa5?style=flat-square&logo=visualstudiocode&logoColor=white)](https://insiders.vscode.dev/redirect/mcp/install?name=superfetch&inputs=%5B%5D&config=%7B%22command%22%3A%22npx%22%2C%22args%22%3A%5B%22-y%22%2C%22%40j0hanz%2Fsuperfetch%40latest%22%2C%22--stdio%22%5D%7D&quality=insiders)
+
+[![Install in Cursor](https://cursor.com/deeplink/mcp-install-dark.svg)](https://cursor.com/install-mcp?name=superfetch&config=eyJjb21tYW5kIjoibnB4IiwiYXJncyI6WyIteSIsIkBqMGhhbnovc3VwZXJmZXRjaEBsYXRlc3QiLCItLXN0ZGlvIl19)
 
 A [Model Context Protocol](https://modelcontextprotocol.io/) (MCP) server that fetches, extracts, and transforms web content into AI-optimized formats using Mozilla Readability.
 
-[Quick Start](#quick-start) · [Tools](#available-tools) · [Configuration](#configuration) · [Contributing](#contributing)
+[Quick Start](#quick-start) · [How to Choose a Tool](#-how-to-choose-a-tool) · [Tools](#available-tools) · [Configuration](#configuration) · [Contributing](#contributing)
 
 > 📦 **Published to [MCP Registry](https://registry.modelcontextprotocol.io/)** — Search for `io.github.j0hanz/superfetch`
 
@@ -24,6 +30,43 @@ A [Model Context Protocol](https://modelcontextprotocol.io/) (MCP) server that f
 | 🛡️ **Security First**     | SSRF protection, URL validation, header sanitization          |
 | 🔄 **Resilient Fetching** | Exponential backoff with jitter                               |
 | 📊 **Monitoring**         | Stats resource for cache performance and health               |
+
+---
+
+## 🎯 How to Choose a Tool
+
+Use this guide to select the right tool for your web content extraction needs:
+
+### Decision Tree
+
+```text
+Need web content for AI?
+├─ Single URL?
+│   ├─ Need structured semantic blocks → fetch-url (JSONL)
+│   ├─ Need readable markdown → fetch-markdown
+│   └─ Need links only → fetch-links
+└─ Multiple URLs?
+    └─ Use fetch-urls (batch processing)
+```
+
+### Quick Reference Table
+
+| Tool             | Best For                         | Output Format           | Use When                                    |
+| ---------------- | -------------------------------- | ----------------------- | ------------------------------------------- |
+| `fetch-url`      | Single page → structured content | JSONL semantic blocks   | AI analysis, RAG pipelines, content parsing |
+| `fetch-markdown` | Single page → readable format    | Clean Markdown + TOC    | Documentation, human-readable output        |
+| `fetch-links`    | Link discovery & classification  | URL array with types    | Sitemap building, finding related pages     |
+| `fetch-urls`     | Batch processing multiple pages  | Multiple JSONL/Markdown | Comparing pages, bulk extraction            |
+
+### Common Use Cases
+
+| Task                     | Recommended Tool                         | Why                                                  |
+| ------------------------ | ---------------------------------------- | ---------------------------------------------------- |
+| Parse a blog post for AI | `fetch-url`                              | Returns semantic blocks (headings, paragraphs, code) |
+| Generate documentation   | `fetch-markdown`                         | Clean markdown with optional TOC                     |
+| Build a sitemap          | `fetch-links`                            | Extracts and classifies all links                    |
+| Compare multiple docs    | `fetch-urls`                             | Parallel fetching with concurrency control           |
+| Extract article for RAG  | `fetch-url` + `extractMainContent: true` | Removes ads/nav, keeps main content                  |
 
 ---
 
@@ -77,6 +120,99 @@ Add to `.vscode/mcp.json` in your workspace:
   }
 }
 ```
+
+### Cursor
+
+1. Open Cursor Settings
+2. Go to **Features > MCP Servers**
+3. Click **"+ Add new global MCP server"**
+4. Add this configuration:
+
+```json
+{
+  "mcpServers": {
+    "superFetch": {
+      "command": "npx",
+      "args": ["-y", "@j0hanz/superfetch@latest", "--stdio"]
+    }
+  }
+}
+```
+
+> **Tip:** On Windows, if you encounter issues, try: `cmd /c "npx -y @j0hanz/superfetch@latest --stdio"`
+
+<details>
+<summary><strong>Cline (VS Code Extension)</strong></summary>
+
+Open the Cline MCP settings file:
+
+**macOS:**
+
+```bash
+code ~/Library/Application\ Support/Code/User/globalStorage/saoudrizwan.claude-dev/settings/cline_mcp_settings.json
+```
+
+**Windows:**
+
+```bash
+code %APPDATA%\Code\User\globalStorage\saoudrizwan.claude-dev\settings\cline_mcp_settings.json
+```
+
+Add the configuration:
+
+```json
+{
+  "mcpServers": {
+    "superFetch": {
+      "command": "npx",
+      "args": ["-y", "@j0hanz/superfetch@latest", "--stdio"],
+      "disabled": false,
+      "autoApprove": []
+    }
+  }
+}
+```
+
+</details>
+
+<details>
+<summary><strong>Windsurf</strong></summary>
+
+Add to `./codeium/windsurf/model_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "superFetch": {
+      "command": "npx",
+      "args": ["-y", "@j0hanz/superfetch@latest", "--stdio"]
+    }
+  }
+}
+```
+
+</details>
+
+<details>
+<summary><strong>Claude Desktop (Config File Locations)</strong></summary>
+
+**macOS:**
+
+```bash
+# Open config file
+open -e "$HOME/Library/Application Support/Claude/claude_desktop_config.json"
+
+# Or with VS Code
+code "$HOME/Library/Application Support/Claude/claude_desktop_config.json"
+```
+
+**Windows:**
+
+```bash
+code %APPDATA%\Claude\claude_desktop_config.json
+```
+
+</details>
 
 ---
 
@@ -140,33 +276,163 @@ node dist/index.js --stdio
 
 Fetches a webpage and converts it to AI-readable JSONL format with semantic content blocks.
 
-| Parameter            | Type     | Default    | Description                                  |
-| -------------------- | -------- | ---------- | -------------------------------------------- |
-| `url`                | string   | _required_ | URL to fetch                                 |
-| `extractMainContent` | boolean  | `true`     | Use Readability to extract main content      |
-| `includeMetadata`    | boolean  | `true`     | Include page metadata (title, description)   |
-| `maxContentLength`   | number   | –          | Maximum content length in characters         |
-| `customHeaders`      | object   | –          | Custom HTTP headers for the request          |
+| Parameter            | Type    | Default    | Description                                  |
+| -------------------- | ------- | ---------- | -------------------------------------------- |
+| `url`                | string  | _required_ | URL to fetch                                 |
+| `extractMainContent` | boolean | `true`     | Use Readability to extract main content      |
+| `includeMetadata`    | boolean | `true`     | Include page metadata (title, description)   |
+| `maxContentLength`   | number  | –          | Maximum content length in characters         |
+| `customHeaders`      | object  | –          | Custom HTTP headers for the request          |
+| `timeout`            | number  | `30000`    | Request timeout in milliseconds (1000-60000) |
+| `retries`            | number  | `3`        | Number of retry attempts (1-10)              |
+
+**Example Response:**
+
+```json
+{
+  "url": "https://example.com/article",
+  "title": "Example Article",
+  "fetchedAt": "2025-12-11T10:30:00.000Z",
+  "contentBlocks": [
+    {
+      "type": "metadata",
+      "title": "Example Article",
+      "description": "A sample article"
+    },
+    { "type": "heading", "level": 1, "text": "Introduction" },
+    {
+      "type": "paragraph",
+      "text": "This is the main content of the article..."
+    },
+    {
+      "type": "code",
+      "language": "javascript",
+      "content": "console.log('Hello');"
+    }
+  ],
+  "cached": false
+}
+```
 
 ### `fetch-links`
 
-Extracts hyperlinks from a webpage with classification.
+Extracts hyperlinks from a webpage with classification. Supports filtering, image links, and link limits.
 
-| Parameter         | Type    | Default    | Description               |
-| ----------------- | ------- | ---------- | ------------------------- |
-| `url`             | string  | _required_ | URL to extract links from |
-| `includeExternal` | boolean | `true`     | Include external links    |
-| `includeInternal` | boolean | `true`     | Include internal links    |
+| Parameter         | Type    | Default    | Description                                  |
+| ----------------- | ------- | ---------- | -------------------------------------------- |
+| `url`             | string  | _required_ | URL to extract links from                    |
+| `includeExternal` | boolean | `true`     | Include external links                       |
+| `includeInternal` | boolean | `true`     | Include internal links                       |
+| `includeImages`   | boolean | `false`    | Include image links (img src attributes)     |
+| `maxLinks`        | number  | –          | Maximum number of links to return (1-1000)   |
+| `filterPattern`   | string  | –          | Regex pattern to filter links (matches href) |
+| `customHeaders`   | object  | –          | Custom HTTP headers for the request          |
+| `timeout`         | number  | `30000`    | Request timeout in milliseconds (1000-60000) |
+| `retries`         | number  | `3`        | Number of retry attempts (1-10)              |
+
+**Example Response:**
+
+```json
+{
+  "url": "https://example.com/",
+  "linkCount": 15,
+  "links": [
+    {
+      "href": "https://example.com/about",
+      "text": "About Us",
+      "type": "internal"
+    },
+    {
+      "href": "https://github.com/example",
+      "text": "GitHub",
+      "type": "external"
+    },
+    { "href": "https://example.com/logo.png", "text": "", "type": "image" }
+  ],
+  "cached": false,
+  "truncated": false
+}
+```
 
 ### `fetch-markdown`
 
-Fetches a webpage and converts it to clean Markdown.
+Fetches a webpage and converts it to clean Markdown with optional table of contents.
 
-| Parameter            | Type    | Default    | Description               |
-| -------------------- | ------- | ---------- | ------------------------- |
-| `url`                | string  | _required_ | URL to fetch              |
-| `extractMainContent` | boolean | `true`     | Extract main content only |
-| `includeMetadata`    | boolean | `true`     | Include YAML frontmatter  |
+| Parameter            | Type    | Default    | Description                                  |
+| -------------------- | ------- | ---------- | -------------------------------------------- |
+| `url`                | string  | _required_ | URL to fetch                                 |
+| `extractMainContent` | boolean | `true`     | Extract main content only                    |
+| `includeMetadata`    | boolean | `true`     | Include YAML frontmatter                     |
+| `maxContentLength`   | number  | –          | Maximum content length in characters         |
+| `generateToc`        | boolean | `false`    | Generate table of contents from headings     |
+| `customHeaders`      | object  | –          | Custom HTTP headers for the request          |
+| `timeout`            | number  | `30000`    | Request timeout in milliseconds (1000-60000) |
+| `retries`            | number  | `3`        | Number of retry attempts (1-10)              |
+
+**Example Response:**
+
+````json
+{
+  "url": "https://example.com/docs",
+  "title": "Documentation",
+  "fetchedAt": "2025-12-11T10:30:00.000Z",
+  "markdown": "---\ntitle: Documentation\nsource: \"https://example.com/docs\"\n---\n\n# Getting Started\n\nWelcome to our documentation...\n\n## Installation\n\n```bash\nnpm install example\n```",
+  "toc": [
+    { "level": 1, "text": "Getting Started", "slug": "getting-started" },
+    { "level": 2, "text": "Installation", "slug": "installation" }
+  ],
+  "cached": false,
+  "truncated": false
+}
+````
+
+### `fetch-urls` (Batch)
+
+Fetches multiple URLs in parallel with concurrency control. Ideal for comparing content or processing multiple pages efficiently.
+
+| Parameter            | Type     | Default    | Description                                  |
+| -------------------- | -------- | ---------- | -------------------------------------------- |
+| `urls`               | string[] | _required_ | Array of URLs to fetch (1-10 URLs)           |
+| `extractMainContent` | boolean  | `true`     | Use Readability to extract main content      |
+| `includeMetadata`    | boolean  | `true`     | Include page metadata                        |
+| `maxContentLength`   | number   | –          | Maximum content length per URL in characters |
+| `format`             | string   | `'jsonl'`  | Output format: `'jsonl'` or `'markdown'`     |
+| `concurrency`        | number   | `3`        | Maximum concurrent requests (1-5)            |
+| `continueOnError`    | boolean  | `true`     | Continue processing if some URLs fail        |
+| `customHeaders`      | object   | –          | Custom HTTP headers for all requests         |
+| `timeout`            | number   | `30000`    | Request timeout in milliseconds (1000-60000) |
+| `retries`            | number   | `3`        | Number of retry attempts (1-10)              |
+
+**Example Output:**
+
+```json
+{
+  "results": [
+    {
+      "url": "https://example.com",
+      "success": true,
+      "title": "Example",
+      "content": "...",
+      "cached": false
+    },
+    {
+      "url": "https://example.org",
+      "success": true,
+      "title": "Example Org",
+      "content": "...",
+      "cached": false
+    }
+  ],
+  "summary": {
+    "total": 2,
+    "successful": 2,
+    "failed": 0,
+    "cached": 0,
+    "totalContentBlocks": 15
+  },
+  "fetchedAt": "2024-12-11T10:30:00.000Z"
+}
+```
 
 ### Resources
 
@@ -297,10 +563,10 @@ Default: **100 requests/minute** per IP (configurable)
 
 ### Tech Stack
 
-| Category           | Technology                      |
-| ------------------ | ------------------------------- |
-| Runtime            | Node.js ≥18                     |
-| Language           | TypeScript 5.9                  |
+| Category           | Technology                       |
+| ------------------ | -------------------------------- |
+| Runtime            | Node.js ≥18                      |
+| Language           | TypeScript 5.9                   |
 | MCP SDK            | @modelcontextprotocol/sdk ^1.0.4 |
 | Content Extraction | @mozilla/readability             |
 | HTML Parsing       | Cheerio, JSDOM                   |
@@ -322,15 +588,3 @@ Default: **100 requests/minute** per IP (configurable)
 6. Open a Pull Request
 
 For examples of other MCP servers, see: [github.com/modelcontextprotocol/servers](https://github.com/modelcontextprotocol/servers)
-
----
-
-## License
-
-MIT License — see [LICENSE](LICENSE) for details.
-
----
-
-<p align="center">
-  <sub>Built with ❤️ by <a href="https://github.com/j0hanz">j0hanz</a></sub>
-</p>

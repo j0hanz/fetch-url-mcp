@@ -1,15 +1,6 @@
-import type { Request, Response, NextFunction } from 'express';
+import type { NextFunction, Request, Response } from 'express';
 
-interface RateLimitEntry {
-  count: number;
-  resetTime: number;
-}
-
-interface RateLimiterOptions {
-  maxRequests: number;
-  windowMs: number;
-  cleanupIntervalMs: number;
-}
+import type { RateLimitEntry, RateLimiterOptions } from '../config/types.js';
 
 const DEFAULT_OPTIONS: RateLimiterOptions = {
   maxRequests: 100,
@@ -17,11 +8,10 @@ const DEFAULT_OPTIONS: RateLimiterOptions = {
   cleanupIntervalMs: 60000,
 };
 
-// Validation bounds for options
 const MIN_MAX_REQUESTS = 1;
 const MAX_MAX_REQUESTS = 10000;
-const MIN_WINDOW_MS = 1000; // 1 second
-const MAX_WINDOW_MS = 3600000; // 1 hour
+const MIN_WINDOW_MS = 1000;
+const MAX_WINDOW_MS = 3600000;
 
 class RateLimiter {
   private readonly store = new Map<string, RateLimitEntry>();
@@ -32,7 +22,6 @@ class RateLimiter {
   constructor(options: Partial<RateLimiterOptions> = {}) {
     const opts = { ...DEFAULT_OPTIONS, ...options };
 
-    // Validate and clamp options within bounds
     this.maxRequests = Math.min(
       Math.max(opts.maxRequests, MIN_MAX_REQUESTS),
       MAX_MAX_REQUESTS
@@ -43,16 +32,10 @@ class RateLimiter {
     );
     const cleanupInterval = Math.max(opts.cleanupIntervalMs, MIN_WINDOW_MS);
 
-    // Start cleanup interval
     this.cleanupInterval = setInterval(() => this.cleanup(), cleanupInterval);
-
-    // Ensure interval doesn't prevent process exit
     this.cleanupInterval.unref();
   }
 
-  /**
-   * Destroys the rate limiter and cleans up resources
-   */
   destroy(): void {
     if (this.cleanupInterval) {
       clearInterval(this.cleanupInterval);
@@ -61,27 +44,20 @@ class RateLimiter {
     this.store.clear();
   }
 
-  /**
-   * Rate limiting middleware
-   */
   middleware(): (req: Request, res: Response, next: NextFunction) => void {
     return (req: Request, res: Response, next: NextFunction): void => {
       const key = this.getKey(req);
       const now = Date.now();
 
-      // Get or create entry
       let entry = this.store.get(key);
 
-      // Reset if window has passed
       if (!entry || now > entry.resetTime) {
         entry = { count: 0, resetTime: now + this.windowMs };
         this.store.set(key, entry);
       }
 
-      // Increment count
       entry.count++;
 
-      // Check limit
       if (entry.count > this.maxRequests) {
         const retryAfter = Math.ceil((entry.resetTime - now) / 1000);
         res.set('Retry-After', String(retryAfter));
@@ -92,7 +68,6 @@ class RateLimiter {
         return;
       }
 
-      // Add rate limit headers
       res.set('X-RateLimit-Limit', String(this.maxRequests));
       res.set('X-RateLimit-Remaining', String(this.maxRequests - entry.count));
       res.set('X-RateLimit-Reset', String(Math.ceil(entry.resetTime / 1000)));
@@ -101,40 +76,23 @@ class RateLimiter {
     };
   }
 
-  /**
-   * Get key for request (IP address)
-   * Handles proxy configurations and provides fallback
-   * Sanitizes IP to prevent cache key injection
-   */
   private getKey(req: Request): string {
-    let ip: string;
-
-    // Priority: X-Real-IP > first X-Forwarded-For > req.ip > socket
+    const fallback = req.ip ?? req.socket.remoteAddress ?? 'unknown';
     const realIp = req.headers['x-real-ip'];
+    const forwardedFor = req.headers['x-forwarded-for'];
+
+    let ip: string = fallback;
     if (typeof realIp === 'string' && realIp) {
       ip = realIp;
-    } else {
-      const forwardedFor = req.headers['x-forwarded-for'];
-      if (typeof forwardedFor === 'string') {
-        const firstIp = forwardedFor.split(',')[0]?.trim();
-        if (firstIp) {
-          ip = firstIp;
-        } else {
-          ip = req.ip ?? req.socket.remoteAddress ?? 'unknown';
-        }
-      } else {
-        ip = req.ip ?? req.socket.remoteAddress ?? 'unknown';
-      }
+    } else if (typeof forwardedFor === 'string') {
+      const firstIp = forwardedFor.split(',')[0]?.trim();
+      if (firstIp) ip = firstIp;
     }
 
-    // Sanitize IP - remove any characters that shouldn't be in an IP
-    // This prevents potential cache key injection attacks
-    return ip.replace(/[^a-fA-F0-9.:]/g, '').substring(0, 45) || 'unknown';
+    const sanitized = ip.replace(/[^a-fA-F0-9.:]/g, '').substring(0, 45);
+    return sanitized.length > 0 ? sanitized : 'unknown';
   }
 
-  /**
-   * Clean up expired entries
-   */
   private cleanup(): void {
     const now = Date.now();
     for (const [key, entry] of this.store) {

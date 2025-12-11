@@ -1,22 +1,11 @@
+import type { ToolErrorResponse } from '../config/types.js';
+
 import {
   AppError,
-  UrlValidationError,
   FetchError,
   TimeoutError,
+  UrlValidationError,
 } from '../errors/index.js';
-
-/** MCP SDK-compatible error response (index signature required by SDK) */
-export type ToolErrorResponse = {
-  [x: string]: unknown;
-  content: { type: 'text'; text: string }[];
-  structuredContent: {
-    [x: string]: unknown;
-    error: string;
-    url: string;
-    errorCode: string;
-  };
-  isError: true;
-};
 
 export function createToolErrorResponse(
   message: string,
@@ -55,5 +44,9 @@ export function handleToolError(
   }
 
   const message = error instanceof Error ? error.message : 'Unknown error';
-  return createToolErrorResponse(`${fallbackMessage}: ${message}`, url, 'UNKNOWN_ERROR');
+  return createToolErrorResponse(
+    `${fallbackMessage}: ${message}`,
+    url,
+    'UNKNOWN_ERROR'
+  );
 }

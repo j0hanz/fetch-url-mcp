@@ -1,36 +1,51 @@
+import crypto from 'crypto';
 import NodeCache from 'node-cache';
-import { config } from '../config/index.js';
-import { logWarn } from './logger.js';
-import type { CacheEntry } from '../types/index.js';
 
-const cache = new NodeCache({
+import { config } from '../config/index.js';
+import type { CacheEntry } from '../config/types.js';
+
+import { logDebug, logWarn } from './logger.js';
+
+const contentCache = new NodeCache({
   stdTTL: config.cache.ttl,
   checkperiod: Math.floor(config.cache.ttl / 10),
   useClones: false,
   maxKeys: config.cache.maxKeys,
 });
 
-const stats = { hits: 0, misses: 0, sets: 0, errors: 0 };
-// 5MB default max content size for cache entries
+const HTML_CACHE_TTL = 60;
+const HTML_CACHE_MAX_KEYS = 50;
+const htmlCache = new NodeCache({
+  stdTTL: HTML_CACHE_TTL,
+  checkperiod: 30,
+  useClones: false,
+  maxKeys: HTML_CACHE_MAX_KEYS,
+});
+
+const stats = {
+  hits: 0,
+  misses: 0,
+  sets: 0,
+  errors: 0,
+  htmlHits: 0,
+  htmlMisses: 0,
+};
+
 const MAX_CONTENT_SIZE = 5242880;
-// Maximum cache key length to prevent memory issues
+const MAX_HTML_SIZE = 10485760;
 const MAX_KEY_LENGTH = 500;
 
-/**
- * Creates a cache key from namespace and URL
- * Truncates long URLs to prevent memory issues
- * @returns Cache key string or null if inputs are invalid
- */
 export function createCacheKey(namespace: string, url: string): string | null {
-  if (!namespace || !url) {
-    return null;
-  }
+  if (!namespace || !url) return null;
   const key = `${namespace}:${url}`;
-  // Truncate extremely long keys
-  if (key.length > MAX_KEY_LENGTH) {
-    return key.substring(0, MAX_KEY_LENGTH);
-  }
-  return key;
+  if (key.length <= MAX_KEY_LENGTH) return key;
+  // Use hash for long URLs to prevent collisions from truncation
+  const hash = crypto
+    .createHash('sha256')
+    .update(url)
+    .digest('hex')
+    .substring(0, 32);
+  return `${namespace}:hash:${hash}`;
 }
 
 export function get(cacheKey: string | null): CacheEntry | undefined {
@@ -38,7 +53,7 @@ export function get(cacheKey: string | null): CacheEntry | undefined {
   if (!cacheKey) return undefined;
 
   try {
-    const entry = cache.get<CacheEntry>(cacheKey);
+    const entry = contentCache.get<CacheEntry>(cacheKey);
     if (entry) {
       stats.hits++;
       return entry;
@@ -78,7 +93,7 @@ export function set(cacheKey: string | null, content: string): void {
       expiresAt: new Date(nowMs + config.cache.ttl * 1000).toISOString(),
     };
 
-    cache.set(cacheKey, entry);
+    contentCache.set(cacheKey, entry);
     stats.sets++;
   } catch (error) {
     stats.errors++;
@@ -89,12 +104,45 @@ export function set(cacheKey: string | null, content: string): void {
   }
 }
 
+export function getHtml(url: string): string | undefined {
+  if (!config.cache.enabled) return undefined;
+
+  try {
+    const html = htmlCache.get<string>(url);
+    if (html) {
+      stats.htmlHits++;
+      logDebug('HTML cache hit', { url: url.substring(0, 100) });
+      return html;
+    }
+    stats.htmlMisses++;
+    return undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+export function setHtml(url: string, html: string): void {
+  if (!config.cache.enabled) return;
+  if (!html || html.length > MAX_HTML_SIZE) return;
+
+  try {
+    htmlCache.set(url, html);
+    logDebug('HTML cached', { url: url.substring(0, 100), size: html.length });
+  } catch {
+    // Ignore HTML cache errors
+  }
+}
+
 export function getStats() {
   const total = stats.hits + stats.misses;
   const hitRate = total > 0 ? ((stats.hits / total) * 100).toFixed(2) : '0.00';
 
+  const htmlTotal = stats.htmlHits + stats.htmlMisses;
+  const htmlHitRate =
+    htmlTotal > 0 ? ((stats.htmlHits / htmlTotal) * 100).toFixed(2) : '0.00';
+
   return {
-    size: cache.keys().length,
+    size: contentCache.keys().length,
     maxKeys: config.cache.maxKeys,
     ttl: config.cache.ttl,
     hits: stats.hits,
@@ -102,5 +150,11 @@ export function getStats() {
     sets: stats.sets,
     errors: stats.errors,
     hitRate: `${hitRate}%`,
+    htmlCacheSize: htmlCache.keys().length,
+    htmlCacheMaxKeys: HTML_CACHE_MAX_KEYS,
+    htmlCacheTtl: HTML_CACHE_TTL,
+    htmlHits: stats.htmlHits,
+    htmlMisses: stats.htmlMisses,
+    htmlHitRate: `${htmlHitRate}%`,
   };
 }

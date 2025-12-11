@@ -1,49 +1,38 @@
 import { UrlValidationError, ValidationError } from '../errors/app-error.js';
 
-// Maximum URL length to prevent DoS attacks
 const MAX_URL_LENGTH = 2048;
 
-// Blocked hosts to prevent SSRF attacks
 const BLOCKED_HOSTS = new Set([
   'localhost',
   '127.0.0.1',
   '0.0.0.0',
   '::1',
-  '169.254.169.254', // AWS metadata endpoint
-  'metadata.google.internal', // GCP metadata
-  'metadata.azure.com', // Azure metadata
-  '100.100.100.200', // Alibaba Cloud metadata
-  'instance-data', // Common cloud metadata hostname
+  '169.254.169.254',
+  'metadata.google.internal',
+  'metadata.azure.com',
+  '100.100.100.200',
+  'instance-data',
 ]);
 
-// Blocked IP patterns (private networks)
 const BLOCKED_IP_PATTERNS: readonly RegExp[] = [
-  /^10\./, // Private Class A
-  /^172\.(1[6-9]|2\d|3[01])\./, // Private Class B
-  /^192\.168\./, // Private Class C
-  /^127\./, // Loopback
-  /^0\./, // Current network
-  /^169\.254\./, // Link-local
-  /^fc00:/i, // IPv6 unique local
-  /^fe80:/i, // IPv6 link-local
-  /^::ffff:127\./, // IPv4-mapped IPv6 loopback
-  /^::ffff:10\./, // IPv4-mapped IPv6 private
-  /^::ffff:172\.(1[6-9]|2\d|3[01])\./, // IPv4-mapped IPv6 private
-  /^::ffff:192\.168\./, // IPv4-mapped IPv6 private
+  /^10\./,
+  /^172\.(1[6-9]|2\d|3[01])\./,
+  /^192\.168\./,
+  /^127\./,
+  /^0\./,
+  /^169\.254\./,
+  /^fc00:/i,
+  /^fe80:/i,
+  /^::ffff:127\./,
+  /^::ffff:10\./,
+  /^::ffff:172\.(1[6-9]|2\d|3[01])\./,
+  /^::ffff:192\.168\./,
 ];
 
-/**
- * Checks if a hostname matches blocked IP patterns
- */
 function isBlockedIp(hostname: string): boolean {
   return BLOCKED_IP_PATTERNS.some((pattern) => pattern.test(hostname));
 }
 
-/**
- * Validates and normalizes a URL, blocking SSRF attack vectors
- * @throws {ValidationError} if URL is empty or too long
- * @throws {UrlValidationError} if URL is invalid or blocked
- */
 export function validateAndNormalizeUrl(urlString: string): string {
   // Check for empty or whitespace-only input
   if (!urlString || typeof urlString !== 'string') {
@@ -121,9 +110,6 @@ export function validateAndNormalizeUrl(urlString: string): string {
   return url.href;
 }
 
-/**
- * Checks if a URL is internal (same domain)
- */
 export function isInternalUrl(url: string, baseUrl: string): boolean {
   try {
     const urlObj = new URL(url, baseUrl);

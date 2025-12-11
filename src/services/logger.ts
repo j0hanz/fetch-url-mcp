@@ -1,15 +1,14 @@
-import winston from 'winston';
 import fs from 'fs';
-import { config } from '../config/index.js';
 import path from 'path';
+import winston from 'winston';
+
+import { config } from '../config/index.js';
 
 const logsDir = path.join(process.cwd(), 'logs');
 
-// Ensure logs directory exists
+// Ensure logs directory exists (mkdirSync with recursive is idempotent)
 try {
-  if (!fs.existsSync(logsDir)) {
-    fs.mkdirSync(logsDir, { recursive: true });
-  }
+  fs.mkdirSync(logsDir, { recursive: true });
 } catch {
   // If we can't create logs dir, file transports will fail gracefully
 }
