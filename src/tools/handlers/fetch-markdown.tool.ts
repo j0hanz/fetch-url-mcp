@@ -8,6 +8,7 @@ import type {
 import { extractContent } from '../../services/extractor.js';
 import { logDebug, logError } from '../../services/logger.js';
 
+import { stripMarkdownLinks } from '../../utils/content-cleaner.js';
 import {
   createToolErrorResponse,
   handleToolError,
@@ -21,8 +22,15 @@ export const FETCH_MARKDOWN_TOOL_NAME = 'fetch-markdown';
 export const FETCH_MARKDOWN_TOOL_DESCRIPTION =
   'Fetches a webpage and converts it to clean Markdown format with optional frontmatter, table of contents, and content length limits';
 
+/**
+ * Generate URL-friendly slug from text
+ * Strips markdown link syntax before slugifying
+ */
 function slugify(text: string): string {
-  return text
+  // First strip markdown links: [Text](#anchor) -> Text
+  const cleanText = stripMarkdownLinks(text);
+
+  return cleanText
     .toLowerCase()
     .replace(/[^\w\s-]/g, '')
     .replace(/\s+/g, '-')
@@ -30,6 +38,10 @@ function slugify(text: string): string {
     .trim();
 }
 
+/**
+ * Extract table of contents from markdown headings
+ * Returns clean text without markdown link syntax
+ */
 function extractToc(markdown: string): TocEntry[] {
   const headingRegex = /^(#{1,6})\s+(.+)$/gm;
   const toc: TocEntry[] = [];
@@ -37,8 +49,10 @@ function extractToc(markdown: string): TocEntry[] {
 
   while ((match = headingRegex.exec(markdown)) !== null) {
     if (!match[1] || !match[2]) continue;
-    const text = match[2].trim();
-    toc.push({ level: match[1].length, text, slug: slugify(text) });
+    const rawText = match[2].trim();
+    // Clean markdown links from TOC text: [Usage](#usage) -> Usage
+    const text = stripMarkdownLinks(rawText);
+    toc.push({ level: match[1].length, text, slug: slugify(rawText) });
   }
 
   return toc;
