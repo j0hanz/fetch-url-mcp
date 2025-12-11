@@ -9,7 +9,8 @@ function truncateBlock(block: ContentBlockUnion): ContentBlockUnion {
   switch (block.type) {
     case 'paragraph':
     case 'heading':
-    case 'code': {
+    case 'code':
+    case 'blockquote': {
       const truncated = truncateText(block.text, maxLength);
       return truncated === block.text ? block : { ...block, text: truncated };
     }

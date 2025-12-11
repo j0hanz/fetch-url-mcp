@@ -5,7 +5,8 @@ type ContentBlockType =
   | 'list'
   | 'code'
   | 'table'
-  | 'image';
+  | 'image'
+  | 'blockquote';
 
 interface ContentBlock {
   type: ContentBlockType;
@@ -55,6 +56,11 @@ export interface ImageBlock extends ContentBlock {
   alt?: string | undefined;
 }
 
+export interface BlockquoteBlock extends ContentBlock {
+  type: 'blockquote';
+  text: string;
+}
+
 export type ContentBlockUnion =
   | MetadataBlock
   | HeadingBlock
@@ -62,7 +68,8 @@ export type ContentBlockUnion =
   | ListBlock
   | CodeBlock
   | TableBlock
-  | ImageBlock;
+  | ImageBlock
+  | BlockquoteBlock;
 
 export interface ExtractedArticle {
   title?: string | undefined;
@@ -175,7 +182,8 @@ export type ParseableTagName =
   | 'pre'
   | 'code'
   | 'table'
-  | 'img';
+  | 'img'
+  | 'blockquote';
 
 export interface LinksTransformResult {
   links: ExtractedLink[];

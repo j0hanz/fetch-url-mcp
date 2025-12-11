@@ -257,46 +257,12 @@ export function cleanCodeBlock(code: string): string | null {
 }
 
 /**
- * Normalize whitespace in text content
- */
-export function normalizeWhitespace(text: string): string {
-  return text
-    .replace(/\s+/g, ' ') // Collapse multiple spaces
-    .replace(/\n{3,}/g, '\n\n') // Max 2 newlines
-    .trim();
-}
-
-/**
  * Strip markdown link syntax from text for cleaner slugs/display
  * [Text](#anchor) -> Text
  * [Text](url) -> Text
  */
 export function stripMarkdownLinks(text: string): string {
   return text.replace(/\[([^\]]+)\]\([^)]*\)/g, '$1');
-}
-
-/**
- * Check if content block should be filtered out entirely
- * More aggressive filtering for standalone content
- */
-export function shouldFilterContent(
-  text: string,
-  type: 'paragraph' | 'heading' | 'list-item' | 'code'
-): boolean {
-  const trimmed = text.trim();
-
-  switch (type) {
-    case 'paragraph':
-      return cleanParagraph(trimmed) === null;
-    case 'heading':
-      return cleanHeading(trimmed) === null;
-    case 'list-item':
-      return trimmed.length < MIN_LIST_ITEM_LENGTH || isNoiseText(trimmed);
-    case 'code':
-      return cleanCodeBlock(trimmed) === null;
-    default:
-      return false;
-  }
 }
 
 /**

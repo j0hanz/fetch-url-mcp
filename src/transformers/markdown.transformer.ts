@@ -2,42 +2,7 @@ import TurndownService from 'turndown';
 
 import type { MetadataBlock } from '../config/types.js';
 
-// Language detection patterns for code blocks
-const LANGUAGE_PATTERNS: [RegExp, string][] = [
-  // JSX/TSX patterns
-  [
-    /^\s*import\s+.*\s+from\s+['"]react['"]|<[A-Z][a-zA-Z]*[\s/>]|jsx\s*:/m,
-    'jsx',
-  ],
-  // TypeScript patterns
-  [
-    /:\s*(string|number|boolean|void|any|unknown|never)\b|interface\s+\w+|type\s+\w+\s*=/m,
-    'typescript',
-  ],
-  // JavaScript patterns (generic)
-  [
-    /^\s*(import|export|const|let|var|function|class|async|await)\b/m,
-    'javascript',
-  ],
-  // Python patterns
-  [/^\s*(def|class|import|from|if __name__|print\()/m, 'python'],
-  // Bash/Shell patterns
-  [
-    /^\s*(npm|yarn|pnpm|npx|brew|apt|pip|cargo|go )\s+(install|add|run|build|start)/m,
-    'bash',
-  ],
-  [/^\s*[$#]\s+\w+|^\s*(sudo|chmod|mkdir|cd|ls|cat|echo)\s+/m, 'bash'],
-  // CSS patterns
-  [/^\s*[.#@]?[\w-]+\s*\{[^}]*\}|@media|@import|@keyframes/m, 'css'],
-  // HTML patterns
-  [/^\s*<(!DOCTYPE|html|head|body|div|span|p|a|script|style)\b/im, 'html'],
-  // JSON patterns
-  [/^\s*[{[]\s*"[^"]+"\s*:/m, 'json'],
-  // YAML patterns (but not frontmatter)
-  [/^\s*[\w-]+:\s*[^\n]+\n\s*[\w-]+:/m, 'yaml'],
-  // SQL patterns
-  [/^\s*(SELECT|INSERT|UPDATE|DELETE|CREATE|ALTER|DROP)\s+/im, 'sql'],
-];
+import { detectLanguage } from '../utils/language-detector.js';
 
 // Patterns for standalone noise lines to remove from markdown
 const NOISE_LINE_PATTERNS: RegExp[] = [
@@ -76,18 +41,6 @@ const NOISE_LINE_PATTERNS: RegExp[] = [
   /^\[\d+\]$/,
   /^\(\d+\)$/,
 ];
-
-/**
- * Detect programming language from code content
- */
-function detectLanguage(code: string): string | undefined {
-  for (const [pattern, language] of LANGUAGE_PATTERNS) {
-    if (pattern.test(code)) {
-      return language;
-    }
-  }
-  return undefined;
-}
 
 /**
  * Check if a line is noise that should be removed

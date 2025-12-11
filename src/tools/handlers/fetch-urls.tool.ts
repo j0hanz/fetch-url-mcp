@@ -109,10 +109,12 @@ async function processSingleUrl(
   } catch (error) {
     const errorMessage =
       error instanceof Error ? error.message : 'Unknown error';
-    let errorCode = 'FETCH_ERROR';
-    if (error && typeof error === 'object' && 'code' in error) {
-      errorCode = String((error as Record<string, unknown>).code);
-    }
+    const errorCode =
+      error instanceof Error &&
+      'code' in error &&
+      typeof error.code === 'string'
+        ? error.code
+        : 'FETCH_ERROR';
 
     logWarn('Batch URL processing failed', { url, error: errorMessage });
     return {

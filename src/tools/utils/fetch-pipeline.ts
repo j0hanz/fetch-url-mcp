@@ -19,7 +19,7 @@ export async function executeFetchPipeline<T>(
     retries,
     transform,
     serialize = JSON.stringify,
-    deserialize = JSON.parse as unknown as (cached: string) => T,
+    deserialize = (cached: string) => JSON.parse(cached) as T,
   } = options;
 
   const normalizedUrl = validateAndNormalizeUrl(url);

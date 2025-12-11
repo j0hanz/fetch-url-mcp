@@ -223,6 +223,14 @@
         "copilot/claude-sonnet-4.5",
         "copilot/gemini-3-pro-preview"
       ]
+    },
+    "superFetch/.vscode/mcp.json: superFetch": {
+      "allowedModels": [
+        "copilot/claude-haiku-4.5",
+        "copilot/claude-opus-4.5",
+        "copilot/claude-sonnet-4.5",
+        "copilot/gemini-3-pro-preview"
+      ]
     }
   }
 }

@@ -133,12 +133,11 @@ async function fetchUrl(
 
   try {
     const response = await client.request<string>(requestConfig);
-    const headers = response.headers as Record<string, unknown>;
-    const contentTypeHeader = headers['content-type'];
+    const contentTypeHeader: unknown = response.headers['content-type'];
 
     let contentType: string | undefined;
     if (Array.isArray(contentTypeHeader)) {
-      const first = contentTypeHeader[0] as unknown;
+      const first: unknown = contentTypeHeader[0];
       if (typeof first === 'string') contentType = first;
     } else if (typeof contentTypeHeader === 'string') {
       contentType = contentTypeHeader;

@@ -4,6 +4,7 @@ import type { AnyNode, Element } from 'domhandler';
 
 import { config } from '../config/index.js';
 import type {
+  BlockquoteBlock,
   CodeBlock,
   ContentBlockUnion,
   HeadingBlock,
@@ -21,64 +22,12 @@ import {
   cleanParagraph,
   removeInlineTimestamps,
 } from '../utils/content-cleaner.js';
+import { detectLanguage } from '../utils/language-detector.js';
 import { sanitizeText } from '../utils/sanitizer.js';
 
 import { logWarn } from './logger.js';
 
 const MAX_HTML_SIZE = 10 * 1024 * 1024;
-
-// Language detection patterns for code blocks
-const LANGUAGE_PATTERNS: [RegExp, string][] = [
-  // JSX/TSX patterns
-  [
-    /^\s*import\s+.*\s+from\s+['"]react['"]|<[A-Z][a-zA-Z]*[\s/>]|jsx\s*:/m,
-    'jsx',
-  ],
-  // TypeScript patterns
-  [
-    /:\s*(string|number|boolean|void|any|unknown|never)\b|interface\s+\w+|type\s+\w+\s*=/m,
-    'typescript',
-  ],
-  // JavaScript patterns (generic)
-  [
-    /^\s*(import|export|const|let|var|function|class|async|await)\b/m,
-    'javascript',
-  ],
-  // Python patterns
-  [/^\s*(def|class|import|from|if __name__|print\()/m, 'python'],
-  // Bash/Shell patterns
-  [
-    /^\s*(npm|yarn|pnpm|npx|brew|apt|pip|cargo|go )\s+(install|add|run|build|start)/m,
-    'bash',
-  ],
-  [/^\s*[$#]\s+\w+|^\s*(sudo|chmod|mkdir|cd|ls|cat|echo)\s+/m, 'bash'],
-  // CSS patterns
-  [/^\s*[.#@]?[\w-]+\s*\{[^}]*\}|@media|@import|@keyframes/m, 'css'],
-  // HTML patterns
-  [/^\s*<(!DOCTYPE|html|head|body|div|span|p|a|script|style)\b/im, 'html'],
-  // JSON patterns
-  [/^\s*[{[]\s*"[^"]+"\s*:/m, 'json'],
-  // YAML patterns
-  [/^\s*[\w-]+:\s*.+$/m, 'yaml'],
-  // SQL patterns
-  [/^\s*(SELECT|INSERT|UPDATE|DELETE|CREATE|ALTER|DROP)\s+/im, 'sql'],
-  // Rust patterns
-  [/^\s*(fn|let\s+mut|impl|struct|enum|use\s+\w+::)/m, 'rust'],
-  // Go patterns
-  [/^\s*(func|package|import\s+")/m, 'go'],
-];
-
-/**
- * Detect programming language from code content
- */
-function detectLanguage(code: string): string | undefined {
-  for (const [pattern, language] of LANGUAGE_PATTERNS) {
-    if (pattern.test(code)) {
-      return language;
-    }
-  }
-  return undefined;
-}
 
 function parseHeading($: CheerioAPI, element: Element): HeadingBlock | null {
   const rawText = sanitizeText($(element).text());
@@ -203,6 +152,17 @@ function parseImage($: CheerioAPI, element: Element): ImageBlock | null {
   };
 }
 
+function parseBlockquote(
+  $: CheerioAPI,
+  element: Element
+): BlockquoteBlock | null {
+  const rawText = sanitizeText($(element).text());
+  const text = cleanParagraph(rawText);
+  if (!text || text.length < config.extraction.minParagraphLength) return null;
+
+  return { type: 'blockquote', text };
+}
+
 const ELEMENT_PARSERS = {
   h1: parseHeading,
   h2: parseHeading,
@@ -217,6 +177,7 @@ const ELEMENT_PARSERS = {
   code: parseCode,
   table: parseTable,
   img: parseImage,
+  blockquote: parseBlockquote,
 } as const satisfies Record<
   string,
   ($: CheerioAPI, element: Element) => ContentBlockUnion | null
@@ -240,6 +201,7 @@ function filterBlocks(blocks: ContentBlockUnion[]): ContentBlockUnion[] {
       case 'paragraph':
       case 'heading':
       case 'code':
+      case 'blockquote':
         return block.text.length > 0;
       case 'list':
         return block.items.length > 0;
@@ -270,7 +232,7 @@ export function parseHtml(html: string): ContentBlockUnion[] {
     // Use toArray() + for...of instead of .each() to avoid callback overhead
     const elements = $('body')
       .find(
-        'h1, h2, h3, h4, h5, h6, p, ul, ol, pre, code:not(pre code), table, img'
+        'h1, h2, h3, h4, h5, h6, p, ul, ol, pre, code:not(pre code), table, img, blockquote'
       )
       .toArray();
 
