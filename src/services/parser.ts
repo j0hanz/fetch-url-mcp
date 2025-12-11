@@ -12,9 +12,9 @@ import type {
   TableBlock,
   ImageBlock,
   ContentBlockUnion,
-} from '../types/index.js';
+  ParseableTagName,
+} from '../config/types.js';
 
-// Maximum HTML size to parse (10MB)
 const MAX_HTML_SIZE = 10 * 1024 * 1024;
 
 function parseHeading($: CheerioAPI, element: Element): HeadingBlock | null {
@@ -75,7 +75,6 @@ function parseTable($: CheerioAPI, element: Element): TableBlock | null {
   const rows: string[][] = [];
   const $table = $(element);
 
-  // Extract headers from thead or first row
   $table.find('thead th, thead td').each((_, cell) => {
     headers.push(sanitizeText($(cell).text()));
   });
@@ -90,7 +89,6 @@ function parseTable($: CheerioAPI, element: Element): TableBlock | null {
       });
   }
 
-  // Extract body rows
   const rowsSelector =
     headers.length > 0 ? 'tbody tr, tr:not(:first)' : 'tbody tr, tr';
   $table.find(rowsSelector).each((_, row) => {
@@ -142,8 +140,6 @@ const ELEMENT_PARSERS = {
   ($: CheerioAPI, element: Element) => ContentBlockUnion | null
 >;
 
-type ParseableTagName = keyof typeof ELEMENT_PARSERS;
-
 function isParseableTag(tag: string): tag is ParseableTagName {
   return tag in ELEMENT_PARSERS;
 }
@@ -171,18 +167,9 @@ function filterBlocks(blocks: ContentBlockUnion[]): ContentBlockUnion[] {
   });
 }
 
-/**
- * Parses HTML content and extracts semantic blocks
- * @param html - HTML string to parse
- * @returns Array of content blocks (empty array if parsing fails)
- */
 export function parseHtml(html: string): ContentBlockUnion[] {
-  // Input validation
-  if (!html || typeof html !== 'string') {
-    return [];
-  }
+  if (!html || typeof html !== 'string') return [];
 
-  // Size validation to prevent memory issues
   if (html.length > MAX_HTML_SIZE) {
     logWarn('HTML content exceeds maximum size, truncating', {
       size: html.length,
@@ -204,7 +191,7 @@ export function parseHtml(html: string): ContentBlockUnion[] {
           const block = parseElement($, element);
           if (block) blocks.push(block);
         } catch {
-          // Skip individual element parsing errors
+          // Skip element errors
         }
       });
 

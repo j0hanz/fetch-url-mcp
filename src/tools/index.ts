@@ -260,12 +260,7 @@ const FetchUrlsOutputSchema = {
   fetchedAt: z.string().describe('ISO timestamp of batch completion'),
 };
 
-/**
- * Registers all tools with the MCP server using the modern McpServer API
- * Tools are registered with Zod schemas for automatic validation
- */
 export function registerTools(server: McpServer): void {
-  // Register fetch-url tool
   server.registerTool(
     FETCH_URL_TOOL_NAME,
     {
@@ -277,7 +272,6 @@ export function registerTools(server: McpServer): void {
     async (args) => fetchUrlToolHandler(args)
   );
 
-  // Register fetch-links tool
   server.registerTool(
     FETCH_LINKS_TOOL_NAME,
     {
@@ -289,7 +283,6 @@ export function registerTools(server: McpServer): void {
     async (args) => fetchLinksToolHandler(args)
   );
 
-  // Register fetch-markdown tool
   server.registerTool(
     FETCH_MARKDOWN_TOOL_NAME,
     {
@@ -301,7 +294,6 @@ export function registerTools(server: McpServer): void {
     async (args) => fetchMarkdownToolHandler(args)
   );
 
-  // Register fetch-urls batch tool
   server.registerTool(
     FETCH_URLS_TOOL_NAME,
     {

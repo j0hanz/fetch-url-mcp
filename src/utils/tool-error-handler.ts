@@ -4,19 +4,7 @@ import {
   FetchError,
   TimeoutError,
 } from '../errors/index.js';
-
-/** MCP SDK-compatible error response (index signature required by SDK) */
-export interface ToolErrorResponse {
-  [x: string]: unknown;
-  content: { type: 'text'; text: string }[];
-  structuredContent: {
-    [x: string]: unknown;
-    error: string;
-    url: string;
-    errorCode: string;
-  };
-  isError: true;
-}
+import type { ToolErrorResponse } from '../config/types.js';
 
 export function createToolErrorResponse(
   message: string,

@@ -2,9 +2,6 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import * as cache from '../services/cache.js';
 import { config } from '../config/index.js';
 
-/**
- * Registers all resources with the MCP server using the modern McpServer API
- */
 export function registerResources(server: McpServer): void {
   // Register server statistics resource
   server.registerResource(

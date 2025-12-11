@@ -6,30 +6,17 @@ import {
   handleToolError,
 } from '../../utils/tool-error-handler.js';
 import { executeFetchPipeline } from '../utils/fetch-pipeline.js';
-import type { FetchLinksInput, ExtractedLink } from '../../types/index.js';
+import type {
+  FetchLinksInput,
+  ExtractedLink,
+  LinksTransformResult,
+  ExtractLinksOptions,
+} from '../../config/types.js';
 
 export const FETCH_LINKS_TOOL_NAME = 'fetch-links';
 export const FETCH_LINKS_TOOL_DESCRIPTION =
   'Extracts all hyperlinks from a webpage with anchor text and type classification. Supports filtering, image links, and link limits.';
 
-interface LinksTransformResult {
-  links: ExtractedLink[];
-  linkCount: number;
-  filtered: number;
-  truncated: boolean;
-}
-
-interface ExtractLinksOptions {
-  includeInternal: boolean;
-  includeExternal: boolean;
-  includeImages: boolean;
-  maxLinks?: number | undefined;
-  filterPattern?: RegExp | undefined;
-}
-
-/**
- * Extracts and classifies links from HTML
- */
 function extractLinks(
   html: string,
   baseUrl: string,

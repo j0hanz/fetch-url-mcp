@@ -12,21 +12,13 @@ import type {
   FetchUrlInput,
   MetadataBlock,
   ContentBlockUnion,
-} from '../../types/index.js';
+  JsonlTransformResult,
+} from '../../config/types.js';
 
 export const FETCH_URL_TOOL_NAME = 'fetch-url';
 export const FETCH_URL_TOOL_DESCRIPTION =
   'Fetches a webpage and converts it to AI-readable JSONL format with semantic content blocks. Supports custom headers, retries, and content length limits.';
 
-interface JsonlTransformResult {
-  content: string;
-  contentBlocks: number;
-  title: string | undefined;
-}
-
-/**
- * Transforms HTML to JSONL format with semantic content blocks
- */
 function transformToJsonl(
   html: string,
   url: string,

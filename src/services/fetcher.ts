@@ -36,14 +36,9 @@ function calculateBackoff(attempt: number, maxDelay = 10000): number {
   return Math.round(baseDelay + jitter);
 }
 
-// HTTP/HTTPS agents with connection pooling for better performance
 const httpAgent = new http.Agent({ keepAlive: true, maxSockets: 25 });
 const httpsAgent = new https.Agent({ keepAlive: true, maxSockets: 25 });
 
-/**
- * Destroys HTTP agents and closes all sockets
- * Should be called during graceful shutdown
- */
 export function destroyAgents(): void {
   httpAgent.destroy();
   httpsAgent.destroy();
@@ -66,7 +61,6 @@ const client = axios.create({
   validateStatus: (status) => status >= 200 && status < 300,
 });
 
-// Request interceptor for logging and request enhancement
 client.interceptors.request.use(
   (requestConfig) => {
     logDebug('HTTP Request', {
@@ -81,7 +75,6 @@ client.interceptors.request.use(
   }
 );
 
-// Response interceptor for logging and consistent error transformation
 client.interceptors.response.use(
   (response) => {
     logDebug('HTTP Response', {
@@ -94,7 +87,6 @@ client.interceptors.response.use(
   async (error: AxiosError) => {
     const url = error.config?.url ?? 'unknown';
 
-    // Transform Axios errors to application errors
     if (error.code === 'ECONNABORTED' || error.code === 'ETIMEDOUT') {
       logError('HTTP Timeout', { url, timeout: config.fetcher.timeout });
       return Promise.reject(new TimeoutError(config.fetcher.timeout, true));
@@ -121,11 +113,6 @@ client.interceptors.response.use(
   }
 );
 
-/**
- * Fetches HTML content from a URL (internal - use fetchUrlWithRetry for retry logic)
- * @throws {FetchError} if request fails or returns non-HTML content
- * @throws {TimeoutError} if request times out
- */
 async function fetchUrl(
   url: string,
   customHeaders?: Record<string, string>
@@ -143,8 +130,6 @@ async function fetchUrl(
 
   try {
     const response = await client.request<string>(requestConfig);
-
-    // Validate content type is HTML/text
     const contentType = response.headers['content-type'] as string | undefined;
     if (contentType && !isHtmlContentType(contentType)) {
       throw new FetchError(
@@ -155,12 +140,10 @@ async function fetchUrl(
 
     return response.data;
   } catch (error) {
-    // Re-throw our custom errors (from interceptors or content-type check)
     if (error instanceof FetchError || error instanceof TimeoutError) {
       throw error;
     }
 
-    // Handle any unexpected errors
     throw new FetchError(
       `Unexpected error: ${error instanceof Error ? error.message : 'Unknown'}`,
       url
@@ -168,9 +151,6 @@ async function fetchUrl(
   }
 }
 
-/**
- * Checks if content type indicates HTML content
- */
 function isHtmlContentType(contentType: string): boolean {
   const normalized = contentType.toLowerCase();
   return (
@@ -180,21 +160,12 @@ function isHtmlContentType(contentType: string): boolean {
   );
 }
 
-/**
- * Fetches URL with exponential backoff retry logic
- * Uses HTML cache to prevent duplicate network requests for the same URL
- * @param url - URL to fetch
- * @param customHeaders - Optional custom headers
- * @param maxRetries - Maximum retry attempts (1-10, defaults to 3)
- * @param skipCache - Skip the HTML cache (useful when fresh content is required)
- */
 export async function fetchUrlWithRetry(
   url: string,
   customHeaders?: Record<string, string>,
   maxRetries = 3,
   skipCache = false
 ): Promise<{ html: string; fromHtmlCache: boolean }> {
-  // Check HTML cache first (prevents duplicate network requests within 60s window)
   if (!skipCache) {
     const cachedHtml = getHtml(url);
     if (cachedHtml) {
@@ -203,15 +174,12 @@ export async function fetchUrlWithRetry(
     }
   }
 
-  // Validate maxRetries within bounds
   const retries = Math.min(Math.max(1, maxRetries), 10);
   let lastError: Error | undefined;
 
   for (let attempt = 1; attempt <= retries; attempt++) {
     try {
       const html = await fetchUrl(url, customHeaders);
-
-      // Store in HTML cache for future requests
       setHtml(url, html);
       logDebug('HTML Cache Set', { url });
 
@@ -219,7 +187,6 @@ export async function fetchUrlWithRetry(
     } catch (error) {
       lastError = error instanceof Error ? error : new Error('Unknown error');
 
-      // Don't retry on client errors (4xx) except 429 (rate limited)
       if (error instanceof FetchError && error.httpStatus) {
         const status = error.httpStatus;
         if (status >= 400 && status < 500 && status !== 429) {

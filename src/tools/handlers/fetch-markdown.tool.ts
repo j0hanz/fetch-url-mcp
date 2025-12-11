@@ -7,35 +7,17 @@ import {
   handleToolError,
 } from '../../utils/tool-error-handler.js';
 import { executeFetchPipeline } from '../utils/fetch-pipeline.js';
-import type { FetchMarkdownInput } from '../../types/index.js';
+import type {
+  FetchMarkdownInput,
+  TocEntry,
+  MarkdownTransformResult,
+  TransformOptions,
+} from '../../config/types.js';
 
 export const FETCH_MARKDOWN_TOOL_NAME = 'fetch-markdown';
 export const FETCH_MARKDOWN_TOOL_DESCRIPTION =
   'Fetches a webpage and converts it to clean Markdown format with optional frontmatter, table of contents, and content length limits';
 
-interface TocEntry {
-  level: number;
-  text: string;
-  slug: string;
-}
-
-interface MarkdownTransformResult {
-  markdown: string;
-  title: string | undefined;
-  toc: TocEntry[] | undefined;
-  truncated: boolean;
-}
-
-interface TransformOptions {
-  extractMainContent: boolean;
-  includeMetadata: boolean;
-  generateToc: boolean;
-  maxContentLength?: number | undefined;
-}
-
-/**
- * Generates a URL-friendly slug from text
- */
 function slugify(text: string): string {
   return text
     .toLowerCase()
@@ -45,9 +27,6 @@ function slugify(text: string): string {
     .trim();
 }
 
-/**
- * Extracts table of contents from markdown
- */
 function extractToc(markdown: string): TocEntry[] {
   const toc: TocEntry[] = [];
   const headingRegex = /^(#{1,6})\s+(.+)$/gm;
@@ -69,9 +48,6 @@ function extractToc(markdown: string): TocEntry[] {
   return toc;
 }
 
-/**
- * Transforms HTML to clean Markdown with optional frontmatter
- */
 function transformToMarkdown(
   html: string,
   url: string,

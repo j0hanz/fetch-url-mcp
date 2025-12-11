@@ -8,40 +8,23 @@ import * as cache from '../../services/cache.js';
 import { config } from '../../config/index.js';
 import { logDebug, logError, logWarn } from '../../services/logger.js';
 import { runWithConcurrency } from '../../utils/concurrency.js';
-import {
-  createBatchResponse,
-  type BatchUrlResult,
-} from '../utils/response-builder.js';
+import { createBatchResponse } from '../utils/response-builder.js';
 import { createToolErrorResponse } from '../../utils/tool-error-handler.js';
 import type {
   FetchUrlsInput,
   MetadataBlock,
   ContentBlockUnion,
-} from '../../types/index.js';
+  SingleUrlResult,
+  BatchUrlResult,
+} from '../../config/types.js';
 
 export const FETCH_URLS_TOOL_NAME = 'fetch-urls';
 export const FETCH_URLS_TOOL_DESCRIPTION =
   'Fetches multiple URLs in parallel and converts them to AI-readable format (JSONL or Markdown). Supports concurrency control and continues on individual failures.';
 
-/** Maximum URLs allowed per batch */
 const MAX_URLS = 10;
-/** Default concurrency limit */
 const DEFAULT_CONCURRENCY = 3;
 
-interface SingleUrlResult {
-  url: string;
-  success: boolean;
-  title?: string | undefined;
-  content?: string | undefined;
-  contentBlocks?: number | undefined;
-  cached: boolean;
-  error?: string | undefined;
-  errorCode?: string | undefined;
-}
-
-/**
- * Processes a single URL and returns the result
- */
 async function processSingleUrl(
   url: string,
   options: {
@@ -217,9 +200,6 @@ async function processSingleUrl(
   }
 }
 
-/**
- * Handler for the fetch-urls batch tool
- */
 export async function fetchUrlsToolHandler(input: FetchUrlsInput) {
   try {
     // Validate input - urls array is guaranteed by Zod schema but check for empty

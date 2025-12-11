@@ -6,10 +6,6 @@ import { registerResources } from './resources/index.js';
 import { registerPrompts } from './prompts/index.js';
 import { logError, logInfo } from './services/logger.js';
 
-/**
- * Creates and configures the MCP server instance
- * Using McpServer (high-level API) instead of deprecated Server class
- */
 export function createMcpServer(): McpServer {
   const server = new McpServer({
     name: config.server.name,

@@ -3,10 +3,6 @@ import { config } from '../config/index.js';
 import { logDebug, logWarn } from './logger.js';
 import type { CacheEntry } from '../types/index.js';
 
-/**
- * Long-lived cache for processed content (default 1hr TTL)
- * Stores transformed results (JSONL, Markdown, Links)
- */
 const contentCache = new NodeCache({
   stdTTL: config.cache.ttl,
   checkperiod: Math.floor(config.cache.ttl / 10),
@@ -14,10 +10,6 @@ const contentCache = new NodeCache({
   maxKeys: config.cache.maxKeys,
 });
 
-/**
- * Short-lived cache for raw HTML (60s TTL)
- * Prevents duplicate fetches when multiple tools process the same URL
- */
 const HTML_CACHE_TTL = 60;
 const HTML_CACHE_MAX_KEYS = 50;
 const htmlCache = new NodeCache({
@@ -36,33 +28,16 @@ const stats = {
   htmlMisses: 0,
 };
 
-// 5MB default max content size for cache entries
 const MAX_CONTENT_SIZE = 5242880;
-// 10MB max size for raw HTML cache
 const MAX_HTML_SIZE = 10485760;
-// Maximum cache key length to prevent memory issues
 const MAX_KEY_LENGTH = 500;
 
-/**
- * Creates a cache key from namespace and URL
- * Truncates long URLs to prevent memory issues
- * @returns Cache key string or null if inputs are invalid
- */
 export function createCacheKey(namespace: string, url: string): string | null {
-  if (!namespace || !url) {
-    return null;
-  }
+  if (!namespace || !url) return null;
   const key = `${namespace}:${url}`;
-  // Truncate extremely long keys
-  if (key.length > MAX_KEY_LENGTH) {
-    return key.substring(0, MAX_KEY_LENGTH);
-  }
-  return key;
+  return key.length > MAX_KEY_LENGTH ? key.substring(0, MAX_KEY_LENGTH) : key;
 }
 
-/**
- * Gets a cached content entry
- */
 export function get(cacheKey: string | null): CacheEntry | undefined {
   if (!config.cache.enabled) return undefined;
   if (!cacheKey) return undefined;
@@ -86,9 +61,6 @@ export function get(cacheKey: string | null): CacheEntry | undefined {
   }
 }
 
-/**
- * Sets a cached content entry
- */
 export function set(cacheKey: string | null, content: string): void {
   if (!config.cache.enabled) return;
   if (!cacheKey) return;
@@ -122,10 +94,6 @@ export function set(cacheKey: string | null, content: string): void {
   }
 }
 
-/**
- * Gets raw HTML from short-term cache
- * Used to prevent duplicate fetches within the same session
- */
 export function getHtml(url: string): string | undefined {
   if (!config.cache.enabled) return undefined;
 
@@ -143,10 +111,6 @@ export function getHtml(url: string): string | undefined {
   }
 }
 
-/**
- * Caches raw HTML for short-term reuse
- * Prevents duplicate network requests when multiple tools process the same URL
- */
 export function setHtml(url: string, html: string): void {
   if (!config.cache.enabled) return;
   if (!html || html.length > MAX_HTML_SIZE) return;
@@ -155,13 +119,10 @@ export function setHtml(url: string, html: string): void {
     htmlCache.set(url, html);
     logDebug('HTML cached', { url: url.substring(0, 100), size: html.length });
   } catch {
-    // Silently ignore HTML cache errors
+    // Ignore HTML cache errors
   }
 }
 
-/**
- * Gets cache statistics including both content and HTML caches
- */
 export function getStats() {
   const total = stats.hits + stats.misses;
   const hitRate = total > 0 ? ((stats.hits / total) * 100).toFixed(2) : '0.00';
@@ -171,7 +132,6 @@ export function getStats() {
     htmlTotal > 0 ? ((stats.htmlHits / htmlTotal) * 100).toFixed(2) : '0.00';
 
   return {
-    // Content cache stats
     size: contentCache.keys().length,
     maxKeys: config.cache.maxKeys,
     ttl: config.cache.ttl,
@@ -180,7 +140,6 @@ export function getStats() {
     sets: stats.sets,
     errors: stats.errors,
     hitRate: `${hitRate}%`,
-    // HTML cache stats
     htmlCacheSize: htmlCache.keys().length,
     htmlCacheMaxKeys: HTML_CACHE_MAX_KEYS,
     htmlCacheTtl: HTML_CACHE_TTL,
