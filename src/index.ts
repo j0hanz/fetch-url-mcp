@@ -18,10 +18,21 @@ import { rateLimiter } from './middleware/rate-limiter.js';
 
 import { createMcpServer } from './server.js';
 
+let isShuttingDown = false;
+let shutdown: ((signal: string) => Promise<void>) | undefined;
+
 process.on('uncaughtException', (error) => {
   logError('Uncaught exception', error);
   process.stderr.write(`Uncaught exception: ${error.message}\n`);
-  process.exit(1);
+
+  if (!isShuttingDown && !isStdioMode && shutdown) {
+    isShuttingDown = true;
+    // Attempt graceful cleanup before exit
+    process.stderr.write('Attempting graceful shutdown...\n');
+    void shutdown('UNCAUGHT_EXCEPTION');
+  } else {
+    process.exit(1);
+  }
 });
 
 process.on('unhandledRejection', (reason) => {
@@ -32,7 +43,11 @@ process.on('unhandledRejection', (reason) => {
 
 const isStdioMode = process.argv.includes('--stdio');
 
-const ALLOWED_ORIGINS: string[] = [];
+const ALLOWED_ORIGINS: string[] = process.env.ALLOWED_ORIGINS
+  ? process.env.ALLOWED_ORIGINS.split(',').map((o) => o.trim())
+  : [];
+
+const ALLOW_ALL_ORIGINS = process.env.CORS_ALLOW_ALL === 'true';
 
 function getSessionId(req: Request): string | undefined {
   const header = req.headers['mcp-session-id'];
@@ -52,6 +67,9 @@ if (isStdioMode) {
   await startStdioServer();
 } else {
   const app = express();
+
+  // Shutdown handler declaration (needed for uncaughtException)
+  let shutdown: (signal: string) => Promise<void>;
 
   app.use(express.json({ limit: '1mb' }));
 
@@ -88,8 +106,8 @@ if (isStdioMode) {
 
     if (
       !origin ||
-      ALLOWED_ORIGINS.length === 0 ||
-      ALLOWED_ORIGINS.includes(origin)
+      ALLOW_ALL_ORIGINS ||
+      (ALLOWED_ORIGINS.length > 0 && ALLOWED_ORIGINS.includes(origin))
     ) {
       res.header('Access-Control-Allow-Origin', origin ?? '*');
       res.header('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
@@ -98,6 +116,10 @@ if (isStdioMode) {
         'Content-Type, mcp-session-id'
       );
       res.header('Access-Control-Max-Age', '86400');
+    } else if (ALLOWED_ORIGINS.length > 0) {
+      // Origin not in allowlist
+      next();
+      return;
     }
 
     if (req.method === 'OPTIONS') {
@@ -124,16 +146,24 @@ if (isStdioMode) {
 
   const SESSION_TTL_MS = 30 * 60 * 1000;
 
+  async function cleanupStaleSessions(): Promise<void> {
+    const now = Date.now();
+    const closePromises: Promise<void>[] = [];
+
+    for (const [sessionId, entry] of sessions) {
+      if (now - entry.createdAt > SESSION_TTL_MS) {
+        logInfo('Cleaning up stale session', { sessionId });
+        closePromises.push(entry.transport.close());
+        sessions.delete(sessionId);
+      }
+    }
+
+    await Promise.allSettled(closePromises);
+  }
+
   const sessionCleanupInterval = setInterval(
     () => {
-      const now = Date.now();
-      for (const [sessionId, entry] of sessions) {
-        if (now - entry.createdAt > SESSION_TTL_MS) {
-          logInfo('Cleaning up stale session', { sessionId });
-          void entry.transport.close();
-          sessions.delete(sessionId);
-        }
-      }
+      void cleanupStaleSessions();
     },
     5 * 60 * 1000
   );
@@ -261,16 +291,22 @@ if (isStdioMode) {
       process.exit(1);
     });
 
-  const shutdown = (signal: string): void => {
+  const shutdownFn = async (signal: string): Promise<void> => {
+    if (isShuttingDown) return;
+    isShuttingDown = true;
+
     process.stdout.write(`\n${signal} received, shutting down gracefully...\n`);
 
     clearInterval(sessionCleanupInterval);
 
     rateLimiter.destroy();
 
+    // Close all sessions gracefully
+    const closePromises: Promise<void>[] = [];
     for (const session of sessions.values()) {
-      void session.transport.close();
+      closePromises.push(session.transport.close());
     }
+    await Promise.allSettled(closePromises);
     sessions.clear();
 
     destroyAgents();
@@ -286,10 +322,16 @@ if (isStdioMode) {
     }, 10000).unref();
   };
 
+  // Assign to module-level shutdown variable
+  shutdown = shutdownFn;
+
+  // Assign shutdown function
+  shutdown = shutdownFn;
+
   process.on('SIGINT', () => {
-    shutdown('SIGINT');
+    void shutdown('SIGINT');
   });
   process.on('SIGTERM', () => {
-    shutdown('SIGTERM');
+    void shutdown('SIGTERM');
   });
 }

@@ -150,6 +150,7 @@ export interface ErrorResponse {
 export interface RateLimitEntry {
   count: number;
   resetTime: number;
+  lastAccessed: number;
 }
 
 export interface RateLimiterOptions {

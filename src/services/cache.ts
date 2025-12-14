@@ -22,13 +22,25 @@ const htmlCache = new NodeCache({
   maxKeys: HTML_CACHE_MAX_KEYS,
 });
 
+// Track cache evictions
+contentCache.on('del', (key) => {
+  stats.evictions++;
+  logDebug('Cache eviction', { key: String(key).substring(0, 100) });
+});
+
+htmlCache.on('del', () => {
+  stats.htmlEvictions++;
+});
+
 const stats = {
   hits: 0,
   misses: 0,
   sets: 0,
   errors: 0,
+  evictions: 0,
   htmlHits: 0,
   htmlMisses: 0,
+  htmlEvictions: 0,
 };
 
 const MAX_CONTENT_SIZE = 5242880;
@@ -39,12 +51,8 @@ export function createCacheKey(namespace: string, url: string): string | null {
   if (!namespace || !url) return null;
   const key = `${namespace}:${url}`;
   if (key.length <= MAX_KEY_LENGTH) return key;
-  // Use hash for long URLs to prevent collisions from truncation
-  const hash = crypto
-    .createHash('sha256')
-    .update(url)
-    .digest('hex')
-    .substring(0, 32);
+  // Use full hash for long URLs to prevent collisions
+  const hash = crypto.createHash('sha256').update(url).digest('hex');
   return `${namespace}:hash:${hash}`;
 }
 
@@ -110,9 +118,18 @@ export function getHtml(url: string): string | undefined {
   try {
     const html = htmlCache.get<string>(url);
     if (html) {
-      stats.htmlHits++;
-      logDebug('HTML cache hit', { url: url.substring(0, 100) });
-      return html;
+      // Validate cached HTML is within limits
+      if (typeof html === 'string' && html.length <= MAX_HTML_SIZE) {
+        stats.htmlHits++;
+        logDebug('HTML cache hit', { url: url.substring(0, 100) });
+        return html;
+      }
+      // Invalid cache entry, remove it
+      htmlCache.del(url);
+      logWarn('Removed oversized HTML from cache', {
+        url: url.substring(0, 100),
+        size: html.length,
+      });
     }
     stats.htmlMisses++;
     return undefined;
@@ -141,13 +158,20 @@ export function getStats(): {
   misses: number;
   sets: number;
   errors: number;
+  evictions: number;
   hitRate: string;
   htmlCacheSize: number;
   htmlCacheMaxKeys: number;
   htmlCacheTtl: number;
   htmlHits: number;
   htmlMisses: number;
+  htmlEvictions: number;
   htmlHitRate: string;
+  efficiency: {
+    hitRate: string;
+    missRate: string;
+    errorRate: string;
+  };
 } {
   const total = stats.hits + stats.misses;
   const hitRate = total > 0 ? ((stats.hits / total) * 100).toFixed(2) : '0.00';
@@ -155,6 +179,11 @@ export function getStats(): {
   const htmlTotal = stats.htmlHits + stats.htmlMisses;
   const htmlHitRate =
     htmlTotal > 0 ? ((stats.htmlHits / htmlTotal) * 100).toFixed(2) : '0.00';
+
+  const missRate =
+    total > 0 ? ((stats.misses / total) * 100).toFixed(2) : '0.00';
+  const errorRate =
+    stats.sets > 0 ? ((stats.errors / stats.sets) * 100).toFixed(2) : '0.00';
 
   return {
     size: contentCache.keys().length,
@@ -164,12 +193,19 @@ export function getStats(): {
     misses: stats.misses,
     sets: stats.sets,
     errors: stats.errors,
+    evictions: stats.evictions,
     hitRate: `${hitRate}%`,
     htmlCacheSize: htmlCache.keys().length,
     htmlCacheMaxKeys: HTML_CACHE_MAX_KEYS,
     htmlCacheTtl: HTML_CACHE_TTL,
     htmlHits: stats.htmlHits,
     htmlMisses: stats.htmlMisses,
+    htmlEvictions: stats.htmlEvictions,
     htmlHitRate: `${htmlHitRate}%`,
+    efficiency: {
+      hitRate: `${hitRate}%`,
+      missRate: `${missRate}%`,
+      errorRate: `${errorRate}%`,
+    },
   };
 }

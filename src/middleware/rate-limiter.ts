@@ -54,11 +54,16 @@ class RateLimiter {
       let entry = this.store.get(key);
 
       if (!entry || now > entry.resetTime) {
-        entry = { count: 0, resetTime: now + this.windowMs };
+        entry = {
+          count: 0,
+          resetTime: now + this.windowMs,
+          lastAccessed: now,
+        };
         this.store.set(key, entry);
       }
 
       entry.count++;
+      entry.lastAccessed = now;
 
       if (entry.count > this.maxRequests) {
         const retryAfter = Math.ceil((entry.resetTime - now) / 1000);
@@ -97,8 +102,10 @@ class RateLimiter {
 
   private cleanup(): void {
     const now = Date.now();
+    const MAX_IDLE_TIME = 3600000; // 1 hour
+
     for (const [key, entry] of this.store) {
-      if (entry.resetTime < now) {
+      if (entry.resetTime < now || now - entry.lastAccessed > MAX_IDLE_TIME) {
         this.store.delete(key);
       }
     }

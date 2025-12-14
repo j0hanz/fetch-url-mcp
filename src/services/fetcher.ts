@@ -7,7 +7,16 @@ import { config } from '../config/index.js';
 import { FetchError, TimeoutError } from '../errors/app-error.js';
 
 import { getHtml, setHtml } from './cache.js';
-import { logDebug, logError } from './logger.js';
+import { logDebug, logError, logWarn } from './logger.js';
+
+// Extend Axios types to include metadata
+declare module 'axios' {
+  export interface InternalAxiosRequestConfig {
+    metadata?: {
+      startTime?: number;
+    };
+  }
+}
 
 const BLOCKED_HEADERS = new Set([
   'host',
@@ -66,53 +75,78 @@ const client = axios.create({
 
 client.interceptors.request.use(
   (requestConfig) => {
+    // Add timing metadata
+    requestConfig.metadata ??= {};
+    requestConfig.metadata.startTime = Date.now();
+
     logDebug('HTTP Request', {
       method: requestConfig.method?.toUpperCase(),
       url: requestConfig.url,
     });
     return requestConfig;
   },
-  async (error: AxiosError) => {
+  (error: AxiosError) => {
     logError('HTTP Request Error', error);
-    return Promise.reject(error);
+    throw error;
   }
 );
 
 client.interceptors.response.use(
   (response) => {
+    const duration =
+      Date.now() - (response.config.metadata?.startTime ?? Date.now());
+    const contentType: unknown = response.headers['content-type'];
+    const contentTypeStr =
+      typeof contentType === 'string' ? contentType : undefined;
+
     logDebug('HTTP Response', {
       status: response.status,
-      url: response.config.url,
-      contentType: response.headers['content-type'],
+      url: response.config.url ?? 'unknown',
+      contentType: contentTypeStr,
+      duration: `${duration}ms`,
+      size: response.headers['content-length'],
     });
+
+    // Log slow requests
+    if (duration > 5000) {
+      logWarn('Slow HTTP request detected', {
+        url: response.config.url ?? 'unknown',
+        duration: `${duration}ms`,
+      });
+    }
+
+    // Early content-type validation before processing
+    if (contentTypeStr && !isHtmlContentType(contentTypeStr)) {
+      throw new FetchError(
+        `Unexpected content type: ${contentTypeStr}. Expected HTML content.`,
+        response.config.url ?? 'unknown'
+      );
+    }
+
     return response;
   },
-  async (error: AxiosError) => {
+  (error: AxiosError) => {
     const url = error.config?.url ?? 'unknown';
 
     if (error.code === 'ECONNABORTED' || error.code === 'ETIMEDOUT') {
       logError('HTTP Timeout', { url, timeout: config.fetcher.timeout });
-      return Promise.reject(new TimeoutError(config.fetcher.timeout, true));
+      throw new TimeoutError(config.fetcher.timeout, true);
     }
 
     if (error.response) {
       const { status } = error.response;
       const { statusText } = error.response;
       logError('HTTP Error Response', { url, status, statusText });
-      return Promise.reject(
-        new FetchError(`HTTP ${status}: ${statusText}`, url, status)
-      );
+      throw new FetchError(`HTTP ${status}: ${statusText}`, url, status);
     }
 
     if (error.request) {
       logError('HTTP Network Error', { url, code: error.code });
-      return Promise.reject(
-        new FetchError(`Network error: Could not reach ${url}`, url)
-      );
+      throw new FetchError(`Network error: Could not reach ${url}`, url);
     }
 
     logError('HTTP Unknown Error', { url, message: error.message });
-    return Promise.reject(new FetchError(error.message, url));
+    throw new FetchError(error.message, url);
   }
 );
 
@@ -137,23 +171,6 @@ async function fetchUrl(
 
   try {
     const response = await client.request<string>(requestConfig);
-    const contentTypeHeader: unknown = response.headers['content-type'];
-
-    let contentType: string | undefined;
-    if (Array.isArray(contentTypeHeader)) {
-      const first: unknown = contentTypeHeader[0];
-      if (typeof first === 'string') contentType = first;
-    } else if (typeof contentTypeHeader === 'string') {
-      contentType = contentTypeHeader;
-    }
-
-    if (contentType && !isHtmlContentType(contentType)) {
-      throw new FetchError(
-        `Unexpected content type: ${contentType}. Expected HTML content.`,
-        url
-      );
-    }
-
     return response.data;
   } catch (error) {
     if (error instanceof FetchError || error instanceof TimeoutError) {

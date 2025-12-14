@@ -216,11 +216,23 @@ export function parseHtml(html: string): ContentBlockUnion[] {
 
   let processedHtml = html;
   if (html.length > MAX_HTML_SIZE) {
-    logWarn('HTML content exceeds maximum size, truncating', {
+    logWarn('HTML content exceeds maximum size, truncating at safe boundary', {
       size: html.length,
       maxSize: MAX_HTML_SIZE,
     });
-    processedHtml = html.substring(0, MAX_HTML_SIZE);
+
+    // Truncate at last complete tag boundary to avoid malformed HTML
+    let safeLength = MAX_HTML_SIZE;
+    while (safeLength > 0 && html[safeLength] !== '>') {
+      safeLength--;
+    }
+
+    processedHtml = html.substring(0, safeLength + 1);
+
+    // If we had to truncate too much, fall back to simple truncation
+    if (processedHtml.length < MAX_HTML_SIZE * 0.5) {
+      processedHtml = html.substring(0, MAX_HTML_SIZE);
+    }
   }
 
   try {
