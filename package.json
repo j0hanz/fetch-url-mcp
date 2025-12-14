@@ -14,7 +14,7 @@
   ],
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/j0hanz/super-fetch-mcp-server.git"
+    "url": "https://github.com/j0hanz/super-fetch-mcp-server.git"
   },
   "homepage": "https://github.com/j0hanz/super-fetch-mcp-server#readme",
   "bugs": {
@@ -29,7 +29,9 @@
     "content-extraction",
     "readability",
     "jsonl",
-    "ai-tools"
+    "ai-tools",
+    "model-context-protocol",
+    "superfetch"
   ],
   "scripts": {
     "dev": "tsx watch src/index.ts",
