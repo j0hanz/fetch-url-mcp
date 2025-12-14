@@ -1,6 +1,9 @@
+import * as cheerio from 'cheerio';
+
 import type {
   BatchUrlResult,
   FetchUrlsInput,
+  MetadataBlock,
   SingleUrlResult,
 } from '../../config/types.js';
 
@@ -37,6 +40,42 @@ interface ProcessOptions {
   format: 'jsonl' | 'markdown';
 }
 
+// Fast metadata extraction using Cheerio only (no JSDOM)
+function extractMetadataFast(html: string): {
+  title?: string;
+  description?: string;
+  author?: string;
+} {
+  const $ = cheerio.load(html);
+  const getMetaContent = (selectors: string[]): string | undefined => {
+    for (const selector of selectors) {
+      const content = $(selector).attr('content');
+      if (content) return content;
+    }
+    return undefined;
+  };
+
+  const title =
+    getMetaContent([
+      'meta[property="og:title"]',
+      'meta[name="twitter:title"]',
+    ]) ??
+    ($('title').text() || undefined);
+
+  const description = getMetaContent([
+    'meta[property="og:description"]',
+    'meta[name="twitter:description"]',
+    'meta[name="description"]',
+  ]);
+
+  const author = getMetaContent([
+    'meta[name="author"]',
+    'meta[property="article:author"]',
+  ]);
+
+  return { title, description, author };
+}
+
 async function processSingleUrl(
   url: string,
   options: ProcessOptions
@@ -61,24 +100,46 @@ async function processSingleUrl(
 
     const fetchResult = await fetchUrlWithRetry(normalizedUrl);
 
-    // Only invoke JSDOM when extractMainContent is true (lazy loading optimization)
-    const { article, metadata: extractedMeta } = extractContent(
-      fetchResult.html,
-      normalizedUrl,
-      {
-        extractArticle: options.extractMainContent,
+    let sourceHtml: string;
+    let title: string | undefined;
+    let metadata: MetadataBlock | undefined;
+
+    // Fast path: Skip JSDOM entirely when extractMainContent is false
+    if (!options.extractMainContent) {
+      sourceHtml = fetchResult.html;
+      const extractedMeta = extractMetadataFast(fetchResult.html);
+      ({ title } = extractedMeta);
+
+      if (options.includeMetadata) {
+        metadata = {
+          type: 'metadata' as const,
+          url: normalizedUrl,
+          fetchedAt: new Date().toISOString(),
+          title: extractedMeta.title,
+          description: extractedMeta.description,
+          author: extractedMeta.author,
+        };
       }
-    );
-    const useArticle = shouldUseArticle(options.extractMainContent, article);
-    const metadata = buildMetadata(
-      normalizedUrl,
-      article,
-      extractedMeta,
-      useArticle,
-      options.includeMetadata
-    );
-    const sourceHtml = useArticle ? article.content : fetchResult.html;
-    const title = useArticle ? article.title : extractedMeta.title;
+    } else {
+      // Slow path: Use JSDOM only when article extraction is needed
+      const { article, metadata: extractedMeta } = extractContent(
+        fetchResult.html,
+        normalizedUrl,
+        {
+          extractArticle: true,
+        }
+      );
+      const useArticle = shouldUseArticle(true, article);
+      metadata = buildMetadata(
+        normalizedUrl,
+        article,
+        extractedMeta,
+        useArticle,
+        options.includeMetadata
+      );
+      sourceHtml = useArticle ? article.content : fetchResult.html;
+      title = useArticle ? article.title : extractedMeta.title;
+    }
 
     let content: string;
     let contentBlocks: number | undefined;

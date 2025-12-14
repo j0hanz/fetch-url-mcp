@@ -47,12 +47,29 @@ const MAX_CONTENT_SIZE = 5242880;
 const MAX_HTML_SIZE = 10485760;
 const MAX_KEY_LENGTH = 500;
 
+// LRU cache for hash results to avoid recomputing hashes
+const hashCache = new Map<string, string>();
+const MAX_HASH_CACHE_SIZE = 100;
+
 export function createCacheKey(namespace: string, url: string): string | null {
   if (!namespace || !url) return null;
   const key = `${namespace}:${url}`;
   if (key.length <= MAX_KEY_LENGTH) return key;
-  // Use full hash for long URLs to prevent collisions
-  const hash = crypto.createHash('sha256').update(url).digest('hex');
+
+  // Check hash cache first
+  let hash = hashCache.get(url);
+  if (!hash) {
+    // Use SHA-1 (faster than SHA-256) with truncation for cache keys
+    hash = crypto.createHash('sha1').update(url).digest('hex').substring(0, 40);
+
+    // Maintain LRU behavior
+    if (hashCache.size >= MAX_HASH_CACHE_SIZE) {
+      const firstKey = hashCache.keys().next().value;
+      if (firstKey) hashCache.delete(firstKey);
+    }
+    hashCache.set(url, hash);
+  }
+
   return `${namespace}:hash:${hash}`;
 }
 

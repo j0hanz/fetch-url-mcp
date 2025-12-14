@@ -9,14 +9,8 @@ import { FetchError, TimeoutError } from '../errors/app-error.js';
 import { getHtml, setHtml } from './cache.js';
 import { logDebug, logError, logWarn } from './logger.js';
 
-// Extend Axios types to include metadata
-declare module 'axios' {
-  export interface InternalAxiosRequestConfig {
-    metadata?: {
-      startTime?: number;
-    };
-  }
-}
+// Use WeakMap for request timings to avoid modifying request objects
+const requestTimings = new WeakMap<AxiosRequestConfig, number>();
 
 const BLOCKED_HEADERS = new Set([
   'host',
@@ -75,9 +69,8 @@ const client = axios.create({
 
 client.interceptors.request.use(
   (requestConfig) => {
-    // Add timing metadata
-    requestConfig.metadata ??= {};
-    requestConfig.metadata.startTime = Date.now();
+    // Store timing in WeakMap instead of modifying config
+    requestTimings.set(requestConfig, Date.now());
 
     logDebug('HTTP Request', {
       method: requestConfig.method?.toUpperCase(),
@@ -93,8 +86,10 @@ client.interceptors.request.use(
 
 client.interceptors.response.use(
   (response) => {
-    const duration =
-      Date.now() - (response.config.metadata?.startTime ?? Date.now());
+    const startTime = requestTimings.get(response.config);
+    const duration = startTime ? Date.now() - startTime : 0;
+    requestTimings.delete(response.config); // Clean up
+
     const contentType: unknown = response.headers['content-type'];
     const contentTypeStr =
       typeof contentType === 'string' ? contentType : undefined;

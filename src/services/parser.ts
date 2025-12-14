@@ -29,6 +29,10 @@ import { logWarn } from './logger.js';
 
 const MAX_HTML_SIZE = 10 * 1024 * 1024;
 
+// Cache selector for performance
+const CONTENT_SELECTOR =
+  'h1, h2, h3, h4, h5, h6, p, ul, ol, pre, code:not(pre code), table, img, blockquote';
+
 function parseHeading($: CheerioAPI, element: Element): HeadingBlock | null {
   const rawText = sanitizeText($(element).text());
   const text = cleanHeading(rawText);
@@ -242,11 +246,7 @@ export function parseHtml(html: string): ContentBlockUnion[] {
     $('script, style, noscript, iframe, svg').remove();
 
     // Use toArray() + for...of instead of .each() to avoid callback overhead
-    const elements = $('body')
-      .find(
-        'h1, h2, h3, h4, h5, h6, p, ul, ol, pre, code:not(pre code), table, img, blockquote'
-      )
-      .toArray();
+    const elements = $('body').find(CONTENT_SELECTOR).toArray();
 
     for (const element of elements) {
       try {

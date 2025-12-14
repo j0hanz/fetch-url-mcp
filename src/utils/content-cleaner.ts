@@ -3,101 +3,96 @@
  * that slip through Readability extraction.
  */
 
-// Patterns for noise content removal - exact matches (case-insensitive)
-const NOISE_PATTERNS: RegExp[] = [
-  // Relative timestamps (standalone)
-  /^\d+\s*(seconds?|minutes?|hours?|days?|weeks?|months?|years?)\s*ago$/i,
-  /^(just now|recently|today|yesterday|last week|last month)$/i,
-  /^(updated|modified|edited|created|published)\s*:?\s*\d+\s*(seconds?|minutes?|hours?|days?|weeks?|months?|years?)\s*ago$/i,
-  /^(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\s+\d{1,2},?\s+\d{4}$/i,
-  /^\d{1,2}\s+(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\s+\d{4}$/i,
-  /^\d{4}-\d{2}-\d{2}$/i, // ISO date
-  /^last\s+updated\s*:?/i,
+// Pre-compiled combined pattern for optimal performance
+const NOISE_PATTERN_COMBINED = new RegExp(
+  [
+    // Relative timestamps
+    '^\\d+\\s*(seconds?|minutes?|hours?|days?|weeks?|months?|years?)\\s*ago$',
+    '^(just now|recently|today|yesterday|last week|last month)$',
+    '^(updated|modified|edited|created|published)\\s*:?\\s*\\d+\\s*(seconds?|minutes?|hours?|days?|weeks?|months?|years?)\\s*ago$',
+    '^(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\\s+\\d{1,2},?\\s+\\d{4}$',
+    '^\\d{1,2}\\s+(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\\s+\\d{4}$',
+    '^\\d{4}-\\d{2}-\\d{2}$',
+    '^last\\s+updated\\s*:?',
+    // Share/action buttons
+    '^(share|copy|like|follow|subscribe|download|print|save|bookmark|tweet|pin it|email|export)$',
+    '^(copy to clipboard|copied!?|copy code|copy link)$',
+    '^(share on|share to|share via)\\s+(twitter|facebook|linkedin|reddit|x|email)$',
+    // UI artifacts
+    '^(click to copy|expand|collapse|show more|show less|load more|view more|read more|see more|see all|view all)$',
+    '^(toggle|switch|enable|disable|on|off)$',
+    '^(edit|delete|remove|add|new|create|update|cancel|confirm|submit|reset|clear)$',
+    '^(open in|view in|edit in)\\s+\\w+$',
+    '^(try it|run|execute|play|preview|demo|live demo|playground)$',
+    '^(source|view source|edit this page|edit on github|improve this doc)$',
+    // Empty/placeholder
+    '^(loading\\.{0,3}|please wait\\.{0,3}|\\.{2,})$',
+    '^(n\\/a|tbd|todo|coming soon|placeholder|untitled)$',
+    // Navigation
+    '^(next|previous|prev|back|forward|home|menu|close|open|skip to|jump to|go to)$',
+    '^(table of contents|toc|contents|on this page|in this article|in this section)$',
+    '^(scroll to top|back to top|top)$',
+    // Cookie/consent
+    '^(accept|reject|accept all|reject all|cookie settings|privacy settings|manage preferences)$',
+    '^(accept cookies|decline cookies|cookie policy|privacy policy|terms of service|terms & conditions)$',
+    // Counts
+    '^\\d+\\s*(comments?|replies?|reactions?|responses?)$',
+    '^\\d+\\s*(likes?|shares?|views?|followers?|retweets?|stars?|forks?|claps?|upvotes?|downvotes?)$',
+    '^(liked by|shared by|followed by)\\s+\\d+',
+    // Version badges
+    '^v?\\d+\\.\\d+(\\.\\d+)?(-\\w+)?$',
+    '^(stable|beta|alpha|rc|preview|experimental|deprecated|legacy|new|updated)$',
+    // Structural
+    '^(a|b|c|d|e|f|g|h|i|j|k|l|m|n|o|p|q|r|s|t|u|v|w|x|y|z)$',
+    '^panel\\s*[a-z]?$',
+    // API artifacts
+    '^(required|optional|default|type|example|description|parameters?|returns?|response|request)$',
+    '^(get|post|put|patch|delete|head|options)\\s*$',
+    // Interactive
+    '^(drag|drop|resize|zoom|scroll|swipe|tap|click|hover|focus)(\\s+to\\s+\\w+)?$',
+    '^(drag the|move the|resize the|drag to|click to)\\s+\\w+',
+    // Breadcrumbs
+    '^[/\\\\>→»›]+$',
+    // Ads
+    '^(ad|advertisement|sponsored|promoted|partner content)$',
+  ].join('|'),
+  'i'
+);
 
-  // Share/action button labels (standalone)
-  /^(share|copy|like|follow|subscribe|download|print|save|bookmark|tweet|pin it|email|export)$/i,
-  /^(copy to clipboard|copied!?|copy code|copy link)$/i,
-  /^(share on|share to|share via)\s+(twitter|facebook|linkedin|reddit|x|email)$/i,
+// Pre-compiled pattern for short text noise
+const SHORT_TEXT_NOISE_PATTERN = new RegExp(
+  [
+    '^#\\w+$',
+    '^@\\w+$',
+    '^\\d+$',
+    '^[•·→←↑↓►▼▲◄▶◀■□●○★☆✓✗✔✘×]+$',
+    '^[,;:\\-–—]+$',
+    '^\\[\\d+\\]$',
+    '^\\(\\d+\\)$',
+    '^fig\\.?\\s*\\d+$',
+    '^table\\s*\\d+$',
+    '^step\\s*\\d+$',
+    '^note:?$',
+    '^tip:?$',
+    '^warning:?$',
+    '^info:?$',
+    '^caution:?$',
+  ].join('|'),
+  'i'
+);
 
-  // UI artifacts and button labels
-  /^(click to copy|expand|collapse|show more|show less|load more|view more|read more|see more|see all|view all)$/i,
-  /^(toggle|switch|enable|disable|on|off)$/i,
-  /^(edit|delete|remove|add|new|create|update|cancel|confirm|submit|reset|clear)$/i,
-  /^(open in|view in|edit in)\s+\w+$/i,
-  /^(try it|run|execute|play|preview|demo|live demo|playground)$/i,
-  /^(source|view source|edit this page|edit on github|improve this doc)$/i,
-
-  // Empty or placeholder content
-  /^(loading\.{0,3}|please wait\.{0,3}|\.{2,})$/i,
-  /^(n\/a|tbd|todo|coming soon|placeholder|untitled)$/i,
-
-  // Navigation artifacts
-  /^(next|previous|prev|back|forward|home|menu|close|open|skip to|jump to|go to)$/i,
-  /^(table of contents|toc|contents|on this page|in this article|in this section)$/i,
-  /^(scroll to top|back to top|top)$/i,
-
-  // Cookie/consent/legal notices
-  /^(accept|reject|accept all|reject all|cookie settings|privacy settings|manage preferences)$/i,
-  /^(accept cookies|decline cookies|cookie policy|privacy policy|terms of service|terms & conditions)$/i,
-
-  // Comment/reaction counts
-  /^\d+\s*(comments?|replies?|reactions?|responses?)$/i,
-
-  // Social counts and engagement
-  /^\d+\s*(likes?|shares?|views?|followers?|retweets?|stars?|forks?|claps?|upvotes?|downvotes?)$/i,
-  /^(liked by|shared by|followed by)\s+\d+/i,
-
-  // Version badges (standalone)
-  /^v?\d+\.\d+(\.\d+)?(-\w+)?$/i, // v1.2.3, 1.2.3-beta
-  /^(stable|beta|alpha|rc|preview|experimental|deprecated|legacy|new|updated)$/i,
-
-  // Empty structural elements
-  /^(a|b|c|d|e|f|g|h|i|j|k|l|m|n|o|p|q|r|s|t|u|v|w|x|y|z)$/i, // Single letters
-  /^panel\s*[a-z]?$/i, // Panel A, Panel B, etc.
-
-  // API explorer artifacts
-  /^(required|optional|default|type|example|description|parameters?|returns?|response|request)$/i,
-  /^(get|post|put|patch|delete|head|options)\s*$/i, // HTTP methods alone
-
-  // Interactive element labels
-  /^(drag|drop|resize|zoom|scroll|swipe|tap|click|hover|focus)(\s+to\s+\w+)?$/i,
-  /^(drag the|move the|resize the|drag to|click to)\s+\w+/i,
-
-  // Breadcrumb separators
-  /^[/\\>→»›]+$/,
-
-  // Advertisement markers
-  /^(ad|advertisement|sponsored|promoted|partner content)$/i,
-];
-
-// Patterns that indicate noise when text is very short (< 25 chars)
-const SHORT_TEXT_NOISE_PATTERNS: RegExp[] = [
-  /^#\w+$/, // Hashtags only
-  /^@\w+$/, // Mentions only
-  /^\d+$/, // Numbers only
-  /^[•·→←↑↓►▼▲◄▶◀■□●○★☆✓✗✔✘×]+$/, // Bullet/arrow/symbol characters only
-  /^[,;:\-–—]+$/, // Punctuation only
-  /^\[\d+\]$/, // Reference numbers [1], [2]
-  /^\(\d+\)$/, // Reference numbers (1), (2)
-  /^fig\.?\s*\d+$/i, // Figure references
-  /^table\s*\d+$/i, // Table references
-  /^step\s*\d+$/i, // Step numbers alone
-  /^note:?$/i, // "Note" alone
-  /^tip:?$/i, // "Tip" alone
-  /^warning:?$/i, // "Warning" alone
-  /^info:?$/i, // "Info" alone
-  /^caution:?$/i, // "Caution" alone
-];
-
-// Patterns to detect content that's likely part of UI chrome (not main content)
-const UI_CHROME_PATTERNS: RegExp[] = [
-  /^(sign in|sign up|log in|log out|register|create account)$/i,
-  /^(search|search\.\.\.|search docs|search documentation)$/i,
-  /^(dark mode|light mode|theme|language|locale)$/i,
-  /^(feedback|report issue|report a bug|file an issue|suggest edit)$/i,
-  /^(documentation|docs|api|reference|guide|tutorial|examples?)$/i,
-  /^(version|changelog|release notes|what's new)$/i,
-];
+// Pre-compiled pattern for UI chrome detection
+const UI_CHROME_PATTERN = new RegExp(
+  [
+    '^(sign in|sign up|log in|log out|register|create account)$',
+    '^(search|search\\.\\.\\.|search docs|search documentation)$',
+    '^(dark mode|light mode|theme|language|locale)$',
+    '^(feedback|report issue|report a bug|file an issue|suggest edit)$',
+    '^(documentation|docs|api|reference|guide|tutorial|examples?)$',
+    "^(version|changelog|release notes|what's new)$",
+  ].join('|'),
+  'i'
+);
 
 // Minimum lengths for different content types
 const MIN_PARAGRAPH_LENGTH = 20;
@@ -116,26 +111,20 @@ function isNoiseText(text: string): boolean {
     return true;
   }
 
-  // Check against all noise patterns
-  for (const pattern of NOISE_PATTERNS) {
-    if (pattern.test(trimmed)) {
-      return true;
-    }
+  // Check combined noise pattern (single regex test)
+  if (NOISE_PATTERN_COMBINED.test(trimmed)) {
+    return true;
   }
 
   // Check short text patterns for brief content
   if (trimmed.length < SHORT_TEXT_THRESHOLD) {
-    for (const pattern of SHORT_TEXT_NOISE_PATTERNS) {
-      if (pattern.test(trimmed)) {
-        return true;
-      }
+    if (SHORT_TEXT_NOISE_PATTERN.test(trimmed)) {
+      return true;
     }
 
     // Also check UI chrome patterns for short text
-    for (const pattern of UI_CHROME_PATTERNS) {
-      if (pattern.test(trimmed)) {
-        return true;
-      }
+    if (UI_CHROME_PATTERN.test(trimmed)) {
+      return true;
     }
   }
 

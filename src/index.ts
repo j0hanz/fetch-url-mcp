@@ -19,17 +19,19 @@ import { rateLimiter } from './middleware/rate-limiter.js';
 import { createMcpServer } from './server.js';
 
 let isShuttingDown = false;
-let shutdown: ((signal: string) => Promise<void>) | undefined;
+
+// Ref for shutdown handler to be assigned later
+const shutdownHandlerRef: { current?: (signal: string) => Promise<void> } = {};
 
 process.on('uncaughtException', (error) => {
   logError('Uncaught exception', error);
   process.stderr.write(`Uncaught exception: ${error.message}\n`);
 
-  if (!isShuttingDown && !isStdioMode && shutdown) {
+  if (!isShuttingDown && !isStdioMode && shutdownHandlerRef.current) {
     isShuttingDown = true;
     // Attempt graceful cleanup before exit
     process.stderr.write('Attempting graceful shutdown...\n');
-    void shutdown('UNCAUGHT_EXCEPTION');
+    void shutdownHandlerRef.current('UNCAUGHT_EXCEPTION');
   } else {
     process.exit(1);
   }
@@ -67,9 +69,6 @@ if (isStdioMode) {
   await startStdioServer();
 } else {
   const app = express();
-
-  // Shutdown handler declaration (needed for uncaughtException)
-  let shutdown: (signal: string) => Promise<void>;
 
   app.use(express.json({ limit: '1mb' }));
 
@@ -145,6 +144,7 @@ if (isStdioMode) {
   const sessions = new Map<string, SessionEntry>();
 
   const SESSION_TTL_MS = 30 * 60 * 1000;
+  let cleanupTimeout: NodeJS.Timeout | null = null;
 
   async function cleanupStaleSessions(): Promise<void> {
     const now = Date.now();
@@ -161,13 +161,21 @@ if (isStdioMode) {
     await Promise.allSettled(closePromises);
   }
 
-  const sessionCleanupInterval = setInterval(
-    () => {
-      void cleanupStaleSessions();
-    },
-    5 * 60 * 1000
-  );
-  sessionCleanupInterval.unref();
+  function scheduleCleanup(): void {
+    if (cleanupTimeout) return;
+
+    cleanupTimeout = setTimeout(
+      () => {
+        void cleanupStaleSessions().then(() => {
+          cleanupTimeout = null;
+          if (sessions.size > 0) scheduleCleanup();
+        });
+      },
+      5 * 60 * 1000
+    );
+
+    cleanupTimeout.unref();
+  }
 
   app.post(
     '/mcp',
@@ -196,6 +204,7 @@ if (isStdioMode) {
           onsessioninitialized: (id) => {
             sessions.set(id, { transport, createdAt: Date.now() });
             logInfo('Session initialized', { sessionId: id });
+            scheduleCleanup();
           },
           onsessionclosed: (id) => {
             sessions.delete(id);
@@ -297,7 +306,7 @@ if (isStdioMode) {
 
     process.stdout.write(`\n${signal} received, shutting down gracefully...\n`);
 
-    clearInterval(sessionCleanupInterval);
+    if (cleanupTimeout) clearTimeout(cleanupTimeout);
 
     rateLimiter.destroy();
 
@@ -322,16 +331,13 @@ if (isStdioMode) {
     }, 10000).unref();
   };
 
-  // Assign to module-level shutdown variable
-  shutdown = shutdownFn;
-
-  // Assign shutdown function
-  shutdown = shutdownFn;
+  // Assign shutdown function for signal handlers
+  const shutdownHandler = shutdownFn;
 
   process.on('SIGINT', () => {
-    void shutdown('SIGINT');
+    void shutdownHandler('SIGINT');
   });
   process.on('SIGTERM', () => {
-    void shutdown('SIGTERM');
+    void shutdownHandler('SIGTERM');
   });
 }
