@@ -247,6 +247,10 @@ export interface FetchPipelineOptions<T> {
   customHeaders?: Record<string, string> | undefined;
   /** Optional: number of retry attempts (1-10, defaults to 3) */
   retries?: number | undefined;
+  /** Optional: AbortSignal for request cancellation */
+  signal?: AbortSignal | undefined;
+  /** Optional: per-request timeout override in milliseconds */
+  timeout?: number | undefined;
   /** Transform function to process HTML into desired format */
   transform: (html: string, url: string) => T;
   /** Optional: serialize result for caching (defaults to JSON.stringify) */

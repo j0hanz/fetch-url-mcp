@@ -4,6 +4,7 @@ import type {
 } from '../../config/types.js';
 
 import * as cache from '../../services/cache.js';
+import type { FetchOptions } from '../../services/fetcher.js';
 import { fetchUrlWithRetry } from '../../services/fetcher.js';
 import { logDebug } from '../../services/logger.js';
 
@@ -20,6 +21,8 @@ export async function executeFetchPipeline<T>(
     cacheNamespace,
     customHeaders,
     retries,
+    signal,
+    timeout,
     transform,
     serialize = JSON.stringify,
     deserialize = (cached: string) => JSON.parse(cached) as T,
@@ -52,13 +55,20 @@ export async function executeFetchPipeline<T>(
     return pending as Promise<PipelineResult<T>>;
   }
 
+  // Build fetch options
+  const fetchOptions: FetchOptions = {
+    customHeaders,
+    signal,
+    timeout,
+  };
+
   // Create new request
   const request = (async () => {
     try {
       logDebug('Fetching URL', { url: normalizedUrl, retries });
       const fetchResult = await fetchUrlWithRetry(
         normalizedUrl,
-        customHeaders,
+        fetchOptions,
         retries
       );
       const { html } = fetchResult;

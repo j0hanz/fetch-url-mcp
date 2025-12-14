@@ -68,3 +68,12 @@ export class TimeoutError extends AppError {
     this.timeoutMs = timeoutMs;
   }
 }
+
+export class AbortError extends AppError {
+  readonly reason: string | undefined;
+
+  constructor(reason?: string) {
+    super(reason ?? 'Request was aborted', 499, 'ABORTED');
+    this.reason = reason;
+  }
+}

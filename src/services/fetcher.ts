@@ -1,13 +1,32 @@
-import axios, { type AxiosError, type AxiosRequestConfig } from 'axios';
+import axios, {
+  type AxiosError,
+  type AxiosRequestConfig,
+  isCancel,
+} from 'axios';
 import http from 'http';
 import https from 'https';
 
 import { config } from '../config/index.js';
 
-import { FetchError, TimeoutError } from '../errors/app-error.js';
+import {
+  AbortError,
+  FetchError,
+  RateLimitError,
+  TimeoutError,
+} from '../errors/app-error.js';
 
 import { getHtml, setHtml } from './cache.js';
 import { logDebug, logError, logWarn } from './logger.js';
+
+/** Options for fetch operations */
+export interface FetchOptions {
+  /** Custom HTTP headers to include in the request */
+  customHeaders?: Record<string, string>;
+  /** AbortSignal for request cancellation */
+  signal?: AbortSignal;
+  /** Per-request timeout override in milliseconds */
+  timeout?: number;
+}
 
 // Use WeakMap for request timings to avoid modifying request objects
 const requestTimings = new WeakMap<AxiosRequestConfig, number>();
@@ -123,14 +142,45 @@ client.interceptors.response.use(
   (error: AxiosError) => {
     const url = error.config?.url ?? 'unknown';
 
+    // Handle request cancellation (AbortController)
+    if (isCancel(error) || error.name === 'AbortError') {
+      logDebug('HTTP Request Aborted', { url });
+      throw new AbortError('Request was canceled');
+    }
+
+    // Handle CanceledError from AbortSignal.timeout()
+    if (error.name === 'CanceledError') {
+      logDebug('HTTP Request Canceled (timeout signal)', { url });
+      throw new TimeoutError(config.fetcher.timeout, true);
+    }
+
     if (error.code === 'ECONNABORTED' || error.code === 'ETIMEDOUT') {
       logError('HTTP Timeout', { url, timeout: config.fetcher.timeout });
       throw new TimeoutError(config.fetcher.timeout, true);
     }
 
     if (error.response) {
-      const { status } = error.response;
-      const { statusText } = error.response;
+      const { status, statusText, headers } = error.response;
+
+      // Handle 429 Too Many Requests with Retry-After header
+      if (status === 429) {
+        const retryAfterHeader = headers['retry-after'] as string | undefined;
+        let retryAfterSeconds = 60; // Default 60 seconds
+
+        if (retryAfterHeader) {
+          const parsed = parseInt(retryAfterHeader, 10);
+          if (!isNaN(parsed)) {
+            retryAfterSeconds = parsed;
+          }
+        }
+
+        logWarn('Rate limited by server', {
+          url,
+          retryAfter: `${retryAfterSeconds}s`,
+        });
+        throw new RateLimitError(retryAfterSeconds);
+      }
+
       logError('HTTP Error Response', { url, status, statusText });
       throw new FetchError(`HTTP ${status}: ${statusText}`, url, status);
     }
@@ -145,17 +195,23 @@ client.interceptors.response.use(
   }
 );
 
-async function fetchUrl(
-  url: string,
-  customHeaders?: Record<string, string>
-): Promise<string> {
+async function fetchUrl(url: string, options?: FetchOptions): Promise<string> {
   const requestConfig: AxiosRequestConfig = {
     method: 'GET',
     url,
     responseType: 'text',
   };
 
-  const sanitized = sanitizeHeaders(customHeaders);
+  // Apply per-request timeout via AbortSignal.timeout() if provided
+  // This is cleaner than axios timeout as it properly cancels the request
+  if (options?.signal) {
+    requestConfig.signal = options.signal;
+  } else if (options?.timeout) {
+    // Use AbortSignal.timeout() for per-request timeout (Node 17.3+)
+    requestConfig.signal = AbortSignal.timeout(options.timeout);
+  }
+
+  const sanitized = sanitizeHeaders(options?.customHeaders);
   if (sanitized) {
     const existingHeaders =
       requestConfig.headers && typeof requestConfig.headers === 'object'
@@ -168,7 +224,12 @@ async function fetchUrl(
     const response = await client.request<string>(requestConfig);
     return response.data;
   } catch (error) {
-    if (error instanceof FetchError || error instanceof TimeoutError) {
+    if (
+      error instanceof FetchError ||
+      error instanceof TimeoutError ||
+      error instanceof AbortError ||
+      error instanceof RateLimitError
+    ) {
       throw error;
     }
 
@@ -190,7 +251,7 @@ function isHtmlContentType(contentType: string): boolean {
 
 export async function fetchUrlWithRetry(
   url: string,
-  customHeaders?: Record<string, string>,
+  options?: FetchOptions,
   maxRetries = 3,
   skipCache = false
 ): Promise<{ html: string; fromHtmlCache: boolean }> {
@@ -206,8 +267,14 @@ export async function fetchUrlWithRetry(
   let lastError: Error = new Error(`Failed to fetch ${url}`);
 
   for (let attempt = 1; attempt <= retries; attempt++) {
+    // Check if aborted before attempting (early exit for batch operations)
+    if (options?.signal?.aborted) {
+      const abortError = new AbortError('Request was aborted before execution');
+      throw abortError;
+    }
+
     try {
-      const html = await fetchUrl(url, customHeaders);
+      const html = await fetchUrl(url, options);
       setHtml(url, html);
       logDebug('HTML Cache Set', { url });
 
@@ -215,9 +282,29 @@ export async function fetchUrlWithRetry(
     } catch (error) {
       lastError = error instanceof Error ? error : new Error(String(error));
 
+      // Don't retry on abort - exit immediately
+      if (error instanceof AbortError) {
+        throw error;
+      }
+
+      // Handle rate limiting with smart retry
+      if (error instanceof RateLimitError) {
+        if (attempt < retries) {
+          const waitTime = Math.min(error.retryAfter * 1000, 30000); // Cap at 30s
+          logWarn('Rate limited, waiting before retry', {
+            url,
+            attempt,
+            waitTime: `${waitTime}ms`,
+          });
+          await new Promise((resolve) => setTimeout(resolve, waitTime));
+          continue;
+        }
+        throw error;
+      }
+
       if (error instanceof FetchError && error.httpStatus) {
         const status = error.httpStatus;
-        // Don't retry client errors (except 429 Too Many Requests)
+        // Don't retry client errors (except 429 which is handled above)
         if (status >= 400 && status < 500 && status !== 429) {
           throw error;
         }
@@ -225,6 +312,7 @@ export async function fetchUrlWithRetry(
 
       if (attempt < retries) {
         const delay = calculateBackoff(attempt);
+        logDebug('Retrying request', { url, attempt, delay: `${delay}ms` });
         await new Promise((resolve) => setTimeout(resolve, delay));
       }
     }

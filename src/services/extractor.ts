@@ -19,7 +19,7 @@ const MAX_HTML_SIZE = 10 * 1024 * 1024;
  * Extract metadata using Cheerio (fast, no full DOM)
  * This avoids JSDOM overhead for simple meta tag extraction
  */
-function extractMetadataWithCheerio($: CheerioAPI): ExtractedMetadata {
+export function extractMetadataWithCheerio($: CheerioAPI): ExtractedMetadata {
   const getMetaContent = (selectors: string[]): string | undefined => {
     for (const selector of selectors) {
       const content = $(selector).attr('content');

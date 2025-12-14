@@ -8,7 +8,10 @@ import type {
 } from '../../config/types.js';
 
 import * as cache from '../../services/cache.js';
-import { extractContent } from '../../services/extractor.js';
+import {
+  extractContent,
+  extractMetadataWithCheerio,
+} from '../../services/extractor.js';
 import { fetchUrlWithRetry } from '../../services/fetcher.js';
 import { logDebug, logError, logWarn } from '../../services/logger.js';
 import { parseHtml } from '../../services/parser.js';
@@ -38,42 +41,6 @@ interface ProcessOptions {
   includeMetadata: boolean;
   maxContentLength?: number | undefined;
   format: 'jsonl' | 'markdown';
-}
-
-// Fast metadata extraction using Cheerio only (no JSDOM)
-function extractMetadataFast(html: string): {
-  title?: string;
-  description?: string;
-  author?: string;
-} {
-  const $ = cheerio.load(html);
-  const getMetaContent = (selectors: string[]): string | undefined => {
-    for (const selector of selectors) {
-      const content = $(selector).attr('content');
-      if (content) return content;
-    }
-    return undefined;
-  };
-
-  const title =
-    getMetaContent([
-      'meta[property="og:title"]',
-      'meta[name="twitter:title"]',
-    ]) ??
-    ($('title').text() || undefined);
-
-  const description = getMetaContent([
-    'meta[property="og:description"]',
-    'meta[name="twitter:description"]',
-    'meta[name="description"]',
-  ]);
-
-  const author = getMetaContent([
-    'meta[name="author"]',
-    'meta[property="article:author"]',
-  ]);
-
-  return { title, description, author };
 }
 
 async function processSingleUrl(
@@ -107,7 +74,8 @@ async function processSingleUrl(
     // Fast path: Skip JSDOM entirely when extractMainContent is false
     if (!options.extractMainContent) {
       sourceHtml = fetchResult.html;
-      const extractedMeta = extractMetadataFast(fetchResult.html);
+      const $ = cheerio.load(fetchResult.html);
+      const extractedMeta = extractMetadataWithCheerio($);
       ({ title } = extractedMeta);
 
       if (options.includeMetadata) {

@@ -331,13 +331,13 @@ if (isStdioMode) {
     }, 10000).unref();
   };
 
-  // Assign shutdown function for signal handlers
-  const shutdownHandler = shutdownFn;
+  // Assign shutdown function for signal handlers and uncaughtException handler
+  shutdownHandlerRef.current = shutdownFn;
 
   process.on('SIGINT', () => {
-    void shutdownHandler('SIGINT');
+    void shutdownFn('SIGINT');
   });
   process.on('SIGTERM', () => {
-    void shutdownHandler('SIGTERM');
+    void shutdownFn('SIGTERM');
   });
 }
