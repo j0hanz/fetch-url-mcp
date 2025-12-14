@@ -12,10 +12,22 @@ import { registerPrompts } from './prompts/index.js';
 import { registerResources } from './resources/index.js';
 
 export function createMcpServer(): McpServer {
-  const server = new McpServer({
-    name: config.server.name,
-    version: config.server.version,
-  });
+  const server = new McpServer(
+    {
+      name: config.server.name,
+      version: config.server.version,
+    },
+    {
+      capabilities: {
+        tools: { listChanged: false },
+        resources: { listChanged: true, subscribe: true },
+        prompts: { listChanged: false },
+        logging: {},
+        sampling: {},
+      },
+      instructions: `superFetch MCP server v${config.server.version} - AI-optimized web content fetching with JSONL/Markdown output. Provides tools for fetching, parsing, and transforming web content into structured formats suitable for LLM consumption. Supports resource subscriptions for cache updates and LLM sampling for enhanced content processing.`,
+    }
+  );
 
   // Register all features using the modern API
   registerTools(server);

@@ -144,6 +144,9 @@ export function set(cacheKey: string | null, content: string): void {
 
     contentCache.set(cacheKey, entry);
     stats.sets++;
+
+    // Notify subscribers of cache update
+    notifyUpdate(cacheKey);
   } catch (error) {
     stats.errors++;
     logWarn('Cache set error', {
@@ -189,6 +192,39 @@ export function setHtml(url: string, html: string): void {
   } catch {
     // Ignore HTML cache errors
   }
+}
+
+export function keys(): string[] {
+  return [...contentCache.keys(), ...htmlCache.keys()];
+}
+
+type CacheUpdateCallback = (key: string, namespace: string) => void;
+const updateCallbacks: CacheUpdateCallback[] = [];
+
+export function onUpdate(callback: CacheUpdateCallback): () => void {
+  updateCallbacks.push(callback);
+
+  // Return unsubscribe function
+  return () => {
+    const index = updateCallbacks.indexOf(callback);
+    if (index > -1) {
+      updateCallbacks.splice(index, 1);
+    }
+  };
+}
+
+// Notify callbacks when cache is updated
+function notifyUpdate(key: string): void {
+  const parts = key.split(':');
+  const namespace = parts[0] ?? 'unknown';
+
+  updateCallbacks.forEach((callback) => {
+    try {
+      callback(key, namespace);
+    } catch {
+      // Silently ignore callback errors
+    }
+  });
 }
 
 export function getStats(): {

@@ -218,7 +218,15 @@ export async function fetchUrlsToolHandler(input: FetchUrlsInput): Promise<{
     );
 
     // Execute with concurrency control
-    const settledResults = await runWithConcurrency(concurrency, tasks);
+    const settledResults = await runWithConcurrency(concurrency, tasks, {
+      onProgress: (completed, total) => {
+        logDebug('Batch progress', {
+          completed,
+          total,
+          percentage: Math.round((completed / total) * 100),
+        });
+      },
+    });
 
     // Helper to safely extract error message from rejected promise
     const getErrorMessage = ({ reason }: PromiseRejectedResult): string => {

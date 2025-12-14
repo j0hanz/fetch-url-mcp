@@ -11,12 +11,7 @@ export function registerPrompts(server: McpServer): void {
       description: 'Analyze fetched web content with optional focus area',
       argsSchema: {
         url: z.string().min(1).describe('URL of the content to analyze'),
-        focus: z
-          .string()
-          .optional()
-          .describe(
-            'Specific aspect to focus on (e.g., "technical details", "pricing")'
-          ),
+        focus: z.string().optional().describe('Specific aspect to focus on'),
       },
     },
     ({ url, focus }) => {
@@ -78,11 +73,7 @@ export function registerPrompts(server: McpServer): void {
       description: 'Extract specific structured data from a web page',
       argsSchema: {
         url: z.string().min(1).describe('URL of the page to extract data from'),
-        dataType: z
-          .string()
-          .describe(
-            'Type of data to extract (e.g., "contact info", "product details", "article metadata")'
-          ),
+        dataType: z.string().describe('Type of data to extract'),
       },
     },
     ({ url, dataType }) => ({
