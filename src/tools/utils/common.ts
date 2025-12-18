@@ -2,12 +2,11 @@ import type {
   ExtractedArticle,
   ExtractedMetadata,
   MetadataBlock,
+  TruncationResult,
 } from '../../config/types.js';
+import type { ContentTransformOptions } from '../../config/types.js';
 
-export interface ContentTransformOptions {
-  readonly extractMainContent: boolean;
-  readonly includeMetadata: boolean;
-}
+export type { ContentTransformOptions };
 
 export function determineContentExtractionSource(
   extractMainContent: boolean,
@@ -41,11 +40,6 @@ export function createContentMetadataBlock(
         url,
         fetchedAt: now,
       };
-}
-
-export interface TruncationResult {
-  readonly content: string;
-  readonly truncated: boolean;
 }
 
 export function enforceContentLengthLimit(

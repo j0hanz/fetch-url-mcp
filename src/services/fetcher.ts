@@ -9,18 +9,13 @@ import https from 'https';
 import os from 'os';
 
 import { config } from '../config/index.js';
+import type { FetchOptions } from '../config/types.js';
 
 import { FetchError } from '../errors/app-error.js';
 
 import { validateResolvedIps } from '../utils/url-validator.js';
 
 import { logDebug, logError, logWarn } from './logger.js';
-
-export interface FetchOptions {
-  customHeaders?: Record<string, string>;
-  signal?: AbortSignal;
-  timeout?: number;
-}
 
 const REQUEST_START_TIME = Symbol('requestStartTime');
 const REQUEST_ID = Symbol('requestId');

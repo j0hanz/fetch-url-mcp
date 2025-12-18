@@ -1,10 +1,10 @@
 import type {
+  FetchOptions,
   FetchPipelineOptions,
   PipelineResult,
 } from '../../config/types.js';
 
 import * as cache from '../../services/cache.js';
-import type { FetchOptions } from '../../services/fetcher.js';
 import { fetchUrlWithRetry } from '../../services/fetcher.js';
 import { logDebug, logWarn } from '../../services/logger.js';
 

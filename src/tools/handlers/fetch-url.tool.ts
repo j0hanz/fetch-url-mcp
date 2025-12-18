@@ -1,6 +1,8 @@
 import type {
+  ContentTransformOptions,
   FetchUrlInput,
   JsonlTransformResult,
+  ToolResponseBase,
 } from '../../config/types.js';
 
 import { extractContent } from '../../services/extractor.js';
@@ -11,7 +13,6 @@ import {
   createToolErrorResponse,
   handleToolError,
 } from '../../utils/tool-error-handler.js';
-import type { ContentTransformOptions } from '../utils/common.js';
 import {
   createContentMetadataBlock,
   determineContentExtractionSource,
@@ -59,16 +60,9 @@ function transformToJsonl(
   };
 }
 
-interface FetchUrlToolResponse {
-  [x: string]: unknown;
-  content: { type: 'text'; text: string }[];
-  structuredContent?: Record<string, unknown>;
-  isError?: boolean;
-}
-
 export async function fetchUrlToolHandler(
   input: FetchUrlInput
-): Promise<FetchUrlToolResponse> {
+): Promise<ToolResponseBase> {
   if (!input.url) {
     return createToolErrorResponse('URL is required', '', 'VALIDATION_ERROR');
   }

@@ -1,7 +1,5 @@
 import { config } from '../config/index.js';
-
-type LogLevel = 'debug' | 'info' | 'warn' | 'error';
-type LogMetadata = Record<string, unknown>;
+import type { LogLevel, LogMetadata } from '../config/types.js';
 
 function formatMetadata(meta?: LogMetadata): string {
   return meta && Object.keys(meta).length > 0 ? ` ${JSON.stringify(meta)}` : '';

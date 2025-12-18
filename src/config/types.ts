@@ -1,3 +1,5 @@
+import type { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
+
 type ContentBlockType =
   | 'metadata'
   | 'heading'
@@ -313,4 +315,61 @@ export interface ToolErrorResponse {
     errorCode: string;
   };
   isError: true;
+}
+
+// Fetcher types
+export interface FetchOptions {
+  customHeaders?: Record<string, string>;
+  signal?: AbortSignal;
+  timeout?: number;
+}
+
+// Content transformation types
+export interface ContentTransformOptions {
+  readonly extractMainContent: boolean;
+  readonly includeMetadata: boolean;
+}
+
+export interface TruncationResult {
+  readonly content: string;
+  readonly truncated: boolean;
+}
+
+// Concurrency types
+export type ConcurrencyLimitedExecutor = <T>(
+  task: () => Promise<T>
+) => Promise<T>;
+
+export type ProgressCallback = (completed: number, total: number) => void;
+
+export interface ConcurrencyExecutionOptions {
+  readonly onProgress?: ProgressCallback;
+}
+
+export interface SessionEntry {
+  readonly transport: StreamableHTTPServerTransport;
+  createdAt: number;
+}
+
+// Tool response types
+export interface ToolResponseBase {
+  [x: string]: unknown;
+  content: { type: 'text'; text: string }[];
+  structuredContent?: Record<string, unknown>;
+  isError?: boolean;
+}
+
+// Link types
+export type LinkType = 'internal' | 'external' | 'image';
+
+// Logger types
+export type LogLevel = 'debug' | 'info' | 'warn' | 'error';
+export type LogMetadata = Record<string, unknown>;
+
+// MCP request types
+export interface McpRequestBody {
+  method?: string;
+  id?: string | number;
+  jsonrpc?: '2.0';
+  params?: unknown;
 }

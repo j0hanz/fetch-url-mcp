@@ -5,6 +5,8 @@ import type {
   ExtractLinksOptions,
   FetchLinksInput,
   LinksTransformResult,
+  LinkType,
+  ToolResponseBase,
 } from '../../config/types.js';
 
 import { logDebug, logError } from '../../services/logger.js';
@@ -19,8 +21,6 @@ import { executeFetchPipeline } from '../utils/fetch-pipeline.js';
 export const FETCH_LINKS_TOOL_NAME = 'fetch-links';
 export const FETCH_LINKS_TOOL_DESCRIPTION =
   'Extracts all hyperlinks from a webpage with anchor text and type classification. Supports filtering, image links, and link limits.';
-
-type LinkType = 'internal' | 'external' | 'image';
 
 function tryResolveUrl(href: string, baseUrl: string): string | null {
   try {
@@ -105,11 +105,9 @@ function extractLinks(
   };
 }
 
-export async function fetchLinksToolHandler(input: FetchLinksInput): Promise<{
-  content: { type: 'text'; text: string }[];
-  structuredContent?: Record<string, unknown>;
-  isError?: boolean;
-}> {
+export async function fetchLinksToolHandler(
+  input: FetchLinksInput
+): Promise<ToolResponseBase> {
   if (!input.url) {
     return createToolErrorResponse('URL is required', '', 'VALIDATION_ERROR');
   }

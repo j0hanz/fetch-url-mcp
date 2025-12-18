@@ -9,6 +9,7 @@ import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/
 import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
 
 import { config } from './config/index.js';
+import type { McpRequestBody } from './config/types.js';
 
 import { destroyAgents } from './services/fetcher.js';
 import { logError, logInfo } from './services/logger.js';
@@ -54,13 +55,6 @@ const ALLOW_ALL_ORIGINS = process.env.CORS_ALLOW_ALL === 'true';
 function getSessionId(req: Request): string | undefined {
   const header = req.headers['mcp-session-id'];
   return Array.isArray(header) ? header[0] : header;
-}
-
-interface McpRequestBody {
-  method?: string;
-  id?: string | number;
-  jsonrpc?: '2.0';
-  params?: unknown;
 }
 
 function isMcpRequestBody(body: unknown): body is McpRequestBody {

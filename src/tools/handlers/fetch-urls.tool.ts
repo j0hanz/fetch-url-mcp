@@ -1,12 +1,11 @@
 import type {
+  BatchResponseContent,
+  BatchSummary,
   BatchUrlResult,
   FetchUrlsInput,
   MetadataBlock,
-} from '../../config/types.js';
-import type {
-  BatchResponseContent,
-  BatchSummary,
   ToolResponse,
+  ToolResponseBase,
 } from '../../config/types.js';
 
 import * as cache from '../../services/cache.js';
@@ -34,13 +33,6 @@ const MAX_CONCURRENCY = 5;
 export const FETCH_URLS_TOOL_NAME = 'fetch-urls';
 export const FETCH_URLS_TOOL_DESCRIPTION =
   'Fetches multiple URLs in parallel and converts them to AI-readable format (JSONL or Markdown). Supports concurrency control and continues on individual failures.';
-
-interface FetchUrlsToolResponse {
-  [x: string]: unknown;
-  content: { type: 'text'; text: string }[];
-  structuredContent?: Record<string, unknown>;
-  isError?: boolean;
-}
 
 function createBatchResponse(
   results: BatchUrlResult[]
@@ -254,7 +246,7 @@ function extractRejectionMessage({ reason }: PromiseRejectedResult): string {
 
 function validateBatchInput(
   input: FetchUrlsInput
-): string[] | FetchUrlsToolResponse {
+): string[] | ToolResponseBase {
   if (input.urls.length === 0) {
     return createToolErrorResponse(
       'At least one URL is required',
@@ -288,7 +280,7 @@ function validateBatchInput(
 
 export async function fetchUrlsToolHandler(
   input: FetchUrlsInput
-): Promise<FetchUrlsToolResponse> {
+): Promise<ToolResponseBase> {
   try {
     const validationResult = validateBatchInput(input);
     if (!Array.isArray(validationResult)) {

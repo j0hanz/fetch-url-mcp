@@ -1,14 +1,11 @@
 import type { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 
+import type { SessionEntry } from '../config/types.js';
+
 import { logInfo } from './logger.js';
 
 const DEFAULT_SESSION_TTL_MS = 30 * 60 * 1000;
 const CLEANUP_INTERVAL_MS = 2 * 60 * 1000;
-
-interface SessionEntry {
-  readonly transport: StreamableHTTPServerTransport;
-  createdAt: number;
-}
 
 export class SessionManager {
   private readonly sessions = new Map<string, SessionEntry>();

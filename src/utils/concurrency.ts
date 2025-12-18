@@ -1,12 +1,10 @@
+import type {
+  ConcurrencyExecutionOptions,
+  ConcurrencyLimitedExecutor,
+} from '../config/types.js';
+
 const MAX_CONCURRENCY_LIMIT = 10;
 const MIN_CONCURRENCY = 1;
-
-type ConcurrencyLimitedExecutor = <T>(task: () => Promise<T>) => Promise<T>;
-type ProgressCallback = (completed: number, total: number) => void;
-
-interface ConcurrencyExecutionOptions {
-  readonly onProgress?: ProgressCallback;
-}
 
 function createConcurrencyLimiter(limit: number): ConcurrencyLimitedExecutor {
   const maxConcurrency = Math.min(
