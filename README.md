@@ -149,6 +149,34 @@ See [Configuration](#configuration) section below for all available options and 
 > **Tip:** On Windows, if you encounter issues, try: `cmd /c "npx -y @j0hanz/superfetch@latest --stdio"`
 
 <details>
+<summary><strong>Codex IDE</strong></summary>
+
+Add to your `~/.codex/config.toml` file:
+
+**Basic Configuration:**
+
+```toml
+[mcp_servers.superfetch]
+command = "npx"
+args = ["-y", "@j0hanz/superfetch@latest", "--stdio"]
+```
+
+**With Environment Variables:**
+
+```toml
+[mcp_servers.superfetch]
+command = "npx"
+args = ["-y", "@j0hanz/superfetch@latest", "--stdio"]
+env = { CACHE_TTL = "7200", LOG_LEVEL = "debug", FETCH_TIMEOUT = "60000" }
+```
+
+> **Access config file:** Click the gear icon → "Codex Settings &gt; Open config.toml"
+>
+> **Documentation:** [Codex MCP Guide](https://codex.com/docs/mcp)
+
+</details>
+
+<details>
 <summary><strong>Cline (VS Code Extension)</strong></summary>
 
 Open the Cline MCP settings file:
