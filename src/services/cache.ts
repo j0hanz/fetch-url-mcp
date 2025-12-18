@@ -6,6 +6,12 @@ import type { CacheEntry } from '../config/types.js';
 
 import { logDebug, logWarn } from './logger.js';
 
+const HTML_CACHE_TTL = 60;
+const HTML_CACHE_MAX_KEYS = 50;
+const MAX_CONTENT_SIZE = 5242880;
+const MAX_HTML_SIZE = 10485760;
+const MAX_KEY_LENGTH = 500;
+
 const contentCache = new NodeCache({
   stdTTL: config.cache.ttl,
   checkperiod: Math.floor(config.cache.ttl / 10),
@@ -13,39 +19,12 @@ const contentCache = new NodeCache({
   maxKeys: config.cache.maxKeys,
 });
 
-const HTML_CACHE_TTL = 60;
-const HTML_CACHE_MAX_KEYS = 50;
 const htmlCache = new NodeCache({
   stdTTL: HTML_CACHE_TTL,
   checkperiod: 30,
   useClones: false,
   maxKeys: HTML_CACHE_MAX_KEYS,
 });
-
-// Track cache evictions
-contentCache.on('del', (key) => {
-  stats.evictions++;
-  logDebug('Cache eviction', { key: String(key).substring(0, 100) });
-});
-
-htmlCache.on('del', () => {
-  stats.htmlEvictions++;
-});
-
-const stats = {
-  hits: 0,
-  misses: 0,
-  sets: 0,
-  errors: 0,
-  evictions: 0,
-  htmlHits: 0,
-  htmlMisses: 0,
-  htmlEvictions: 0,
-};
-
-const MAX_CONTENT_SIZE = 5242880;
-const MAX_HTML_SIZE = 10485760;
-const MAX_KEY_LENGTH = 500;
 
 export function createCacheKey(namespace: string, url: string): string | null {
   if (!namespace || !url) return null;
@@ -67,15 +46,9 @@ export function get(cacheKey: string | null): CacheEntry | undefined {
 
   try {
     const entry = contentCache.get<CacheEntry>(cacheKey);
-    if (entry) {
-      stats.hits++;
-      return entry;
-    }
-
-    stats.misses++;
+    if (entry) return entry;
     return undefined;
   } catch (error) {
-    stats.errors++;
     logWarn('Cache get error', {
       key: cacheKey.substring(0, 100),
       error: error instanceof Error ? error.message : 'Unknown error',
@@ -107,9 +80,7 @@ export function set(cacheKey: string | null, content: string): void {
     };
 
     contentCache.set(cacheKey, entry);
-    stats.sets++;
   } catch (error) {
-    stats.errors++;
     logWarn('Cache set error', {
       key: cacheKey.substring(0, 100),
       error: error instanceof Error ? error.message : 'Unknown error',
@@ -122,13 +93,10 @@ export function getHtml(url: string): string | undefined {
 
   try {
     const html = htmlCache.get<string>(url);
+    if (html && typeof html === 'string' && html.length <= MAX_HTML_SIZE) {
+      return html;
+    }
     if (html) {
-      // Validate cached HTML is within limits
-      if (typeof html === 'string' && html.length <= MAX_HTML_SIZE) {
-        stats.htmlHits++;
-        logDebug('HTML cache hit', { url: url.substring(0, 100) });
-        return html;
-      }
       // Invalid cache entry, remove it
       htmlCache.del(url);
       logWarn('Removed oversized HTML from cache', {
@@ -136,7 +104,6 @@ export function getHtml(url: string): string | undefined {
         size: html.length,
       });
     }
-    stats.htmlMisses++;
     return undefined;
   } catch (error) {
     logDebug('HTML cache get error (non-critical)', {
@@ -153,7 +120,6 @@ export function setHtml(url: string, html: string): void {
 
   try {
     htmlCache.set(url, html);
-    logDebug('HTML cached', { url: url.substring(0, 100), size: html.length });
   } catch (error) {
     logDebug('HTML cache set error (non-critical)', {
       url: url.substring(0, 100),
@@ -164,64 +130,4 @@ export function setHtml(url: string, html: string): void {
 
 export function keys(): string[] {
   return [...contentCache.keys(), ...htmlCache.keys()];
-}
-
-export function getStats(): {
-  size: number;
-  maxKeys: number;
-  ttl: number;
-  hits: number;
-  misses: number;
-  sets: number;
-  errors: number;
-  evictions: number;
-  hitRate: string;
-  htmlCacheSize: number;
-  htmlCacheMaxKeys: number;
-  htmlCacheTtl: number;
-  htmlHits: number;
-  htmlMisses: number;
-  htmlEvictions: number;
-  htmlHitRate: string;
-  efficiency: {
-    hitRate: string;
-    missRate: string;
-    errorRate: string;
-  };
-} {
-  const total = stats.hits + stats.misses;
-  const hitRate = total > 0 ? ((stats.hits / total) * 100).toFixed(2) : '0.00';
-
-  const htmlTotal = stats.htmlHits + stats.htmlMisses;
-  const htmlHitRate =
-    htmlTotal > 0 ? ((stats.htmlHits / htmlTotal) * 100).toFixed(2) : '0.00';
-
-  const missRate =
-    total > 0 ? ((stats.misses / total) * 100).toFixed(2) : '0.00';
-  const errorRate =
-    stats.sets > 0 ? ((stats.errors / stats.sets) * 100).toFixed(2) : '0.00';
-
-  return {
-    size: contentCache.keys().length,
-    maxKeys: config.cache.maxKeys,
-    ttl: config.cache.ttl,
-    hits: stats.hits,
-    misses: stats.misses,
-    sets: stats.sets,
-    errors: stats.errors,
-    evictions: stats.evictions,
-    hitRate: `${hitRate}%`,
-    htmlCacheSize: htmlCache.keys().length,
-    htmlCacheMaxKeys: HTML_CACHE_MAX_KEYS,
-    htmlCacheTtl: HTML_CACHE_TTL,
-    htmlHits: stats.htmlHits,
-    htmlMisses: stats.htmlMisses,
-    htmlEvictions: stats.htmlEvictions,
-    htmlHitRate: `${htmlHitRate}%`,
-    efficiency: {
-      hitRate: `${hitRate}%`,
-      missRate: `${missRate}%`,
-      errorRate: `${errorRate}%`,
-    },
-  };
 }

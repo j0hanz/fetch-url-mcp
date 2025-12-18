@@ -12,6 +12,7 @@ import { config } from './config/index.js';
 
 import { destroyAgents } from './services/fetcher.js';
 import { logError, logInfo } from './services/logger.js';
+import { SessionManager } from './services/session-manager.js';
 
 import { errorHandler } from './middleware/error-handler.js';
 import { rateLimiter } from './middleware/rate-limiter.js';
@@ -161,45 +162,7 @@ if (isStdioMode) {
     });
   });
 
-  interface SessionEntry {
-    transport: StreamableHTTPServerTransport;
-    createdAt: number;
-  }
-  const sessions = new Map<string, SessionEntry>();
-
-  const SESSION_TTL_MS = 30 * 60 * 1000;
-  let cleanupTimeout: NodeJS.Timeout | null = null;
-
-  async function cleanupStaleSessions(): Promise<void> {
-    const now = Date.now();
-    const closePromises: Promise<void>[] = [];
-
-    for (const [sessionId, entry] of sessions) {
-      if (now - entry.createdAt > SESSION_TTL_MS) {
-        logInfo('Cleaning up stale session', { sessionId });
-        closePromises.push(entry.transport.close());
-        sessions.delete(sessionId);
-      }
-    }
-
-    await Promise.allSettled(closePromises);
-  }
-
-  function scheduleCleanup(): void {
-    if (cleanupTimeout) return;
-
-    cleanupTimeout = setTimeout(
-      () => {
-        void cleanupStaleSessions().then(() => {
-          cleanupTimeout = null;
-          if (sessions.size > 0) scheduleCleanup();
-        });
-      },
-      2 * 60 * 1000 // Run every 2 minutes for more aggressive cleanup
-    );
-
-    cleanupTimeout.unref();
-  }
+  const sessionManager = new SessionManager();
 
   app.post(
     '/mcp',
@@ -220,39 +183,35 @@ if (isStdioMode) {
         return;
       }
 
-      // Body is validated above as McpRequestBody via type guard.
-      // Express types req.body as 'any', so explicit annotation satisfies ESLint.
-      // eslint-disable-next-line prefer-destructuring -- Direct assignment needed for type safety
-      const body: McpRequestBody = req.body;
+      // Body is validated above as McpRequestBody via type guard
       logInfo('[MCP POST]', {
-        method: body.method,
-        id: body.id,
+        method: req.body.method,
+        id: req.body.id,
         sessionId: sessionId ?? 'none',
         isInitialize: isInitializeRequest(req.body),
-        sessionCount: sessions.size,
+        sessionCount: sessionManager.size,
       });
 
-      const existingSession = sessionId ? sessions.get(sessionId) : undefined;
-      if (existingSession) {
+      const existingSession = sessionId
+        ? sessionManager.get(sessionId)
+        : undefined;
+      if (existingSession && sessionId) {
         ({ transport } = existingSession);
-        existingSession.createdAt = Date.now();
+        sessionManager.update(sessionId);
       } else if (!sessionId && isInitializeRequest(req.body)) {
         transport = new StreamableHTTPServerTransport({
           sessionIdGenerator: () => crypto.randomUUID(),
           onsessioninitialized: (id) => {
-            sessions.set(id, { transport, createdAt: Date.now() });
-            logInfo('Session initialized', { sessionId: id });
-            scheduleCleanup();
+            sessionManager.set(id, transport);
           },
           onsessionclosed: (id) => {
-            sessions.delete(id);
-            logInfo('Session closed', { sessionId: id });
+            sessionManager.delete(id);
           },
         });
 
         transport.onclose = () => {
           if (transport.sessionId) {
-            sessions.delete(transport.sessionId);
+            sessionManager.delete(transport.sessionId);
           }
         };
 
@@ -285,13 +244,13 @@ if (isStdioMode) {
         return;
       }
 
-      const session = sessions.get(sessionId);
+      const session = sessionManager.get(sessionId);
       if (!session) {
         res.status(404).json({ error: 'Session not found' });
         return;
       }
 
-      session.createdAt = Date.now();
+      sessionManager.update(sessionId);
 
       await session.transport.handleRequest(req, res);
     })
@@ -301,7 +260,7 @@ if (isStdioMode) {
     '/mcp',
     asyncHandler(async (req: Request, res: Response) => {
       const sessionId = getSessionId(req);
-      const session = sessionId ? sessions.get(sessionId) : undefined;
+      const session = sessionId ? sessionManager.get(sessionId) : undefined;
 
       if (session) {
         await session.transport.handleRequest(req, res);
@@ -344,17 +303,10 @@ if (isStdioMode) {
 
     process.stdout.write(`\n${signal} received, shutting down gracefully...\n`);
 
-    if (cleanupTimeout) clearTimeout(cleanupTimeout);
-
     rateLimiter.destroy();
+    sessionManager.destroy();
 
-    // Close all sessions gracefully
-    const closePromises: Promise<void>[] = [];
-    for (const session of sessions.values()) {
-      closePromises.push(session.transport.close());
-    }
-    await Promise.allSettled(closePromises);
-    sessions.clear();
+    await sessionManager.closeAll();
 
     destroyAgents();
 

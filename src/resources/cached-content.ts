@@ -54,10 +54,10 @@ export function registerCachedContentResource(server: McpServer): void {
       mimeType: 'application/json',
     },
     (uri) => {
-      const stats = cache.getStats();
+      const cacheKeys = cache.keys();
       const cacheList = {
-        totalEntries: stats.size + stats.htmlCacheSize,
-        entries: cache.keys().map((key: string) => {
+        totalEntries: cacheKeys.length,
+        entries: cacheKeys.map((key: string) => {
           const parts = key.split(':');
           const namespace = parts[0] ?? 'unknown';
           const urlHash = parts.slice(1).join(':') || 'unknown';

@@ -13,7 +13,10 @@ import {
   createToolErrorResponse,
   handleToolError,
 } from '../../utils/tool-error-handler.js';
-import { buildMetadata, shouldUseArticle } from '../utils/common.js';
+import {
+  createContentMetadataBlock,
+  determineContentExtractionSource,
+} from '../utils/common.js';
 import { executeFetchPipeline } from '../utils/fetch-pipeline.js';
 
 import { htmlToMarkdown } from '../../transformers/markdown.transformer.js';
@@ -67,16 +70,19 @@ function transformToMarkdown(
   const { article, metadata: extractedMeta } = extractContent(html, url, {
     extractArticle: options.extractMainContent,
   });
-  const useArticle = shouldUseArticle(options.extractMainContent, article);
-  const metadata = buildMetadata(
+  const shouldExtractFromArticle = determineContentExtractionSource(
+    options.extractMainContent,
+    article
+  );
+  const metadata = createContentMetadataBlock(
     url,
     article,
     extractedMeta,
-    useArticle,
+    shouldExtractFromArticle,
     options.includeMetadata
   );
-  const sourceHtml = useArticle ? article.content : html;
-  const title = useArticle ? article.title : extractedMeta.title;
+  const sourceHtml = shouldExtractFromArticle ? article.content : html;
+  const title = shouldExtractFromArticle ? article.title : extractedMeta.title;
 
   let markdown = htmlToMarkdown(sourceHtml, metadata);
   const toc = options.generateToc ? extractToc(markdown) : undefined;

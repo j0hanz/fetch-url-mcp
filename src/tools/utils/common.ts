@@ -4,23 +4,23 @@ import type {
   MetadataBlock,
 } from '../../config/types.js';
 
-export function shouldUseArticle(
+export function determineContentExtractionSource(
   extractMainContent: boolean,
   article: ExtractedArticle | null
 ): article is ExtractedArticle {
   return extractMainContent && !!article;
 }
 
-export function buildMetadata(
+export function createContentMetadataBlock(
   url: string,
   article: ExtractedArticle | null,
   extractedMeta: ExtractedMetadata,
-  useArticle: boolean,
+  shouldExtractFromArticle: boolean,
   includeMetadata: boolean
 ): MetadataBlock | undefined {
   if (!includeMetadata) return undefined;
   const now = new Date().toISOString();
-  return useArticle && article
+  return shouldExtractFromArticle && article
     ? {
         type: 'metadata',
         title: article.title,
@@ -38,7 +38,7 @@ export function buildMetadata(
       };
 }
 
-export function truncateContent(
+export function enforceContentLengthLimit(
   content: string,
   maxLength?: number
 ): { content: string; truncated: boolean } {

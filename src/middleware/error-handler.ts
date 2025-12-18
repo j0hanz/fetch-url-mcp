@@ -12,10 +12,9 @@ import { logError } from '../services/logger.js';
 
 export function errorHandler(
   err: Error,
-  _req: Request,
+  req: Request,
   res: Response,
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- Required by Express error handler signature
-  _next: NextFunction
+  next: NextFunction
 ): void {
   const isAppError = err instanceof AppError;
   const statusCode = isAppError ? err.statusCode : 500;
@@ -23,7 +22,10 @@ export function errorHandler(
   const message =
     isAppError && err.isOperational ? err.message : 'Internal Server Error';
 
-  logError(`HTTP ${statusCode}: ${err.message}`, err);
+  logError(
+    `HTTP ${statusCode}: ${err.message} - ${req.method} ${req.path}`,
+    err
+  );
 
   if (err instanceof RateLimitError) {
     res.set('Retry-After', String(err.retryAfter));
@@ -46,4 +48,7 @@ export function errorHandler(
   }
 
   res.status(statusCode).json(response);
+
+  // Ensure middleware chain ends here
+  next();
 }

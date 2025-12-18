@@ -70,17 +70,6 @@ function sanitizeHeaders(
   return Object.keys(sanitized).length > 0 ? sanitized : undefined;
 }
 
-/**
- * Calculate exponential backoff delay with jitter.
- * Safe for attempt values up to 20 (2^19 = 524288 < Number.MAX_SAFE_INTEGER).
- * Current max retries is 10, well within safe bounds.
- */
-function calculateBackoff(attempt: number, maxDelay = 10000): number {
-  const baseDelay = Math.min(1000 * Math.pow(2, attempt - 1), maxDelay);
-  const jitter = baseDelay * 0.25 * (Math.random() * 2 - 1);
-  return Math.round(baseDelay + jitter);
-}
-
 // Dynamic connection pool sizing based on CPU cores (2-4x throughput on multi-core)
 const CPU_COUNT = os.cpus().length;
 const MAX_SOCKETS = Math.max(CPU_COUNT * 2, 25); // Scale with cores, minimum 25
@@ -312,6 +301,39 @@ function isHtmlContentType(contentType: string): boolean {
   );
 }
 
+/** Calculate exponential backoff delay with jitter */
+function calculateRetryDelay(attempt: number): number {
+  const baseDelayMs = 1000;
+  const maxDelayMs = 10000;
+  const jitterFactor = 0.25;
+
+  const exponentialDelay = Math.min(
+    baseDelayMs * Math.pow(2, attempt - 1),
+    maxDelayMs
+  );
+  const jitter = exponentialDelay * jitterFactor * (Math.random() * 2 - 1);
+  return Math.round(exponentialDelay + jitter);
+}
+
+/** Determine if error should trigger retry */
+function shouldRetryError(
+  attempt: number,
+  maxRetries: number,
+  error: Error
+): boolean {
+  if (attempt >= maxRetries) return false;
+  if (error.name === 'AbortError' || error.name === 'CanceledError')
+    return false;
+
+  // Don't retry on client errors (4xx except 429)
+  if ('httpStatus' in error) {
+    const status = (error as { httpStatus?: number }).httpStatus;
+    if (status && status >= 400 && status < 500 && status !== 429) return false;
+  }
+
+  return true;
+}
+
 export async function fetchUrlWithRetry(
   url: string,
   options?: FetchOptions,
@@ -345,11 +367,6 @@ export async function fetchUrlWithRetry(
     } catch (error) {
       lastError = error instanceof Error ? error : new Error(String(error));
 
-      // Don't retry on abort - exit immediately
-      if (error instanceof AbortError) {
-        throw error;
-      }
-
       // Handle rate limiting with smart retry
       if (error instanceof RateLimitError) {
         if (attempt < retries) {
@@ -365,18 +382,12 @@ export async function fetchUrlWithRetry(
         throw error;
       }
 
-      if (error instanceof FetchError && error.httpStatus) {
-        const status = error.httpStatus;
-        // Don't retry client errors (except 429 which is handled above)
-        if (status >= 400 && status < 500 && status !== 429) {
-          throw error;
-        }
-      }
-
-      if (attempt < retries) {
-        const delay = calculateBackoff(attempt);
+      if (shouldRetryError(attempt, retries, lastError)) {
+        const delay = calculateRetryDelay(attempt);
         logDebug('Retrying request', { url, attempt, delay: `${delay}ms` });
         await new Promise((resolve) => setTimeout(resolve, delay));
+      } else {
+        throw error;
       }
     }
   }

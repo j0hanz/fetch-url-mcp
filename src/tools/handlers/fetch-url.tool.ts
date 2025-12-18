@@ -12,9 +12,9 @@ import {
   handleToolError,
 } from '../../utils/tool-error-handler.js';
 import {
-  buildMetadata,
-  shouldUseArticle,
-  truncateContent,
+  createContentMetadataBlock,
+  determineContentExtractionSource,
+  enforceContentLengthLimit,
 } from '../utils/common.js';
 import { executeFetchPipeline } from '../utils/fetch-pipeline.js';
 
@@ -33,17 +33,20 @@ function transformToJsonl(
   const { article, metadata: extractedMeta } = extractContent(html, url, {
     extractArticle: options.extractMainContent,
   });
-  const useArticle = shouldUseArticle(options.extractMainContent, article);
-  const sourceHtml = useArticle ? article.content : html;
+  const shouldExtractFromArticle = determineContentExtractionSource(
+    options.extractMainContent,
+    article
+  );
+  const sourceHtml = shouldExtractFromArticle ? article.content : html;
   const contentBlocks = parseHtml(sourceHtml);
-  const metadata = buildMetadata(
+  const metadata = createContentMetadataBlock(
     url,
     article,
     extractedMeta,
-    useArticle,
+    shouldExtractFromArticle,
     options.includeMetadata
   );
-  const title = useArticle ? article.title : extractedMeta.title;
+  const title = shouldExtractFromArticle ? article.title : extractedMeta.title;
 
   return {
     content: toJsonl(contentBlocks, metadata),
@@ -86,7 +89,7 @@ export async function fetchUrlToolHandler(input: FetchUrlInput): Promise<{
       }),
     });
 
-    const { content, truncated } = truncateContent(
+    const { content, truncated } = enforceContentLengthLimit(
       result.data.content,
       input.maxContentLength
     );

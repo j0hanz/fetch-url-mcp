@@ -1,15 +1,14 @@
-import * as cheerio from 'cheerio';
-import type { CheerioAPI } from 'cheerio';
 import { JSDOM, VirtualConsole } from 'jsdom';
 
 import { Readability } from '@mozilla/readability';
 
-import { config } from '../config/index.js';
 import type {
   ExtractedArticle,
   ExtractedMetadata,
   ExtractionResult,
 } from '../config/types.js';
+
+import { truncateHtml } from '../utils/html-truncator.js';
 
 import { preserveCardLinks } from './card-extractor.js';
 import { logError, logWarn } from './logger.js';
@@ -23,38 +22,104 @@ sharedVirtualConsole.on('warn', () => {
   /* suppress JSDOM warnings */
 });
 
+/** Extract Open Graph meta tags (og:*) */
+function extractOpenGraph(document: Document): {
+  title?: string;
+  description?: string;
+  author?: string;
+} {
+  const data: { title?: string; description?: string } = {};
+  const ogTags = document.querySelectorAll('meta[property^="og:"]');
+
+  for (const tag of ogTags) {
+    const property = tag.getAttribute('property');
+    const content = tag.getAttribute('content')?.trim();
+    if (!property || !content) continue;
+
+    const key = property.replace('og:', '');
+    if (key === 'title') data.title = content;
+    else if (key === 'description') data.description = content;
+  }
+
+  return data;
+}
+
+/** Extract Twitter Card meta tags (twitter:*) */
+function extractTwitterCard(document: Document): {
+  title?: string;
+  description?: string;
+} {
+  const data: { title?: string; description?: string } = {};
+  const twitterTags = document.querySelectorAll('meta[name^="twitter:"]');
+
+  for (const tag of twitterTags) {
+    const name = tag.getAttribute('name');
+    const content = tag.getAttribute('content')?.trim();
+    if (!name || !content) continue;
+
+    const key = name.replace('twitter:', '');
+    if (key === 'title') data.title = content;
+    else if (key === 'description') data.description = content;
+  }
+
+  return data;
+}
+
+/** Extract standard HTML meta tags */
+function extractStandardMeta(document: Document): {
+  title?: string;
+  description?: string;
+  author?: string;
+} {
+  const data: { title?: string; description?: string; author?: string } = {};
+
+  // Extract standard meta tags
+  const metaTags = document.querySelectorAll('meta[name][content]');
+  for (const tag of metaTags) {
+    const name = tag.getAttribute('name');
+    const content = tag.getAttribute('content')?.trim();
+    if (!name || !content) continue;
+
+    if (name === 'description') data.description = content;
+    else if (name === 'author') data.author = content;
+  }
+
+  // Extract title from <title> tag if not found
+  if (!data.title) {
+    const titleEl = document.querySelector('title');
+    if (titleEl?.textContent) data.title = titleEl.textContent.trim();
+  }
+
+  return data;
+}
+
 /**
- * Extract metadata using Cheerio (fast, no full DOM)
- * This avoids JSDOM overhead for simple meta tag extraction
+ * Extract metadata using inline parsers (no class hierarchy needed)
  */
-export function extractMetadataWithCheerio($: CheerioAPI): ExtractedMetadata {
-  const getMetaContent = (selectors: string[]): string | undefined => {
-    for (const selector of selectors) {
-      const content = $(selector).attr('content');
-      if (content) return content;
-    }
-    return undefined;
-  };
+export function extractMetadataWithCheerio(html: string): ExtractedMetadata {
+  try {
+    const dom = new JSDOM(html);
+    const { document } = dom.window;
 
-  const title =
-    getMetaContent([
-      'meta[property="og:title"]',
-      'meta[name="twitter:title"]',
-    ]) ??
-    ($('title').text() || undefined);
+    const ogData = extractOpenGraph(document);
+    const twitterData = extractTwitterCard(document);
+    const standardData = extractStandardMeta(document);
 
-  const description = getMetaContent([
-    'meta[property="og:description"]',
-    'meta[name="twitter:description"]',
-    'meta[name="description"]',
-  ]);
-
-  const author = getMetaContent([
-    'meta[name="author"]',
-    'meta[property="article:author"]',
-  ]);
-
-  return { title, description, author };
+    // Merge with precedence: Open Graph > Twitter > Standard
+    return {
+      title: ogData.title ?? twitterData.title ?? standardData.title,
+      description:
+        ogData.description ??
+        twitterData.description ??
+        standardData.description,
+      author: standardData.author,
+    };
+  } catch (error) {
+    logWarn('Failed to extract metadata', {
+      error: error instanceof Error ? error.message : 'Unknown',
+    });
+    return {};
+  }
 }
 
 /**
@@ -112,23 +177,13 @@ export function extractContent(
     return { article: null, metadata: {} };
   }
 
-  let processedHtml = html;
-  if (html.length > config.constants.maxHtmlSize) {
-    logWarn('HTML content exceeds maximum size for extraction, truncating', {
-      size: html.length,
-      maxSize: config.constants.maxHtmlSize,
-    });
-    processedHtml = html.substring(0, config.constants.maxHtmlSize);
-  }
-
   try {
-    // Fast path: Extract metadata with Cheerio (no full DOM parsing)
-    const $ = cheerio.load(processedHtml);
-    const metadata = extractMetadataWithCheerio($);
+    // Fast path: Extract metadata with specialized parsers
+    const metadata = extractMetadataWithCheerio(truncateHtml(html));
 
     // Lazy path: Only use JSDOM when article extraction is requested
     const article = options.extractArticle
-      ? extractArticleWithJsdom(processedHtml, url)
+      ? extractArticleWithJsdom(truncateHtml(html), url)
       : null;
 
     return { article, metadata };

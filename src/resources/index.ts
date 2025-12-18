@@ -69,7 +69,12 @@ export function registerResources(server: McpServer): void {
           nodeVersion: process.version,
           memoryUsage: process.memoryUsage(),
         },
-        cache: cache.getStats(),
+        cache: {
+          enabled: config.cache.enabled,
+          ttl: config.cache.ttl,
+          maxKeys: config.cache.maxKeys,
+          totalKeys: cache.keys().length,
+        },
         config: {
           fetcher: {
             timeout: config.fetcher.timeout,

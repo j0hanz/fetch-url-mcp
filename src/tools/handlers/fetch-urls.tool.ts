@@ -1,5 +1,3 @@
-import * as cheerio from 'cheerio';
-
 import type {
   BatchUrlResult,
   FetchUrlsInput,
@@ -26,9 +24,9 @@ import { runWithConcurrency } from '../../utils/concurrency.js';
 import { createToolErrorResponse } from '../../utils/tool-error-handler.js';
 import { validateAndNormalizeUrl } from '../../utils/url-validator.js';
 import {
-  buildMetadata,
-  shouldUseArticle,
-  truncateContent,
+  createContentMetadataBlock,
+  determineContentExtractionSource,
+  enforceContentLengthLimit,
 } from '../utils/common.js';
 
 import { toJsonl } from '../../transformers/jsonl.transformer.js';
@@ -110,12 +108,11 @@ async function processSingleUrl(
     // Fast path: Skip JSDOM entirely when extractMainContent is false
     if (!options.extractMainContent) {
       sourceHtml = fetchResult.html;
-      const $ = cheerio.load(fetchResult.html);
-      const extractedMeta = extractMetadataWithCheerio($);
+      const extractedMeta = extractMetadataWithCheerio(fetchResult.html);
       ({ title } = extractedMeta);
 
-      // Use buildMetadata helper for consistency
-      metadata = buildMetadata(
+      // Use createContentMetadataBlock helper for consistency
+      metadata = createContentMetadataBlock(
         normalizedUrl,
         null,
         extractedMeta,
@@ -131,16 +128,21 @@ async function processSingleUrl(
           extractArticle: true,
         }
       );
-      const useArticle = shouldUseArticle(true, article);
-      metadata = buildMetadata(
+      const shouldExtractFromArticle = determineContentExtractionSource(
+        true,
+        article
+      );
+      metadata = createContentMetadataBlock(
         normalizedUrl,
         article,
         extractedMeta,
-        useArticle,
+        shouldExtractFromArticle,
         options.includeMetadata
       );
-      sourceHtml = useArticle ? article.content : fetchResult.html;
-      title = useArticle ? article.title : extractedMeta.title;
+      sourceHtml = shouldExtractFromArticle
+        ? article.content
+        : fetchResult.html;
+      title = shouldExtractFromArticle ? article.title : extractedMeta.title;
     }
 
     let content: string;
@@ -154,7 +156,7 @@ async function processSingleUrl(
       content = toJsonl(blocks, metadata);
     }
 
-    const { content: truncatedContent } = truncateContent(
+    const { content: truncatedContent } = enforceContentLengthLimit(
       content,
       options.maxContentLength
     );

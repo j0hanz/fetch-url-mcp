@@ -22,6 +22,7 @@ import {
   cleanParagraph,
   removeInlineTimestamps,
 } from '../utils/content-cleaner.js';
+import { truncateHtml } from '../utils/html-truncator.js';
 import { detectLanguage } from '../utils/language-detector.js';
 import { sanitizeText } from '../utils/sanitizer.js';
 
@@ -219,24 +220,7 @@ function filterBlocks(blocks: ContentBlockUnion[]): ContentBlockUnion[] {
 export function parseHtml(html: string): ContentBlockUnion[] {
   if (!html || typeof html !== 'string') return [];
 
-  let processedHtml = html;
-  if (html.length > config.constants.maxHtmlSize) {
-    logWarn('HTML content exceeds maximum size, truncating at safe boundary', {
-      size: html.length,
-      maxSize: config.constants.maxHtmlSize,
-    });
-
-    // Use lastIndexOf for O(log n) reverse search (10-100x faster than while loop)
-    const lastTag = html.lastIndexOf('>', config.constants.maxHtmlSize);
-
-    // If we found a tag boundary near the limit (within 10% buffer)
-    if (lastTag !== -1 && lastTag > config.constants.maxHtmlSize * 0.9) {
-      processedHtml = html.substring(0, lastTag + 1);
-    } else {
-      // Fallback: simple truncation if no suitable boundary found
-      processedHtml = html.substring(0, config.constants.maxHtmlSize);
-    }
-  }
+  const processedHtml = truncateHtml(html);
 
   try {
     const $ = cheerio.load(processedHtml);
@@ -252,7 +236,7 @@ export function parseHtml(html: string): ContentBlockUnion[] {
           const block = parseElement($, element);
           if (block) blocks.push(block);
         } catch {
-          // Skip element errors
+          // Ignore individual element parsing errors
         }
       });
 

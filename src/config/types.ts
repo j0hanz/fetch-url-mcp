@@ -14,9 +14,9 @@ interface ContentBlock {
 
 export interface MetadataBlock extends ContentBlock {
   type: 'metadata';
-  title?: string | undefined;
-  description?: string | undefined;
-  author?: string | undefined;
+  title?: string;
+  description?: string;
+  author?: string;
   url: string;
   fetchedAt: string;
 }
@@ -40,20 +40,20 @@ export interface ListBlock extends ContentBlock {
 
 export interface CodeBlock extends ContentBlock {
   type: 'code';
-  language?: string | undefined;
+  language?: string;
   text: string;
 }
 
 export interface TableBlock extends ContentBlock {
   type: 'table';
-  headers?: string[] | undefined;
+  headers?: string[];
   rows: string[][];
 }
 
 export interface ImageBlock extends ContentBlock {
   type: 'image';
   src: string;
-  alt?: string | undefined;
+  alt?: string;
 }
 
 export interface BlockquoteBlock extends ContentBlock {
@@ -72,12 +72,12 @@ export type ContentBlockUnion =
   | BlockquoteBlock;
 
 export interface ExtractedArticle {
-  title?: string | undefined;
-  byline?: string | undefined;
+  title?: string;
+  byline?: string;
   content: string;
   textContent: string;
-  excerpt?: string | undefined;
-  siteName?: string | undefined;
+  excerpt?: string;
+  siteName?: string;
 }
 
 export interface CacheEntry {
@@ -95,46 +95,46 @@ export interface ExtractedLink {
 
 interface RequestOptions {
   /** Custom HTTP headers for the request */
-  customHeaders?: Record<string, string> | undefined;
+  customHeaders?: Record<string, string>;
   /** Request timeout in milliseconds (1000-60000) */
-  timeout?: number | undefined;
+  timeout?: number;
   /** Number of retry attempts (1-10) */
-  retries?: number | undefined;
+  retries?: number;
 }
 
 export interface FetchUrlInput extends RequestOptions {
   url: string;
-  extractMainContent?: boolean | undefined;
-  includeMetadata?: boolean | undefined;
-  maxContentLength?: number | undefined;
-  format?: 'jsonl' | 'markdown' | undefined;
+  extractMainContent?: boolean;
+  includeMetadata?: boolean;
+  maxContentLength?: number;
+  format?: 'jsonl' | 'markdown';
 }
 
 export interface FetchLinksInput extends RequestOptions {
   url: string;
-  includeExternal?: boolean | undefined;
-  includeInternal?: boolean | undefined;
-  maxLinks?: number | undefined;
-  filterPattern?: string | undefined;
-  includeImages?: boolean | undefined;
+  includeExternal?: boolean;
+  includeInternal?: boolean;
+  maxLinks?: number;
+  filterPattern?: string;
+  includeImages?: boolean;
 }
 
 export interface FetchMarkdownInput extends RequestOptions {
   url: string;
-  extractMainContent?: boolean | undefined;
-  includeMetadata?: boolean | undefined;
-  maxContentLength?: number | undefined;
-  generateToc?: boolean | undefined;
+  extractMainContent?: boolean;
+  includeMetadata?: boolean;
+  maxContentLength?: number;
+  generateToc?: boolean;
 }
 
 export interface FetchUrlsInput extends RequestOptions {
   urls: string[];
-  extractMainContent?: boolean | undefined;
-  includeMetadata?: boolean | undefined;
-  maxContentLength?: number | undefined;
-  format?: 'jsonl' | 'markdown' | undefined;
-  concurrency?: number | undefined;
-  continueOnError?: boolean | undefined;
+  extractMainContent?: boolean;
+  includeMetadata?: boolean;
+  maxContentLength?: number;
+  format?: 'jsonl' | 'markdown';
+  concurrency?: number;
+  continueOnError?: boolean;
 }
 
 export interface ErrorResponse {
@@ -142,8 +142,8 @@ export interface ErrorResponse {
     message: string;
     code: string;
     statusCode: number;
-    details?: Record<string, unknown> | undefined;
-    stack?: string | undefined;
+    details?: Record<string, unknown>;
+    stack?: string;
   };
 }
 
@@ -160,9 +160,9 @@ export interface RateLimiterOptions {
 }
 
 export interface ExtractedMetadata {
-  title?: string | undefined;
-  description?: string | undefined;
-  author?: string | undefined;
+  title?: string;
+  description?: string;
+  author?: string;
 }
 
 export interface ExtractionResult {
@@ -197,8 +197,8 @@ export interface ExtractLinksOptions {
   includeInternal: boolean;
   includeExternal: boolean;
   includeImages: boolean;
-  maxLinks?: number | undefined;
-  filterPattern?: RegExp | undefined;
+  maxLinks?: number;
+  filterPattern?: RegExp;
 }
 
 export interface TocEntry {
@@ -218,7 +218,7 @@ export interface TransformOptions {
   extractMainContent: boolean;
   includeMetadata: boolean;
   generateToc: boolean;
-  maxContentLength?: number | undefined;
+  maxContentLength?: number;
 }
 
 export interface JsonlTransformResult {
@@ -230,12 +230,12 @@ export interface JsonlTransformResult {
 export interface SingleUrlResult {
   url: string;
   success: boolean;
-  title?: string | undefined;
-  content?: string | undefined;
-  contentBlocks?: number | undefined;
+  title?: string;
+  content?: string;
+  contentBlocks?: number;
   cached: boolean;
-  error?: string | undefined;
-  errorCode?: string | undefined;
+  error?: string;
+  errorCode?: string;
 }
 
 export interface FetchPipelineOptions<T> {
@@ -244,19 +244,19 @@ export interface FetchPipelineOptions<T> {
   /** Cache namespace (e.g., 'url', 'links', 'markdown') */
   cacheNamespace: string;
   /** Optional custom HTTP headers */
-  customHeaders?: Record<string, string> | undefined;
+  customHeaders?: Record<string, string>;
   /** Optional: number of retry attempts (1-10, defaults to 3) */
-  retries?: number | undefined;
+  retries?: number;
   /** Optional: AbortSignal for request cancellation */
-  signal?: AbortSignal | undefined;
+  signal?: AbortSignal;
   /** Optional: per-request timeout override in milliseconds */
-  timeout?: number | undefined;
+  timeout?: number;
   /** Transform function to process HTML into desired format */
   transform: (html: string, url: string) => T;
   /** Optional: serialize result for caching (defaults to JSON.stringify) */
-  serialize?: ((result: T) => string) | undefined;
+  serialize?: (result: T) => string;
   /** Optional: deserialize cached content */
-  deserialize?: ((cached: string) => T) | undefined;
+  deserialize?: (cached: string) => T;
 }
 
 /** Result from the fetch pipeline */
@@ -280,12 +280,12 @@ export interface ToolResponse<T = Record<string, unknown>> {
 export interface BatchUrlResult {
   url: string;
   success: boolean;
-  title?: string | undefined;
-  content?: string | undefined;
-  contentBlocks?: number | undefined;
-  cached?: boolean | undefined;
-  error?: string | undefined;
-  errorCode?: string | undefined;
+  title?: string;
+  content?: string;
+  contentBlocks?: number;
+  cached?: boolean;
+  error?: string;
+  errorCode?: string;
 }
 
 export interface BatchSummary {
