@@ -9,14 +9,12 @@ import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/
 import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
 
 import { config } from './config/index.js';
-import type { McpRequestBody } from './config/types.js';
+import type { McpRequestBody, SessionEntry } from './config/types.js';
 
 import { destroyAgents } from './services/fetcher.js';
 import { logError, logInfo } from './services/logger.js';
-import { SessionManager } from './services/session-manager.js';
 
 import { errorHandler } from './middleware/error-handler.js';
-import { rateLimiter } from './middleware/rate-limiter.js';
 
 import { createMcpServer } from './server.js';
 
@@ -103,8 +101,6 @@ if (isStdioMode) {
     }
   );
 
-  app.use(rateLimiter.middleware());
-
   app.use((req, res, next) => {
     const { origin } = req.headers;
 
@@ -151,7 +147,8 @@ if (isStdioMode) {
     });
   });
 
-  const sessionManager = new SessionManager();
+  // Simple session storage - Map suffices for debugging HTTP mode
+  const sessions = new Map<string, SessionEntry>();
 
   app.post(
     '/mcp',
@@ -178,29 +175,28 @@ if (isStdioMode) {
         id: req.body.id,
         sessionId: sessionId ?? 'none',
         isInitialize: isInitializeRequest(req.body),
-        sessionCount: sessionManager.size,
+        sessionCount: sessions.size,
       });
 
-      const existingSession = sessionId
-        ? sessionManager.get(sessionId)
-        : undefined;
+      const existingSession = sessionId ? sessions.get(sessionId) : undefined;
       if (existingSession && sessionId) {
         ({ transport } = existingSession);
-        sessionManager.update(sessionId);
       } else if (!sessionId && isInitializeRequest(req.body)) {
         transport = new StreamableHTTPServerTransport({
           sessionIdGenerator: () => crypto.randomUUID(),
           onsessioninitialized: (id) => {
-            sessionManager.set(id, transport);
+            sessions.set(id, { transport, createdAt: Date.now() });
+            logInfo('Session initialized', { sessionId: id });
           },
           onsessionclosed: (id) => {
-            sessionManager.delete(id);
+            sessions.delete(id);
+            logInfo('Session closed', { sessionId: id });
           },
         });
 
         transport.onclose = () => {
           if (transport.sessionId) {
-            sessionManager.delete(transport.sessionId);
+            sessions.delete(transport.sessionId);
           }
         };
 
@@ -233,13 +229,11 @@ if (isStdioMode) {
         return;
       }
 
-      const session = sessionManager.get(sessionId);
+      const session = sessionId ? sessions.get(sessionId) : undefined;
       if (!session) {
         res.status(404).json({ error: 'Session not found' });
         return;
       }
-
-      sessionManager.update(sessionId);
 
       await session.transport.handleRequest(req, res);
     })
@@ -249,7 +243,7 @@ if (isStdioMode) {
     '/mcp',
     asyncHandler(async (req: Request, res: Response) => {
       const sessionId = getSessionId(req);
-      const session = sessionId ? sessionManager.get(sessionId) : undefined;
+      const session = sessionId ? sessions.get(sessionId) : undefined;
 
       if (session) {
         await session.transport.handleRequest(req, res);
@@ -292,10 +286,12 @@ if (isStdioMode) {
 
     process.stdout.write(`\n${signal} received, shutting down gracefully...\n`);
 
-    rateLimiter.destroy();
-    sessionManager.destroy();
-
-    await sessionManager.closeAll();
+    // Close all sessions
+    const closePromises = Array.from(sessions.values()).map((session) =>
+      session.transport.close()
+    );
+    await Promise.allSettled(closePromises);
+    sessions.clear();
 
     destroyAgents();
 
