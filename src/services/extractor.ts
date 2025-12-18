@@ -82,61 +82,7 @@ function extractStandardMeta(document: Document): {
   return data;
 }
 
-export function extractMetadata(html: string): ExtractedMetadata {
-  try {
-    const dom = new JSDOM(html);
-    const { document } = dom.window;
-
-    const ogData = extractOpenGraph(document);
-    const twitterData = extractTwitterCard(document);
-    const standardData = extractStandardMeta(document);
-
-    return {
-      title: ogData.title ?? twitterData.title ?? standardData.title,
-      description:
-        ogData.description ??
-        twitterData.description ??
-        standardData.description,
-      author: standardData.author,
-    };
-  } catch (error) {
-    logWarn('Failed to extract metadata', {
-      error: error instanceof Error ? error.message : 'Unknown',
-    });
-    return {};
-  }
-}
-
-function extractArticleWithJsdom(
-  html: string,
-  url: string
-): ExtractedArticle | null {
-  try {
-    const dom = new JSDOM(html, { url, virtualConsole: sharedVirtualConsole });
-    const { document } = dom.window;
-
-    const reader = new Readability(document);
-    const article = reader.parse();
-
-    if (!article) return null;
-
-    return {
-      title: article.title ?? undefined,
-      byline: article.byline ?? undefined,
-      content: article.content ?? '',
-      textContent: article.textContent ?? '',
-      excerpt: article.excerpt ?? undefined,
-      siteName: article.siteName ?? undefined,
-    };
-  } catch (error) {
-    logError(
-      'Failed to extract article with JSDOM',
-      error instanceof Error ? error : undefined
-    );
-    return null;
-  }
-}
-
+// Main extraction function
 export function extractContent(
   html: string,
   url: string,
@@ -153,11 +99,49 @@ export function extractContent(
   }
 
   try {
-    const metadata = extractMetadata(truncateHtml(html));
+    // Truncate HTML to improve performance
+    const processedHtml = truncateHtml(html);
+    // Parse HTML with JSDOM
+    const dom = new JSDOM(processedHtml, {
+      url,
+      virtualConsole: sharedVirtualConsole,
+    });
+    const { document } = dom.window;
+    const ogData = extractOpenGraph(document);
+    const twitterData = extractTwitterCard(document);
+    const standardData = extractStandardMeta(document);
 
-    const article = options.extractArticle
-      ? extractArticleWithJsdom(truncateHtml(html), url)
-      : null;
+    const metadata: ExtractedMetadata = {
+      title: ogData.title ?? twitterData.title ?? standardData.title,
+      description:
+        ogData.description ??
+        twitterData.description ??
+        standardData.description,
+      author: standardData.author,
+    };
+    let article: ExtractedArticle | null = null;
+    if (options.extractArticle) {
+      try {
+        const reader = new Readability(document);
+        const parsed = reader.parse();
+
+        if (parsed) {
+          article = {
+            title: parsed.title ?? undefined,
+            byline: parsed.byline ?? undefined,
+            content: parsed.content ?? '',
+            textContent: parsed.textContent ?? '',
+            excerpt: parsed.excerpt ?? undefined,
+            siteName: parsed.siteName ?? undefined,
+          };
+        }
+      } catch (error) {
+        logError(
+          'Failed to extract article with Readability',
+          error instanceof Error ? error : undefined
+        );
+      }
+    }
 
     return { article, metadata };
   } catch (error) {
