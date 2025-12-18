@@ -46,7 +46,10 @@ export async function startStdioServer(): Promise<void> {
     server
       .close()
       .catch((err: unknown) => {
-        logError('Error during shutdown', err instanceof Error ? err : undefined);
+        logError(
+          'Error during shutdown',
+          err instanceof Error ? err : undefined
+        );
       })
       .finally(() => {
         process.exit(0);

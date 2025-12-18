@@ -1,4 +1,4 @@
-import { JSDOM, VirtualConsole } from 'jsdom';
+import { JSDOM } from 'jsdom';
 
 import { Readability } from '@mozilla/readability';
 
@@ -11,10 +11,6 @@ import type {
 import { truncateHtml } from '../utils/html-truncator.js';
 
 import { logError, logWarn } from './logger.js';
-
-const sharedVirtualConsole = new VirtualConsole();
-sharedVirtualConsole.on('error', () => {});
-sharedVirtualConsole.on('warn', () => {});
 
 function extractOpenGraph(document: Document): {
   title?: string;
@@ -102,10 +98,7 @@ export function extractContent(
     // Truncate HTML to improve performance
     const processedHtml = truncateHtml(html);
     // Parse HTML with JSDOM
-    const dom = new JSDOM(processedHtml, {
-      url,
-      virtualConsole: sharedVirtualConsole,
-    });
+    const dom = new JSDOM(processedHtml, { url });
     const { document } = dom.window;
     const ogData = extractOpenGraph(document);
     const twitterData = extractTwitterCard(document);

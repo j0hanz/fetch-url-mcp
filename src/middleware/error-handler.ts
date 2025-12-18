@@ -6,11 +6,7 @@ import { FetchError } from '../errors/app-error.js';
 
 import { logError } from '../services/logger.js';
 
-export function errorHandler(
-  err: Error,
-  req: Request,
-  res: Response
-): void {
+export function errorHandler(err: Error, req: Request, res: Response): void {
   const isFetchError = err instanceof FetchError;
   const statusCode = isFetchError ? err.statusCode : 500;
   const code = isFetchError ? err.code : 'INTERNAL_ERROR';

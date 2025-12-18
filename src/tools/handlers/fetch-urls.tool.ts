@@ -14,7 +14,6 @@ import { fetchUrlWithRetry } from '../../services/fetcher.js';
 import { logDebug, logError, logWarn } from '../../services/logger.js';
 import { parseHtml } from '../../services/parser.js';
 
-import { runWithConcurrency } from '../../utils/concurrency.js';
 import { createToolErrorResponse } from '../../utils/tool-error-handler.js';
 import { validateAndNormalizeUrl } from '../../utils/url-validator.js';
 import {
@@ -325,33 +324,41 @@ export async function fetchUrlsToolHandler(
       format,
     };
 
-    const tasks = validUrls.map(
-      (url) => () => processSingleUrl(url, processOptions)
-    );
+    // Process URLs in batches using native Promise.allSettled
+    const results: BatchUrlResult[] = [];
+    const batchSize = Math.min(concurrency, validUrls.length);
 
-    const settledResults = await runWithConcurrency(concurrency, tasks, {
-      onProgress: (completed, total) => {
-        logDebug('Batch progress', {
-          completed,
-          total,
-          percentage: Math.round((completed / total) * 100),
-        });
-      },
-    });
+    for (let i = 0; i < validUrls.length; i += batchSize) {
+      const batch = validUrls.slice(i, i + batchSize);
+      const batchTasks = batch.map((url) =>
+        processSingleUrl(url, processOptions)
+      );
 
-    const results: BatchUrlResult[] = settledResults.map((result, index) => {
-      if (result.status === 'fulfilled') {
-        return result.value;
-      }
+      logDebug('Processing batch', {
+        batch: i / batchSize + 1,
+        urls: batch.length,
+        total: validUrls.length,
+      });
 
-      return {
-        url: validUrls[index] ?? 'unknown',
-        success: false as const,
-        cached: false as const,
-        error: extractRejectionMessage(result),
-        errorCode: 'PROMISE_REJECTED',
-      };
-    });
+      const settledResults = await Promise.allSettled(batchTasks);
+
+      const batchResults: BatchUrlResult[] = settledResults.map(
+        (result, index) => {
+          if (result.status === 'fulfilled') {
+            return result.value;
+          }
+          return {
+            url: batch[index] ?? 'unknown',
+            success: false as const,
+            cached: false as const,
+            error: extractRejectionMessage(result),
+            errorCode: 'PROMISE_REJECTED',
+          };
+        }
+      );
+
+      results.push(...batchResults);
+    }
 
     if (!continueOnError) {
       const firstError = results.find((result) => !result.success);

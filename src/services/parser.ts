@@ -23,10 +23,42 @@ import {
   removeInlineTimestamps,
 } from '../utils/content-cleaner.js';
 import { truncateHtml } from '../utils/html-truncator.js';
-import { detectLanguage } from '../utils/language-detector.js';
 import { sanitizeText } from '../utils/sanitizer.js';
 
 import { logWarn } from './logger.js';
+
+function detectLanguageFromCode(code: string): string | undefined {
+  // Common language patterns for code block detection
+  const patterns: readonly [RegExp, string][] = [
+    [
+      /^\s*import\s+.*\s+from\s+['"]react['"]|<[A-Z][a-zA-Z]*[\s/>]|jsx\s*:|className=/m,
+      'jsx',
+    ],
+    [
+      /:\s*(string|number|boolean|void|any|unknown|never)\b|interface\s+\w+|type\s+\w+\s*=/m,
+      'typescript',
+    ],
+    [/^\s*(fn|let\s+mut|impl|struct|enum|use\s+\w+::)/m, 'rust'],
+    [
+      /^\s*(export|const|let|var|function|class|async|await)\b|^\s*import\s+.*['"]]/m,
+      'javascript',
+    ],
+    [/^\s*(def|class|import|from|if __name__|print\()/m, 'python'],
+    [
+      /^\s*(npm|yarn|pnpm|npx|brew|apt|pip|cargo|go )\s+(install|add|run|build|start)/m,
+      'bash',
+    ],
+    [/^\s*[$#]\s+\w+|^\s*#!|^\s*(sudo|chmod|mkdir|cd|ls|cat|echo)\s+/m, 'bash'],
+    [/^\s*[.#@]?[\w-]+\s*\{[^}]*\}|@media|@import|@keyframes/m, 'css'],
+    [/^\s*<(!DOCTYPE|html|head|body|div|span|p|a|script|style)\b/im, 'html'],
+    [/^\s*\{\s*"|^\s*\[\s*("|\d|true|false|null)/m, 'json'],
+    [/^\s*[\w-]+:\s*.+$/m, 'yaml'],
+    [/^\s*(SELECT|INSERT|UPDATE|DELETE|CREATE|ALTER|DROP)\s+/im, 'sql'],
+    [/^\s*(func|package|import\s+")/m, 'go'],
+  ];
+
+  return patterns.find(([pattern]) => pattern.test(code))?.[1];
+}
 
 const CONTENT_SELECTOR =
   'h1, h2, h3, h4, h5, h6, p, ul, ol, pre, code:not(pre code), table, img, blockquote';
@@ -92,7 +124,7 @@ function parseCode($: CheerioAPI, element: Element): CodeBlock | null {
     /highlight-(\w+)/.exec(className) ??
     /^(\w+)$/.exec(dataLang);
 
-  const language = languageMatch?.[1] ?? detectLanguage(text);
+  const language = languageMatch?.[1] ?? detectLanguageFromCode(text);
 
   return {
     type: 'code',

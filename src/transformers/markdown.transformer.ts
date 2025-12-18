@@ -2,7 +2,30 @@ import TurndownService from 'turndown';
 
 import type { MetadataBlock } from '../config/types.js';
 
-import { detectLanguage } from '../utils/language-detector.js';
+function detectLanguageFromCode(code: string): string | undefined {
+  const patterns: readonly [RegExp, string][] = [
+    [
+      /^\s*import\s+.*\s+from\s+['"]react['"]|<[A-Z][a-zA-Z]*[\s/>]|jsx\s*:|className=/m,
+      'jsx',
+    ],
+    [
+      /:\s*(string|number|boolean|void|any|unknown|never)\b|interface\s+\w+|type\s+\w+\s*=/m,
+      'typescript',
+    ],
+    [/^\s*(fn|let\s+mut|impl|struct|enum|use\s+\w+::)/m, 'rust'],
+    [
+      /^\s*(export|const|let|var|function|class|async|await)\b|^\s*import\s+.*['"]]/m,
+      'javascript',
+    ],
+    [/^\s*(def|class|import|from|if __name__|print\()/m, 'python'],
+    [/^\s*(npm|yarn|pnpm|npx)\s+(install|add|run|build|start)/m, 'bash'],
+    [/^\s*[.#@]?[\w-]+\s*\{[^}]*\}|@media|@import/m, 'css'],
+    [/^\s*<(!DOCTYPE|html|head|body|div)\b/im, 'html'],
+    [/^\s*\{\s*"|^\s*\[\s*(")/m, 'json'],
+    [/^\s*(SELECT|INSERT|UPDATE|DELETE|CREATE)\s+/im, 'sql'],
+  ];
+  return patterns.find(([pattern]) => pattern.test(code))?.[1];
+}
 
 const NOISE_LINE_PATTERNS: readonly RegExp[] = [
   // Single letters or panel labels (common in code examples)
@@ -92,7 +115,7 @@ turndown.addRule('fencedCodeBlockWithLanguage', {
       /highlight-(\w+)/.exec(className) ??
       /^(\w+)$/.exec(dataLang);
 
-    const language = languageMatch?.[1] ?? detectLanguage(code) ?? '';
+    const language = languageMatch?.[1] ?? detectLanguageFromCode(code) ?? '';
 
     return `\n\n\`\`\`${language}\n${code.replace(/\n$/, '')}\n\`\`\`\n\n`;
   },
