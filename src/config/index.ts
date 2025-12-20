@@ -94,5 +94,13 @@ export const config = {
       /^::ffff:172\.(1[6-9]|2\d|3[01])\./,
       /^::ffff:192\.168\./,
     ] as readonly RegExp[],
+    blockedHeaders: new Set([
+      'host',
+      'authorization',
+      'cookie',
+      'x-forwarded-for',
+      'x-real-ip',
+      'proxy-authorization',
+    ]),
   },
 } as const;

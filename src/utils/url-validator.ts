@@ -1,5 +1,3 @@
-import dns from 'dns/promises';
-
 import { config } from '../config/index.js';
 
 /**
@@ -7,36 +5,6 @@ import { config } from '../config/index.js';
  */
 export function isBlockedIp(ip: string): boolean {
   return config.security.blockedIpPatterns.some((pattern) => pattern.test(ip));
-}
-
-export async function validateResolvedIps(hostname: string): Promise<void> {
-  if (/^[\d.]+$/.test(hostname) || hostname.includes(':')) {
-    return;
-  }
-
-  try {
-    const ipv4Addresses = await dns.resolve4(hostname).catch(() => []);
-    for (const ip of ipv4Addresses) {
-      if (isBlockedIp(ip) || config.security.blockedHosts.has(ip)) {
-        throw new Error(
-          `DNS rebinding detected: ${hostname} resolves to blocked IP ${ip}`
-        );
-      }
-    }
-
-    const ipv6Addresses = await dns.resolve6(hostname).catch(() => []);
-    for (const ip of ipv6Addresses) {
-      if (isBlockedIp(ip) || config.security.blockedHosts.has(ip)) {
-        throw new Error(
-          `DNS rebinding detected: ${hostname} resolves to blocked IP ${ip}`
-        );
-      }
-    }
-  } catch (error) {
-    if (error instanceof Error && error.message.includes('DNS rebinding')) {
-      throw error;
-    }
-  }
 }
 
 export function validateAndNormalizeUrl(urlString: string): string {

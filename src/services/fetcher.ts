@@ -26,15 +26,6 @@ interface TimedAxiosRequestConfig extends AxiosRequestConfig {
   [REQUEST_ID]?: string;
 }
 
-const BLOCKED_HEADERS = new Set([
-  'host',
-  'authorization',
-  'cookie',
-  'x-forwarded-for',
-  'x-real-ip',
-  'proxy-authorization',
-]);
-
 function sanitizeHeaders(
   headers?: Record<string, string>
 ): Record<string, string> | undefined {
@@ -42,7 +33,7 @@ function sanitizeHeaders(
 
   const sanitized: Record<string, string> = {};
   for (const [key, value] of Object.entries(headers)) {
-    if (!BLOCKED_HEADERS.has(key.toLowerCase())) {
+    if (!config.security.blockedHeaders.has(key.toLowerCase())) {
       // Prevent HTTP header injection via CRLF
       if (/[\r\n]/.test(key) || /[\r\n]/.test(value)) {
         continue;
@@ -78,9 +69,9 @@ function customLookup(
     for (const addr of addresses) {
       const ip = typeof addr === 'string' ? addr : addr.address;
       if (isBlockedIp(ip)) {
-        const error = new Error(`Blocked IP: ${ip}`);
-        (error as any).code = 'EBLOCKED';
-        callback(error as NodeJS.ErrnoException, address, family);
+        const error = new Error(`Blocked IP: ${ip}`) as NodeJS.ErrnoException;
+        error.code = 'EBLOCKED';
+        callback(error, address, family);
         return;
       }
     }
