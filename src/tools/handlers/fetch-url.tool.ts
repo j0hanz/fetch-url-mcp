@@ -84,7 +84,8 @@ export async function fetchUrlToolHandler(
       retries: input.retries,
       transform: (html, url) =>
         transformToJsonl(html, url, { extractMainContent, includeMetadata }),
-      serialize: (data) => data.content,
+      serialize: (data) =>
+        enforceContentLengthLimit(data.content, input.maxContentLength).content,
       deserialize: (cached) => ({
         content: cached,
         contentBlocks: 0,

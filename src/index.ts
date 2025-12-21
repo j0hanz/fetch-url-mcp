@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+import { randomUUID, timingSafeEqual } from 'node:crypto';
+
 import express, {
   type NextFunction,
   type Request,
@@ -13,7 +15,7 @@ import type { McpRequestBody, SessionEntry } from './config/types.js';
 
 import { requestContext } from './services/context.js';
 import { destroyAgents } from './services/fetcher.js';
-import { logError, logInfo } from './services/logger.js';
+import { logError, logInfo, logWarn } from './services/logger.js';
 
 import { errorHandler } from './middleware/error-handler.js';
 
@@ -50,6 +52,51 @@ const ALLOWED_ORIGINS: string[] = process.env.ALLOWED_ORIGINS
   : [];
 
 const ALLOW_ALL_ORIGINS = process.env.CORS_ALLOW_ALL === 'true';
+const AUTH_TOKEN = config.security.apiKey;
+const REQUIRE_AUTH = config.security.requireAuth;
+const ALLOW_REMOTE = config.security.allowRemote;
+
+function isLoopbackHost(host: string): boolean {
+  return host === '127.0.0.1' || host === '::1' || host === 'localhost';
+}
+
+function normalizeHeaderValue(
+  header: string | string[] | undefined
+): string | undefined {
+  return Array.isArray(header) ? header[0] : header;
+}
+
+function timingSafeEquals(a: string, b: string): boolean {
+  if (a.length !== b.length) return false;
+  return timingSafeEqual(Buffer.from(a), Buffer.from(b));
+}
+
+function isAuthorizedRequest(req: Request): boolean {
+  if (!REQUIRE_AUTH) return true;
+  if (!AUTH_TOKEN) return false;
+
+  const authHeader = normalizeHeaderValue(req.headers.authorization);
+  if (authHeader?.startsWith('Bearer ')) {
+    const token = authHeader.slice('Bearer '.length).trim();
+    return token.length > 0 && timingSafeEquals(token, AUTH_TOKEN);
+  }
+
+  const apiKeyHeader = normalizeHeaderValue(req.headers['x-api-key']);
+  if (apiKeyHeader) {
+    return timingSafeEquals(apiKeyHeader.trim(), AUTH_TOKEN);
+  }
+
+  return false;
+}
+
+function authMiddleware(req: Request, res: Response, next: NextFunction): void {
+  if (isAuthorizedRequest(req)) {
+    next();
+    return;
+  }
+
+  res.status(401).json({ error: 'Unauthorized' });
+}
 
 function getSessionId(req: Request): string | undefined {
   const header = req.headers['mcp-session-id'];
@@ -87,7 +134,7 @@ if (isStdioMode) {
 
   // Context middleware
   app.use((req, res, next) => {
-    const requestId = crypto.randomUUID();
+    const requestId = randomUUID();
     const sessionId = getSessionId(req);
 
     requestContext.run({ requestId, sessionId }, () => {
@@ -133,7 +180,7 @@ if (isStdioMode) {
       res.header('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
       res.header(
         'Access-Control-Allow-Headers',
-        'Content-Type, mcp-session-id'
+        'Content-Type, mcp-session-id, Authorization, X-API-Key'
       );
       res.header('Access-Control-Max-Age', '86400');
     } else if (ALLOWED_ORIGINS.length > 0) {
@@ -158,8 +205,82 @@ if (isStdioMode) {
     });
   });
 
+  if (!ALLOW_REMOTE && !isLoopbackHost(config.server.host)) {
+    logError(
+      'Refusing to bind to non-loopback host without ALLOW_REMOTE=true',
+      { host: config.server.host }
+    );
+    process.exit(1);
+  }
+
+  if (REQUIRE_AUTH && !AUTH_TOKEN) {
+    logError(
+      'REQUIRE_AUTH is enabled but API_KEY is not set; refusing to start'
+    );
+    process.exit(1);
+  }
+
   // Simple session storage - Map suffices for debugging HTTP mode
   const sessions = new Map<string, SessionEntry>();
+  const { sessionTtlMs, maxSessions } = config.server;
+
+  const evictExpiredSessions = (): number => {
+    const now = Date.now();
+    let evicted = 0;
+
+    for (const [id, session] of sessions.entries()) {
+      if (now - session.lastSeen > sessionTtlMs) {
+        sessions.delete(id);
+        evicted += 1;
+        session.transport.close().catch((error: unknown) => {
+          logWarn('Failed to close expired session', {
+            sessionId: id,
+            error: error instanceof Error ? error.message : 'Unknown error',
+          });
+        });
+      }
+    }
+
+    return evicted;
+  };
+
+  const evictOldestSession = (): boolean => {
+    let oldestId: string | undefined;
+    let oldestSeen = Number.POSITIVE_INFINITY;
+
+    for (const [id, session] of sessions.entries()) {
+      if (session.lastSeen < oldestSeen) {
+        oldestSeen = session.lastSeen;
+        oldestId = id;
+      }
+    }
+
+    if (!oldestId) return false;
+
+    const session = sessions.get(oldestId);
+    sessions.delete(oldestId);
+    session?.transport.close().catch((error: unknown) => {
+      logWarn('Failed to close evicted session', {
+        sessionId: oldestId,
+        error: error instanceof Error ? error.message : 'Unknown error',
+      });
+    });
+
+    return true;
+  };
+
+  const sessionCleanupInterval = setInterval(
+    () => {
+      const evicted = evictExpiredSessions();
+      if (evicted > 0) {
+        logInfo('Expired sessions evicted', { evicted });
+      }
+    },
+    Math.min(Math.max(Math.floor(sessionTtlMs / 2), 10000), 60000)
+  );
+  sessionCleanupInterval.unref();
+
+  app.use('/mcp', authMiddleware);
 
   app.post(
     '/mcp',
@@ -191,12 +312,28 @@ if (isStdioMode) {
 
       const existingSession = sessionId ? sessions.get(sessionId) : undefined;
       if (existingSession && sessionId) {
+        existingSession.lastSeen = Date.now();
         ({ transport } = existingSession);
       } else if (!sessionId && isInitializeRequest(req.body)) {
+        evictExpiredSessions();
+
+        if (sessions.size >= maxSessions && !evictOldestSession()) {
+          res.status(503).json({
+            jsonrpc: '2.0',
+            error: {
+              code: -32000,
+              message: 'Server busy: maximum sessions reached',
+            },
+            id: null,
+          });
+          return;
+        }
+
         transport = new StreamableHTTPServerTransport({
-          sessionIdGenerator: () => crypto.randomUUID(),
+          sessionIdGenerator: () => randomUUID(),
           onsessioninitialized: (id) => {
-            sessions.set(id, { transport, createdAt: Date.now() });
+            const now = Date.now();
+            sessions.set(id, { transport, createdAt: now, lastSeen: now });
             logInfo('Session initialized', { sessionId: id });
           },
           onsessionclosed: (id) => {
@@ -246,6 +383,7 @@ if (isStdioMode) {
         return;
       }
 
+      session.lastSeen = Date.now();
       await session.transport.handleRequest(req, res);
     })
   );
@@ -257,6 +395,7 @@ if (isStdioMode) {
       const session = sessionId ? sessions.get(sessionId) : undefined;
 
       if (session) {
+        session.lastSeen = Date.now();
         await session.transport.handleRequest(req, res);
       } else {
         res.status(204).end();

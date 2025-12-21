@@ -22,7 +22,10 @@ import type { FetchOptions } from '../config/types.js';
 
 import { FetchError } from '../errors/app-error.js';
 
-import { isBlockedIp } from '../utils/url-validator.js';
+import {
+  isBlockedIp,
+  validateAndNormalizeUrl,
+} from '../utils/url-validator.js';
 
 import { logDebug, logError, logWarn } from './logger.js';
 
@@ -94,6 +97,50 @@ function resolveDns(
 
     callback(null, address, family);
   });
+}
+
+interface RedirectOptions {
+  protocol?: string;
+  hostname?: string;
+  host?: string;
+  href?: string;
+  path?: string;
+  port?: string | number;
+  auth?: string;
+}
+
+function buildRedirectUrl(options: RedirectOptions): string | null {
+  if (typeof options.href === 'string' && options.href.length > 0) {
+    return options.href;
+  }
+
+  const protocol = options.protocol ?? 'http:';
+  const hostname = options.hostname ?? options.host;
+  if (!hostname) return null;
+
+  const port = options.port ? `:${options.port}` : '';
+  const path = options.path ?? '/';
+
+  return `${protocol}//${hostname}${port}${path}`;
+}
+
+function validateRedirectTarget(options: RedirectOptions): void {
+  if (options.auth) {
+    const error = new Error(
+      'Redirect target includes credentials'
+    ) as NodeJS.ErrnoException;
+    error.code = 'EBADREDIRECT';
+    throw error;
+  }
+
+  const targetUrl = buildRedirectUrl(options);
+  if (!targetUrl) {
+    const error = new Error('Invalid redirect target') as NodeJS.ErrnoException;
+    error.code = 'EBADREDIRECT';
+    throw error;
+  }
+
+  validateAndNormalizeUrl(targetUrl);
 }
 
 function getAgentOptions(): http.AgentOptions {
@@ -367,6 +414,9 @@ const client: AxiosInstance = axios.create({
   maxContentLength: config.fetcher.maxContentLength,
   httpAgent,
   httpsAgent,
+  beforeRedirect: (options) => {
+    validateRedirectTarget(options as RedirectOptions);
+  },
   headers: {
     'User-Agent': config.fetcher.userAgent,
     Accept:
@@ -391,12 +441,13 @@ export async function fetchUrlWithRetry(
   options?: FetchOptions,
   maxRetries = 3
 ): Promise<string> {
-  const policy = new RetryPolicy(maxRetries, url);
+  const normalizedUrl = validateAndNormalizeUrl(url);
+  const policy = new RetryPolicy(maxRetries, normalizedUrl);
 
   return policy.execute(async () => {
     const requestConfig: AxiosRequestConfig = {
       method: 'GET',
-      url,
+      url: normalizedUrl,
       responseType: 'text',
     };
 
@@ -424,7 +475,7 @@ export async function fetchUrlWithRetry(
       }
       throw new FetchError(
         `Unexpected error: ${error instanceof Error ? error.message : 'Unknown'}`,
-        url
+        normalizedUrl
       );
     }
   }, options?.signal);

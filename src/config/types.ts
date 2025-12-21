@@ -349,6 +349,7 @@ export interface ConcurrencyExecutionOptions {
 export interface SessionEntry {
   readonly transport: StreamableHTTPServerTransport;
   createdAt: number;
+  lastSeen: number;
 }
 
 // Tool response types

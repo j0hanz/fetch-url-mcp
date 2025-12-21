@@ -17,7 +17,7 @@ export function errorHandler(err: Error, req: Request, res: Response): void {
     err
   );
 
-  if (isFetchError && err.code === 'RATE_LIMITED' && err.details.retryAfter) {
+  if (isFetchError && err.statusCode === 429 && err.details.retryAfter) {
     const retryAfter = err.details.retryAfter as number;
     res.set('Retry-After', String(retryAfter));
   }

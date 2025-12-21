@@ -35,12 +35,23 @@ function parseLogLevel(
   return 'info';
 }
 
+const host = process.env.HOST ?? '127.0.0.1';
+const isLoopbackHost =
+  host === '127.0.0.1' || host === '::1' || host === 'localhost';
+
 export const config = {
   server: {
     name: 'superFetch',
     version: '1.0.0',
     port: parseInteger(process.env.PORT, 3000, 1024, 65535),
-    host: process.env.HOST ?? '127.0.0.1',
+    host,
+    sessionTtlMs: parseInteger(
+      process.env.SESSION_TTL_MS,
+      30 * 60 * 1000,
+      60 * 1000,
+      24 * 60 * 60 * 1000
+    ),
+    maxSessions: parseInteger(process.env.MAX_SESSIONS, 200, 10, 10000),
   },
   fetcher: {
     timeout: parseInteger(process.env.FETCH_TIMEOUT, 30000, 5000, 120000),
@@ -102,5 +113,8 @@ export const config = {
       'x-real-ip',
       'proxy-authorization',
     ]),
+    apiKey: process.env.API_KEY,
+    allowRemote: parseBoolean(process.env.ALLOW_REMOTE, false),
+    requireAuth: parseBoolean(process.env.REQUIRE_AUTH, !isLoopbackHost),
   },
 } as const;

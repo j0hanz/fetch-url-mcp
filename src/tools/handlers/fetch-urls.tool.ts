@@ -2,6 +2,7 @@ import type {
   BatchResponseContent,
   BatchSummary,
   BatchUrlResult,
+  FetchOptions,
   FetchUrlsInput,
   MetadataBlock,
   ToolResponse,
@@ -69,6 +70,8 @@ interface SingleUrlProcessOptions {
   readonly includeMetadata: boolean;
   readonly maxContentLength?: number;
   readonly format: 'jsonl' | 'markdown';
+  readonly requestOptions?: FetchOptions;
+  readonly maxRetries?: number;
 }
 
 interface SingleUrlResult {
@@ -185,7 +188,11 @@ async function processSingleUrl(
     );
     if (cachedResult) return cachedResult;
 
-    const html = await fetchUrlWithRetry(normalizedUrl);
+    const html = await fetchUrlWithRetry(
+      normalizedUrl,
+      options.requestOptions,
+      options.maxRetries
+    );
 
     const { sourceHtml, title, metadata } = processContentExtraction(
       html,
@@ -322,6 +329,11 @@ export async function fetchUrlsToolHandler(
       includeMetadata: input.includeMetadata ?? true,
       maxContentLength: input.maxContentLength,
       format,
+      requestOptions: {
+        customHeaders: input.customHeaders,
+        timeout: input.timeout,
+      },
+      maxRetries: input.retries,
     };
 
     // Process URLs in batches using native Promise.allSettled
