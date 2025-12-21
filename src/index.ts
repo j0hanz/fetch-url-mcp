@@ -11,6 +11,7 @@ import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
 import { config } from './config/index.js';
 import type { McpRequestBody, SessionEntry } from './config/types.js';
 
+import { requestContext } from './services/context.js';
 import { destroyAgents } from './services/fetcher.js';
 import { logError, logInfo } from './services/logger.js';
 
@@ -83,6 +84,16 @@ if (isStdioMode) {
   const app = express();
 
   app.use(express.json({ limit: '1mb' }));
+
+  // Context middleware
+  app.use((req, res, next) => {
+    const requestId = crypto.randomUUID();
+    const sessionId = getSessionId(req);
+
+    requestContext.run({ requestId, sessionId }, () => {
+      next();
+    });
+  });
 
   app.use(
     (err: Error, _req: Request, res: Response, next: NextFunction): void => {

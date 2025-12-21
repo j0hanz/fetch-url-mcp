@@ -9,10 +9,13 @@ import axios, {
   type RawAxiosResponseHeaders,
 } from 'axios';
 import crypto from 'crypto';
+import diagnosticsChannel from 'diagnostics_channel';
 import dns from 'dns';
 import http from 'http';
 import https from 'https';
 import os from 'os';
+import { performance } from 'perf_hooks';
+import { setTimeout } from 'timers/promises';
 
 import { config } from '../config/index.js';
 import type { FetchOptions } from '../config/types.js';
@@ -27,6 +30,7 @@ import { logDebug, logError, logWarn } from './logger.js';
 
 const REQUEST_START_TIME = Symbol('requestStartTime');
 const REQUEST_ID = Symbol('requestId');
+const fetchChannel = diagnosticsChannel.channel('superfetch.fetch');
 
 interface TimedAxiosRequestConfig extends InternalAxiosRequestConfig {
   [REQUEST_START_TIME]?: number;
@@ -108,14 +112,20 @@ function handleRequest(
   config: InternalAxiosRequestConfig
 ): InternalAxiosRequestConfig {
   const timedConfig = config as TimedAxiosRequestConfig;
-  timedConfig[REQUEST_START_TIME] = Date.now();
+  timedConfig[REQUEST_START_TIME] = performance.now();
   timedConfig[REQUEST_ID] = crypto.randomUUID().substring(0, 8);
 
-  logDebug('HTTP Request', {
+  const eventData = {
     requestId: timedConfig[REQUEST_ID],
     method: config.method?.toUpperCase(),
     url: config.url,
-  });
+  };
+
+  if (fetchChannel.hasSubscribers) {
+    fetchChannel.publish({ type: 'start', ...eventData });
+  }
+
+  logDebug('HTTP Request', eventData);
 
   return config;
 }
@@ -127,7 +137,7 @@ function handleRequestError(error: AxiosError): Promise<never> {
 
 function calculateDuration(config: TimedAxiosRequestConfig): number {
   const startTime = config[REQUEST_START_TIME];
-  return startTime ? Date.now() - startTime : 0;
+  return startTime ? performance.now() - startTime : 0;
 }
 
 function logResponse(
@@ -169,6 +179,22 @@ function parseRetryAfter(header: unknown): number {
 
 function handleResponseError(error: AxiosError): Promise<never> {
   const url = error.config?.url ?? 'unknown';
+
+  if (fetchChannel.hasSubscribers) {
+    const timedConfig = error.config as TimedAxiosRequestConfig | undefined;
+    const requestId = timedConfig?.[REQUEST_ID];
+    const duration = timedConfig ? calculateDuration(timedConfig) : 0;
+
+    fetchChannel.publish({
+      type: 'error',
+      requestId,
+      url,
+      error: error.message,
+      code: error.code,
+      status: error.response?.status,
+      duration,
+    });
+  }
 
   if (
     isCancel(error) ||
@@ -224,6 +250,15 @@ function handleResponse(response: AxiosResponse): AxiosResponse {
   // Cleanup symbols safely
   timedConfig[REQUEST_START_TIME] = undefined;
   timedConfig[REQUEST_ID] = undefined;
+
+  if (fetchChannel.hasSubscribers) {
+    fetchChannel.publish({
+      type: 'end',
+      requestId,
+      status: response.status,
+      duration,
+    });
+  }
 
   logResponse(response, requestId, duration);
 
@@ -309,7 +344,7 @@ class RetryPolicy {
       });
     }
 
-    await new Promise((resolve) => setTimeout(resolve, delay));
+    await setTimeout(delay);
   }
 
   private calculateBackoff(attempt: number): number {

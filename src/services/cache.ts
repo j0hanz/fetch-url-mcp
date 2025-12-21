@@ -1,11 +1,11 @@
+import { createHash } from 'node:crypto';
+
 import NodeCache from 'node-cache';
 
 import { config } from '../config/index.js';
 import type { CacheEntry } from '../config/types.js';
 
 import { logWarn } from './logger.js';
-
-const MAX_KEY_LENGTH = 500;
 
 const contentCache = new NodeCache({
   stdTTL: config.cache.ttl,
@@ -17,8 +17,12 @@ const contentCache = new NodeCache({
 export function createCacheKey(namespace: string, url: string): string | null {
   if (!namespace || !url) return null;
 
-  const key = `${namespace}:${url}`;
-  return key.length <= MAX_KEY_LENGTH ? key : key.substring(0, MAX_KEY_LENGTH);
+  // Hash URL for consistent key length and smaller memory footprint
+  const urlHash = createHash('sha256')
+    .update(url)
+    .digest('hex')
+    .substring(0, 16);
+  return `${namespace}:${urlHash}`;
 }
 
 export function get(cacheKey: string | null): CacheEntry | undefined {

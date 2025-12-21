@@ -1,8 +1,18 @@
 import { config } from '../config/index.js';
 import type { LogLevel, LogMetadata } from '../config/types.js';
 
+import { getRequestId, getSessionId } from './context.js';
+
 function formatMetadata(meta?: LogMetadata): string {
-  return meta && Object.keys(meta).length > 0 ? ` ${JSON.stringify(meta)}` : '';
+  const requestId = getRequestId();
+  const sessionId = getSessionId();
+
+  const contextMeta: LogMetadata = {};
+  if (requestId) contextMeta.requestId = requestId;
+  if (sessionId) contextMeta.sessionId = sessionId;
+
+  const merged = { ...contextMeta, ...meta };
+  return Object.keys(merged).length > 0 ? ` ${JSON.stringify(merged)}` : '';
 }
 
 function createTimestamp(): string {
