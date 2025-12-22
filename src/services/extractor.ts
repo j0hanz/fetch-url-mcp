@@ -12,73 +12,115 @@ import { truncateHtml } from '../utils/html-truncator.js';
 
 import { logError, logWarn } from './logger.js';
 
-function extractOpenGraph(document: Document): {
-  title?: string;
-  description?: string;
-  author?: string;
-} {
-  const data: { title?: string; description?: string } = {};
-  const ogTags = document.querySelectorAll('meta[property^="og:"]');
+type MetaSource = 'og' | 'twitter' | 'standard';
+type MetaField = keyof ExtractedMetadata;
 
-  for (const tag of ogTags) {
-    const property = tag.getAttribute('property');
-    const content = tag.getAttribute('content')?.trim();
-    if (!property || !content) continue;
+interface MetaCollectorState {
+  title: Partial<Record<MetaSource, string>>;
+  description: Partial<Record<MetaSource, string>>;
+  author: Partial<Record<MetaSource, string>>;
+}
 
+class MetadataCollector {
+  private readonly state: MetaCollectorState = {
+    title: {},
+    description: {},
+    author: {},
+  };
+
+  constructor(private readonly document: Document) {}
+
+  extract(): ExtractedMetadata {
+    this.scanMetaTags();
+    this.scanTitleTag();
+
+    return {
+      title: this.resolveField('title'),
+      description: this.resolveField('description'),
+      author: this.resolveField('author'),
+    };
+  }
+
+  private scanMetaTags(): void {
+    const metaTags = this.document.querySelectorAll('meta');
+
+    for (const tag of metaTags) {
+      const name = tag.getAttribute('name');
+      const property = tag.getAttribute('property');
+      const content = tag.getAttribute('content')?.trim();
+
+      if (!content) continue;
+
+      if (property?.startsWith('og:')) {
+        this.processOpenGraph(property, content);
+      } else if (name?.startsWith('twitter:')) {
+        this.processTwitter(name, content);
+      } else if (name) {
+        this.processStandard(name, content);
+      }
+    }
+  }
+
+  private scanTitleTag(): void {
+    if (!this.state.title.standard) {
+      const titleEl = this.document.querySelector('title');
+      if (titleEl?.textContent) {
+        this.state.title.standard = titleEl.textContent.trim();
+      }
+    }
+  }
+
+  private processOpenGraph(property: string, content: string): void {
     const key = property.replace('og:', '');
-    if (key === 'title') data.title = content;
-    else if (key === 'description') data.description = content;
+    if (key === 'title') this.state.title.og = content;
+    if (key === 'description') this.state.description.og = content;
   }
 
-  return data;
-}
-
-function extractTwitterCard(document: Document): {
-  title?: string;
-  description?: string;
-} {
-  const data: { title?: string; description?: string } = {};
-  const twitterTags = document.querySelectorAll('meta[name^="twitter:"]');
-
-  for (const tag of twitterTags) {
-    const name = tag.getAttribute('name');
-    const content = tag.getAttribute('content')?.trim();
-    if (!name || !content) continue;
-
+  private processTwitter(name: string, content: string): void {
     const key = name.replace('twitter:', '');
-    if (key === 'title') data.title = content;
-    else if (key === 'description') data.description = content;
+    if (key === 'title') this.state.title.twitter = content;
+    if (key === 'description') this.state.description.twitter = content;
   }
 
-  return data;
+  private processStandard(name: string, content: string): void {
+    if (name === 'description') this.state.description.standard = content;
+    if (name === 'author') this.state.author.standard = content;
+  }
+
+  private resolveField(field: MetaField): string | undefined {
+    const sources = this.state[field];
+    return sources.og ?? sources.twitter ?? sources.standard;
+  }
 }
 
-function extractStandardMeta(document: Document): {
-  title?: string;
-  description?: string;
-  author?: string;
-} {
-  const data: { title?: string; description?: string; author?: string } = {};
+class ArticleExtractor {
+  constructor(private readonly document: Document) {}
 
-  const metaTags = document.querySelectorAll('meta[name][content]');
-  for (const tag of metaTags) {
-    const name = tag.getAttribute('name');
-    const content = tag.getAttribute('content')?.trim();
-    if (!name || !content) continue;
+  extract(): ExtractedArticle | null {
+    try {
+      const reader = new Readability(this.document as unknown as Document);
+      const parsed = reader.parse();
 
-    if (name === 'description') data.description = content;
-    else if (name === 'author') data.author = content;
+      if (!parsed) return null;
+
+      return {
+        title: parsed.title ?? undefined,
+        byline: parsed.byline ?? undefined,
+        content: parsed.content ?? '',
+        textContent: parsed.textContent ?? '',
+        excerpt: parsed.excerpt ?? undefined,
+        siteName: parsed.siteName ?? undefined,
+      };
+    } catch (error) {
+      logError(
+        'Failed to extract article with Readability',
+        error instanceof Error ? error : undefined
+      );
+      return null;
+    }
   }
-
-  if (!data.title) {
-    const titleEl = document.querySelector('title');
-    if (titleEl?.textContent) data.title = titleEl.textContent.trim();
-  }
-
-  return data;
 }
 
-// Main extraction function
 export function extractContent(
   html: string,
   url: string,
@@ -95,57 +137,24 @@ export function extractContent(
   }
 
   try {
-    // Truncate HTML to improve performance
     const processedHtml = truncateHtml(html);
-    // Parse HTML with LinkeDOM
     const { document } = parseHTML(processedHtml);
 
     // Set baseURI for relative link resolution
-    if (url) {
-      try {
-        Object.defineProperty(document, 'baseURI', {
-          value: url,
-          writable: true,
-        });
-      } catch {
-        // Ignore if property definition fails
-      }
+    try {
+      Object.defineProperty(document, 'baseURI', {
+        value: url,
+        writable: true,
+      });
+    } catch {
+      // Ignore errors in setting baseURI
     }
-
-    const ogData = extractOpenGraph(document as unknown as Document);
-    const twitterData = extractTwitterCard(document as unknown as Document);
-    const standardData = extractStandardMeta(document as unknown as Document);
-
-    const metadata: ExtractedMetadata = {
-      title: ogData.title ?? twitterData.title ?? standardData.title,
-      description:
-        ogData.description ??
-        twitterData.description ??
-        standardData.description,
-      author: standardData.author,
-    };
+    const collector = new MetadataCollector(document as unknown as Document);
+    const metadata = collector.extract();
     let article: ExtractedArticle | null = null;
     if (options.extractArticle) {
-      try {
-        const reader = new Readability(document as unknown as Document);
-        const parsed = reader.parse();
-
-        if (parsed) {
-          article = {
-            title: parsed.title ?? undefined,
-            byline: parsed.byline ?? undefined,
-            content: parsed.content ?? '',
-            textContent: parsed.textContent ?? '',
-            excerpt: parsed.excerpt ?? undefined,
-            siteName: parsed.siteName ?? undefined,
-          };
-        }
-      } catch (error) {
-        logError(
-          'Failed to extract article with Readability',
-          error instanceof Error ? error : undefined
-        );
-      }
+      const extractor = new ArticleExtractor(document as unknown as Document);
+      article = extractor.extract();
     }
 
     return { article, metadata };
