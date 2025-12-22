@@ -1,3 +1,5 @@
+import packageJson from '../../package.json' with { type: 'json' };
+
 function parseInteger(
   envValue: string | undefined,
   defaultValue: number,
@@ -42,7 +44,7 @@ const isLoopbackHost =
 export const config = {
   server: {
     name: 'superFetch',
-    version: '1.1.2',
+    version: packageJson.version,
     port: parseInteger(process.env.PORT, 3000, 1024, 65535),
     host,
     sessionTtlMs: parseInteger(
