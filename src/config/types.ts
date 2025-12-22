@@ -236,6 +236,9 @@ export interface SingleUrlResult {
   title?: string;
   content?: string;
   contentBlocks?: number;
+  contentSize?: number;
+  resourceUri?: string;
+  resourceMimeType?: string;
   cached: boolean;
   error?: string;
   errorCode?: string;
@@ -274,11 +277,27 @@ export interface PipelineResult<T> {
   url: string;
   /** Timestamp of when content was fetched/cached */
   fetchedAt: string;
+  /** Cache key used for this result (if caching is enabled) */
+  cacheKey?: string | null;
 }
+
+export type ToolContentBlock =
+  | {
+      type: 'text';
+      text: string;
+    }
+  | {
+      type: 'resource_link';
+      uri: string;
+      name: string;
+      title?: string;
+      description?: string;
+      mimeType?: string;
+    };
 
 export interface ToolResponse<T = Record<string, unknown>> {
   [x: string]: unknown;
-  content: { type: 'text'; text: string }[];
+  content: ToolContentBlock[];
   structuredContent: T & Record<string, unknown>;
 }
 
@@ -288,6 +307,9 @@ export interface BatchUrlResult {
   title?: string;
   content?: string;
   contentBlocks?: number;
+  contentSize?: number;
+  resourceUri?: string;
+  resourceMimeType?: string;
   cached?: boolean;
   error?: string;
   errorCode?: string;
@@ -310,7 +332,7 @@ export interface BatchResponseContent {
 
 export interface ToolErrorResponse {
   [x: string]: unknown;
-  content: { type: 'text'; text: string }[];
+  content: ToolContentBlock[];
   structuredContent: {
     [x: string]: unknown;
     error: string;
@@ -358,7 +380,7 @@ export interface SessionEntry {
 // Tool response types
 export interface ToolResponseBase {
   [x: string]: unknown;
-  content: { type: 'text'; text: string }[];
+  content: ToolContentBlock[];
   structuredContent?: Record<string, unknown>;
   isError?: boolean;
 }

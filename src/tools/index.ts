@@ -175,7 +175,17 @@ const FetchUrlOutputSchema = {
   format: z.enum(['jsonl', 'markdown']).describe('Output format used'),
   content: z
     .string()
+    .optional()
     .describe('The extracted content in JSONL or Markdown format'),
+  contentSize: z.number().optional().describe('Content length in characters'),
+  resourceUri: z
+    .string()
+    .optional()
+    .describe('Resource URI when content is too large to inline'),
+  resourceMimeType: z
+    .string()
+    .optional()
+    .describe('MIME type for the resource URI'),
   cached: z.boolean().describe('Whether the result was served from cache'),
   error: z.string().optional().describe('Error message if the request failed'),
   errorCode: z.string().optional().describe('Error code if the request failed'),
@@ -211,7 +221,19 @@ const FetchMarkdownOutputSchema = {
   fetchedAt: z
     .string()
     .describe('ISO timestamp of when the content was fetched'),
-  markdown: z.string().describe('The extracted content in Markdown format'),
+  markdown: z
+    .string()
+    .optional()
+    .describe('The extracted content in Markdown format'),
+  contentSize: z.number().optional().describe('Content length in characters'),
+  resourceUri: z
+    .string()
+    .optional()
+    .describe('Resource URI when content is too large to inline'),
+  resourceMimeType: z
+    .string()
+    .optional()
+    .describe('MIME type for the resource URI'),
   toc: z
     .array(
       z.object({
@@ -239,6 +261,18 @@ const FetchUrlsOutputSchema = {
         success: z.boolean().describe('Whether the fetch was successful'),
         title: z.string().optional().describe('Page title'),
         content: z.string().optional().describe('The extracted content'),
+        contentSize: z
+          .number()
+          .optional()
+          .describe('Content length in characters'),
+        resourceUri: z
+          .string()
+          .optional()
+          .describe('Resource URI when content is too large to inline'),
+        resourceMimeType: z
+          .string()
+          .optional()
+          .describe('MIME type for the resource URI'),
         contentBlocks: z
           .number()
           .optional()

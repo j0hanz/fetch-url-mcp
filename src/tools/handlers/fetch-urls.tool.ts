@@ -30,6 +30,7 @@ import { htmlToMarkdown } from '../../transformers/markdown.transformer.js';
 const MAX_URLS_PER_BATCH = 10;
 const DEFAULT_CONCURRENCY = 3;
 const MAX_CONCURRENCY = 5;
+const INLINE_CONTENT_LIMIT = config.constants.maxInlineContentChars;
 
 export const FETCH_URLS_TOOL_NAME = 'fetch-urls';
 export const FETCH_URLS_TOOL_DESCRIPTION =
@@ -90,12 +91,25 @@ function createBatchResponse(
     fetchedAt: new Date().toISOString(),
   };
 
+  const resourceLinks = results
+    .filter(
+      (result): result is BatchUrlResult & { resourceUri: string } =>
+        typeof result.resourceUri === 'string'
+    )
+    .map((result) => ({
+      type: 'resource_link' as const,
+      uri: result.resourceUri,
+      name: `Fetched content for ${result.url}`,
+      mimeType: result.resourceMimeType,
+    }));
+
   return {
     content: [
       {
         type: 'text' as const,
         text: JSON.stringify(structuredContent, null, 2),
       },
+      ...resourceLinks,
     ],
     structuredContent,
   };
@@ -116,9 +130,51 @@ interface SingleUrlResult {
   title?: string;
   content?: string;
   contentBlocks?: number;
+  contentSize?: number;
+  resourceUri?: string;
+  resourceMimeType?: string;
   cached: boolean;
   error?: string;
   errorCode?: string;
+}
+
+function applyInlineLimit(
+  content: string,
+  cacheKey: string | null,
+  format: 'jsonl' | 'markdown'
+): {
+  content?: string;
+  contentSize: number;
+  resourceUri?: string;
+  resourceMimeType?: string;
+  error?: string;
+} {
+  const contentSize = content.length;
+  if (contentSize <= INLINE_CONTENT_LIMIT) {
+    return { content, contentSize };
+  }
+
+  if (!config.cache.enabled || !cacheKey) {
+    return {
+      contentSize,
+      error: `Content exceeds inline limit (${INLINE_CONTENT_LIMIT} chars) and cannot be cached`,
+    };
+  }
+
+  const resourceUri = cache.toResourceUri(cacheKey);
+  if (!resourceUri) {
+    return {
+      contentSize,
+      error: `Content exceeds inline limit (${INLINE_CONTENT_LIMIT} chars) and cannot be cached`,
+    };
+  }
+
+  return {
+    contentSize,
+    resourceUri,
+    resourceMimeType:
+      format === 'markdown' ? 'text/markdown' : 'application/jsonl',
+  };
 }
 
 function attemptCacheRetrievalForUrl(
@@ -149,11 +205,25 @@ function attemptCacheRetrievalForUrl(
     return null;
   }
 
+  const inlineResult = applyInlineLimit(parsed.content, cacheKey, format);
+  if (inlineResult.error) {
+    return {
+      url: normalizedUrl,
+      success: false,
+      cached: false,
+      error: inlineResult.error,
+      errorCode: 'INTERNAL_ERROR',
+    };
+  }
+
   logDebug('Batch cache hit', { url: normalizedUrl });
   return {
     url: normalizedUrl,
     success: true,
-    content: parsed.content,
+    content: inlineResult.content,
+    contentSize: inlineResult.contentSize,
+    resourceUri: inlineResult.resourceUri,
+    resourceMimeType: inlineResult.resourceMimeType,
     title: parsed.title,
     contentBlocks: parsed.contentBlocks,
     cached: true,
@@ -326,11 +396,29 @@ async function processSingleUrl(
       cache.set(cacheKey, JSON.stringify(cachePayload));
     }
 
+    const inlineResult = applyInlineLimit(
+      finalContent,
+      cacheKey,
+      options.format
+    );
+    if (inlineResult.error) {
+      return {
+        url: normalizedUrl,
+        success: false,
+        cached: false,
+        error: inlineResult.error,
+        errorCode: 'INTERNAL_ERROR',
+      };
+    }
+
     return {
       url: normalizedUrl,
       success: true,
       title,
-      content: finalContent,
+      content: inlineResult.content,
+      contentSize: inlineResult.contentSize,
+      resourceUri: inlineResult.resourceUri,
+      resourceMimeType: inlineResult.resourceMimeType,
       contentBlocks,
       cached: false,
     };

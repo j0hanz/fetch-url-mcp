@@ -14,6 +14,19 @@ const contentCache = new NodeCache({
   maxKeys: config.cache.maxKeys,
 });
 
+export interface CacheKeyParts {
+  namespace: string;
+  urlHash: string;
+}
+
+interface CacheUpdateEvent extends CacheKeyParts {
+  cacheKey: string;
+}
+
+type CacheUpdateListener = (event: CacheUpdateEvent) => void;
+
+const updateListeners = new Set<CacheUpdateListener>();
+
 function stableStringify(value: unknown): string {
   if (value === null || value === undefined) {
     return '';
@@ -67,6 +80,35 @@ export function createCacheKey(
   return `${namespace}:${urlHash}.${varyHash}`;
 }
 
+export function parseCacheKey(cacheKey: string): CacheKeyParts | null {
+  if (!cacheKey) return null;
+  const [namespace, ...rest] = cacheKey.split(':');
+  const urlHash = rest.join(':');
+  if (!namespace || !urlHash) return null;
+  return { namespace, urlHash };
+}
+
+export function toResourceUri(cacheKey: string): string | null {
+  const parts = parseCacheKey(cacheKey);
+  if (!parts) return null;
+  return `superfetch://cache/${parts.namespace}/${parts.urlHash}`;
+}
+
+export function onCacheUpdate(listener: CacheUpdateListener): () => void {
+  updateListeners.add(listener);
+  return () => {
+    updateListeners.delete(listener);
+  };
+}
+
+function emitCacheUpdate(cacheKey: string): void {
+  const parts = parseCacheKey(cacheKey);
+  if (!parts) return;
+  for (const listener of updateListeners) {
+    listener({ cacheKey, ...parts });
+  }
+}
+
 export function get(cacheKey: string | null): CacheEntry | undefined {
   if (!config.cache.enabled || !cacheKey) {
     return undefined;
@@ -94,6 +136,7 @@ export function set(cacheKey: string | null, content: string): void {
       expiresAt: new Date(Date.now() + config.cache.ttl * 1000).toISOString(),
     };
     contentCache.set(cacheKey, entry);
+    emitCacheUpdate(cacheKey);
   } catch (error) {
     logWarn('Cache set error', {
       key: cacheKey.substring(0, 100),

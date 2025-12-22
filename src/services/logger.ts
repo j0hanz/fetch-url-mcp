@@ -35,19 +35,19 @@ function shouldLog(level: LogLevel): boolean {
 
 export function logInfo(message: string, meta?: LogMetadata): void {
   if (shouldLog('info')) {
-    console.log(formatLogEntry('info', message, meta));
+    process.stderr.write(`${formatLogEntry('info', message, meta)}\n`);
   }
 }
 
 export function logDebug(message: string, meta?: LogMetadata): void {
   if (shouldLog('debug')) {
-    console.debug(formatLogEntry('debug', message, meta));
+    process.stderr.write(`${formatLogEntry('debug', message, meta)}\n`);
   }
 }
 
 export function logWarn(message: string, meta?: LogMetadata): void {
   if (shouldLog('warn')) {
-    console.warn(formatLogEntry('warn', message, meta));
+    process.stderr.write(`${formatLogEntry('warn', message, meta)}\n`);
   }
 }
 
@@ -59,5 +59,5 @@ export function logError(message: string, error?: Error | LogMetadata): void {
       ? { error: error.message, stack: error.stack }
       : (error ?? {});
 
-  console.error(formatLogEntry('error', message, errorMeta));
+  process.stderr.write(`${formatLogEntry('error', message, errorMeta)}\n`);
 }

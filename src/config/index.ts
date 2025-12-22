@@ -80,6 +80,12 @@ export const config = {
     maxHtmlSize: 10 * 1024 * 1024,
     maxContentSize: 5 * 1024 * 1024,
     maxUrlLength: 2048,
+    maxInlineContentChars: parseInteger(
+      process.env.MAX_INLINE_CONTENT_CHARS,
+      20000,
+      1000,
+      200000
+    ),
   },
   security: {
     blockedHosts: new Set([

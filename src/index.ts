@@ -53,7 +53,6 @@ const ALLOWED_ORIGINS: string[] = process.env.ALLOWED_ORIGINS
 
 const ALLOW_ALL_ORIGINS = process.env.CORS_ALLOW_ALL === 'true';
 const AUTH_TOKEN = config.security.apiKey;
-const REQUIRE_AUTH = config.security.requireAuth;
 const ALLOW_REMOTE = config.security.allowRemote;
 
 function isLoopbackHost(host: string): boolean {
@@ -72,7 +71,6 @@ function timingSafeEquals(a: string, b: string): boolean {
 }
 
 function isAuthorizedRequest(req: Request): boolean {
-  if (!REQUIRE_AUTH) return true;
   if (!AUTH_TOKEN) return false;
 
   const authHeader = normalizeHeaderValue(req.headers.authorization);
@@ -95,6 +93,10 @@ function authMiddleware(req: Request, res: Response, next: NextFunction): void {
     return;
   }
 
+  res.set(
+    'WWW-Authenticate',
+    'Bearer realm="mcp", error="invalid_token", error_description="Missing or invalid credentials"'
+  );
   res.status(401).json({ error: 'Unauthorized' });
 }
 
@@ -257,7 +259,7 @@ if (isStdioMode) {
     next();
   };
 
-  app.get('/health', (_req, res) => {
+  app.get('/health', authMiddleware, (_req, res) => {
     res.json({
       status: 'healthy',
       name: config.server.name,
@@ -274,10 +276,8 @@ if (isStdioMode) {
     process.exit(1);
   }
 
-  if (REQUIRE_AUTH && !AUTH_TOKEN) {
-    logError(
-      'REQUIRE_AUTH is enabled but API_KEY is not set; refusing to start'
-    );
+  if (!AUTH_TOKEN) {
+    logError('API_KEY is required for HTTP mode; refusing to start');
     process.exit(1);
   }
 
@@ -341,7 +341,8 @@ if (isStdioMode) {
   );
   sessionCleanupInterval.unref();
 
-  app.use('/mcp', rateLimitMiddleware, authMiddleware);
+  app.use('/mcp', rateLimitMiddleware);
+  app.use(authMiddleware);
 
   app.post(
     '/mcp',

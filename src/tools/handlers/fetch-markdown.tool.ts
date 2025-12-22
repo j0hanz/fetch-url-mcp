@@ -1,10 +1,13 @@
+import { config } from '../../config/index.js';
 import type {
   FetchMarkdownInput,
   MarkdownTransformResult,
   TocEntry,
+  ToolResponseBase,
   TransformOptions,
 } from '../../config/types.js';
 
+import * as cache from '../../services/cache.js';
 import { extractContent } from '../../services/extractor.js';
 import { logDebug, logError } from '../../services/logger.js';
 
@@ -24,13 +27,6 @@ import { htmlToMarkdown } from '../../transformers/markdown.transformer.js';
 export const FETCH_MARKDOWN_TOOL_NAME = 'fetch-markdown';
 export const FETCH_MARKDOWN_TOOL_DESCRIPTION =
   'Fetches a webpage and converts it to clean Markdown format with optional frontmatter, table of contents, and content length limits';
-
-interface FetchMarkdownToolResponse {
-  [x: string]: unknown;
-  content: { type: 'text'; text: string }[];
-  structuredContent?: Record<string, unknown>;
-  isError?: boolean;
-}
 
 function slugify(text: string): string {
   const cleanText = stripMarkdownLinks(text);
@@ -104,7 +100,7 @@ function transformToMarkdown(
 
 export async function fetchMarkdownToolHandler(
   input: FetchMarkdownInput
-): Promise<FetchMarkdownToolResponse> {
+): Promise<ToolResponseBase> {
   if (!input.url) {
     return createToolErrorResponse('URL is required', '', 'VALIDATION_ERROR');
   }
@@ -133,14 +129,36 @@ export async function fetchMarkdownToolHandler(
       transform: (html, url) => transformToMarkdown(html, url, options),
     });
 
+    const inlineLimit = config.constants.maxInlineContentChars;
+    const contentSize = result.data.markdown.length;
+    const shouldInline = contentSize <= inlineLimit;
+    const resourceMimeType = 'text/markdown';
+    const resourceUri =
+      !shouldInline && config.cache.enabled && result.cacheKey
+        ? cache.toResourceUri(result.cacheKey)
+        : undefined;
+
+    if (!shouldInline && !resourceUri) {
+      return createToolErrorResponse(
+        `Content exceeds inline limit (${inlineLimit} chars) and cannot be cached`,
+        input.url,
+        'INTERNAL_ERROR'
+      );
+    }
+
     const structuredContent = {
       url: result.url,
       title: result.data.title,
       fetchedAt: result.fetchedAt,
-      markdown: result.data.markdown,
+      contentSize,
       ...(result.data.toc && { toc: result.data.toc }),
       cached: result.fromCache,
       ...(result.data.truncated && { truncated: result.data.truncated }),
+      ...(shouldInline ? { markdown: result.data.markdown } : {}),
+      ...(resourceUri && {
+        resourceUri,
+        resourceMimeType,
+      }),
     };
 
     const jsonOutput = JSON.stringify(
@@ -150,7 +168,20 @@ export async function fetchMarkdownToolHandler(
     );
 
     return {
-      content: [{ type: 'text' as const, text: jsonOutput }],
+      content: [
+        { type: 'text' as const, text: jsonOutput },
+        ...(resourceUri
+          ? [
+              {
+                type: 'resource_link' as const,
+                uri: resourceUri,
+                name: 'Fetched markdown',
+                mimeType: resourceMimeType,
+                description: `Content exceeds inline limit (${inlineLimit} chars)`,
+              },
+            ]
+          : []),
+      ],
       structuredContent,
     };
   } catch (error) {

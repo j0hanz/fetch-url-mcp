@@ -2,12 +2,31 @@ import { ResourceTemplate } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 
 import * as cache from '../services/cache.js';
+import { logWarn } from '../services/logger.js';
 
 export function registerCachedContentResource(server: McpServer): void {
   server.registerResource(
     'cached-content',
     new ResourceTemplate('superfetch://cache/{namespace}/{urlHash}', {
-      list: undefined,
+      list: () => {
+        const resources = cache
+          .keys()
+          .map((key) => {
+            const parts = cache.parseCacheKey(key);
+            if (!parts) return null;
+            return {
+              name: `${parts.namespace}:${parts.urlHash}`,
+              uri: `superfetch://cache/${parts.namespace}/${parts.urlHash}`,
+              description: `Cached content entry for ${parts.namespace}`,
+              mimeType: 'application/json',
+            };
+          })
+          .filter(
+            (entry): entry is NonNullable<typeof entry> => entry !== null
+          );
+
+        return { resources };
+      },
     }),
     {
       title: 'Cached Content',
@@ -57,9 +76,9 @@ export function registerCachedContentResource(server: McpServer): void {
       const cacheList = {
         totalEntries: cacheKeys.length,
         entries: cacheKeys.map((key: string) => {
-          const parts = key.split(':');
-          const namespace = parts[0] ?? 'unknown';
-          const urlHash = parts.slice(1).join(':') || 'unknown';
+          const parts = cache.parseCacheKey(key);
+          const namespace = parts?.namespace ?? 'unknown';
+          const urlHash = parts?.urlHash ?? 'unknown';
           return {
             namespace,
             urlHash,
@@ -80,4 +99,34 @@ export function registerCachedContentResource(server: McpServer): void {
       };
     }
   );
+
+  const unsubscribe = cache.onCacheUpdate(({ cacheKey }) => {
+    const resourceUri = cache.toResourceUri(cacheKey);
+    if (!resourceUri) return;
+
+    if (server.isConnected()) {
+      void server.server
+        .sendResourceUpdated({ uri: resourceUri })
+        .catch((error: unknown) => {
+          logWarn('Failed to send resource update notification', {
+            uri: resourceUri,
+            error: error instanceof Error ? error.message : 'Unknown error',
+          });
+        });
+      void server.server
+        .sendResourceUpdated({ uri: 'superfetch://cache/list' })
+        .catch((error: unknown) => {
+          logWarn('Failed to send cache list update notification', {
+            error: error instanceof Error ? error.message : 'Unknown error',
+          });
+        });
+      server.sendResourceListChanged();
+    }
+  });
+
+  const previousOnClose = server.server.onclose;
+  server.server.onclose = () => {
+    previousOnClose?.();
+    unsubscribe();
+  };
 }

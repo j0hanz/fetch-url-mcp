@@ -1,3 +1,4 @@
+import { config } from '../../config/index.js';
 import type {
   ContentTransformOptions,
   FetchUrlInput,
@@ -5,6 +6,7 @@ import type {
   ToolResponseBase,
 } from '../../config/types.js';
 
+import * as cache from '../../services/cache.js';
 import { extractContent } from '../../services/extractor.js';
 import { logDebug, logError } from '../../services/logger.js';
 import { parseHtml } from '../../services/parser.js';
@@ -157,15 +159,40 @@ export async function fetchUrlToolHandler(
             }),
     });
 
+    const inlineLimit = config.constants.maxInlineContentChars;
+    const contentSize = result.data.content.length;
+    const shouldInline = contentSize <= inlineLimit;
+    const resourceMimeType =
+      format === 'markdown' ? 'text/markdown' : 'application/jsonl';
+    const resourceUri =
+      !shouldInline && config.cache.enabled && result.cacheKey
+        ? cache.toResourceUri(result.cacheKey)
+        : undefined;
+
+    if (!shouldInline) {
+      if (!resourceUri) {
+        return createToolErrorResponse(
+          `Content exceeds inline limit (${inlineLimit} chars) and cannot be cached`,
+          input.url,
+          'INTERNAL_ERROR'
+        );
+      }
+    }
+
     const structuredContent = {
       url: result.url,
       title: result.data.title,
       contentBlocks: result.data.contentBlocks,
       fetchedAt: result.fetchedAt,
       format,
-      content: result.data.content,
+      contentSize,
       cached: result.fromCache,
       ...(result.data.truncated && { truncated: result.data.truncated }),
+      ...(shouldInline ? { content: result.data.content } : {}),
+      ...(resourceUri && {
+        resourceUri,
+        resourceMimeType,
+      }),
     };
 
     const jsonOutput = JSON.stringify(
@@ -175,7 +202,20 @@ export async function fetchUrlToolHandler(
     );
 
     return {
-      content: [{ type: 'text' as const, text: jsonOutput }],
+      content: [
+        { type: 'text' as const, text: jsonOutput },
+        ...(resourceUri
+          ? [
+              {
+                type: 'resource_link' as const,
+                uri: resourceUri,
+                name: 'Fetched content',
+                mimeType: resourceMimeType,
+                description: `Content exceeds inline limit (${inlineLimit} chars)`,
+              },
+            ]
+          : []),
+      ],
       structuredContent,
     };
   } catch (error) {

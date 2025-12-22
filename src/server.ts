@@ -41,7 +41,7 @@ export async function startStdioServer(): Promise<void> {
   };
 
   process.on('SIGINT', () => {
-    process.stdout.write('\nShutting down superFetch MCP server...\n');
+    process.stderr.write('\nShutting down superFetch MCP server...\n');
     destroyAgents();
     server
       .close()

@@ -96,6 +96,7 @@ function attemptCacheRetrieval<T>(
     fromCache: true,
     url: normalizedUrl,
     fetchedAt: cached.fetchedAt,
+    cacheKey,
   };
 }
 
@@ -162,5 +163,6 @@ export async function executeFetchPipeline<T>(
     fromCache: false,
     url: normalizedUrl,
     fetchedAt: new Date().toISOString(),
+    cacheKey,
   };
 }

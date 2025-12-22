@@ -307,6 +307,8 @@ node dist/index.js --stdio
 
 ## Available Tools
 
+> **Note:** If extracted content exceeds `MAX_INLINE_CONTENT_CHARS`, the tool response includes a `resourceUri` and a `resource_link` content block instead of embedding the full text.
+
 ### `fetch-url`
 
 Fetches a webpage and converts it to AI-readable JSONL format with semantic content blocks.
@@ -635,6 +637,12 @@ Configure SuperFetch behavior by adding environment variables to your MCP client
 | `CACHE_TTL`      | `3600`  | `60`-`86400`     | Cache lifetime in seconds (1min-24hrs) |
 | `CACHE_MAX_KEYS` | `100`   | `10`-`1000`      | Maximum number of cached entries       |
 
+#### 📦 Output Settings
+
+| Variable                   | Default | Valid Values    | Description                                                     |
+| -------------------------- | ------- | --------------- | --------------------------------------------------------------- |
+| `MAX_INLINE_CONTENT_CHARS` | `20000` | `1000`-`200000` | Inline content limit before returning a `resource_link` instead |
+
 #### 📝 Logging Settings
 
 | Variable         | Default | Valid Values                        | Description                |
@@ -651,11 +659,10 @@ Configure SuperFetch behavior by adding environment variables to your MCP client
 
 #### 🛡️ Security Settings
 
-| Variable       | Default  | Description                                                                  |
-| -------------- | -------- | ---------------------------------------------------------------------------- |
-| `API_KEY`      | -        | API Key for authentication (required if `REQUIRE_AUTH` is true)              |
-| `REQUIRE_AUTH` | `true`\* | Require authentication (\*defaults to `false` on loopback unless configured) |
-| `ALLOW_REMOTE` | `false`  | Allow binding to non-loopback interfaces                                     |
+| Variable       | Default | Description                                              |
+| -------------- | ------- | -------------------------------------------------------- |
+| `API_KEY`      | -       | API Key for HTTP authentication (required for HTTP mode) |
+| `ALLOW_REMOTE` | `false` | Allow binding to non-loopback interfaces                 |
 
 #### Rate Limiting
 
@@ -671,7 +678,7 @@ Configure SuperFetch behavior by adding environment variables to your MCP client
 <details>
 <summary><strong>HTTP Mode</strong> (Advanced) — For running as a standalone HTTP server</summary>
 
-SuperFetch can run as an HTTP server for custom integrations. HTTP mode requires additional configuration:
+SuperFetch can run as an HTTP server for custom integrations. HTTP mode requires additional configuration and an `API_KEY` for authenticated access (send `Authorization: Bearer <key>` or `X-API-Key: <key>`).
 
 #### Start HTTP Server
 
