@@ -1,4 +1,4 @@
-import { JSDOM } from 'jsdom';
+import { parseHTML } from 'linkedom';
 
 import { Readability } from '@mozilla/readability';
 
@@ -97,12 +97,24 @@ export function extractContent(
   try {
     // Truncate HTML to improve performance
     const processedHtml = truncateHtml(html);
-    // Parse HTML with JSDOM
-    const dom = new JSDOM(processedHtml, { url });
-    const { document } = dom.window;
-    const ogData = extractOpenGraph(document);
-    const twitterData = extractTwitterCard(document);
-    const standardData = extractStandardMeta(document);
+    // Parse HTML with LinkeDOM
+    const { document } = parseHTML(processedHtml);
+
+    // Set baseURI for relative link resolution
+    if (url) {
+      try {
+        Object.defineProperty(document, 'baseURI', {
+          value: url,
+          writable: true,
+        });
+      } catch {
+        // Ignore if property definition fails
+      }
+    }
+
+    const ogData = extractOpenGraph(document as unknown as Document);
+    const twitterData = extractTwitterCard(document as unknown as Document);
+    const standardData = extractStandardMeta(document as unknown as Document);
 
     const metadata: ExtractedMetadata = {
       title: ogData.title ?? twitterData.title ?? standardData.title,
@@ -115,7 +127,7 @@ export function extractContent(
     let article: ExtractedArticle | null = null;
     if (options.extractArticle) {
       try {
-        const reader = new Readability(document);
+        const reader = new Readability(document as unknown as Document);
         const parsed = reader.parse();
 
         if (parsed) {

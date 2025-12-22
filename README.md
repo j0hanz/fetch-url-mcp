@@ -790,7 +790,7 @@ Sessions are managed via `mcp-session-id` header with 30-minute TTL.
 | Language           | TypeScript 5.9                    |
 | MCP SDK            | @modelcontextprotocol/sdk ^1.25.1 |
 | Content Extraction | @mozilla/readability ^0.6.0       |
-| HTML Parsing       | Cheerio ^1.1.2, JSDOM ^27.3.0     |
+| HTML Parsing       | Cheerio ^1.1.2, LinkeDOM ^0.18.12 |
 | Markdown           | Turndown ^7.2.2                   |
 | HTTP               | Express ^5.2.1, Axios ^1.7.9      |
 | Caching            | node-cache ^5.1.2                 |

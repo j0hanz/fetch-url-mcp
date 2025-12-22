@@ -1,11 +1,7 @@
 #!/usr/bin/env node
 import { randomUUID, timingSafeEqual } from 'node:crypto';
 
-import express, {
-  type NextFunction,
-  type Request,
-  type Response,
-} from 'express';
+import type { NextFunction, Request, Response } from 'express';
 
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
@@ -128,6 +124,7 @@ if (isStdioMode) {
   const { startStdioServer } = await import('./server.js');
   await startStdioServer();
 } else {
+  const { default: express } = await import('express');
   const app = express();
 
   app.use(express.json({ limit: '1mb' }));
