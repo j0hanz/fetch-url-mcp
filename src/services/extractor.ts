@@ -45,19 +45,29 @@ class MetadataCollector {
     const metaTags = this.document.querySelectorAll('meta');
 
     for (const tag of metaTags) {
-      const name = tag.getAttribute('name');
-      const property = tag.getAttribute('property');
-      const content = tag.getAttribute('content')?.trim();
+      this.processMetaTag(tag);
+    }
+  }
 
-      if (!content) continue;
+  private processMetaTag(tag: Element): void {
+    const name = tag.getAttribute('name');
+    const property = tag.getAttribute('property');
+    const content = tag.getAttribute('content')?.trim();
 
-      if (property?.startsWith('og:')) {
-        this.processOpenGraph(property, content);
-      } else if (name?.startsWith('twitter:')) {
-        this.processTwitter(name, content);
-      } else if (name) {
-        this.processStandard(name, content);
-      }
+    if (!content) return;
+
+    if (property?.startsWith('og:')) {
+      this.processOpenGraph(property, content);
+      return;
+    }
+
+    if (name?.startsWith('twitter:')) {
+      this.processTwitter(name, content);
+      return;
+    }
+
+    if (name) {
+      this.processStandard(name, content);
     }
   }
 
@@ -126,13 +136,7 @@ export function extractContent(
   url: string,
   options: { extractArticle?: boolean } = { extractArticle: true }
 ): ExtractionResult {
-  if (!html || typeof html !== 'string') {
-    logWarn('extractContent called with invalid HTML input');
-    return { article: null, metadata: {} };
-  }
-
-  if (!url || typeof url !== 'string') {
-    logWarn('extractContent called with invalid URL');
+  if (!isValidInput(html, url)) {
     return { article: null, metadata: {} };
   }
 
@@ -140,22 +144,13 @@ export function extractContent(
     const processedHtml = truncateHtml(html);
     const { document } = parseHTML(processedHtml);
 
-    // Set baseURI for relative link resolution
-    try {
-      Object.defineProperty(document, 'baseURI', {
-        value: url,
-        writable: true,
-      });
-    } catch {
-      // Ignore errors in setting baseURI
-    }
+    applyBaseUri(document, url);
+
     const collector = new MetadataCollector(document as unknown as Document);
     const metadata = collector.extract();
-    let article: ExtractedArticle | null = null;
-    if (options.extractArticle) {
-      const extractor = new ArticleExtractor(document as unknown as Document);
-      article = extractor.extract();
-    }
+    const article = options.extractArticle
+      ? new ArticleExtractor(document as unknown as Document).extract()
+      : null;
 
     return { article, metadata };
   } catch (error) {
@@ -164,5 +159,30 @@ export function extractContent(
       error instanceof Error ? error : undefined
     );
     return { article: null, metadata: {} };
+  }
+}
+
+function isValidInput(html: string, url: string): boolean {
+  if (!html || typeof html !== 'string') {
+    logWarn('extractContent called with invalid HTML input');
+    return false;
+  }
+
+  if (!url || typeof url !== 'string') {
+    logWarn('extractContent called with invalid URL');
+    return false;
+  }
+
+  return true;
+}
+
+function applyBaseUri(document: Document, url: string): void {
+  try {
+    Object.defineProperty(document, 'baseURI', {
+      value: url,
+      writable: true,
+    });
+  } catch {
+    // Ignore errors in setting baseURI
   }
 }

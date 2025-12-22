@@ -132,16 +132,19 @@ const ESCAPE_PATTERNS = {
   tab: /\t/g,
 } as const;
 
-function escapeYamlValue(value: string): string {
-  const requiresQuoting =
+function needsYamlQuotes(value: string): boolean {
+  return (
     YAML_SPECIAL_CHARS.test(value) ||
     value.startsWith(' ') ||
     value.endsWith(' ') ||
     value === '' ||
     YAML_NUMERIC.test(value) ||
-    YAML_RESERVED_WORDS.test(value);
+    YAML_RESERVED_WORDS.test(value)
+  );
+}
 
-  if (!requiresQuoting) {
+function escapeYamlValue(value: string): string {
+  if (!needsYamlQuotes(value)) {
     return value;
   }
 
@@ -168,19 +171,27 @@ function createFrontmatter(metadata: MetadataBlock): string {
   return lines.join('\n');
 }
 
+function convertHtmlToMarkdown(html: string): string {
+  let content = turndown.turndown(html);
+  content = content.replace(MULTIPLE_NEWLINES, '\n\n').trim();
+  content = cleanMarkdownContent(content);
+  content = content.replace(MULTIPLE_NEWLINES, '\n\n').trim();
+  return content;
+}
+
+function buildFrontmatterBlock(metadata?: MetadataBlock): string {
+  return metadata ? createFrontmatter(metadata) : '';
+}
+
 export function htmlToMarkdown(html: string, metadata?: MetadataBlock): string {
-  const frontmatter = metadata ? createFrontmatter(metadata) : '';
+  const frontmatter = buildFrontmatterBlock(metadata);
 
   if (!html || typeof html !== 'string') {
     return frontmatter ? `${frontmatter}\n\n` : '';
   }
 
   try {
-    let content = turndown.turndown(html);
-    content = content.replace(MULTIPLE_NEWLINES, '\n\n').trim();
-    content = cleanMarkdownContent(content);
-    content = content.replace(MULTIPLE_NEWLINES, '\n\n').trim();
-
+    const content = convertHtmlToMarkdown(html);
     return frontmatter ? `${frontmatter}\n\n${content}` : content;
   } catch {
     return frontmatter ? `${frontmatter}\n\n` : '';

@@ -6,12 +6,28 @@ function parseInteger(
   min?: number,
   max?: number
 ): number {
+  const parsed = parseRawInteger(envValue, defaultValue);
+  return clampInteger(parsed, defaultValue, min, max);
+}
+
+function parseRawInteger(
+  envValue: string | undefined,
+  defaultValue: number
+): number {
   if (!envValue) return defaultValue;
   const parsed = parseInt(envValue, 10);
-  if (isNaN(parsed)) return defaultValue;
-  if (min !== undefined && parsed < min) return defaultValue;
-  if (max !== undefined && parsed > max) return defaultValue;
-  return parsed;
+  return Number.isNaN(parsed) ? defaultValue : parsed;
+}
+
+function clampInteger(
+  value: number,
+  defaultValue: number,
+  min?: number,
+  max?: number
+): number {
+  if (min !== undefined && value < min) return defaultValue;
+  if (max !== undefined && value > max) return defaultValue;
+  return value;
 }
 
 function parseBoolean(

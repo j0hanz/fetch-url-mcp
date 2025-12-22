@@ -244,34 +244,53 @@ function filterBlocks(blocks: ContentBlockUnion[]): ContentBlockUnion[] {
   });
 }
 
-export function parseHtml(html: string): ContentBlockUnion[] {
-  if (!html || typeof html !== 'string') return [];
-
-  const processedHtml = truncateHtml(html);
-
+function loadHtml(html: string): CheerioAPI | null {
   try {
-    const $ = cheerio.load(processedHtml);
-    const blocks: ContentBlockUnion[] = [];
-
-    $('script, style, noscript, iframe, svg').remove();
-
-    $('body')
-      .find(CONTENT_SELECTOR)
-      .each((_, element) => {
-        try {
-          const block = parseElement($, element);
-          if (block) blocks.push(block);
-        } catch {
-          /* skip */
-        }
-      });
-
-    return filterBlocks(blocks);
+    return cheerio.load(html);
   } catch (error) {
     logWarn('Failed to parse HTML', {
       error: error instanceof Error ? error.message : 'Unknown error',
       htmlLength: html.length,
     });
-    return [];
+    return null;
   }
+}
+
+function removeNoiseElements($: CheerioAPI): void {
+  $('script, style, noscript, iframe, svg').remove();
+}
+
+function collectBlocks($: CheerioAPI): ContentBlockUnion[] {
+  const blocks: ContentBlockUnion[] = [];
+
+  $('body')
+    .find(CONTENT_SELECTOR)
+    .each((_, element) => {
+      const block = safeParseElement($, element);
+      if (block) blocks.push(block);
+    });
+
+  return blocks;
+}
+
+function safeParseElement(
+  $: CheerioAPI,
+  element: AnyNode
+): ContentBlockUnion | null {
+  try {
+    return parseElement($, element);
+  } catch {
+    return null;
+  }
+}
+
+export function parseHtml(html: string): ContentBlockUnion[] {
+  if (!html || typeof html !== 'string') return [];
+
+  const processedHtml = truncateHtml(html);
+  const $ = loadHtml(processedHtml);
+  if (!$) return [];
+
+  removeNoiseElements($);
+  return filterBlocks(collectBlocks($));
 }

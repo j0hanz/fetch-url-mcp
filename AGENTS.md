@@ -17,6 +17,8 @@
 - `npm run type-check`: run `tsc --noEmit` for type safety.
 - `npm run format`: apply Prettier formatting and import sorting.
 - `npm run knip` / `npm run knip:fix`: detect and optionally remove unused code.
+- `npm test` / `npm run test:coverage`: run Vitest tests (with coverage).
+- `npm run bench`: run the minimal performance benchmark (builds first).
 
 ## Coding Style & Naming Conventions
 
@@ -27,9 +29,9 @@
 
 ## Testing Guidelines
 
-- No dedicated test runner or `test` script is defined in `package.json`.
-- Use `npm run lint` and `npm run type-check` as the baseline verification steps.
-- If you add tests, include a script (for example `npm test`) and document the location and runner in this file and `README.md`.
+- Vitest is the test runner; tests live under `tests/`.
+- Use `npm test` and `npm run test:coverage` as baseline verification steps.
+- Keep tests fast and deterministic; avoid network access.
 
 ## Commit & Pull Request Guidelines
 

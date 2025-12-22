@@ -787,17 +787,20 @@ Sessions are managed via `mcp-session-id` header with 30-minute TTL.
 
 ### Scripts
 
-| Command              | Description                        |
-| -------------------- | ---------------------------------- |
-| `npm run dev`        | Development server with hot reload |
-| `npm run build`      | Compile TypeScript                 |
-| `npm start`          | Production server                  |
-| `npm run lint`       | Run ESLint                         |
-| `npm run type-check` | TypeScript type checking           |
-| `npm run format`     | Format with Prettier               |
-| `npm run release`    | Create new release                 |
-| `npm run knip`       | Find unused exports/dependencies   |
-| `npm run knip:fix`   | Auto-fix unused code               |
+| Command                 | Description                        |
+| ----------------------- | ---------------------------------- |
+| `npm run dev`           | Development server with hot reload |
+| `npm run build`         | Compile TypeScript                 |
+| `npm start`             | Production server                  |
+| `npm run lint`          | Run ESLint                         |
+| `npm run type-check`    | TypeScript type checking           |
+| `npm run format`        | Format with Prettier               |
+| `npm test`              | Run Vitest tests                   |
+| `npm run test:coverage` | Run tests with coverage            |
+| `npm run bench`         | Run minimal performance benchmark  |
+| `npm run release`       | Create new release                 |
+| `npm run knip`          | Find unused exports/dependencies   |
+| `npm run knip:fix`      | Auto-fix unused code               |
 
 ### Tech Stack
 
@@ -820,8 +823,9 @@ Sessions are managed via `mcp-session-id` header with 30-minute TTL.
 1. Fork the repository
 2. Create a feature branch: `git checkout -b feature/amazing-feature`
 3. Ensure linting passes: `npm run lint`
-4. Commit changes: `git commit -m 'Add amazing feature'`
-5. Push: `git push origin feature/amazing-feature`
-6. Open a Pull Request
+4. Run tests: `npm test`
+5. Commit changes: `git commit -m 'Add amazing feature'`
+6. Push: `git push origin feature/amazing-feature`
+7. Open a Pull Request
 
 For examples of other MCP servers, see: [github.com/modelcontextprotocol/servers](https://github.com/modelcontextprotocol/servers)

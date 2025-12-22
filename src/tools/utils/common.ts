@@ -46,6 +46,14 @@ export function enforceContentLengthLimit(
   content: string,
   maxLength?: number
 ): TruncationResult {
+  return truncateContent(content, maxLength);
+}
+
+export function truncateContent(
+  content: string,
+  maxLength?: number,
+  suffix = '\n...[truncated]'
+): TruncationResult {
   const shouldTruncate =
     maxLength !== undefined && maxLength > 0 && content.length > maxLength;
 
@@ -54,7 +62,7 @@ export function enforceContentLengthLimit(
   }
 
   return {
-    content: `${content.substring(0, maxLength)}\n...[truncated]`,
+    content: `${content.substring(0, maxLength)}${suffix}`,
     truncated: true,
   };
 }

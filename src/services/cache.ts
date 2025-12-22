@@ -51,6 +51,29 @@ function stableStringify(value: unknown): string {
   return `{${entries.join(',')}}`;
 }
 
+function createHashFragment(input: string, length: number): string {
+  return createHash('sha256').update(input).digest('hex').substring(0, length);
+}
+
+function buildCacheKey(
+  namespace: string,
+  urlHash: string,
+  varyHash?: string
+): string {
+  return varyHash
+    ? `${namespace}:${urlHash}.${varyHash}`
+    : `${namespace}:${urlHash}`;
+}
+
+function getVaryHash(
+  vary?: Record<string, unknown> | string
+): string | undefined {
+  if (!vary) return undefined;
+  const varyString = typeof vary === 'string' ? vary : stableStringify(vary);
+  if (!varyString) return undefined;
+  return createHashFragment(varyString, 12);
+}
+
 export function createCacheKey(
   namespace: string,
   url: string,
@@ -58,26 +81,9 @@ export function createCacheKey(
 ): string | null {
   if (!namespace || !url) return null;
 
-  // Hash URL for consistent key length and smaller memory footprint
-  const urlHash = createHash('sha256')
-    .update(url)
-    .digest('hex')
-    .substring(0, 16);
-
-  if (!vary) {
-    return `${namespace}:${urlHash}`;
-  }
-
-  const varyString = typeof vary === 'string' ? vary : stableStringify(vary);
-  if (!varyString) {
-    return `${namespace}:${urlHash}`;
-  }
-
-  const varyHash = createHash('sha256')
-    .update(varyString)
-    .digest('hex')
-    .substring(0, 12);
-  return `${namespace}:${urlHash}.${varyHash}`;
+  const urlHash = createHashFragment(url, 16);
+  const varyHash = getVaryHash(vary);
+  return buildCacheKey(namespace, urlHash, varyHash);
 }
 
 export function parseCacheKey(cacheKey: string): CacheKeyParts | null {
