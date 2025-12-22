@@ -69,7 +69,7 @@
     "eslint": "^9.23.2",
     "eslint-config-prettier": "^10.1.8",
     "eslint-plugin-unused-imports": "^4.3.0",
-    "knip": "^5.75.1",
+    "knip": "^5.76.2",
     "prettier": "^3.7.4",
     "shx": "^0.4.0",
     "tsx": "^4.21.0",
