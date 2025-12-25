@@ -112,11 +112,10 @@ function assertUrlLength(trimmedUrl: string): void {
 }
 
 function parseUrl(trimmedUrl: string): URL {
-  try {
-    return new URL(trimmedUrl);
-  } catch {
+  if (!URL.canParse(trimmedUrl)) {
     throw new Error('Invalid URL format');
   }
+  return new URL(trimmedUrl);
 }
 
 function assertProtocolAllowed(url: URL): void {
@@ -184,11 +183,10 @@ export function validateAndNormalizeUrl(urlString: string): string {
 }
 
 export function isInternalUrl(url: string, baseUrl: string): boolean {
-  try {
-    const urlObj = new URL(url, baseUrl);
-    const baseUrlObj = new URL(baseUrl);
-    return urlObj.hostname === baseUrlObj.hostname;
-  } catch {
+  if (!URL.canParse(baseUrl) || !URL.canParse(url, baseUrl)) {
     return false;
   }
+  const urlObj = new URL(url, baseUrl);
+  const baseUrlObj = new URL(baseUrl);
+  return urlObj.hostname === baseUrlObj.hostname;
 }

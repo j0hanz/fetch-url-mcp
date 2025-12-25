@@ -1,7 +1,7 @@
-import dns from 'dns';
-import http from 'http';
-import https from 'https';
-import os from 'os';
+import dns from 'node:dns';
+import http from 'node:http';
+import https from 'node:https';
+import os from 'node:os';
 
 import { isBlockedIp } from '../../utils/url-validator.js';
 

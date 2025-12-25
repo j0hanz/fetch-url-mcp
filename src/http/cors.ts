@@ -17,12 +17,7 @@ function isOriginAllowed(
 }
 
 function isValidOrigin(origin: string): boolean {
-  try {
-    new URL(origin);
-    return true;
-  } catch {
-    return false;
-  }
+  return URL.canParse(origin);
 }
 
 export function createCorsMiddleware(

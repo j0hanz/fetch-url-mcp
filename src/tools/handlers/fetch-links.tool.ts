@@ -69,11 +69,10 @@ function resolveFilterPattern(
 }
 
 function tryResolveUrl(href: string, baseUrl: string): string | null {
-  try {
-    return new URL(href, baseUrl).href;
-  } catch {
+  if (!URL.canParse(href, baseUrl)) {
     return null;
   }
+  return new URL(href, baseUrl).href;
 }
 
 function shouldIncludeLink(

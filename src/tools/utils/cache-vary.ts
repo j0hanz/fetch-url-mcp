@@ -1,6 +1,16 @@
+import { validateHeaderName, validateHeaderValue } from 'node:http';
+
 import { config } from '../../config/index.js';
 
-const CRLF_REGEX = /[\r\n]/;
+function isValidHeader(key: string, value: string): boolean {
+  try {
+    validateHeaderName(key);
+    validateHeaderValue(key, value);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 function sanitizeHeaderValue(value: string): string {
   return value.trim();
@@ -18,11 +28,7 @@ export function normalizeHeadersForCache(
 
   for (const [key, value] of Object.entries(headers)) {
     const lowerKey = key.toLowerCase();
-    if (
-      !blockedHeaders.has(lowerKey) &&
-      !CRLF_REGEX.test(key) &&
-      !CRLF_REGEX.test(value)
-    ) {
+    if (!blockedHeaders.has(lowerKey) && isValidHeader(key, value)) {
       normalized[lowerKey] = sanitizeHeaderValue(value);
     }
   }

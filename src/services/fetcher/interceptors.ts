@@ -1,4 +1,6 @@
 import { randomUUID } from 'node:crypto';
+import diagnosticsChannel from 'node:diagnostics_channel';
+import { performance } from 'node:perf_hooks';
 
 import type {
   AxiosError,
@@ -8,8 +10,6 @@ import type {
   RawAxiosResponseHeaders,
 } from 'axios';
 import { isCancel } from 'axios';
-import diagnosticsChannel from 'diagnostics_channel';
-import { performance } from 'perf_hooks';
 
 import { config } from '../../config/index.js';
 

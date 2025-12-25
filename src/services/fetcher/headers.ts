@@ -1,6 +1,16 @@
+import { validateHeaderName, validateHeaderValue } from 'node:http';
+
 import { config } from '../../config/index.js';
 
-const CRLF_REGEX = /[\r\n]/;
+function isValidHeader(key: string, value: string): boolean {
+  try {
+    validateHeaderName(key);
+    validateHeaderValue(key, value);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 export function sanitizeHeaders(
   headers?: Record<string, string>
@@ -13,11 +23,7 @@ export function sanitizeHeaders(
   const sanitized: Record<string, string> = {};
 
   for (const [key, value] of Object.entries(headers)) {
-    if (
-      !blockedHeaders.has(key.toLowerCase()) &&
-      !CRLF_REGEX.test(key) &&
-      !CRLF_REGEX.test(value)
-    ) {
+    if (!blockedHeaders.has(key.toLowerCase()) && isValidHeader(key, value)) {
       sanitized[key] = value;
     }
   }
