@@ -1,10 +1,17 @@
 #!/usr/bin/env node
+import { parseArgs } from 'node:util';
+
 import { logError } from './services/logger.js';
 
 import { startHttpServer } from './http/server.js';
 import { startStdioServer } from './server.js';
 
-const isStdioMode = process.argv.includes('--stdio');
+const { values } = parseArgs({
+  options: {
+    stdio: { type: 'boolean', default: false },
+  },
+});
+const isStdioMode = values.stdio;
 let isShuttingDown = false;
 
 const shutdownHandlerRef: { current?: (signal: string) => Promise<void> } = {};

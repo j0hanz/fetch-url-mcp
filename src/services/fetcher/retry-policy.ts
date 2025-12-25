@@ -35,7 +35,7 @@ export class RetryPolicy {
           throw lastError;
         }
 
-        await this.wait(attempt, lastError);
+        await this.wait(attempt, lastError, signal);
       }
     }
 
@@ -63,7 +63,11 @@ export class RetryPolicy {
     return true;
   }
 
-  private async wait(attempt: number, error: Error): Promise<void> {
+  private async wait(
+    attempt: number,
+    error: Error,
+    signal?: AbortSignal
+  ): Promise<void> {
     const delay = this.calculateDelay(attempt, error);
 
     if (error instanceof FetchError && error.details.httpStatus === 429) {
@@ -80,7 +84,25 @@ export class RetryPolicy {
       });
     }
 
-    await setTimeout(delay);
+    try {
+      await setTimeout(delay, undefined, { signal });
+    } catch (timeoutError) {
+      if (
+        timeoutError instanceof Error &&
+        (timeoutError.name === 'AbortError' ||
+          timeoutError.name === 'TimeoutError')
+      ) {
+        throw new FetchError(
+          'Request was aborted during retry wait',
+          this.url,
+          499,
+          {
+            reason: 'aborted',
+          }
+        );
+      }
+      throw timeoutError;
+    }
   }
 
   private calculateDelay(attempt: number, error: Error): number {
