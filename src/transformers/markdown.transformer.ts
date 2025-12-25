@@ -81,45 +81,53 @@ function cleanMarkdownContent(markdown: string): string {
   return cleanedLines.join('\n');
 }
 
-const turndown = new TurndownService({
-  headingStyle: 'atx',
-  codeBlockStyle: 'fenced',
-  emDelimiter: '_',
-  bulletListMarker: '-',
-});
+let turndownInstance: TurndownService | null = null;
 
-turndown.addRule('removeNoise', {
-  filter: ['script', 'style', 'noscript', 'nav', 'footer', 'aside', 'iframe'],
-  replacement: () => '',
-});
+function getTurndown(): TurndownService {
+  if (turndownInstance) return turndownInstance;
 
-turndown.addRule('fencedCodeBlockWithLanguage', {
-  filter: (node, options) => {
-    return (
-      options.codeBlockStyle === 'fenced' &&
-      node.nodeName === 'PRE' &&
-      node.firstChild !== null &&
-      node.firstChild.nodeName === 'CODE'
-    );
-  },
-  replacement: (_content, node) => {
-    const codeNode = node.firstChild as HTMLElement;
-    const code = codeNode.textContent || '';
+  turndownInstance = new TurndownService({
+    headingStyle: 'atx',
+    codeBlockStyle: 'fenced',
+    emDelimiter: '_',
+    bulletListMarker: '-',
+  });
 
-    const className = codeNode.getAttribute('class') ?? '';
-    const dataLang = codeNode.getAttribute('data-language') ?? '';
+  turndownInstance.addRule('removeNoise', {
+    filter: ['script', 'style', 'noscript', 'nav', 'footer', 'aside', 'iframe'],
+    replacement: () => '',
+  });
 
-    const languageMatch =
-      /language-(\w+)/.exec(className) ??
-      /lang-(\w+)/.exec(className) ??
-      /highlight-(\w+)/.exec(className) ??
-      /^(\w+)$/.exec(dataLang);
+  turndownInstance.addRule('fencedCodeBlockWithLanguage', {
+    filter: (node, options) => {
+      return (
+        options.codeBlockStyle === 'fenced' &&
+        node.nodeName === 'PRE' &&
+        node.firstChild !== null &&
+        node.firstChild.nodeName === 'CODE'
+      );
+    },
+    replacement: (_content, node) => {
+      const codeNode = node.firstChild as HTMLElement;
+      const code = codeNode.textContent || '';
 
-    const language = languageMatch?.[1] ?? detectLanguageFromCode(code) ?? '';
+      const className = codeNode.getAttribute('class') ?? '';
+      const dataLang = codeNode.getAttribute('data-language') ?? '';
 
-    return `\n\n\`\`\`${language}\n${code.replace(/\n$/, '')}\n\`\`\`\n\n`;
-  },
-});
+      const languageMatch =
+        /language-(\w+)/.exec(className) ??
+        /lang-(\w+)/.exec(className) ??
+        /highlight-(\w+)/.exec(className) ??
+        /^(\w+)$/.exec(dataLang);
+
+      const language = languageMatch?.[1] ?? detectLanguageFromCode(code) ?? '';
+
+      return `\n\n\`\`\`${language}\n${code.replace(/\n$/, '')}\n\`\`\`\n\n`;
+    },
+  });
+
+  return turndownInstance;
+}
 
 const YAML_SPECIAL_CHARS = /[:[\]{}"\n\r\t'|>&*!?,#]/;
 const YAML_NUMERIC = /^[\d.]+$/;
@@ -172,7 +180,7 @@ function createFrontmatter(metadata: MetadataBlock): string {
 }
 
 function convertHtmlToMarkdown(html: string): string {
-  let content = turndown.turndown(html);
+  let content = getTurndown().turndown(html);
   content = content.replace(MULTIPLE_NEWLINES, '\n\n').trim();
   content = cleanMarkdownContent(content);
   content = content.replace(MULTIPLE_NEWLINES, '\n\n').trim();
