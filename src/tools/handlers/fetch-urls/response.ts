@@ -35,12 +35,37 @@ export function createBatchResponse(
     content: [
       {
         type: 'text' as const,
-        text: JSON.stringify(structuredContent, null, 2),
+        text: formatBatchResponseSummary(structuredContent),
       },
       ...resourceLinks,
     ],
     structuredContent,
   };
+}
+
+function formatBatchResponseSummary(content: BatchResponseContent): string {
+  const { results, summary, fetchedAt } = content;
+  const resultSummaries = results.map((result) => {
+    if (result.success && result.content) {
+      const { content: _, ...summary } = result;
+      return {
+        ...summary,
+        contentPreview: `${result.content.substring(0, 100)}...`,
+      };
+    }
+    return result;
+  });
+
+  return JSON.stringify(
+    {
+      results: resultSummaries,
+      summary,
+      fetchedAt,
+      note: 'Full content available via resource links below',
+    },
+    null,
+    2
+  );
 }
 
 function buildBatchSummary(results: BatchUrlResult[]): BatchSummary {
