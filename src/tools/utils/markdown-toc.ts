@@ -16,21 +16,29 @@ function slugify(text: string): string {
 export function extractToc(markdown: string): TocEntry[] {
   const headingRegex = /^(#{1,6})\s+(.+)$/gm;
   const toc: TocEntry[] = [];
-  let match: RegExpExecArray | null;
 
-  while ((match = headingRegex.exec(markdown)) !== null) {
-    const hashMarks = match[1];
-    const rawText = match[2];
-
-    if (!hashMarks || !rawText) continue;
-
-    const text = stripMarkdownLinks(rawText.trim());
-    toc.push({
-      level: hashMarks.length,
-      text,
-      slug: slugify(rawText),
-    });
+  for (const match of markdown.matchAll(headingRegex)) {
+    const entry = buildTocEntry(match);
+    if (entry) {
+      toc.push(entry);
+    }
   }
 
   return toc;
+}
+
+function buildTocEntry(match: RegExpExecArray): TocEntry | null {
+  const hashMarks = match[1];
+  const rawText = match[2];
+
+  if (!hashMarks || !rawText) {
+    return null;
+  }
+
+  const text = stripMarkdownLinks(rawText.trim());
+  return {
+    level: hashMarks.length,
+    text,
+    slug: slugify(rawText),
+  };
 }

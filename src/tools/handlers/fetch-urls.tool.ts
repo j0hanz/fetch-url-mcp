@@ -26,21 +26,25 @@ export const FETCH_URLS_TOOL_DESCRIPTION =
   'Fetches multiple URLs in parallel and converts them to AI-readable format (JSONL or Markdown). Supports concurrency control and continues on individual failures.';
 
 function extractRejectionMessage({ reason }: PromiseRejectedResult): string {
-  if (reason instanceof Error) {
-    return reason.message;
-  }
-  if (typeof reason === 'string') {
-    return reason;
-  }
-  if (
-    reason &&
-    typeof reason === 'object' &&
-    'message' in reason &&
-    typeof (reason as Record<string, unknown>).message === 'string'
-  ) {
-    return (reason as Record<string, unknown>).message as string;
-  }
+  return toErrorMessage(reason);
+}
+
+function toErrorMessage(reason: unknown): string {
+  if (reason instanceof Error) return reason.message;
+  if (typeof reason === 'string') return reason;
+  if (hasMessage(reason)) return reason.message;
   return 'Unknown error';
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object';
+}
+
+function hasMessage(value: unknown): value is {
+  message: string;
+} {
+  if (!isRecord(value)) return false;
+  return typeof value.message === 'string';
 }
 
 function normalizeConcurrency(input: FetchUrlsInput, urlCount: number): number {
@@ -68,35 +72,7 @@ export async function fetchUrlsToolHandler(
   input: FetchUrlsInput
 ): Promise<ToolResponseBase> {
   try {
-    const validationResult = validateBatchInput(input);
-    if (!Array.isArray(validationResult)) {
-      return validationResult;
-    }
-
-    const validUrls = validationResult;
-    const concurrency = normalizeConcurrency(input, validUrls.length);
-    const continueOnError = input.continueOnError ?? true;
-    const format = input.format ?? 'jsonl';
-
-    logDebug('Starting batch URL fetch', {
-      urlCount: validUrls.length,
-      concurrency,
-      format,
-    });
-
-    const processOptions = buildSingleUrlOptions(input, format);
-    const results = await collectBatchResults(
-      validUrls,
-      processOptions,
-      concurrency
-    );
-
-    if (!continueOnError) {
-      const failureResponse = buildBatchFailure(results);
-      if (failureResponse) return failureResponse;
-    }
-
-    return createBatchResponse(results);
+    return await executeFetchUrls(input);
   } catch (error) {
     logError(
       'fetch-urls tool error',
@@ -109,6 +85,49 @@ export async function fetchUrlsToolHandler(
       'BATCH_ERROR'
     );
   }
+}
+
+async function executeFetchUrls(
+  input: FetchUrlsInput
+): Promise<ToolResponseBase> {
+  const validUrls = resolveValidUrls(input);
+  if (!Array.isArray(validUrls)) return validUrls;
+
+  const batchConfig = buildBatchConfig(input, validUrls.length);
+  logDebug('Starting batch URL fetch', {
+    urlCount: validUrls.length,
+    concurrency: batchConfig.concurrency,
+    format: batchConfig.format,
+  });
+
+  const processOptions = buildSingleUrlOptions(input, batchConfig.format);
+  const results = await collectBatchResults(
+    validUrls,
+    processOptions,
+    batchConfig.concurrency
+  );
+
+  if (!batchConfig.continueOnError) {
+    const failureResponse = buildBatchFailure(results);
+    if (failureResponse) return failureResponse;
+  }
+
+  return createBatchResponse(results);
+}
+
+function resolveValidUrls(input: FetchUrlsInput): string[] | ToolResponseBase {
+  return validateBatchInput(input);
+}
+
+function buildBatchConfig(
+  input: FetchUrlsInput,
+  urlCount: number
+): { concurrency: number; continueOnError: boolean; format: Format } {
+  return {
+    concurrency: normalizeConcurrency(input, urlCount),
+    continueOnError: input.continueOnError ?? true,
+    format: input.format ?? 'jsonl',
+  };
 }
 
 function buildSingleUrlOptions(

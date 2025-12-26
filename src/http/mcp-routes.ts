@@ -1,43 +1,23 @@
-import { randomUUID } from 'node:crypto';
-
 import type { Express, NextFunction, Request, Response } from 'express';
 
-import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
-import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
+import type { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 
 import type { McpRequestBody } from '../config/types.js';
 
-import { logError, logInfo, logWarn } from '../services/logger.js';
+import { logError, logInfo } from '../services/logger.js';
 
-import { createMcpServer } from '../server.js';
-import { getSessionId, type SessionStore } from './sessions.js';
-
-interface McpRouteOptions {
-  readonly sessionStore: SessionStore;
-  readonly maxSessions: number;
-}
-
-let inFlightSessions = 0;
-
-function reserveSessionSlot(store: SessionStore, maxSessions: number): boolean {
-  if (store.size() + inFlightSessions >= maxSessions) {
-    return false;
-  }
-  inFlightSessions += 1;
-  return true;
-}
-
-function releaseSessionSlot(): void {
-  if (inFlightSessions > 0) {
-    inFlightSessions -= 1;
-  }
-}
+import {
+  type McpSessionOptions,
+  resolveTransportForPost,
+} from './mcp-session.js';
+import { isMcpRequestBody } from './mcp-validation.js';
+import { getSessionId } from './sessions.js';
 
 function sendJsonRpcError(
   res: Response,
   code: number,
   message: string,
-  status = 503
+  status = 400
 ): void {
   res.status(status).json({
     jsonrpc: '2.0',
@@ -49,183 +29,100 @@ function sendJsonRpcError(
   });
 }
 
-function respondServerBusy(res: Response): void {
-  sendJsonRpcError(res, -32000, 'Server busy: maximum sessions reached', 503);
-}
-
-function respondBadRequest(res: Response): void {
-  sendJsonRpcError(
-    res,
-    -32000,
-    'Bad Request: Missing session ID or not an initialize request',
-    400
-  );
-}
-
 function respondInvalidRequestBody(res: Response): void {
   sendJsonRpcError(res, -32600, 'Invalid Request: Malformed request body', 400);
 }
 
-function isServerAtCapacity(options: McpRouteOptions): boolean {
-  const currentSize = options.sessionStore.size();
-  return currentSize + inFlightSessions >= options.maxSessions;
+function respondMissingSession(res: Response): void {
+  res.status(400).json({ error: 'Missing mcp-session-id header' });
 }
 
-function tryEvictSlot(options: McpRouteOptions): boolean {
-  const currentSize = options.sessionStore.size();
-  const canFreeSlot =
-    currentSize >= options.maxSessions &&
-    currentSize - 1 + inFlightSessions < options.maxSessions;
-  return canFreeSlot && evictOldestSession(options.sessionStore);
+function respondSessionNotFound(res: Response): void {
+  res.status(404).json({ error: 'Session not found' });
 }
 
-function createTransportForNewSession(options: McpRouteOptions): {
-  transport: StreamableHTTPServerTransport;
-  releaseSlot: () => void;
-} {
-  let slotReleased = false;
-  const releaseSlot = (): void => {
-    if (slotReleased) return;
-    slotReleased = true;
-    releaseSessionSlot();
-  };
-
-  let initialized = false;
-  const transport = new StreamableHTTPServerTransport({
-    sessionIdGenerator: () => randomUUID(),
-    onsessioninitialized: (id) => {
-      initialized = true;
-      releaseSlot();
-      const now = Date.now();
-      options.sessionStore.set(id, {
-        transport,
-        createdAt: now,
-        lastSeen: now,
-      });
-      logInfo('Session initialized', { sessionId: id });
-    },
-    onsessionclosed: (id) => {
-      options.sessionStore.remove(id);
-      logInfo('Session closed', { sessionId: id });
-    },
-  });
-
-  transport.onclose = () => {
-    if (!initialized) {
-      releaseSlot();
-    }
-    if (transport.sessionId) {
-      options.sessionStore.remove(transport.sessionId);
-    }
-  };
-
-  return { transport, releaseSlot };
-}
-
-function ensureSessionCapacity(
-  options: McpRouteOptions,
-  res: Response
-): boolean {
-  if (!isServerAtCapacity(options)) {
-    return true;
-  }
-
-  if (tryEvictSlot(options) && !isServerAtCapacity(options)) {
-    return true;
-  }
-
-  respondServerBusy(res);
-  return false;
-}
-
-async function resolveTransportForPost(
-  req: Request,
-  res: Response,
+function logPostRequest(
   body: McpRequestBody,
   sessionId: string | undefined,
-  options: McpRouteOptions
-): Promise<StreamableHTTPServerTransport | null> {
-  if (sessionId) {
-    const existingSession = options.sessionStore.get(sessionId);
-    if (existingSession) {
-      options.sessionStore.touch(sessionId);
-      return existingSession.transport;
-    }
-  }
-
-  if (!sessionId && isInitializeRequest(body)) {
-    evictExpiredSessions(options.sessionStore);
-
-    if (!ensureSessionCapacity(options, res)) {
-      return null;
-    }
-
-    if (!reserveSessionSlot(options.sessionStore, options.maxSessions)) {
-      respondServerBusy(res);
-      return null;
-    }
-
-    const { transport, releaseSlot } = createTransportForNewSession(options);
-    const mcpServer = createMcpServer();
-
-    try {
-      await mcpServer.connect(transport);
-    } catch (error) {
-      releaseSlot();
-      logError(
-        'Failed to initialize MCP session',
-        error instanceof Error ? error : undefined
-      );
-      throw error;
-    }
-
-    return transport;
-  }
-
-  respondBadRequest(res);
-  return null;
-}
-
-function isMcpRequestBody(body: unknown): body is McpRequestBody {
-  if (!body || typeof body !== 'object') return false;
-  const obj = body as Record<string, unknown>;
-  return (
-    (obj.method === undefined || typeof obj.method === 'string') &&
-    (obj.id === undefined ||
-      typeof obj.id === 'string' ||
-      typeof obj.id === 'number') &&
-    (obj.jsonrpc === undefined || obj.jsonrpc === '2.0') &&
-    (obj.params === undefined || typeof obj.params === 'object')
-  );
-}
-
-function evictExpiredSessions(store: SessionStore): number {
-  const evicted = store.evictExpired();
-  for (const session of evicted) {
-    void session.transport.close().catch((error: unknown) => {
-      logWarn('Failed to close expired session', {
-        error: error instanceof Error ? error.message : 'Unknown error',
-      });
-    });
-  }
-  return evicted.length;
-}
-
-function evictOldestSession(store: SessionStore): boolean {
-  const session = store.evictOldest();
-  if (!session) return false;
-  void session.transport.close().catch((error: unknown) => {
-    logWarn('Failed to close evicted session', {
-      error: error instanceof Error ? error.message : 'Unknown error',
-    });
+  options: McpSessionOptions
+): void {
+  logInfo('[MCP POST]', {
+    method: body.method,
+    id: body.id,
+    sessionId: sessionId ?? 'none',
+    isInitialize: body.method === 'initialize',
+    sessionCount: options.sessionStore.size(),
   });
-  return true;
+}
+
+async function handleTransportRequest(
+  transport: StreamableHTTPServerTransport,
+  req: Request,
+  res: Response,
+  body?: McpRequestBody
+): Promise<void> {
+  try {
+    await dispatchTransportRequest(transport, req, res, body);
+  } catch (error) {
+    logError(
+      'MCP request handling failed',
+      error instanceof Error ? error : undefined
+    );
+    handleTransportError(res);
+  }
+}
+
+function handleTransportError(res: Response): void {
+  if (res.headersSent) return;
+  res.status(500).json({ error: 'Internal Server Error' });
+}
+
+function dispatchTransportRequest(
+  transport: StreamableHTTPServerTransport,
+  req: Request,
+  res: Response,
+  body?: McpRequestBody
+): Promise<void> {
+  return body
+    ? transport.handleRequest(req, res, body)
+    : transport.handleRequest(req, res);
+}
+
+function resolveSessionTransport(
+  sessionId: string | undefined,
+  options: McpSessionOptions,
+  res: Response
+): StreamableHTTPServerTransport | null {
+  if (!sessionId) {
+    respondMissingSession(res);
+    return null;
+  }
+
+  const session = options.sessionStore.get(sessionId);
+  if (!session) {
+    respondSessionNotFound(res);
+    return null;
+  }
+
+  options.sessionStore.touch(sessionId);
+  return session.transport;
+}
+
+function resolveSessionTransportForDelete(
+  sessionId: string | undefined,
+  options: McpSessionOptions
+): StreamableHTTPServerTransport | null {
+  if (!sessionId) return null;
+  const session = options.sessionStore.get(sessionId);
+  if (!session) return null;
+  options.sessionStore.touch(sessionId);
+  return session.transport;
 }
 
 async function handlePost(
   req: Request,
   res: Response,
-  options: McpRouteOptions
+  options: McpSessionOptions
 ): Promise<void> {
   const sessionId = getSessionId(req);
   const { body } = req as { body: unknown };
@@ -234,15 +131,7 @@ async function handlePost(
     return;
   }
 
-  const { method, id } = body;
-
-  logInfo('[MCP POST]', {
-    method,
-    id,
-    sessionId: sessionId ?? 'none',
-    isInitialize: isInitializeRequest(body),
-    sessionCount: options.sessionStore.size(),
-  });
+  logPostRequest(body, sessionId, options);
 
   const transport = await resolveTransportForPost(
     req,
@@ -251,85 +140,42 @@ async function handlePost(
     sessionId,
     options
   );
-  if (!transport) {
-    return;
-  }
+  if (!transport) return;
 
-  try {
-    await transport.handleRequest(req, res, body);
-  } catch (error) {
-    logError(
-      'MCP request handling failed',
-      error instanceof Error ? error : undefined
-    );
-    if (!res.headersSent) {
-      res.status(500).json({ error: 'Internal Server Error' });
-    }
-  }
+  await handleTransportRequest(transport, req, res, body);
 }
 
 async function handleGet(
   req: Request,
   res: Response,
-  options: McpRouteOptions
+  options: McpSessionOptions
 ): Promise<void> {
-  const sessionId = getSessionId(req);
+  const transport = resolveSessionTransport(getSessionId(req), options, res);
+  if (!transport) return;
 
-  if (!sessionId) {
-    res.status(400).json({ error: 'Missing mcp-session-id header' });
-    return;
-  }
-
-  const session = options.sessionStore.get(sessionId);
-  if (!session) {
-    res.status(404).json({ error: 'Session not found' });
-    return;
-  }
-
-  options.sessionStore.touch(sessionId);
-  try {
-    await session.transport.handleRequest(req, res);
-  } catch (error) {
-    logError(
-      'MCP request handling failed',
-      error instanceof Error ? error : undefined
-    );
-    if (!res.headersSent) {
-      res.status(500).json({ error: 'Internal Server Error' });
-    }
-  }
+  await handleTransportRequest(transport, req, res);
 }
 
 async function handleDelete(
   req: Request,
   res: Response,
-  options: McpRouteOptions
+  options: McpSessionOptions
 ): Promise<void> {
-  const sessionId = getSessionId(req);
-  const session = sessionId ? options.sessionStore.get(sessionId) : undefined;
-
-  if (sessionId && session) {
-    options.sessionStore.touch(sessionId);
-    try {
-      await session.transport.handleRequest(req, res);
-    } catch (error) {
-      logError(
-        'MCP request handling failed',
-        error instanceof Error ? error : undefined
-      );
-      if (!res.headersSent) {
-        res.status(500).json({ error: 'Internal Server Error' });
-      }
-    }
+  const transport = resolveSessionTransportForDelete(
+    getSessionId(req),
+    options
+  );
+  if (!transport) {
+    res.status(204).end();
     return;
   }
 
-  res.status(204).end();
+  await handleTransportRequest(transport, req, res);
 }
 
 export function registerMcpRoutes(
   app: Express,
-  options: McpRouteOptions
+  options: McpSessionOptions
 ): void {
   const asyncHandler =
     (fn: (req: Request, res: Response) => Promise<void>) =>
@@ -351,4 +197,4 @@ export function registerMcpRoutes(
   );
 }
 
-export { evictExpiredSessions, evictOldestSession };
+export { evictExpiredSessions, evictOldestSession } from './mcp-session.js';

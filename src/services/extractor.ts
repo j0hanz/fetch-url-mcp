@@ -38,26 +38,52 @@ function createMetaCollectorState(): MetaCollectorState {
 }
 
 function collectMetaTag(state: MetaCollectorState, tag: HTMLMetaElement): void {
-  const name = tag.getAttribute('name');
-  const property = tag.getAttribute('property');
-  const content = tag.getAttribute('content')?.trim();
-
+  const content = getMetaContent(tag);
   if (!content) return;
 
-  if (property?.startsWith('og:')) {
-    const key = property.replace('og:', '');
-    if (key === 'title') state.title.og = content;
-    if (key === 'description') state.description.og = content;
-    return;
-  }
+  if (collectOpenGraphMeta(state, tag, content)) return;
+  if (collectTwitterMeta(state, tag, content)) return;
+  collectStandardMeta(state, tag, content);
+}
 
-  if (name?.startsWith('twitter:')) {
-    const key = name.replace('twitter:', '');
-    if (key === 'title') state.title.twitter = content;
-    if (key === 'description') state.description.twitter = content;
-    return;
-  }
+function getMetaContent(tag: HTMLMetaElement): string | null {
+  return tag.getAttribute('content')?.trim() ?? null;
+}
 
+function collectOpenGraphMeta(
+  state: MetaCollectorState,
+  tag: HTMLMetaElement,
+  content: string
+): boolean {
+  const property = tag.getAttribute('property');
+  if (!property?.startsWith('og:')) return false;
+
+  const key = property.replace('og:', '');
+  if (key === 'title') state.title.og = content;
+  if (key === 'description') state.description.og = content;
+  return true;
+}
+
+function collectTwitterMeta(
+  state: MetaCollectorState,
+  tag: HTMLMetaElement,
+  content: string
+): boolean {
+  const name = tag.getAttribute('name');
+  if (!name?.startsWith('twitter:')) return false;
+
+  const key = name.replace('twitter:', '');
+  if (key === 'title') state.title.twitter = content;
+  if (key === 'description') state.description.twitter = content;
+  return true;
+}
+
+function collectStandardMeta(
+  state: MetaCollectorState,
+  tag: HTMLMetaElement,
+  content: string
+): void {
+  const name = tag.getAttribute('name');
   if (name === 'description') {
     state.description.standard = content;
   }

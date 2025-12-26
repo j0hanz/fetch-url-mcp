@@ -35,30 +35,15 @@ interface CachedUrlEntry {
 }
 
 function isCachedUrlEntry(value: unknown): value is CachedUrlEntry {
-  if (!value || typeof value !== 'object') {
-    return false;
-  }
+  if (!isRecord(value)) return false;
+  return hasValidCachedFields(value);
+}
 
-  const record = value as Record<string, unknown>;
-  if (typeof record.content !== 'string') {
-    return false;
-  }
-
-  if (record.title !== undefined && typeof record.title !== 'string') {
-    return false;
-  }
-
-  if (
-    record.contentBlocks !== undefined &&
-    typeof record.contentBlocks !== 'number'
-  ) {
-    return false;
-  }
-
-  if (record.truncated !== undefined && typeof record.truncated !== 'boolean') {
-    return false;
-  }
-
+function hasValidCachedFields(value: Record<string, unknown>): boolean {
+  if (!isString(value.content)) return false;
+  if (!isOptionalString(value.title)) return false;
+  if (!isOptionalNumber(value.contentBlocks)) return false;
+  if (!isOptionalBoolean(value.truncated)) return false;
   return true;
 }
 
@@ -119,38 +104,52 @@ export async function processSingleUrl(
   options: SingleUrlProcessOptions
 ): Promise<BatchUrlResult> {
   try {
-    const result = await runBatchPipeline(url, options);
-    const inlineResult = applyInlineContentLimit(
-      result.data.content,
-      result.cacheKey ?? null,
-      options.format
-    );
-
-    if (inlineResult.error) {
-      return mapInlineFailure(result.url, inlineResult.error);
-    }
-
-    return mapInlineSuccess(result, inlineResult);
+    return await processSingleUrlInternal(url, options);
   } catch (error) {
-    const errorMessage =
-      error instanceof Error ? error.message : 'Unknown error';
-    const errorCode =
-      error instanceof Error &&
-      'code' in error &&
-      typeof error.code === 'string'
-        ? error.code
-        : 'FETCH_ERROR';
-
-    logWarn('Batch URL processing failed', { url, error: errorMessage });
-
-    return {
-      url,
-      success: false,
-      cached: false,
-      error: errorMessage,
-      errorCode,
-    };
+    return mapProcessError(url, error);
   }
+}
+
+async function processSingleUrlInternal(
+  url: string,
+  options: SingleUrlProcessOptions
+): Promise<BatchUrlResult> {
+  const result = await runBatchPipeline(url, options);
+  const inlineResult = applyInlineContentLimit(
+    result.data.content,
+    result.cacheKey ?? null,
+    options.format
+  );
+
+  if (inlineResult.error) {
+    return mapInlineFailure(result.url, inlineResult.error);
+  }
+
+  return mapInlineSuccess(result, inlineResult);
+}
+
+function mapProcessError(url: string, error: unknown): BatchUrlResult {
+  const errorMessage = resolveErrorMessage(error);
+  const errorCode = resolveErrorCode(error);
+  logWarn('Batch URL processing failed', { url, error: errorMessage });
+
+  return {
+    url,
+    success: false,
+    cached: false,
+    error: errorMessage,
+    errorCode,
+  };
+}
+
+function resolveErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : 'Unknown error';
+}
+
+function resolveErrorCode(error: unknown): string {
+  if (!isRecord(error)) return 'FETCH_ERROR';
+  const { code } = error;
+  return typeof code === 'string' ? code : 'FETCH_ERROR';
 }
 
 async function runBatchPipeline(
@@ -211,3 +210,23 @@ function mapInlineFailure(url: string, errorMessage: string): BatchUrlResult {
 }
 
 export type { SingleUrlProcessOptions };
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object';
+}
+
+function isString(value: unknown): value is string {
+  return typeof value === 'string';
+}
+
+function isOptionalString(value: unknown): boolean {
+  return value === undefined || isString(value);
+}
+
+function isOptionalNumber(value: unknown): boolean {
+  return value === undefined || typeof value === 'number';
+}
+
+function isOptionalBoolean(value: unknown): boolean {
+  return value === undefined || typeof value === 'boolean';
+}

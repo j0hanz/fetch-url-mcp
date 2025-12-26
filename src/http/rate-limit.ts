@@ -24,26 +24,9 @@ function createCleanupInterval(
 ): AbortController {
   const controller = new AbortController();
 
-  void (async () => {
-    try {
-      for await (const _ of setIntervalPromise(
-        options.cleanupIntervalMs,
-        undefined,
-        { signal: controller.signal, ref: false }
-      )) {
-        const now = Date.now();
-        for (const [key, entry] of store.entries()) {
-          if (now - entry.lastAccessed > options.windowMs * 2) {
-            store.delete(key);
-          }
-        }
-      }
-    } catch (error) {
-      if (error instanceof Error && error.name === 'AbortError') {
-        return;
-      }
-    }
-  })();
+  void startCleanupLoop(store, options, controller.signal).catch(
+    handleCleanupError
+  );
 
   return controller;
 }
@@ -62,38 +45,21 @@ export function createRateLimitMiddleware(
     res: Response,
     next: NextFunction
   ): void => {
-    if (!options.enabled || req.method === 'OPTIONS') {
+    if (shouldSkipRateLimit(req, options)) {
       next();
       return;
     }
 
     const now = Date.now();
     const key = getRateLimitKey(req);
-    const existing = store.get(key);
+    const resolution = resolveRateLimitEntry(store, key, now, options);
 
-    if (!existing || now > existing.resetTime) {
-      store.set(key, {
-        count: 1,
-        resetTime: now + options.windowMs,
-        lastAccessed: now,
-      });
+    if (resolution.isNew) {
       next();
       return;
     }
 
-    existing.count += 1;
-    existing.lastAccessed = now;
-
-    if (existing.count > options.maxRequests) {
-      const retryAfter = Math.max(
-        1,
-        Math.ceil((existing.resetTime - now) / 1000)
-      );
-      res.set('Retry-After', String(retryAfter));
-      res.status(429).json({
-        error: 'Rate limit exceeded',
-        retryAfter,
-      });
+    if (handleRateLimitExceeded(res, resolution.entry, now, options)) {
       return;
     }
 
@@ -101,4 +67,93 @@ export function createRateLimitMiddleware(
   };
 
   return { middleware, stop, store };
+}
+
+async function startCleanupLoop(
+  store: Map<string, RateLimitEntry>,
+  options: RateLimitConfig,
+  signal: AbortSignal
+): Promise<void> {
+  for await (const _ of setIntervalPromise(
+    options.cleanupIntervalMs,
+    undefined,
+    { signal, ref: false }
+  )) {
+    evictStaleEntries(store, options, Date.now());
+  }
+}
+
+function evictStaleEntries(
+  store: Map<string, RateLimitEntry>,
+  options: RateLimitConfig,
+  now: number
+): void {
+  for (const [key, entry] of store.entries()) {
+    if (now - entry.lastAccessed > options.windowMs * 2) {
+      store.delete(key);
+    }
+  }
+}
+
+function isAbortError(error: unknown): boolean {
+  return error instanceof Error && error.name === 'AbortError';
+}
+
+function handleCleanupError(error: unknown): void {
+  if (isAbortError(error)) {
+    return;
+  }
+}
+
+function shouldSkipRateLimit(req: Request, options: RateLimitConfig): boolean {
+  return !options.enabled || req.method === 'OPTIONS';
+}
+
+function resolveRateLimitEntry(
+  store: Map<string, RateLimitEntry>,
+  key: string,
+  now: number,
+  options: RateLimitConfig
+): { entry: RateLimitEntry; isNew: boolean } {
+  const existing = store.get(key);
+  if (!existing || now > existing.resetTime) {
+    const entry = createNewEntry(now, options);
+    store.set(key, entry);
+    return { entry, isNew: true };
+  }
+
+  updateEntry(existing, now);
+  return { entry: existing, isNew: false };
+}
+
+function createNewEntry(now: number, options: RateLimitConfig): RateLimitEntry {
+  return {
+    count: 1,
+    resetTime: now + options.windowMs,
+    lastAccessed: now,
+  };
+}
+
+function updateEntry(entry: RateLimitEntry, now: number): void {
+  entry.count += 1;
+  entry.lastAccessed = now;
+}
+
+function handleRateLimitExceeded(
+  res: Response,
+  entry: RateLimitEntry,
+  now: number,
+  options: RateLimitConfig
+): boolean {
+  if (entry.count <= options.maxRequests) {
+    return false;
+  }
+
+  const retryAfter = Math.max(1, Math.ceil((entry.resetTime - now) / 1000));
+  res.set('Retry-After', String(retryAfter));
+  res.status(429).json({
+    error: 'Rate limit exceeded',
+    retryAfter,
+  });
+  return true;
 }

@@ -24,25 +24,33 @@ export function applyInlineContentLimit(
     return { content, contentSize };
   }
 
-  if (!config.cache.enabled || !cacheKey) {
-    return {
-      contentSize,
-      error: `Content exceeds inline limit (${inlineLimit} chars) and cannot be cached`,
-    };
-  }
-
-  const resourceUri = cache.toResourceUri(cacheKey);
+  const resourceUri = resolveResourceUri(cacheKey);
   if (!resourceUri) {
-    return {
-      contentSize,
-      error: `Content exceeds inline limit (${inlineLimit} chars) and cannot be cached`,
-    };
+    return buildCacheError(contentSize, inlineLimit);
   }
 
   return {
     contentSize,
     resourceUri,
-    resourceMimeType:
-      format === 'markdown' ? 'text/markdown' : 'application/jsonl',
+    resourceMimeType: resolveResourceMimeType(format),
+  };
+}
+
+function resolveResourceUri(cacheKey: string | null): string | null {
+  if (!config.cache.enabled || !cacheKey) return null;
+  return cache.toResourceUri(cacheKey);
+}
+
+function resolveResourceMimeType(format: InlineContentFormat): string {
+  return format === 'markdown' ? 'text/markdown' : 'application/jsonl';
+}
+
+function buildCacheError(
+  contentSize: number,
+  inlineLimit: number
+): InlineContentResult {
+  return {
+    contentSize,
+    error: `Content exceeds inline limit (${inlineLimit} chars) and cannot be cached`,
   };
 }

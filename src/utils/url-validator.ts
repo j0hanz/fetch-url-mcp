@@ -47,12 +47,23 @@ export function isBlockedIp(ip: string): boolean {
   if (config.security.blockedHosts.has(ip)) {
     return true;
   }
-  const ipType = isIP(ip);
+  const ipType = resolveIpType(ip);
   if (!ipType) return false;
   const normalizedIp = ip.toLowerCase();
-  if (ipType === 4 && BLOCK_LIST.check(normalizedIp, 'ipv4')) return true;
-  if (ipType === 6 && BLOCK_LIST.check(normalizedIp, 'ipv6')) return true;
+  if (isBlockedByList(normalizedIp, ipType)) return true;
   return matchesBlockedIpPatterns(normalizedIp);
+}
+
+function resolveIpType(ip: string): 4 | 6 | null {
+  const ipType = isIP(ip);
+  return ipType === 4 || ipType === 6 ? ipType : null;
+}
+
+function isBlockedByList(ip: string, ipType: 4 | 6): boolean {
+  if (ipType === 4) {
+    return BLOCK_LIST.check(ip, 'ipv4');
+  }
+  return BLOCK_LIST.check(ip, 'ipv6');
 }
 
 function assertUrlProvided(urlString: string): void {

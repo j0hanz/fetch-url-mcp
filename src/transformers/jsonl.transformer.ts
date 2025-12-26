@@ -69,19 +69,18 @@ export function toJsonl(
   blocks: readonly ContentBlockUnion[],
   metadata?: MetadataBlock
 ): string {
-  const lines: string[] = [];
+  const lines = collectJsonlLines(blocks, metadata);
+  return lines.join('\n');
+}
 
-  if (metadata) {
-    try {
-      const minimalMetadata = {
-        type: metadata.type,
-        title: metadata.title,
-        url: metadata.url,
-      };
-      lines.push(JSON.stringify(minimalMetadata));
-    } catch {
-      /* skip */
-    }
+function collectJsonlLines(
+  blocks: readonly ContentBlockUnion[],
+  metadata?: MetadataBlock
+): string[] {
+  const lines: string[] = [];
+  const header = serializeMetadata(metadata);
+  if (header) {
+    lines.push(header);
   }
 
   for (const block of blocks) {
@@ -91,5 +90,19 @@ export function toJsonl(
     }
   }
 
-  return lines.join('\n');
+  return lines;
+}
+
+function serializeMetadata(metadata?: MetadataBlock): string | null {
+  if (!metadata) return null;
+  try {
+    const minimalMetadata = {
+      type: metadata.type,
+      title: metadata.title,
+      url: metadata.url,
+    };
+    return JSON.stringify(minimalMetadata);
+  } catch {
+    return null;
+  }
 }

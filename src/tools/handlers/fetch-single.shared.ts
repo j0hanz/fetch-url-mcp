@@ -1,4 +1,5 @@
-import type { PipelineResult } from '../../config/types.js';
+import { config } from '../../config/index.js';
+import type { PipelineResult, ToolContentBlock } from '../../config/types.js';
 
 import { appendHeaderVary } from '../utils/cache-vary.js';
 import { executeFetchPipeline } from '../utils/fetch-pipeline.js';
@@ -51,4 +52,49 @@ export async function performSharedFetch<T extends { content: string }>(
   );
 
   return { pipeline, inlineResult };
+}
+
+export type InlineResult = ReturnType<typeof applyInlineContentLimit>;
+
+function serializeStructuredContent(
+  structuredContent: Record<string, unknown>,
+  fromCache: boolean
+): string {
+  return JSON.stringify(
+    structuredContent,
+    fromCache ? undefined : null,
+    fromCache ? undefined : 2
+  );
+}
+
+function buildResourceLink(
+  inlineResult: InlineResult,
+  name: string
+): ToolContentBlock | null {
+  if (!inlineResult.resourceUri) {
+    return null;
+  }
+
+  return {
+    type: 'resource_link',
+    uri: inlineResult.resourceUri,
+    name,
+    mimeType: inlineResult.resourceMimeType,
+    description: `Content exceeds inline limit (${config.constants.maxInlineContentChars} chars)`,
+  };
+}
+
+export function buildToolContentBlocks(
+  structuredContent: Record<string, unknown>,
+  fromCache: boolean,
+  inlineResult: InlineResult,
+  resourceName: string
+): ToolContentBlock[] {
+  const textBlock: ToolContentBlock = {
+    type: 'text',
+    text: serializeStructuredContent(structuredContent, fromCache),
+  };
+
+  const resourceLink = buildResourceLink(inlineResult, resourceName);
+  return resourceLink ? [textBlock, resourceLink] : [textBlock];
 }

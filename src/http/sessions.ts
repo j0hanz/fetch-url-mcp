@@ -21,73 +21,79 @@ export function getSessionId(req: Request): string | undefined {
 export function createSessionStore(sessionTtlMs: number): SessionStore {
   const sessions = new Map<string, SessionEntry>();
 
-  const get = (sessionId: string): SessionEntry | undefined =>
-    sessions.get(sessionId);
-
-  const touch = (sessionId: string): void => {
-    const session = sessions.get(sessionId);
-    if (session) {
-      session.lastSeen = Date.now();
-    }
-  };
-
-  const set = (sessionId: string, entry: SessionEntry): void => {
-    sessions.set(sessionId, entry);
-  };
-
-  const remove = (sessionId: string): SessionEntry | undefined => {
-    const session = sessions.get(sessionId);
-    sessions.delete(sessionId);
-    return session;
-  };
-
-  const size = (): number => sessions.size;
-
-  const clear = (): SessionEntry[] => {
-    const entries = Array.from(sessions.values());
-    sessions.clear();
-    return entries;
-  };
-
-  const evictExpired = (): SessionEntry[] => {
-    const now = Date.now();
-    const evicted: SessionEntry[] = [];
-
-    for (const [id, session] of sessions.entries()) {
-      if (now - session.lastSeen > sessionTtlMs) {
-        sessions.delete(id);
-        evicted.push(session);
-      }
-    }
-
-    return evicted;
-  };
-
-  const evictOldest = (): SessionEntry | undefined => {
-    let oldestId: string | undefined;
-    let oldestSeen = Number.POSITIVE_INFINITY;
-
-    for (const [id, session] of sessions.entries()) {
-      if (session.lastSeen < oldestSeen) {
-        oldestSeen = session.lastSeen;
-        oldestId = id;
-      }
-    }
-
-    if (!oldestId) return undefined;
-    const session = sessions.get(oldestId);
-    sessions.delete(oldestId);
-    return session;
-  };
-
   return {
-    get,
-    touch,
-    set,
-    remove,
-    size,
-    clear,
-    evictExpired,
-    evictOldest,
+    get: (sessionId) => sessions.get(sessionId),
+    touch: (sessionId) => {
+      touchSession(sessions, sessionId);
+    },
+    set: (sessionId, entry) => {
+      sessions.set(sessionId, entry);
+    },
+    remove: (sessionId) => removeSession(sessions, sessionId),
+    size: () => sessions.size,
+    clear: () => clearSessions(sessions),
+    evictExpired: () => evictExpiredSessions(sessions, sessionTtlMs),
+    evictOldest: () => evictOldestSession(sessions),
   };
+}
+
+function touchSession(
+  sessions: Map<string, SessionEntry>,
+  sessionId: string
+): void {
+  const session = sessions.get(sessionId);
+  if (session) {
+    session.lastSeen = Date.now();
+  }
+}
+
+function removeSession(
+  sessions: Map<string, SessionEntry>,
+  sessionId: string
+): SessionEntry | undefined {
+  const session = sessions.get(sessionId);
+  sessions.delete(sessionId);
+  return session;
+}
+
+function clearSessions(sessions: Map<string, SessionEntry>): SessionEntry[] {
+  const entries = Array.from(sessions.values());
+  sessions.clear();
+  return entries;
+}
+
+function evictExpiredSessions(
+  sessions: Map<string, SessionEntry>,
+  sessionTtlMs: number
+): SessionEntry[] {
+  const now = Date.now();
+  const evicted: SessionEntry[] = [];
+
+  for (const [id, session] of sessions.entries()) {
+    if (now - session.lastSeen > sessionTtlMs) {
+      sessions.delete(id);
+      evicted.push(session);
+    }
+  }
+
+  return evicted;
+}
+
+function evictOldestSession(
+  sessions: Map<string, SessionEntry>
+): SessionEntry | undefined {
+  let oldestId: string | undefined;
+  let oldestSeen = Number.POSITIVE_INFINITY;
+
+  for (const [id, session] of sessions.entries()) {
+    if (session.lastSeen < oldestSeen) {
+      oldestSeen = session.lastSeen;
+      oldestId = id;
+    }
+  }
+
+  if (!oldestId) return undefined;
+  const session = sessions.get(oldestId);
+  sessions.delete(oldestId);
+  return session;
 }

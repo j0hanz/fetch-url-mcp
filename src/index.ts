@@ -16,17 +16,27 @@ let isShuttingDown = false;
 
 const shutdownHandlerRef: { current?: (signal: string) => Promise<void> } = {};
 
+function shouldAttemptShutdown(): boolean {
+  return !isShuttingDown && !isStdioMode && Boolean(shutdownHandlerRef.current);
+}
+
+function attemptShutdown(signal: string): void {
+  if (!shutdownHandlerRef.current) return;
+  isShuttingDown = true;
+  process.stderr.write('Attempting graceful shutdown...\n');
+  void shutdownHandlerRef.current(signal);
+}
+
 process.on('uncaughtException', (error) => {
   logError('Uncaught exception', error);
   process.stderr.write(`Uncaught exception: ${error.message}\n`);
 
-  if (!isShuttingDown && !isStdioMode && shutdownHandlerRef.current) {
-    isShuttingDown = true;
-    process.stderr.write('Attempting graceful shutdown...\n');
-    void shutdownHandlerRef.current('UNCAUGHT_EXCEPTION');
-  } else {
-    process.exit(1);
+  if (shouldAttemptShutdown()) {
+    attemptShutdown('UNCAUGHT_EXCEPTION');
+    return;
   }
+
+  process.exit(1);
 });
 
 process.on('unhandledRejection', (reason) => {

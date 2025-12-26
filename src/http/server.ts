@@ -26,7 +26,6 @@ import { createSessionStore, getSessionId } from './sessions.js';
 function isLoopbackHost(host: string): boolean {
   return host === '127.0.0.1' || host === '::1' || host === 'localhost';
 }
-
 function buildCorsOptions(): {
   allowedOrigins: string[];
   allowAllOrigins: boolean;
@@ -37,7 +36,6 @@ function buildCorsOptions(): {
   const allowAllOrigins = process.env.CORS_ALLOW_ALL === 'true';
   return { allowedOrigins, allowAllOrigins };
 }
-
 function createJsonParseErrorHandler(): (
   err: Error,
   _req: Request,
@@ -64,7 +62,6 @@ function createJsonParseErrorHandler(): (
     next();
   };
 }
-
 function createContextMiddleware(): (
   req: Request,
   _res: Response,
@@ -129,33 +126,50 @@ function startSessionCleanupLoop(
   sessionTtlMs: number
 ): AbortController {
   const controller = new AbortController();
-  const intervalMs = Math.min(
-    Math.max(Math.floor(sessionTtlMs / 2), 10000),
-    60000
+  void runSessionCleanupLoop(store, sessionTtlMs, controller.signal).catch(
+    handleSessionCleanupError
   );
-
-  void (async () => {
-    try {
-      for await (const _ of setIntervalPromise(intervalMs, undefined, {
-        signal: controller.signal,
-        ref: false,
-      })) {
-        const evicted = evictExpiredSessions(store);
-        if (evicted > 0) {
-          logInfo('Expired sessions evicted', { evicted });
-        }
-      }
-    } catch (error) {
-      if (error instanceof Error && error.name === 'AbortError') {
-        return;
-      }
-      logWarn('Session cleanup loop failed', {
-        error: error instanceof Error ? error.message : 'Unknown error',
-      });
-    }
-  })();
-
   return controller;
+}
+
+async function runSessionCleanupLoop(
+  store: ReturnType<typeof createSessionStore>,
+  sessionTtlMs: number,
+  signal: AbortSignal
+): Promise<void> {
+  const intervalMs = getCleanupIntervalMs(sessionTtlMs);
+  for await (const _ of setIntervalPromise(intervalMs, undefined, {
+    signal,
+    ref: false,
+  })) {
+    handleSessionEvictions(store);
+  }
+}
+
+function getCleanupIntervalMs(sessionTtlMs: number): number {
+  return Math.min(Math.max(Math.floor(sessionTtlMs / 2), 10000), 60000);
+}
+
+function isAbortError(error: unknown): boolean {
+  return error instanceof Error && error.name === 'AbortError';
+}
+
+function handleSessionEvictions(
+  store: ReturnType<typeof createSessionStore>
+): void {
+  const evicted = evictExpiredSessions(store);
+  if (evicted > 0) {
+    logInfo('Expired sessions evicted', { evicted });
+  }
+}
+
+function handleSessionCleanupError(error: unknown): void {
+  if (isAbortError(error)) {
+    return;
+  }
+  logWarn('Session cleanup loop failed', {
+    error: error instanceof Error ? error.message : 'Unknown error',
+  });
 }
 
 function startListening(app: Express): ReturnType<Express['listen']> {
@@ -236,12 +250,8 @@ function registerSignalHandlers(
 export async function startHttpServer(): Promise<{
   shutdown: (signal: string) => Promise<void>;
 }> {
-  const { default: express } = await import('express');
-  const app = express();
-
-  const jsonParser = express.json({ limit: '1mb' });
+  const { app, jsonParser } = await createExpressApp();
   const corsOptions = buildCorsOptions();
-
   const { middleware: rateLimitMiddleware, stop: stopRateLimitCleanup } =
     createRateLimitMiddleware(config.rateLimit);
   const authMiddleware = createAuthMiddleware(config.security.apiKey ?? '');
@@ -253,7 +263,6 @@ export async function startHttpServer(): Promise<{
     authMiddleware,
     corsOptions
   );
-
   assertHttpConfiguration();
 
   const sessionStore = createSessionStore(config.server.sessionTtlMs);
@@ -266,7 +275,6 @@ export async function startHttpServer(): Promise<{
     sessionStore,
     maxSessions: config.server.maxSessions,
   });
-
   app.use(errorHandler);
 
   const server = startListening(app);
@@ -276,8 +284,16 @@ export async function startHttpServer(): Promise<{
     sessionCleanupController,
     stopRateLimitCleanup
   );
-
   registerSignalHandlers(shutdown);
-
   return { shutdown };
+}
+
+async function createExpressApp(): Promise<{
+  app: Express;
+  jsonParser: RequestHandler;
+}> {
+  const { default: express } = await import('express');
+  const app = express();
+  const jsonParser = express.json({ limit: '1mb' });
+  return { app, jsonParser };
 }

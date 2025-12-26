@@ -68,57 +68,66 @@ function attemptCacheRetrieval<T>(
 export async function executeFetchPipeline<T>(
   options: FetchPipelineOptions<T>
 ): Promise<PipelineResult<T>> {
-  const {
-    url,
-    cacheNamespace,
-    customHeaders,
-    retries,
-    signal,
-    timeout,
-    transform,
-    serialize = JSON.stringify,
-    deserialize,
-  } = options;
-
-  const normalizedUrl = validateAndNormalizeUrl(url);
-  const cacheVary = appendHeaderVary(options.cacheVary, customHeaders);
-  const cacheKey = cache.createCacheKey(
-    cacheNamespace,
-    normalizedUrl,
-    cacheVary
-  );
+  const normalizedUrl = validateAndNormalizeUrl(options.url);
+  const cacheKey = resolveCacheKey(options, normalizedUrl);
 
   const cachedResult = attemptCacheRetrieval<T>(
     cacheKey,
-    deserialize,
-    cacheNamespace,
+    options.deserialize,
+    options.cacheNamespace,
     normalizedUrl
   );
+  if (cachedResult) return cachedResult;
 
-  if (cachedResult) {
-    return cachedResult;
-  }
+  const fetchOptions = buildFetchOptions(options);
+  logDebug('Fetching URL', { url: normalizedUrl, retries: options.retries });
 
-  const fetchOptions: FetchOptions = {
-    customHeaders,
-    signal,
-    timeout,
+  const html = await fetchUrlWithRetry(
+    normalizedUrl,
+    fetchOptions,
+    options.retries
+  );
+  const data = options.transform(html, normalizedUrl);
+  persistCache(cacheKey, data, options.serialize);
+
+  return buildPipelineResult(normalizedUrl, data, cacheKey);
+}
+
+function resolveCacheKey<T>(
+  options: FetchPipelineOptions<T>,
+  normalizedUrl: string
+): string | null {
+  const cacheVary = appendHeaderVary(options.cacheVary, options.customHeaders);
+  return cache.createCacheKey(options.cacheNamespace, normalizedUrl, cacheVary);
+}
+
+function buildFetchOptions<T>(options: FetchPipelineOptions<T>): FetchOptions {
+  return {
+    customHeaders: options.customHeaders,
+    signal: options.signal,
+    timeout: options.timeout,
   };
+}
 
-  logDebug('Fetching URL', { url: normalizedUrl, retries });
+function persistCache<T>(
+  cacheKey: string | null,
+  data: T,
+  serialize: ((result: T) => string) | undefined
+): void {
+  if (!cacheKey) return;
+  const serializer = serialize ?? JSON.stringify;
+  cache.set(cacheKey, serializer(data));
+}
 
-  const html = await fetchUrlWithRetry(normalizedUrl, fetchOptions, retries);
-  const data = transform(html, normalizedUrl);
-
-  if (cacheKey) {
-    const serialized = serialize(data);
-    cache.set(cacheKey, serialized);
-  }
-
+function buildPipelineResult<T>(
+  url: string,
+  data: T,
+  cacheKey: string | null
+): PipelineResult<T> {
   return {
     data,
     fromCache: false,
-    url: normalizedUrl,
+    url,
     fetchedAt: new Date().toISOString(),
     cacheKey,
   };

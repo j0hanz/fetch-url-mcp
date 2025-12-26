@@ -1,4 +1,5 @@
 import packageJson from '../../package.json' with { type: 'json' };
+import type { LogLevel } from './types.js';
 
 function parseInteger(
   envValue: string | undefined,
@@ -38,19 +39,21 @@ function parseBoolean(
   return envValue !== 'false';
 }
 
-function parseLogLevel(
-  envValue: string | undefined
-): 'debug' | 'info' | 'warn' | 'error' {
+function parseLogLevel(envValue: string | undefined): LogLevel {
   const level = envValue?.toLowerCase();
-  if (
-    level === 'debug' ||
-    level === 'info' ||
-    level === 'warn' ||
-    level === 'error'
-  ) {
-    return level;
-  }
-  return 'info';
+  if (!level) return 'info';
+  return isLogLevel(level) ? level : 'info';
+}
+
+const ALLOWED_LOG_LEVELS: ReadonlySet<LogLevel> = new Set([
+  'debug',
+  'info',
+  'warn',
+  'error',
+]);
+
+function isLogLevel(value: string): value is LogLevel {
+  return ALLOWED_LOG_LEVELS.has(value as LogLevel);
 }
 
 const host = process.env.HOST ?? '127.0.0.1';

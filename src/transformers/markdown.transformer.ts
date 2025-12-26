@@ -62,48 +62,67 @@ let turndownInstance: TurndownService | null = null;
 
 function getTurndown(): TurndownService {
   if (turndownInstance) return turndownInstance;
+  turndownInstance = createTurndownInstance();
+  return turndownInstance;
+}
 
-  turndownInstance = new TurndownService({
+function createTurndownInstance(): TurndownService {
+  const instance = new TurndownService({
     headingStyle: 'atx',
     codeBlockStyle: 'fenced',
     emDelimiter: '_',
     bulletListMarker: '-',
   });
 
-  turndownInstance.addRule('removeNoise', {
+  addNoiseRule(instance);
+  addFencedCodeRule(instance);
+
+  return instance;
+}
+
+function addNoiseRule(instance: TurndownService): void {
+  instance.addRule('removeNoise', {
     filter: ['script', 'style', 'noscript', 'nav', 'footer', 'aside', 'iframe'],
     replacement: () => '',
   });
+}
 
-  turndownInstance.addRule('fencedCodeBlockWithLanguage', {
-    filter: (node, options) => {
-      return (
-        options.codeBlockStyle === 'fenced' &&
-        node.nodeName === 'PRE' &&
-        node.firstChild !== null &&
-        node.firstChild.nodeName === 'CODE'
-      );
-    },
-    replacement: (_content, node) => {
-      const codeNode = node.firstChild as HTMLElement;
-      const code = codeNode.textContent || '';
-
-      const className = codeNode.getAttribute('class') ?? '';
-      const dataLang = codeNode.getAttribute('data-language') ?? '';
-
-      const languageMatch =
-        /language-(\w+)/.exec(className) ??
-        /lang-(\w+)/.exec(className) ??
-        /highlight-(\w+)/.exec(className) ??
-        /^(\w+)$/.exec(dataLang);
-
-      const language = languageMatch?.[1] ?? detectLanguageFromCode(code) ?? '';
-
-      return `\n\n\`\`\`${language}\n${code.replace(/\n$/, '')}\n\`\`\`\n\n`;
-    },
+function addFencedCodeRule(instance: TurndownService): void {
+  instance.addRule('fencedCodeBlockWithLanguage', {
+    filter: (node, options) => isFencedCodeBlock(node, options),
+    replacement: (_content, node) => formatFencedCodeBlock(node),
   });
+}
 
-  return turndownInstance;
+function isFencedCodeBlock(
+  node: TurndownService.Node,
+  options: TurndownService.Options
+): boolean {
+  if (options.codeBlockStyle !== 'fenced') return false;
+  if (node.nodeName !== 'PRE') return false;
+  const { firstChild } = node;
+  if (!firstChild) return false;
+  return firstChild.nodeName === 'CODE';
+}
+
+function formatFencedCodeBlock(node: TurndownService.Node): string {
+  const codeNode = node.firstChild as HTMLElement;
+  const code = codeNode.textContent || '';
+  const language = resolveCodeLanguage(codeNode, code);
+  return `\n\n\`\`\`${language}\n${code.replace(/\n$/, '')}\n\`\`\`\n\n`;
+}
+
+function resolveCodeLanguage(codeNode: HTMLElement, code: string): string {
+  const className = codeNode.getAttribute('class') ?? '';
+  const dataLang = codeNode.getAttribute('data-language') ?? '';
+
+  const languageMatch =
+    /language-(\w+)/.exec(className) ??
+    /lang-(\w+)/.exec(className) ??
+    /highlight-(\w+)/.exec(className) ??
+    /^(\w+)$/.exec(dataLang);
+
+  return languageMatch?.[1] ?? detectLanguageFromCode(code) ?? '';
 }
 
 const YAML_SPECIAL_CHARS = /[:[\]{}"\n\r\t'|>&*!?,#]/;
@@ -118,14 +137,15 @@ const ESCAPE_PATTERNS = {
 } as const;
 
 function needsYamlQuotes(value: string): boolean {
-  return (
-    YAML_SPECIAL_CHARS.test(value) ||
-    value.startsWith(' ') ||
-    value.endsWith(' ') ||
-    value === '' ||
-    YAML_NUMERIC.test(value) ||
-    YAML_RESERVED_WORDS.test(value)
-  );
+  const checks = [
+    (input: string) => YAML_SPECIAL_CHARS.test(input),
+    (input: string) => input.startsWith(' ') || input.endsWith(' '),
+    (input: string) => input === '',
+    (input: string) => YAML_NUMERIC.test(input),
+    (input: string) => YAML_RESERVED_WORDS.test(input),
+  ];
+
+  return checks.some((check) => check(value));
 }
 
 function escapeYamlValue(value: string): string {
@@ -165,20 +185,24 @@ function convertHtmlToMarkdown(html: string): string {
 }
 
 function buildFrontmatterBlock(metadata?: MetadataBlock): string {
-  return metadata ? createFrontmatter(metadata) : '';
+  return metadata ? `${createFrontmatter(metadata)}\n\n` : '';
 }
 
 export function htmlToMarkdown(html: string, metadata?: MetadataBlock): string {
   const frontmatter = buildFrontmatterBlock(metadata);
 
-  if (!html || typeof html !== 'string') {
-    return frontmatter ? `${frontmatter}\n\n` : '';
+  if (!isValidHtmlInput(html)) {
+    return frontmatter;
   }
 
   try {
     const content = convertHtmlToMarkdown(html);
-    return frontmatter ? `${frontmatter}\n\n${content}` : content;
+    return frontmatter ? `${frontmatter}${content}` : content;
   } catch {
-    return frontmatter ? `${frontmatter}\n\n` : '';
+    return frontmatter;
   }
+}
+
+function isValidHtmlInput(html: string): boolean {
+  return Boolean(html && typeof html === 'string');
 }

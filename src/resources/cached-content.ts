@@ -64,6 +64,49 @@ function notifyResourceUpdate(server: McpServer, uri: string): void {
 }
 
 export function registerCachedContentResource(server: McpServer): void {
+  registerCacheContentResource(server);
+  registerCacheListResource(server);
+  registerCacheUpdateSubscription(server);
+}
+
+function resolveCacheParams(params: Record<string, unknown>): {
+  namespace: string;
+  urlHash: string;
+} {
+  const namespace = params.namespace as string;
+  const urlHash = params.urlHash as string;
+
+  if (!namespace || !urlHash) {
+    throw new Error('Both namespace and urlHash parameters are required');
+  }
+
+  return { namespace, urlHash };
+}
+
+function buildCachedContentResponse(
+  uri: URL,
+  cacheKey: string
+): { contents: { uri: string; mimeType: string; text: string }[] } {
+  const cached = cache.get(cacheKey);
+
+  if (!cached) {
+    throw new Error(
+      `Content not found in cache for key: ${cacheKey}. Use superfetch://stats to see available cache entries.`
+    );
+  }
+
+  return {
+    contents: [
+      {
+        uri: uri.href,
+        mimeType: 'application/json',
+        text: cached.content,
+      },
+    ],
+  };
+}
+
+function registerCacheContentResource(server: McpServer): void {
   server.registerResource(
     'cached-content',
     new ResourceTemplate('superfetch://cache/{namespace}/{urlHash}', {
@@ -76,34 +119,16 @@ export function registerCachedContentResource(server: McpServer): void {
       mimeType: 'application/json',
     },
     (uri, params) => {
-      const namespace = params.namespace as string;
-      const urlHash = params.urlHash as string;
-
-      if (!namespace || !urlHash) {
-        throw new Error('Both namespace and urlHash parameters are required');
-      }
-
+      const { namespace, urlHash } = resolveCacheParams(
+        params as Record<string, unknown>
+      );
       const cacheKey = `${namespace}:${urlHash}`;
-      const cached = cache.get(cacheKey);
-
-      if (!cached) {
-        throw new Error(
-          `Content not found in cache for key: ${cacheKey}. Use superfetch://stats to see available cache entries.`
-        );
-      }
-
-      return {
-        contents: [
-          {
-            uri: uri.href,
-            mimeType: 'application/json',
-            text: cached.content,
-          },
-        ],
-      };
+      return buildCachedContentResponse(uri, cacheKey);
     }
   );
+}
 
+function registerCacheListResource(server: McpServer): void {
   server.registerResource(
     'cached-urls',
     'superfetch://cache/list',
@@ -122,7 +147,9 @@ export function registerCachedContentResource(server: McpServer): void {
       ],
     })
   );
+}
 
+function registerCacheUpdateSubscription(server: McpServer): void {
   const unsubscribe = cache.onCacheUpdate(({ cacheKey }) => {
     const resourceUri = cache.toResourceUri(cacheKey);
     if (!resourceUri) return;

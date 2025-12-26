@@ -26,13 +26,9 @@ function getErrorDetails(err: Error): Record<string, unknown> | undefined {
 }
 
 function setRetryAfterHeader(res: Response, err: Error): void {
-  if (!(err instanceof FetchError)) return;
-  if (err.statusCode !== 429) return;
-  const { retryAfter } = err.details;
-  if (retryAfter === undefined) return;
-  if (typeof retryAfter === 'number' || typeof retryAfter === 'string') {
-    res.set('Retry-After', String(retryAfter));
-  }
+  const retryAfter = resolveRetryAfter(err);
+  if (!retryAfter) return;
+  res.set('Retry-After', retryAfter);
 }
 
 function buildErrorResponse(err: Error): ErrorResponse {
@@ -51,6 +47,19 @@ function buildErrorResponse(err: Error): ErrorResponse {
   }
 
   return response;
+}
+
+function resolveRetryAfter(err: Error): string | null {
+  if (!(err instanceof FetchError)) return null;
+  if (err.statusCode !== 429) return null;
+
+  const { retryAfter } = err.details;
+  if (!isRetryAfterValue(retryAfter)) return null;
+  return String(retryAfter);
+}
+
+function isRetryAfterValue(value: unknown): boolean {
+  return typeof value === 'number' || typeof value === 'string';
 }
 
 export function errorHandler(

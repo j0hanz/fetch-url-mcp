@@ -56,13 +56,10 @@ export function detectLanguageFromCode(code: string): string | undefined {
     [/^\s*(SELECT|INSERT|UPDATE|DELETE|CREATE|ALTER|DROP)\s+/im, 'sql'],
     [/^\s*(func|package|import\s+")/m, 'go'],
   ];
-
   return patterns.find(([pattern]) => pattern.test(code))?.[1];
 }
-
 const CONTENT_SELECTOR =
   'h1, h2, h3, h4, h5, h6, p, ul, ol, pre, code:not(pre code), table, img, blockquote';
-
 function parseHeading($: CheerioAPI, element: Element): HeadingBlock | null {
   const rawText = sanitizeText($(element).text());
   const text = cleanHeading(rawText);
@@ -74,7 +71,6 @@ function parseHeading($: CheerioAPI, element: Element): HeadingBlock | null {
     text,
   };
 }
-
 function parseParagraph(
   $: CheerioAPI,
   element: Element
@@ -87,10 +83,8 @@ function parseParagraph(
 
   return { type: 'paragraph', text };
 }
-
 function parseList($: CheerioAPI, element: Element): ListBlock | null {
   const rawItems: string[] = [];
-
   $(element)
     .find('li')
     .each((_, li) => {
@@ -229,19 +223,30 @@ function parseElement($: CheerioAPI, node: AnyNode): ContentBlockUnion | null {
 }
 
 function filterBlocks(blocks: ContentBlockUnion[]): ContentBlockUnion[] {
-  return blocks.filter((block) => {
-    switch (block.type) {
-      case 'paragraph':
-      case 'heading':
-      case 'code':
-      case 'blockquote':
-        return block.text.length > 0;
-      case 'list':
-        return block.items.length > 0;
-      default:
-        return true;
-    }
-  });
+  return blocks.filter(shouldIncludeBlock);
+}
+
+const TEXT_BLOCK_TYPES = new Set([
+  'paragraph',
+  'heading',
+  'code',
+  'blockquote',
+]);
+
+function isTextBlock(
+  block: ContentBlockUnion
+): block is ParagraphBlock | HeadingBlock | CodeBlock | BlockquoteBlock {
+  return TEXT_BLOCK_TYPES.has(block.type);
+}
+
+function shouldIncludeBlock(block: ContentBlockUnion): boolean {
+  if (isTextBlock(block)) {
+    return block.text.length > 0;
+  }
+  if (block.type === 'list') {
+    return block.items.length > 0;
+  }
+  return true;
 }
 
 function loadHtml(html: string): CheerioAPI | null {

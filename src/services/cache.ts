@@ -132,25 +132,39 @@ export function get(cacheKey: string | null): CacheEntry | undefined {
 }
 
 export function set(cacheKey: string | null, content: string): void {
-  if (!config.cache.enabled || !cacheKey || !content) return;
+  if (!config.cache.enabled) return;
+  if (!cacheKey) return;
+  if (!content) return;
 
   try {
-    const entry: CacheEntry = {
-      url: cacheKey,
-      content,
-      fetchedAt: new Date().toISOString(),
-      expiresAt: new Date(Date.now() + config.cache.ttl * 1000).toISOString(),
-    };
-    contentCache.set(cacheKey, entry);
-    emitCacheUpdate(cacheKey);
+    const entry = buildCacheEntry(cacheKey, content);
+    persistCacheEntry(cacheKey, entry);
   } catch (error) {
     logWarn('Cache set error', {
       key: cacheKey.substring(0, 100),
-      error: error instanceof Error ? error.message : 'Unknown error',
+      error: resolveErrorMessage(error),
     });
   }
 }
 
 export function keys(): string[] {
   return contentCache.keys();
+}
+
+function buildCacheEntry(cacheKey: string, content: string): CacheEntry {
+  return {
+    url: cacheKey,
+    content,
+    fetchedAt: new Date().toISOString(),
+    expiresAt: new Date(Date.now() + config.cache.ttl * 1000).toISOString(),
+  };
+}
+
+function persistCacheEntry(cacheKey: string, entry: CacheEntry): void {
+  contentCache.set(cacheKey, entry);
+  emitCacheUpdate(cacheKey);
+}
+
+function resolveErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : 'Unknown error';
 }
