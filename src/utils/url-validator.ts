@@ -2,6 +2,8 @@ import { BlockList, isIP } from 'node:net';
 
 import { config } from '../config/index.js';
 
+import { createErrorWithCode } from './error-utils.js';
+
 const BLOCK_LIST = new BlockList();
 const BLOCKED_IPV4_SUBNETS = [
   { subnet: '0.0.0.0', prefix: 8 },
@@ -79,14 +81,20 @@ export function validateAndNormalizeUrl(urlString: string): string {
   return url.href;
 }
 
+const VALIDATION_ERROR_CODE = 'VALIDATION_ERROR';
+
+function createValidationError(message: string): Error {
+  return createErrorWithCode(message, VALIDATION_ERROR_CODE);
+}
+
 function requireTrimmedUrl(urlString: string): string {
   if (!urlString || typeof urlString !== 'string') {
-    throw new Error('URL is required');
+    throw createValidationError('URL is required');
   }
 
   const trimmedUrl = urlString.trim();
   if (!trimmedUrl) {
-    throw new Error('URL cannot be empty');
+    throw createValidationError('URL cannot be empty');
   }
 
   return trimmedUrl;
@@ -94,34 +102,34 @@ function requireTrimmedUrl(urlString: string): string {
 
 function assertUrlLength(url: string): void {
   if (url.length <= config.constants.maxUrlLength) return;
-  throw new Error(
+  throw createValidationError(
     `URL exceeds maximum length of ${config.constants.maxUrlLength} characters`
   );
 }
 
 function parseUrl(urlString: string): URL {
   if (!URL.canParse(urlString)) {
-    throw new Error('Invalid URL format');
+    throw createValidationError('Invalid URL format');
   }
   return new URL(urlString);
 }
 
 function assertHttpProtocol(url: URL): void {
   if (url.protocol === 'http:' || url.protocol === 'https:') return;
-  throw new Error(
+  throw createValidationError(
     `Invalid protocol: ${url.protocol}. Only http: and https: are allowed`
   );
 }
 
 function assertNoCredentials(url: URL): void {
   if (!url.username && !url.password) return;
-  throw new Error('URLs with embedded credentials are not allowed');
+  throw createValidationError('URLs with embedded credentials are not allowed');
 }
 
 function normalizeHostname(url: URL): string {
   const hostname = url.hostname.toLowerCase();
   if (!hostname) {
-    throw new Error('URL must have a valid hostname');
+    throw createValidationError('URL must have a valid hostname');
   }
   return hostname;
 }
@@ -130,19 +138,19 @@ const BLOCKED_HOST_SUFFIXES = ['.local', '.internal'] as const;
 
 function assertHostnameAllowed(hostname: string): void {
   if (config.security.blockedHosts.has(hostname)) {
-    throw new Error(
+    throw createValidationError(
       `Blocked host: ${hostname}. Internal hosts are not allowed`
     );
   }
 
   if (isBlockedIp(hostname)) {
-    throw new Error(
+    throw createValidationError(
       `Blocked IP range: ${hostname}. Private IPs are not allowed`
     );
   }
 
   if (matchesBlockedSuffix(hostname)) {
-    throw new Error(
+    throw createValidationError(
       `Blocked hostname pattern: ${hostname}. Internal domain suffixes are not allowed`
     );
   }

@@ -1,6 +1,6 @@
-import { timingSafeEqual } from 'node:crypto';
-
 import type { NextFunction, Request, Response } from 'express';
+
+import { timingSafeEqualUtf8 } from '../utils/crypto.js';
 
 function normalizeHeaderValue(
   header: string | string[] | undefined
@@ -9,8 +9,7 @@ function normalizeHeaderValue(
 }
 
 function timingSafeEquals(a: string, b: string): boolean {
-  if (a.length !== b.length) return false;
-  return timingSafeEqual(Buffer.from(a), Buffer.from(b));
+  return timingSafeEqualUtf8(a, b);
 }
 
 function isAuthorizedRequest(req: Request, authToken: string): boolean {

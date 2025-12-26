@@ -66,6 +66,7 @@ function applyCorsHeaders(
       'Access-Control-Allow-Headers',
       'Content-Type, mcp-session-id, Authorization, X-API-Key'
     );
+    res.header('Access-Control-Expose-Headers', 'mcp-session-id');
     res.header('Access-Control-Max-Age', '86400');
     return true;
   }

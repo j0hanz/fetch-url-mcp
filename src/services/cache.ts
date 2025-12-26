@@ -1,10 +1,10 @@
-import { hash } from 'node:crypto';
 import { setInterval as setIntervalPromise } from 'node:timers/promises';
 
 import { CACHE_HASH } from '../config/constants.js';
 import { config } from '../config/index.js';
 import type { CacheEntry } from '../config/types.js';
 
+import { sha256Hex } from '../utils/crypto.js';
 import { getErrorMessage } from '../utils/error-utils.js';
 
 import { logWarn } from './logger.js';
@@ -101,7 +101,7 @@ function stableStringify(value: unknown): string {
 }
 
 function createHashFragment(input: string, length: number): string {
-  return hash('sha256', input, 'hex').substring(0, length);
+  return sha256Hex(input).substring(0, length);
 }
 
 /**

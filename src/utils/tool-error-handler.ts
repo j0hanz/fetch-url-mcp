@@ -4,6 +4,8 @@ import type { ToolErrorResponse } from '../config/types.js';
 
 import { FetchError } from '../errors/app-error.js';
 
+import { isSystemError } from './error-utils.js';
+
 const IS_DEVELOPMENT_WITH_STACK_TRACES =
   process.env.NODE_ENV === 'development' &&
   process.env.EXPOSE_STACK_TRACES === 'true';
@@ -65,6 +67,10 @@ export function handleToolError(
   url: string,
   fallbackMessage = 'Operation failed'
 ): ToolErrorResponse {
+  if (isValidationError(error)) {
+    return createToolErrorResponse(error.message, url, 'VALIDATION_ERROR');
+  }
+
   if (error instanceof FetchError) {
     const message = formatErrorMessage(error.message, error);
     return createToolErrorResponse(message, url, error.code);
@@ -79,5 +85,13 @@ export function handleToolError(
     `${fallbackMessage}: Unknown error`,
     url,
     'UNKNOWN_ERROR'
+  );
+}
+
+function isValidationError(error: unknown): error is NodeJS.ErrnoException {
+  return (
+    error instanceof Error &&
+    isSystemError(error) &&
+    error.code === 'VALIDATION_ERROR'
   );
 }
