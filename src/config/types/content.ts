@@ -87,12 +87,6 @@ export interface CacheEntry {
   expiresAt: string;
 }
 
-export interface ExtractedLink {
-  href: string;
-  text: string;
-  type: LinkType;
-}
-
 export interface ExtractedMetadata {
   title?: string;
   description?: string;
@@ -120,21 +114,6 @@ export type ParseableTagName =
   | 'img'
   | 'blockquote';
 
-export interface LinksTransformResult {
-  links: ExtractedLink[];
-  linkCount: number;
-  filtered: number;
-  truncated: boolean;
-}
-
-export interface ExtractLinksOptions {
-  includeInternal: boolean;
-  includeExternal: boolean;
-  includeImages: boolean;
-  maxLinks?: number;
-  filterPattern?: RegExp;
-}
-
 export interface MarkdownTransformResult {
   markdown: string;
   title: string | undefined;
@@ -153,5 +132,3 @@ export interface JsonlTransformResult {
   title: string | undefined;
   truncated?: boolean;
 }
-
-export type LinkType = 'internal' | 'external' | 'image';

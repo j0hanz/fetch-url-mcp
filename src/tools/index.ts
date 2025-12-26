@@ -1,11 +1,6 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 
 import {
-  FETCH_LINKS_TOOL_DESCRIPTION,
-  FETCH_LINKS_TOOL_NAME,
-  fetchLinksToolHandler,
-} from './handlers/fetch-links.tool.js';
-import {
   FETCH_MARKDOWN_TOOL_DESCRIPTION,
   FETCH_MARKDOWN_TOOL_NAME,
   fetchMarkdownToolHandler,
@@ -16,19 +11,10 @@ import {
   fetchUrlToolHandler,
 } from './handlers/fetch-url.tool.js';
 import {
-  FETCH_URLS_TOOL_DESCRIPTION,
-  FETCH_URLS_TOOL_NAME,
-  fetchUrlsToolHandler,
-} from './handlers/fetch-urls.tool.js';
-import {
-  fetchLinksInputSchema,
-  fetchLinksOutputSchema,
   fetchMarkdownInputSchema,
   fetchMarkdownOutputSchema,
   fetchUrlInputSchema,
   fetchUrlOutputSchema,
-  fetchUrlsInputSchema,
-  fetchUrlsOutputSchema,
 } from './schemas.js';
 
 const TOOL_DEFINITIONS = [
@@ -41,28 +27,12 @@ const TOOL_DEFINITIONS = [
     handler: fetchUrlToolHandler,
   },
   {
-    name: FETCH_LINKS_TOOL_NAME,
-    title: 'Fetch Links',
-    description: FETCH_LINKS_TOOL_DESCRIPTION,
-    inputSchema: fetchLinksInputSchema,
-    outputSchema: fetchLinksOutputSchema,
-    handler: fetchLinksToolHandler,
-  },
-  {
     name: FETCH_MARKDOWN_TOOL_NAME,
     title: 'Fetch Markdown',
     description: FETCH_MARKDOWN_TOOL_DESCRIPTION,
     inputSchema: fetchMarkdownInputSchema,
     outputSchema: fetchMarkdownOutputSchema,
     handler: fetchMarkdownToolHandler,
-  },
-  {
-    name: FETCH_URLS_TOOL_NAME,
-    title: 'Fetch URLs (Batch)',
-    description: FETCH_URLS_TOOL_DESCRIPTION,
-    inputSchema: fetchUrlsInputSchema,
-    outputSchema: fetchUrlsOutputSchema,
-    handler: fetchUrlsToolHandler,
   },
 ] as const;
 
