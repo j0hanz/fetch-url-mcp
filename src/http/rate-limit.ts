@@ -26,7 +26,6 @@ function createCleanupInterval(
 
   void (async () => {
     try {
-      // eslint-disable-next-line @typescript-eslint/no-unused-vars
       for await (const _ of setIntervalPromise(
         options.cleanupIntervalMs,
         undefined,

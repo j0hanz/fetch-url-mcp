@@ -107,6 +107,15 @@ export default defineConfig(
         },
       ],
 
+      '@typescript-eslint/no-unused-vars': [
+        'error',
+        {
+          vars: 'all',
+          varsIgnorePattern: '^_',
+          args: 'after-used',
+          argsIgnorePattern: '^_',
+        },
+      ],
       '@typescript-eslint/no-non-null-assertion': 'warn',
       '@typescript-eslint/prefer-namespace-keyword': 'error',
       '@typescript-eslint/prefer-nullish-coalescing': 'error',

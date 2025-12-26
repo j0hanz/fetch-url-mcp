@@ -1,4 +1,4 @@
-import type { Request, Response } from 'express';
+import type { NextFunction, Request, Response } from 'express';
 
 import type { ErrorResponse } from '../config/types.js';
 
@@ -53,7 +53,12 @@ function buildErrorResponse(err: Error): ErrorResponse {
   return response;
 }
 
-export function errorHandler(err: Error, req: Request, res: Response): void {
+export function errorHandler(
+  err: Error,
+  req: Request,
+  res: Response,
+  _next: NextFunction
+): void {
   const statusCode = getStatusCode(err);
 
   logError(
