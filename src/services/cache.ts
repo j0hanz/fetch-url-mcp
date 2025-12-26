@@ -1,18 +1,55 @@
-import { createHash } from 'node:crypto';
-
-import NodeCache from 'node-cache';
+import { hash } from 'node:crypto';
+import { setInterval as setIntervalPromise } from 'node:timers/promises';
 
 import { config } from '../config/index.js';
 import type { CacheEntry } from '../config/types.js';
 
 import { logWarn } from './logger.js';
 
-const contentCache = new NodeCache({
-  stdTTL: config.cache.ttl,
-  checkperiod: Math.floor(config.cache.ttl / 10),
-  useClones: false,
-  maxKeys: config.cache.maxKeys,
-});
+interface CacheItem {
+  entry: CacheEntry;
+  expiresAt: number;
+}
+
+const contentCache = new Map<string, CacheItem>();
+let cleanupController: AbortController | null = null;
+
+function startCleanupLoop(): void {
+  if (cleanupController) return;
+  cleanupController = new AbortController();
+  void runCleanupLoop(cleanupController.signal).catch(() => {});
+}
+
+async function runCleanupLoop(signal: AbortSignal): Promise<void> {
+  const intervalMs = Math.floor(config.cache.ttl * 100);
+  for await (const _ of setIntervalPromise(intervalMs, undefined, {
+    signal,
+    ref: false,
+  })) {
+    evictExpiredEntries();
+  }
+}
+
+function evictExpiredEntries(): void {
+  const now = Date.now();
+  for (const [key, item] of contentCache.entries()) {
+    if (now > item.expiresAt) {
+      contentCache.delete(key);
+    }
+  }
+  enforceMaxKeys();
+}
+
+function enforceMaxKeys(): void {
+  if (contentCache.size <= config.cache.maxKeys) return;
+  const keysToRemove = contentCache.size - config.cache.maxKeys;
+  const iterator = contentCache.keys();
+  for (let i = 0; i < keysToRemove; i++) {
+    const { value, done } = iterator.next();
+    if (done) break;
+    contentCache.delete(value);
+  }
+}
 
 export interface CacheKeyParts {
   namespace: string;
@@ -52,7 +89,7 @@ function stableStringify(value: unknown): string {
 }
 
 function createHashFragment(input: string, length: number): string {
-  return createHash('sha256').update(input).digest('hex').substring(0, length);
+  return hash('sha256', input, 'hex').substring(0, length);
 }
 
 function buildCacheKey(
@@ -121,7 +158,13 @@ export function get(cacheKey: string | null): CacheEntry | undefined {
   }
 
   try {
-    return contentCache.get<CacheEntry>(cacheKey);
+    const item = contentCache.get(cacheKey);
+    if (!item) return undefined;
+    if (Date.now() > item.expiresAt) {
+      contentCache.delete(cacheKey);
+      return undefined;
+    }
+    return item.entry;
   } catch (error) {
     logWarn('Cache get error', {
       key: cacheKey.substring(0, 100),
@@ -137,6 +180,7 @@ export function set(cacheKey: string | null, content: string): void {
   if (!content) return;
 
   try {
+    startCleanupLoop();
     const entry = buildCacheEntry(cacheKey, content);
     persistCacheEntry(cacheKey, entry);
   } catch (error) {
@@ -148,7 +192,7 @@ export function set(cacheKey: string | null, content: string): void {
 }
 
 export function keys(): string[] {
-  return contentCache.keys();
+  return Array.from(contentCache.keys());
 }
 
 function buildCacheEntry(cacheKey: string, content: string): CacheEntry {
@@ -161,7 +205,8 @@ function buildCacheEntry(cacheKey: string, content: string): CacheEntry {
 }
 
 function persistCacheEntry(cacheKey: string, entry: CacheEntry): void {
-  contentCache.set(cacheKey, entry);
+  const expiresAt = Date.now() + config.cache.ttl * 1000;
+  contentCache.set(cacheKey, { entry, expiresAt });
   emitCacheUpdate(cacheKey);
 }
 

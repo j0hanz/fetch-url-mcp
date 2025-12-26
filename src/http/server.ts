@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { setInterval as setIntervalPromise } from 'node:timers/promises';
+import { styleText } from 'node:util';
 
 import type {
   Express,
@@ -181,16 +182,16 @@ function startListening(app: Express): ReturnType<Express['listen']> {
       });
 
       process.stdout.write(
-        `V superFetch MCP server running at http://${config.server.host}:${config.server.port}\n`
+        `${styleText('green', '✓')} superFetch MCP server running at ${styleText('cyan', `http://${config.server.host}:${config.server.port}`)}\n`
       );
       process.stdout.write(
-        `  Health check: http://${config.server.host}:${config.server.port}/health\n`
+        `  Health check: ${styleText('dim', `http://${config.server.host}:${config.server.port}/health`)}\n`
       );
       process.stdout.write(
-        `  MCP endpoint: http://${config.server.host}:${config.server.port}/mcp\n`
+        `  MCP endpoint: ${styleText('dim', `http://${config.server.host}:${config.server.port}/mcp`)}\n`
       );
       process.stdout.write(
-        `\nRun with --stdio flag for direct stdio integration\n`
+        `\n${styleText('dim', 'Run with --stdio flag for direct stdio integration')}\n`
       );
     })
     .on('error', (err) => {
@@ -206,7 +207,9 @@ function createShutdownHandler(
   stopRateLimitCleanup: () => void
 ): (signal: string) => Promise<void> {
   return async (signal: string): Promise<void> => {
-    process.stdout.write(`\n${signal} received, shutting down gracefully...\n`);
+    process.stdout.write(
+      `\n${styleText('yellow', signal)} received, shutting down gracefully...\n`
+    );
 
     stopRateLimitCleanup();
     sessionCleanupController.abort();
