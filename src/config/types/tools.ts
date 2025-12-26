@@ -31,7 +31,6 @@ export interface FetchMarkdownInput extends RequestOptions {
   extractMainContent?: boolean;
   includeMetadata?: boolean;
   maxContentLength?: number;
-  generateToc?: boolean;
 }
 
 export interface FetchUrlsInput extends RequestOptions {

@@ -26,12 +26,11 @@ type MarkdownPipelineResult = MarkdownTransformResult & {
 
 export const FETCH_MARKDOWN_TOOL_NAME = 'fetch-markdown';
 export const FETCH_MARKDOWN_TOOL_DESCRIPTION =
-  'Fetches a webpage and converts it to clean Markdown format with optional frontmatter, table of contents, and content length limits';
+  'Fetches a webpage and converts it to clean Markdown format with optional frontmatter and content length limits';
 
 interface MarkdownOptions {
   readonly extractMainContent: boolean;
   readonly includeMetadata: boolean;
-  readonly generateToc: boolean;
   readonly maxContentLength?: number;
 }
 
@@ -39,7 +38,6 @@ function resolveMarkdownOptions(input: FetchMarkdownInput): MarkdownOptions {
   return {
     extractMainContent: input.extractMainContent ?? true,
     includeMetadata: input.includeMetadata ?? true,
-    generateToc: input.generateToc ?? false,
     maxContentLength: input.maxContentLength,
   };
 }
@@ -55,10 +53,6 @@ function buildMarkdownStructuredContent(
     contentSize: inlineResult.contentSize,
     cached: pipeline.fromCache,
   };
-
-  if (pipeline.data.toc) {
-    structuredContent.toc = pipeline.data.toc;
-  }
 
   if (pipeline.data.truncated || inlineResult.truncated) {
     structuredContent.truncated = true;

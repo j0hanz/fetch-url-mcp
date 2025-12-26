@@ -135,23 +135,15 @@ export interface ExtractLinksOptions {
   filterPattern?: RegExp;
 }
 
-export interface TocEntry {
-  level: number;
-  text: string;
-  slug: string;
-}
-
 export interface MarkdownTransformResult {
   markdown: string;
   title: string | undefined;
-  toc: TocEntry[] | undefined;
   truncated: boolean;
 }
 
 export interface TransformOptions {
   extractMainContent: boolean;
   includeMetadata: boolean;
-  generateToc: boolean;
   maxContentLength?: number;
 }
 

@@ -27,14 +27,6 @@ const linkEntrySchema = z
   })
   .strict();
 
-const tocEntrySchema = z
-  .object({
-    level: z.number().describe('Heading level (1-6)'),
-    text: z.string().describe('Heading text'),
-    slug: z.string().describe('URL-friendly anchor slug'),
-  })
-  .strict();
-
 const batchResultSchema = z
   .object({
     url: z.string().describe('The fetched URL'),
@@ -128,10 +120,6 @@ export const fetchMarkdownInputSchema = requestOptionsSchema
       .positive()
       .optional()
       .describe('Maximum content length in characters'),
-    generateToc: z
-      .boolean()
-      .default(false)
-      .describe('Generate table of contents from headings'),
   })
   .strict();
 
@@ -256,10 +244,6 @@ export const fetchMarkdownOutputSchema = z
       .string()
       .optional()
       .describe('MIME type for the resource URI'),
-    toc: z
-      .array(tocEntrySchema)
-      .optional()
-      .describe('Table of contents (if generateToc is true)'),
     cached: z.boolean().describe('Whether the result was served from cache'),
     truncated: z
       .boolean()

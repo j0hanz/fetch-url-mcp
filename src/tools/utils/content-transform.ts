@@ -15,7 +15,6 @@ import {
   determineContentExtractionSource,
   truncateContent,
 } from './common.js';
-import { extractToc } from './markdown-toc.js';
 
 interface ExtractionOptions {
   readonly extractMainContent: boolean;
@@ -100,7 +99,6 @@ export function transformHtmlToMarkdown(
   );
 
   const markdown = htmlToMarkdown(sourceHtml, metadata);
-  const toc = options.generateToc ? extractToc(markdown) : undefined;
   const { content, truncated } = truncateContent(
     markdown,
     options.maxContentLength,
@@ -110,7 +108,6 @@ export function transformHtmlToMarkdown(
   return {
     markdown: content,
     title,
-    toc,
     truncated,
   };
 }

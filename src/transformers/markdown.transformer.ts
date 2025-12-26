@@ -4,62 +4,10 @@ import {
   CODE_BLOCK,
   FRONTMATTER_DELIMITER,
   joinLines,
-  normalizeNewlines,
-  splitLines,
 } from '../config/formatting.js';
 import type { MetadataBlock } from '../config/types.js';
 
 import { detectLanguageFromCode } from '../services/parser.js';
-
-const NOISE_LINE_PATTERNS: readonly RegExp[] = [
-  // Single letters or panel labels (common in code examples)
-  /^[A-Z]$/,
-  /^Panel\s+[A-Z]$/i,
-
-  // Empty structural elements that survive HTML->Markdown conversion
-  /^[•·→←↑↓►▼▲◄▶◀■□●○★☆✓✗✔✘×]+$/,
-  /^[,;:\-–—]+$/,
-  /^\[\d+\]$/,
-  /^\(\d+\)$/,
-] as const;
-
-function isNoiseLine(line: string): boolean {
-  const trimmed = line.trim();
-
-  if (!trimmed) return false;
-
-  const markdownPrefixes = ['#', '-', '*', '`', '>', '|'];
-  if (markdownPrefixes.some((prefix) => trimmed.startsWith(prefix))) {
-    return false;
-  }
-
-  return NOISE_LINE_PATTERNS.some((pattern) => pattern.test(trimmed));
-}
-
-function cleanMarkdownContent(markdown: string): string {
-  const lines = splitLines(markdown);
-  const cleanedLines: string[] = [];
-  let insideCodeBlock = false;
-
-  for (const line of lines) {
-    if (line.trim().startsWith(CODE_BLOCK.fence)) {
-      insideCodeBlock = !insideCodeBlock;
-      cleanedLines.push(line);
-      continue;
-    }
-
-    if (insideCodeBlock) {
-      cleanedLines.push(line);
-      continue;
-    }
-
-    if (!isNoiseLine(line)) {
-      cleanedLines.push(line);
-    }
-  }
-
-  return joinLines(cleanedLines);
-}
 
 let turndownInstance: TurndownService | null = null;
 
@@ -180,11 +128,7 @@ function createFrontmatter(metadata: MetadataBlock): string {
 }
 
 function convertHtmlToMarkdown(html: string): string {
-  let content = getTurndown().turndown(html);
-  content = normalizeNewlines(content);
-  content = cleanMarkdownContent(content);
-  content = normalizeNewlines(content);
-  return content;
+  return getTurndown().turndown(html).trim();
 }
 
 function buildFrontmatterBlock(metadata?: MetadataBlock): string {
@@ -200,7 +144,7 @@ export function htmlToMarkdown(html: string, metadata?: MetadataBlock): string {
 
   try {
     const content = convertHtmlToMarkdown(html);
-    return frontmatter ? `${frontmatter}${content}` : content;
+    return frontmatter ? `${frontmatter}\n${content}` : content;
   } catch {
     return frontmatter;
   }
