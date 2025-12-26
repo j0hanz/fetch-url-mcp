@@ -23,30 +23,59 @@ export function createBatchResponse(
 ): ToolResponse<BatchResponseContent> {
   const normalizedResults = normalizeBatchResults(results);
   const summary = buildBatchSummary(normalizedResults);
-  const resultsWithoutContent = normalizedResults.map((result) => {
+  const resultsMetadata = normalizedResults.map((result) => {
     if (!result.success || !result.content) return result;
     const { content: _, ...rest } = result;
     return rest;
   });
 
   const structuredContent: BatchResponseContent = {
-    results: resultsWithoutContent,
+    results: normalizedResults,
     summary,
     fetchedAt: new Date().toISOString(),
   };
 
-  const resourceLinks = buildResourceLinks(normalizedResults);
+  const contentBlocks = buildContentBlocks(
+    normalizedResults,
+    resultsMetadata,
+    summary
+  );
 
   return {
-    content: [
-      {
-        type: 'text' as const,
-        text: JSON.stringify(structuredContent, null, 2),
-      },
-      ...resourceLinks,
-    ],
+    content: contentBlocks,
     structuredContent,
   };
+}
+
+function buildContentBlocks(
+  fullResults: BatchUrlResult[],
+  metadataResults: Partial<BatchUrlResult>[],
+  summary: BatchSummary
+): ToolContentBlock[] {
+  const blocks: ToolContentBlock[] = [];
+  blocks.push({
+    type: 'text',
+    text: JSON.stringify(
+      {
+        results: metadataResults,
+        summary,
+        fetchedAt: new Date().toISOString(),
+      },
+      null,
+      2
+    ),
+  });
+  fullResults.forEach((result) => {
+    if (result.success && result.content) {
+      blocks.push({
+        type: 'text',
+        text: `\n--- Content from ${result.url} ---\n${result.content}`,
+      });
+    }
+  });
+  blocks.push(...buildResourceLinks(fullResults));
+
+  return blocks;
 }
 
 function buildBatchSummary(results: BatchUrlResult[]): BatchSummary {
