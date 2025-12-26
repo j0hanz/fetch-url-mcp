@@ -33,6 +33,159 @@ function releaseSessionSlot(): void {
   }
 }
 
+function sendJsonRpcError(
+  res: Response,
+  code: number,
+  message: string,
+  status = 503
+): void {
+  res.status(status).json({
+    jsonrpc: '2.0',
+    error: {
+      code,
+      message,
+    },
+    id: null,
+  });
+}
+
+function respondServerBusy(res: Response): void {
+  sendJsonRpcError(res, -32000, 'Server busy: maximum sessions reached', 503);
+}
+
+function respondBadRequest(res: Response): void {
+  sendJsonRpcError(
+    res,
+    -32000,
+    'Bad Request: Missing session ID or not an initialize request',
+    400
+  );
+}
+
+function respondInvalidRequestBody(res: Response): void {
+  sendJsonRpcError(res, -32600, 'Invalid Request: Malformed request body', 400);
+}
+
+function isServerAtCapacity(options: McpRouteOptions): boolean {
+  const currentSize = options.sessionStore.size();
+  return currentSize + inFlightSessions >= options.maxSessions;
+}
+
+function tryEvictSlot(options: McpRouteOptions): boolean {
+  const currentSize = options.sessionStore.size();
+  const canFreeSlot =
+    currentSize >= options.maxSessions &&
+    currentSize - 1 + inFlightSessions < options.maxSessions;
+  return canFreeSlot && evictOldestSession(options.sessionStore);
+}
+
+function createTransportForNewSession(options: McpRouteOptions): {
+  transport: StreamableHTTPServerTransport;
+  releaseSlot: () => void;
+} {
+  let slotReleased = false;
+  const releaseSlot = (): void => {
+    if (slotReleased) return;
+    slotReleased = true;
+    releaseSessionSlot();
+  };
+
+  let initialized = false;
+  const transport = new StreamableHTTPServerTransport({
+    sessionIdGenerator: () => randomUUID(),
+    onsessioninitialized: (id) => {
+      initialized = true;
+      releaseSlot();
+      const now = Date.now();
+      options.sessionStore.set(id, {
+        transport,
+        createdAt: now,
+        lastSeen: now,
+      });
+      logInfo('Session initialized', { sessionId: id });
+    },
+    onsessionclosed: (id) => {
+      options.sessionStore.remove(id);
+      logInfo('Session closed', { sessionId: id });
+    },
+  });
+
+  transport.onclose = () => {
+    if (!initialized) {
+      releaseSlot();
+    }
+    if (transport.sessionId) {
+      options.sessionStore.remove(transport.sessionId);
+    }
+  };
+
+  return { transport, releaseSlot };
+}
+
+function ensureSessionCapacity(
+  options: McpRouteOptions,
+  res: Response
+): boolean {
+  if (!isServerAtCapacity(options)) {
+    return true;
+  }
+
+  if (tryEvictSlot(options) && !isServerAtCapacity(options)) {
+    return true;
+  }
+
+  respondServerBusy(res);
+  return false;
+}
+
+async function resolveTransportForPost(
+  req: Request,
+  res: Response,
+  body: McpRequestBody,
+  sessionId: string | undefined,
+  options: McpRouteOptions
+): Promise<StreamableHTTPServerTransport | null> {
+  if (sessionId) {
+    const existingSession = options.sessionStore.get(sessionId);
+    if (existingSession) {
+      options.sessionStore.touch(sessionId);
+      return existingSession.transport;
+    }
+  }
+
+  if (!sessionId && isInitializeRequest(body)) {
+    evictExpiredSessions(options.sessionStore);
+
+    if (!ensureSessionCapacity(options, res)) {
+      return null;
+    }
+
+    if (!reserveSessionSlot(options.sessionStore, options.maxSessions)) {
+      respondServerBusy(res);
+      return null;
+    }
+
+    const { transport, releaseSlot } = createTransportForNewSession(options);
+    const mcpServer = createMcpServer();
+
+    try {
+      await mcpServer.connect(transport);
+    } catch (error) {
+      releaseSlot();
+      logError(
+        'Failed to initialize MCP session',
+        error instanceof Error ? error : undefined
+      );
+      throw error;
+    }
+
+    return transport;
+  }
+
+  respondBadRequest(res);
+  return null;
+}
+
 function isMcpRequestBody(body: unknown): body is McpRequestBody {
   if (!body || typeof body !== 'object') return false;
   const obj = body as Record<string, unknown>;
@@ -75,18 +228,9 @@ async function handlePost(
   options: McpRouteOptions
 ): Promise<void> {
   const sessionId = getSessionId(req);
-  let transport: StreamableHTTPServerTransport;
-
   const { body } = req as { body: unknown };
   if (!isMcpRequestBody(body)) {
-    res.status(400).json({
-      jsonrpc: '2.0',
-      error: {
-        code: -32600,
-        message: 'Invalid Request: Malformed request body',
-      },
-      id: null,
-    });
+    respondInvalidRequestBody(res);
     return;
   }
 
@@ -100,103 +244,14 @@ async function handlePost(
     sessionCount: options.sessionStore.size(),
   });
 
-  const existingSession = sessionId
-    ? options.sessionStore.get(sessionId)
-    : undefined;
-  if (existingSession && sessionId) {
-    const { transport: existingTransport } = existingSession;
-    options.sessionStore.touch(sessionId);
-    transport = existingTransport;
-  } else if (!sessionId && isInitializeRequest(body)) {
-    evictExpiredSessions(options.sessionStore);
-
-    const currentSize = options.sessionStore.size();
-    if (currentSize + inFlightSessions >= options.maxSessions) {
-      const canFreeSlot =
-        currentSize >= options.maxSessions &&
-        currentSize - 1 + inFlightSessions < options.maxSessions;
-      if (!canFreeSlot || !evictOldestSession(options.sessionStore)) {
-        res.status(503).json({
-          jsonrpc: '2.0',
-          error: {
-            code: -32000,
-            message: 'Server busy: maximum sessions reached',
-          },
-          id: null,
-        });
-        return;
-      }
-    }
-
-    if (!reserveSessionSlot(options.sessionStore, options.maxSessions)) {
-      res.status(503).json({
-        jsonrpc: '2.0',
-        error: {
-          code: -32000,
-          message: 'Server busy: maximum sessions reached',
-        },
-        id: null,
-      });
-      return;
-    }
-
-    let slotReleased = false;
-    const releaseSlot = (): void => {
-      if (slotReleased) return;
-      slotReleased = true;
-      releaseSessionSlot();
-    };
-
-    let initialized = false;
-
-    transport = new StreamableHTTPServerTransport({
-      sessionIdGenerator: () => randomUUID(),
-      onsessioninitialized: (id) => {
-        initialized = true;
-        releaseSlot();
-        const now = Date.now();
-        options.sessionStore.set(id, {
-          transport,
-          createdAt: now,
-          lastSeen: now,
-        });
-        logInfo('Session initialized', { sessionId: id });
-      },
-      onsessionclosed: (id) => {
-        options.sessionStore.remove(id);
-        logInfo('Session closed', { sessionId: id });
-      },
-    });
-
-    transport.onclose = () => {
-      if (!initialized) {
-        releaseSlot();
-      }
-      if (transport.sessionId) {
-        options.sessionStore.remove(transport.sessionId);
-      }
-    };
-
-    const mcpServer = createMcpServer();
-    try {
-      await mcpServer.connect(transport);
-    } catch (error) {
-      releaseSlot();
-      logError(
-        'Failed to initialize MCP session',
-        error instanceof Error ? error : undefined
-      );
-      throw error;
-    }
-  } else {
-    res.status(400).json({
-      jsonrpc: '2.0',
-      error: {
-        code: -32000,
-        message: 'Bad Request: Missing session ID or not an initialize request',
-      },
-      id: null,
-    });
+  const transport = await resolveTransportForPost(
+    req,
+    res,
+    body,
+    sessionId,
+    options
+  );
+  if (!transport) {
     return;
   }
 

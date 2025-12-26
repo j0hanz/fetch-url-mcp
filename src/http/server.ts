@@ -1,7 +1,13 @@
 import { randomUUID } from 'node:crypto';
 import { setInterval as setIntervalPromise } from 'node:timers/promises';
 
-import type { Express, NextFunction, Request, Response } from 'express';
+import type {
+  Express,
+  NextFunction,
+  Request,
+  RequestHandler,
+  Response,
+} from 'express';
 
 import { config } from '../config/index.js';
 
@@ -100,44 +106,42 @@ function registerHealthRoute(app: Express): void {
   });
 }
 
-export async function startHttpServer(): Promise<{
-  shutdown: (signal: string) => Promise<void>;
-}> {
-  const { default: express } = await import('express');
-  const app = express();
-
-  app.use(express.json({ limit: '1mb' }));
+function attachBaseMiddleware(
+  app: Express,
+  jsonParser: RequestHandler,
+  rateLimitMiddleware: ReturnType<
+    typeof createRateLimitMiddleware
+  >['middleware'],
+  authMiddleware: ReturnType<typeof createAuthMiddleware>,
+  corsOptions: { allowedOrigins: string[]; allowAllOrigins: boolean }
+): void {
+  app.use(jsonParser);
   app.use(createContextMiddleware());
   app.use(createJsonParseErrorHandler());
-  app.use(createCorsMiddleware(buildCorsOptions()));
-
-  const { middleware: rateLimitMiddleware, stop: stopRateLimitCleanup } =
-    createRateLimitMiddleware(config.rateLimit);
-
-  const authMiddleware = createAuthMiddleware(config.security.apiKey ?? '');
+  app.use(createCorsMiddleware(corsOptions));
   app.use('/mcp', rateLimitMiddleware);
   app.use(authMiddleware);
-
   registerHealthRoute(app);
+}
 
-  assertHttpConfiguration();
-
-  const sessionStore = createSessionStore(config.server.sessionTtlMs);
-  const sessionCleanupController = new AbortController();
-  const sessionCleanupIntervalMs = Math.min(
-    Math.max(Math.floor(config.server.sessionTtlMs / 2), 10000),
+function startSessionCleanupLoop(
+  store: ReturnType<typeof createSessionStore>,
+  sessionTtlMs: number
+): AbortController {
+  const controller = new AbortController();
+  const intervalMs = Math.min(
+    Math.max(Math.floor(sessionTtlMs / 2), 10000),
     60000
   );
 
   void (async () => {
     try {
       // eslint-disable-next-line @typescript-eslint/no-unused-vars
-      for await (const _ of setIntervalPromise(
-        sessionCleanupIntervalMs,
-        undefined,
-        { signal: sessionCleanupController.signal, ref: false }
-      )) {
-        const evicted = evictExpiredSessions(sessionStore);
+      for await (const _ of setIntervalPromise(intervalMs, undefined, {
+        signal: controller.signal,
+        ref: false,
+      })) {
+        const evicted = evictExpiredSessions(store);
         if (evicted > 0) {
           logInfo('Expired sessions evicted', { evicted });
         }
@@ -152,14 +156,11 @@ export async function startHttpServer(): Promise<{
     }
   })();
 
-  registerMcpRoutes(app, {
-    sessionStore,
-    maxSessions: config.server.maxSessions,
-  });
+  return controller;
+}
 
-  app.use(errorHandler);
-
-  const server = app
+function startListening(app: Express): ReturnType<Express['listen']> {
+  return app
     .listen(config.server.port, config.server.host, () => {
       logInfo('superFetch MCP server started', {
         host: config.server.host,
@@ -183,8 +184,15 @@ export async function startHttpServer(): Promise<{
       logError('Failed to start server', err);
       process.exit(1);
     });
+}
 
-  const shutdown = async (signal: string): Promise<void> => {
+function createShutdownHandler(
+  server: ReturnType<Express['listen']>,
+  sessionStore: ReturnType<typeof createSessionStore>,
+  sessionCleanupController: AbortController,
+  stopRateLimitCleanup: () => void
+): (signal: string) => Promise<void> {
+  return async (signal: string): Promise<void> => {
     process.stdout.write(`\n${signal} received, shutting down gracefully...\n`);
 
     stopRateLimitCleanup();
@@ -213,13 +221,64 @@ export async function startHttpServer(): Promise<{
       process.exit(1);
     }, 10000).unref();
   };
+}
 
+function registerSignalHandlers(
+  shutdown: (signal: string) => Promise<void>
+): void {
   process.on('SIGINT', () => {
     void shutdown('SIGINT');
   });
   process.on('SIGTERM', () => {
     void shutdown('SIGTERM');
   });
+}
+
+export async function startHttpServer(): Promise<{
+  shutdown: (signal: string) => Promise<void>;
+}> {
+  const { default: express } = await import('express');
+  const app = express();
+
+  const jsonParser = express.json({ limit: '1mb' });
+  const corsOptions = buildCorsOptions();
+
+  const { middleware: rateLimitMiddleware, stop: stopRateLimitCleanup } =
+    createRateLimitMiddleware(config.rateLimit);
+  const authMiddleware = createAuthMiddleware(config.security.apiKey ?? '');
+
+  attachBaseMiddleware(
+    app,
+    jsonParser,
+    rateLimitMiddleware,
+    authMiddleware,
+    corsOptions
+  );
+
+  assertHttpConfiguration();
+
+  const sessionStore = createSessionStore(config.server.sessionTtlMs);
+  const sessionCleanupController = startSessionCleanupLoop(
+    sessionStore,
+    config.server.sessionTtlMs
+  );
+
+  registerMcpRoutes(app, {
+    sessionStore,
+    maxSessions: config.server.maxSessions,
+  });
+
+  app.use(errorHandler);
+
+  const server = startListening(app);
+  const shutdown = createShutdownHandler(
+    server,
+    sessionStore,
+    sessionCleanupController,
+    stopRateLimitCleanup
+  );
+
+  registerSignalHandlers(shutdown);
 
   return { shutdown };
 }

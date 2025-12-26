@@ -19,6 +19,8 @@ import {
   validateBatchInput,
 } from './fetch-urls/validation.js';
 
+type Format = NonNullable<FetchUrlsInput['format']>;
+
 export const FETCH_URLS_TOOL_NAME = 'fetch-urls';
 export const FETCH_URLS_TOOL_DESCRIPTION =
   'Fetches multiple URLs in parallel and converts them to AI-readable format (JSONL or Markdown). Supports concurrency control and continues on individual failures.';
@@ -82,55 +84,16 @@ export async function fetchUrlsToolHandler(
       format,
     });
 
-    const processOptions: SingleUrlProcessOptions = {
-      extractMainContent: input.extractMainContent ?? true,
-      includeMetadata: input.includeMetadata ?? true,
-      maxContentLength: input.maxContentLength,
-      format,
-      requestOptions: {
-        customHeaders: input.customHeaders,
-        timeout: input.timeout,
-      },
-      maxRetries: input.retries,
-    };
-
-    const results: BatchUrlResult[] = [];
-    const batchSize = Math.min(concurrency, validUrls.length);
-
-    for (let i = 0; i < validUrls.length; i += batchSize) {
-      const batch = validUrls.slice(i, i + batchSize);
-      const settledResults = await processBatch(
-        batch,
-        processOptions,
-        i / batchSize + 1,
-        validUrls.length
-      );
-
-      const batchResults = settledResults.map((result, index) =>
-        result.status === 'fulfilled'
-          ? result.value
-          : {
-              url: batch[index] ?? 'unknown',
-              success: false as const,
-              cached: false as const,
-              error: extractRejectionMessage(result),
-              errorCode: 'PROMISE_REJECTED',
-            }
-      );
-
-      results.push(...batchResults);
-    }
+    const processOptions = buildSingleUrlOptions(input, format);
+    const results = await collectBatchResults(
+      validUrls,
+      processOptions,
+      concurrency
+    );
 
     if (!continueOnError) {
-      const firstError = results.find((result) => !result.success);
-      if (firstError && !firstError.success) {
-        const errorMsg = firstError.error ?? 'Unknown error';
-        return createToolErrorResponse(
-          `Batch failed: ${errorMsg}`,
-          firstError.url,
-          firstError.errorCode ?? 'BATCH_ERROR'
-        );
-      }
+      const failureResponse = buildBatchFailure(results);
+      if (failureResponse) return failureResponse;
     }
 
     return createBatchResponse(results);
@@ -146,4 +109,73 @@ export async function fetchUrlsToolHandler(
       'BATCH_ERROR'
     );
   }
+}
+
+function buildSingleUrlOptions(
+  input: FetchUrlsInput,
+  format: Format
+): SingleUrlProcessOptions {
+  return {
+    extractMainContent: input.extractMainContent ?? true,
+    includeMetadata: input.includeMetadata ?? true,
+    maxContentLength: input.maxContentLength,
+    format,
+    requestOptions: {
+      customHeaders: input.customHeaders,
+      timeout: input.timeout,
+    },
+    maxRetries: input.retries,
+  };
+}
+
+function mapSettledResults(
+  batch: string[],
+  settledResults: PromiseSettledResult<BatchUrlResult>[]
+): BatchUrlResult[] {
+  return settledResults.map((result, index) =>
+    result.status === 'fulfilled'
+      ? result.value
+      : {
+          url: batch[index] ?? 'unknown',
+          success: false as const,
+          cached: false as const,
+          error: extractRejectionMessage(result),
+          errorCode: 'PROMISE_REJECTED',
+        }
+  );
+}
+
+async function collectBatchResults(
+  validUrls: string[],
+  processOptions: SingleUrlProcessOptions,
+  concurrency: number
+): Promise<BatchUrlResult[]> {
+  const results: BatchUrlResult[] = [];
+  const batchSize = Math.min(concurrency, validUrls.length);
+
+  for (let i = 0; i < validUrls.length; i += batchSize) {
+    const batch = validUrls.slice(i, i + batchSize);
+
+    const settledResults = await processBatch(
+      batch,
+      processOptions,
+      i / batchSize + 1,
+      validUrls.length
+    );
+
+    results.push(...mapSettledResults(batch, settledResults));
+  }
+
+  return results;
+}
+
+function buildBatchFailure(results: BatchUrlResult[]): ToolResponseBase | null {
+  const firstError = results.find((result) => !result.success);
+  if (!firstError) return null;
+  const errorMsg = firstError.error ?? 'Unknown error';
+  return createToolErrorResponse(
+    `Batch failed: ${errorMsg}`,
+    firstError.url,
+    firstError.errorCode ?? 'BATCH_ERROR'
+  );
 }

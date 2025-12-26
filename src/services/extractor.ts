@@ -29,43 +29,67 @@ function resolveMetaField(
   return sources.og ?? sources.twitter ?? sources.standard;
 }
 
-function extractMetadata(document: Document): ExtractedMetadata {
-  const state: MetaCollectorState = {
+function createMetaCollectorState(): MetaCollectorState {
+  return {
     title: {},
     description: {},
     author: {},
   };
+}
 
-  // Scan meta tags
+function collectMetaTag(state: MetaCollectorState, tag: HTMLMetaElement): void {
+  const name = tag.getAttribute('name');
+  const property = tag.getAttribute('property');
+  const content = tag.getAttribute('content')?.trim();
+
+  if (!content) return;
+
+  if (property?.startsWith('og:')) {
+    const key = property.replace('og:', '');
+    if (key === 'title') state.title.og = content;
+    if (key === 'description') state.description.og = content;
+    return;
+  }
+
+  if (name?.startsWith('twitter:')) {
+    const key = name.replace('twitter:', '');
+    if (key === 'title') state.title.twitter = content;
+    if (key === 'description') state.description.twitter = content;
+    return;
+  }
+
+  if (name === 'description') {
+    state.description.standard = content;
+  }
+
+  if (name === 'author') {
+    state.author.standard = content;
+  }
+}
+
+function scanMetaTags(document: Document, state: MetaCollectorState): void {
   const metaTags = document.querySelectorAll('meta');
   for (const tag of metaTags) {
-    const name = tag.getAttribute('name');
-    const property = tag.getAttribute('property');
-    const content = tag.getAttribute('content')?.trim();
-
-    if (!content) continue;
-
-    if (property?.startsWith('og:')) {
-      const key = property.replace('og:', '');
-      if (key === 'title') state.title.og = content;
-      if (key === 'description') state.description.og = content;
-    } else if (name?.startsWith('twitter:')) {
-      const key = name.replace('twitter:', '');
-      if (key === 'title') state.title.twitter = content;
-      if (key === 'description') state.description.twitter = content;
-    } else if (name) {
-      if (name === 'description') state.description.standard = content;
-      if (name === 'author') state.author.standard = content;
-    }
+    collectMetaTag(state, tag);
   }
+}
 
-  // Scan title tag as fallback
-  if (!state.title.standard) {
-    const titleEl = document.querySelector('title');
-    if (titleEl?.textContent) {
-      state.title.standard = titleEl.textContent.trim();
-    }
+function ensureTitleFallback(
+  document: Document,
+  state: MetaCollectorState
+): void {
+  if (state.title.standard) return;
+  const titleEl = document.querySelector('title');
+  if (titleEl?.textContent) {
+    state.title.standard = titleEl.textContent.trim();
   }
+}
+
+function extractMetadata(document: Document): ExtractedMetadata {
+  const state = createMetaCollectorState();
+
+  scanMetaTags(document, state);
+  ensureTitleFallback(document, state);
 
   return {
     title: resolveMetaField(state, 'title'),

@@ -1,9 +1,5 @@
 import { config } from '../../config/index.js';
-import type {
-  FetchUrlInput,
-  JsonlTransformResult,
-  ToolResponseBase,
-} from '../../config/types.js';
+import type { FetchUrlInput, ToolResponseBase } from '../../config/types.js';
 
 import { logDebug, logError } from '../../services/logger.js';
 
@@ -11,13 +7,12 @@ import {
   createToolErrorResponse,
   handleToolError,
 } from '../../utils/tool-error-handler.js';
-import { appendHeaderVary } from '../utils/cache-vary.js';
 import {
   transformHtmlToJsonl,
   transformHtmlToMarkdownWithBlocks,
 } from '../utils/content-transform.js';
-import { executeFetchPipeline } from '../utils/fetch-pipeline.js';
-import { applyInlineContentLimit } from '../utils/inline-content.js';
+
+import { performSharedFetch } from './fetch-single.shared.js';
 
 export const FETCH_URL_TOOL_NAME = 'fetch-url';
 export const FETCH_URL_TOOL_DESCRIPTION =
@@ -42,20 +37,14 @@ export async function fetchUrlToolHandler(
   });
 
   try {
-    const result = await executeFetchPipeline<JsonlTransformResult>({
+    const { pipeline, inlineResult } = await performSharedFetch({
       url: input.url,
-      cacheNamespace: format === 'markdown' ? 'markdown' : 'url',
+      format,
+      extractMainContent,
+      includeMetadata,
+      maxContentLength: input.maxContentLength,
       customHeaders: input.customHeaders,
       retries: input.retries,
-      cacheVary: appendHeaderVary(
-        {
-          format,
-          extractMainContent,
-          includeMetadata,
-          maxContentLength: input.maxContentLength,
-        },
-        input.customHeaders
-      ),
       transform: (html, url) =>
         format === 'markdown'
           ? transformHtmlToMarkdownWithBlocks(html, url, {
@@ -70,12 +59,6 @@ export async function fetchUrlToolHandler(
             }),
     });
 
-    const inlineResult = applyInlineContentLimit(
-      result.data.content,
-      result.cacheKey ?? null,
-      format
-    );
-
     if (inlineResult.error) {
       return createToolErrorResponse(
         inlineResult.error,
@@ -87,14 +70,14 @@ export async function fetchUrlToolHandler(
     const shouldInline = typeof inlineResult.content === 'string';
 
     const structuredContent = {
-      url: result.url,
-      title: result.data.title,
-      contentBlocks: result.data.contentBlocks,
-      fetchedAt: result.fetchedAt,
+      url: pipeline.url,
+      title: pipeline.data.title,
+      contentBlocks: pipeline.data.contentBlocks,
+      fetchedAt: pipeline.fetchedAt,
       format,
       contentSize: inlineResult.contentSize,
-      cached: result.fromCache,
-      ...(result.data.truncated && { truncated: result.data.truncated }),
+      cached: pipeline.fromCache,
+      ...(pipeline.data.truncated && { truncated: pipeline.data.truncated }),
       ...(shouldInline ? { content: inlineResult.content } : {}),
       ...(inlineResult.resourceUri && {
         resourceUri: inlineResult.resourceUri,
@@ -104,8 +87,8 @@ export async function fetchUrlToolHandler(
 
     const jsonOutput = JSON.stringify(
       structuredContent,
-      result.fromCache ? undefined : null,
-      result.fromCache ? undefined : 2
+      pipeline.fromCache ? undefined : null,
+      pipeline.fromCache ? undefined : 2
     );
 
     return {

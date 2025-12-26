@@ -12,10 +12,13 @@ import {
   createToolErrorResponse,
   handleToolError,
 } from '../../utils/tool-error-handler.js';
-import { appendHeaderVary } from '../utils/cache-vary.js';
 import { transformHtmlToMarkdown } from '../utils/content-transform.js';
-import { executeFetchPipeline } from '../utils/fetch-pipeline.js';
-import { applyInlineContentLimit } from '../utils/inline-content.js';
+
+import { performSharedFetch } from './fetch-single.shared.js';
+
+type MarkdownPipelineResult = MarkdownTransformResult & {
+  readonly content: string;
+};
 
 export const FETCH_MARKDOWN_TOOL_NAME = 'fetch-markdown';
 export const FETCH_MARKDOWN_TOOL_DESCRIPTION =
@@ -38,28 +41,20 @@ export async function fetchMarkdownToolHandler(
   logDebug('Fetching markdown', { url: input.url, ...options });
 
   try {
-    const result = await executeFetchPipeline<MarkdownTransformResult>({
-      url: input.url,
-      cacheNamespace: 'markdown',
-      customHeaders: input.customHeaders,
-      retries: input.retries,
-      cacheVary: appendHeaderVary(
-        {
-          extractMainContent: options.extractMainContent,
-          includeMetadata: options.includeMetadata,
-          generateToc: options.generateToc,
-          maxContentLength: options.maxContentLength,
+    const { pipeline, inlineResult } =
+      await performSharedFetch<MarkdownPipelineResult>({
+        url: input.url,
+        format: 'markdown',
+        extractMainContent: options.extractMainContent,
+        includeMetadata: options.includeMetadata,
+        maxContentLength: options.maxContentLength,
+        customHeaders: input.customHeaders,
+        retries: input.retries,
+        transform: (html, url) => {
+          const markdownResult = transformHtmlToMarkdown(html, url, options);
+          return { ...markdownResult, content: markdownResult.markdown };
         },
-        input.customHeaders
-      ),
-      transform: (html, url) => transformHtmlToMarkdown(html, url, options),
-    });
-
-    const inlineResult = applyInlineContentLimit(
-      result.data.markdown,
-      result.cacheKey ?? null,
-      'markdown'
-    );
+      });
 
     if (inlineResult.error) {
       return createToolErrorResponse(
@@ -72,13 +67,13 @@ export async function fetchMarkdownToolHandler(
     const shouldInline = typeof inlineResult.content === 'string';
 
     const structuredContent = {
-      url: result.url,
-      title: result.data.title,
-      fetchedAt: result.fetchedAt,
+      url: pipeline.url,
+      title: pipeline.data.title,
+      fetchedAt: pipeline.fetchedAt,
       contentSize: inlineResult.contentSize,
-      ...(result.data.toc && { toc: result.data.toc }),
-      cached: result.fromCache,
-      ...(result.data.truncated && { truncated: result.data.truncated }),
+      ...(pipeline.data.toc && { toc: pipeline.data.toc }),
+      cached: pipeline.fromCache,
+      ...(pipeline.data.truncated && { truncated: pipeline.data.truncated }),
       ...(shouldInline ? { markdown: inlineResult.content } : {}),
       ...(inlineResult.resourceUri && {
         resourceUri: inlineResult.resourceUri,
@@ -88,8 +83,8 @@ export async function fetchMarkdownToolHandler(
 
     const jsonOutput = JSON.stringify(
       structuredContent,
-      result.fromCache ? undefined : null,
-      result.fromCache ? undefined : 2
+      pipeline.fromCache ? undefined : null,
+      pipeline.fromCache ? undefined : 2
     );
 
     return {

@@ -139,28 +139,30 @@ function buildRequestSignal(
   return AbortSignal.any([external, timeoutSignal]);
 }
 
-async function readResponseText(
+function assertContentLengthWithinLimit(
   response: Response,
   url: string,
   maxBytes: number
-): Promise<{ text: string; size: number }> {
+): void {
   const contentLengthHeader = response.headers.get('content-length');
-  if (contentLengthHeader) {
-    const contentLength = Number.parseInt(contentLengthHeader, 10);
-    if (!Number.isNaN(contentLength) && contentLength > maxBytes) {
-      throw new FetchError(
-        `Response exceeds maximum size of ${maxBytes} bytes`,
-        url
-      );
-    }
+  if (!contentLengthHeader) return;
+  const contentLength = Number.parseInt(contentLengthHeader, 10);
+  if (Number.isNaN(contentLength) || contentLength <= maxBytes) {
+    return;
   }
 
-  if (!response.body) {
-    const text = await response.text();
-    return { text, size: Buffer.byteLength(text) };
-  }
+  throw new FetchError(
+    `Response exceeds maximum size of ${maxBytes} bytes`,
+    url
+  );
+}
 
-  const reader = response.body.getReader();
+async function readStreamWithLimit(
+  stream: ReadableStream<Uint8Array>,
+  url: string,
+  maxBytes: number
+): Promise<{ text: string; size: number }> {
+  const reader = stream.getReader();
   const decoder = new TextDecoder();
   let total = 0;
   let text = '';
@@ -183,8 +185,60 @@ async function readResponseText(
   }
 
   text += decoder.decode();
-
   return { text, size: total };
+}
+
+async function readResponseText(
+  response: Response,
+  url: string,
+  maxBytes: number
+): Promise<{ text: string; size: number }> {
+  assertContentLengthWithinLimit(response, url, maxBytes);
+
+  if (!response.body) {
+    const text = await response.text();
+    return { text, size: Buffer.byteLength(text) };
+  }
+
+  return readStreamWithLimit(response.body, url, maxBytes);
+}
+
+interface FetchCycleResult {
+  response: Response;
+  nextUrl?: string;
+}
+
+async function performFetchCycle(
+  currentUrl: string,
+  init: RequestInit,
+  redirectLimit: number,
+  redirectCount: number
+): Promise<FetchCycleResult> {
+  const response = await fetch(currentUrl, { ...init, redirect: 'manual' });
+
+  if (!isRedirectStatus(response.status)) {
+    return { response };
+  }
+
+  if (redirectCount >= redirectLimit) {
+    void response.body?.cancel();
+    throw new FetchError('Too many redirects', currentUrl);
+  }
+
+  const location = response.headers.get('location');
+  if (!location) {
+    void response.body?.cancel();
+    throw new FetchError(
+      'Redirect response missing Location header',
+      currentUrl
+    );
+  }
+
+  void response.body?.cancel();
+  return {
+    response,
+    nextUrl: resolveRedirectTarget(currentUrl, location),
+  };
 }
 
 async function fetchWithRedirects(
@@ -201,28 +255,18 @@ async function fetchWithRedirects(
     redirectCount += 1
   ) {
     try {
-      const response = await fetch(currentUrl, { ...init, redirect: 'manual' });
+      const { response, nextUrl } = await performFetchCycle(
+        currentUrl,
+        init,
+        redirectLimit,
+        redirectCount
+      );
 
-      if (!isRedirectStatus(response.status)) {
+      if (!nextUrl) {
         return { response, url: currentUrl };
       }
 
-      if (redirectCount >= redirectLimit) {
-        void response.body?.cancel();
-        throw new FetchError('Too many redirects', currentUrl);
-      }
-
-      const location = response.headers.get('location');
-      if (!location) {
-        void response.body?.cancel();
-        throw new FetchError(
-          'Redirect response missing Location header',
-          currentUrl
-        );
-      }
-
-      void response.body?.cancel();
-      currentUrl = resolveRedirectTarget(currentUrl, location);
+      currentUrl = nextUrl;
     } catch (error) {
       if (error && typeof error === 'object') {
         (error as { requestUrl?: string }).requestUrl = currentUrl;

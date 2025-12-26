@@ -2,6 +2,7 @@ import type {
   BatchUrlResult,
   FetchOptions,
   FetchUrlsInput,
+  PipelineResult,
 } from '../../../config/types.js';
 
 import { logWarn } from '../../../services/logger.js';
@@ -118,31 +119,7 @@ export async function processSingleUrl(
   options: SingleUrlProcessOptions
 ): Promise<BatchUrlResult> {
   try {
-    const cacheVary = buildCacheVary(
-      options,
-      options.requestOptions?.customHeaders
-    );
-
-    const cacheNamespace = options.format === 'markdown' ? 'markdown' : 'url';
-    const result = await executeFetchPipeline<CachedUrlEntry>({
-      url,
-      cacheNamespace,
-      customHeaders: options.requestOptions?.customHeaders,
-      retries: options.maxRetries,
-      timeout: options.requestOptions?.timeout,
-      cacheVary,
-      serialize: JSON.stringify,
-      deserialize: deserializeCachedEntry,
-      transform: (html, normalizedUrl) => {
-        const transformed = transformHtmlForBatch(html, normalizedUrl, options);
-        const { content } = enforceContentLengthLimit(
-          transformed.content,
-          options.maxContentLength
-        );
-        return { ...transformed, content };
-      },
-    });
-
+    const result = await runBatchPipeline(url, options);
     const inlineResult = applyInlineContentLimit(
       result.data.content,
       result.cacheKey ?? null,
@@ -150,26 +127,10 @@ export async function processSingleUrl(
     );
 
     if (inlineResult.error) {
-      return {
-        url: result.url,
-        success: false,
-        cached: false,
-        error: inlineResult.error,
-        errorCode: 'INTERNAL_ERROR',
-      };
+      return mapInlineFailure(result.url, inlineResult.error);
     }
 
-    return {
-      url: result.url,
-      success: true,
-      title: result.data.title,
-      content: inlineResult.content,
-      contentSize: inlineResult.contentSize,
-      resourceUri: inlineResult.resourceUri,
-      resourceMimeType: inlineResult.resourceMimeType,
-      contentBlocks: result.data.contentBlocks,
-      cached: result.fromCache,
-    };
+    return mapInlineSuccess(result, inlineResult);
   } catch (error) {
     const errorMessage =
       error instanceof Error ? error.message : 'Unknown error';
@@ -190,6 +151,63 @@ export async function processSingleUrl(
       errorCode,
     };
   }
+}
+
+async function runBatchPipeline(
+  url: string,
+  options: SingleUrlProcessOptions
+): Promise<PipelineResult<CachedUrlEntry>> {
+  const cacheVary = buildCacheVary(
+    options,
+    options.requestOptions?.customHeaders
+  );
+
+  const cacheNamespace = options.format === 'markdown' ? 'markdown' : 'url';
+  return executeFetchPipeline<CachedUrlEntry>({
+    url,
+    cacheNamespace,
+    customHeaders: options.requestOptions?.customHeaders,
+    retries: options.maxRetries,
+    timeout: options.requestOptions?.timeout,
+    cacheVary,
+    serialize: JSON.stringify,
+    deserialize: deserializeCachedEntry,
+    transform: (html, normalizedUrl) => {
+      const transformed = transformHtmlForBatch(html, normalizedUrl, options);
+      const { content } = enforceContentLengthLimit(
+        transformed.content,
+        options.maxContentLength
+      );
+      return { ...transformed, content };
+    },
+  });
+}
+
+function mapInlineSuccess(
+  result: PipelineResult<CachedUrlEntry>,
+  inlineResult: ReturnType<typeof applyInlineContentLimit>
+): BatchUrlResult {
+  return {
+    url: result.url,
+    success: true,
+    title: result.data.title,
+    content: inlineResult.content,
+    contentSize: inlineResult.contentSize,
+    resourceUri: inlineResult.resourceUri,
+    resourceMimeType: inlineResult.resourceMimeType,
+    contentBlocks: result.data.contentBlocks,
+    cached: result.fromCache,
+  };
+}
+
+function mapInlineFailure(url: string, errorMessage: string): BatchUrlResult {
+  return {
+    url,
+    success: false,
+    cached: false,
+    error: errorMessage,
+    errorCode: 'INTERNAL_ERROR',
+  };
 }
 
 export type { SingleUrlProcessOptions };
