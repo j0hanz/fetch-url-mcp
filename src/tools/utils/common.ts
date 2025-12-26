@@ -1,4 +1,4 @@
-import { TRUNCATION_SUFFIX } from '../../config/formatting.js';
+import { TRUNCATION_MARKER } from '../../config/formatting.js';
 import type {
   ContentTransformOptions,
   ExtractedArticle,
@@ -53,7 +53,7 @@ export function enforceContentLengthLimit(
 export function truncateContent(
   content: string,
   maxLength?: number,
-  suffix = TRUNCATION_SUFFIX.default
+  suffix = TRUNCATION_MARKER
 ): TruncationResult {
   const shouldTruncate =
     maxLength !== undefined && maxLength > 0 && content.length > maxLength;

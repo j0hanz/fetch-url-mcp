@@ -2,10 +2,7 @@ export const LINE_BREAK = '\n';
 
 export const EXCESSIVE_NEWLINES_PATTERN = /\n{2,}/g;
 
-export const TRUNCATION_SUFFIX = {
-  default: '\n...[truncated]',
-  inline: '\n...[truncated]',
-} as const;
+export const TRUNCATION_MARKER = '...[truncated]';
 
 export const CODE_BLOCK = {
   fence: '```',
@@ -15,15 +12,7 @@ export const CODE_BLOCK = {
   },
 } as const;
 
-export const FRONTMATTER = {
-  delimiter: '---',
-  join: (lines: string[]): string => lines.join(LINE_BREAK),
-  suffix: LINE_BREAK,
-} as const;
-
-export const JSONL = {
-  join: (lines: string[]): string => lines.join(LINE_BREAK),
-} as const;
+export const FRONTMATTER_DELIMITER = '---';
 
 export const normalizeNewlines = (content: string): string =>
   content.replace(EXCESSIVE_NEWLINES_PATTERN, LINE_BREAK).trim();

@@ -1,4 +1,4 @@
-import { TRUNCATION_SUFFIX } from '../../config/formatting.js';
+import { TRUNCATION_MARKER } from '../../config/formatting.js';
 import { config } from '../../config/index.js';
 
 import * as cache from '../../services/cache.js';
@@ -52,13 +52,10 @@ function buildTruncatedFallback(
   contentSize: number,
   inlineLimit: number
 ): InlineContentResult {
-  const maxContentLength = Math.max(
-    0,
-    inlineLimit - TRUNCATION_SUFFIX.inline.length
-  );
+  const maxContentLength = Math.max(0, inlineLimit - TRUNCATION_MARKER.length);
   const truncatedContent =
     content.length > inlineLimit
-      ? `${content.substring(0, maxContentLength)}${TRUNCATION_SUFFIX.inline}`
+      ? `${content.substring(0, maxContentLength)}${TRUNCATION_MARKER}`
       : content;
 
   return {

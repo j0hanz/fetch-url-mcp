@@ -2,7 +2,7 @@ import TurndownService from 'turndown';
 
 import {
   CODE_BLOCK,
-  FRONTMATTER,
+  FRONTMATTER_DELIMITER,
   joinLines,
   normalizeNewlines,
   splitLines,
@@ -166,7 +166,7 @@ function escapeYamlValue(value: string): string {
 }
 
 function createFrontmatter(metadata: MetadataBlock): string {
-  const lines: string[] = [FRONTMATTER.delimiter];
+  const lines: string[] = [FRONTMATTER_DELIMITER];
 
   if (metadata.title) {
     lines.push(`title: ${escapeYamlValue(metadata.title)}`);
@@ -175,7 +175,7 @@ function createFrontmatter(metadata: MetadataBlock): string {
     lines.push(`source: ${escapeYamlValue(metadata.url)}`);
   }
 
-  lines.push(FRONTMATTER.delimiter);
+  lines.push(FRONTMATTER_DELIMITER);
   return joinLines(lines);
 }
 
@@ -188,7 +188,7 @@ function convertHtmlToMarkdown(html: string): string {
 }
 
 function buildFrontmatterBlock(metadata?: MetadataBlock): string {
-  return metadata ? `${createFrontmatter(metadata)}${FRONTMATTER.suffix}` : '';
+  return metadata ? createFrontmatter(metadata) : '';
 }
 
 export function htmlToMarkdown(html: string, metadata?: MetadataBlock): string {
