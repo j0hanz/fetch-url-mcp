@@ -2,45 +2,44 @@
 
 ## Project Structure & Module Organization
 
-- `src/` holds the TypeScript source. Key areas: `src/tools/` (MCP tools/handlers), `src/services/` (fetching, parsing, caching, logging), `src/utils/` (sanitization/helpers), `src/transformers/` (markdown/JSONL output), and `src/resources/` (MCP resources).
-- `tests/` contains Vitest tests.
-- `dist/` is the compiled output from `npm run build` and should not be edited.
-- `scripts/` contains release automation (for example `scripts/release.js`, `.sh`, `.bat`).
-- `docs/` stores static assets (for example `docs/logo.png`).
-- Root config files include `package.json`, `tsconfig.json`, `eslint.config.mjs`, `.prettierrc`, and `server.json`.
+- `src/` holds TypeScript source. Core areas: `config/`, `services/`, `tools/`, `transformers/`, `middleware/`, `utils/`, `resources/`. Entrypoints: `src/index.ts` and `src/server.ts`.
+- `tests/` contains Vitest suites named `*.test.ts`.
+- `scripts/` provides release and benchmarking utilities.
+- `dist/` is the compiled output (generated).
+- `docs/` stores documentation and assets.
 
 ## Build, Test, and Development Commands
 
-- `npm run dev`: run the server in watch mode with `tsx`.
-- `npm run build`: compile TypeScript and fix executable flags in `dist/`.
-- `npm start`: run the compiled server from `dist/index.js`.
-- `npm run lint` / `npm run lint:fix`: check or auto-fix ESLint issues.
-- `npm run type-check`: run `tsc --noEmit` for type safety.
-- `npm run format`: apply Prettier formatting and import sorting.
-- `npm test` / `npm run test:coverage`: run Vitest tests (with coverage).
-- `npm run bench`: run the minimal performance benchmark (builds first).
+- `npm install` installs dependencies (Node >= 20.12 required).
+- `npm run dev` starts the dev server with hot reload (tsx watch).
+- `npm run build` compiles TypeScript to `dist/`.
+- `npm start` runs the production server from `dist/`.
+- `npm run lint` / `npm run lint:fix` runs ESLint checks and fixes.
+- `npm run type-check` runs `tsc --noEmit`.
+- `npm run format` formats with Prettier.
+- `npm test` / `npm run test:coverage` runs Vitest (with coverage).
+- `npm run bench` builds and runs the benchmark.
+- `npm run knip` / `npm run knip:fix` checks for unused exports and deps.
 
 ## Coding Style & Naming Conventions
 
-- Formatting: Prettier with 2-space indentation, single quotes, semicolons, 80-char print width.
-- Linting: ESLint must pass before release.
-- File names use kebab-case (for example `fetch-url.tool.ts`).
-- Prefer PascalCase for types/interfaces and camelCase for values/exports.
+- Prettier enforces 2-space indentation, single quotes, semicolons, LF line endings, and 80-char print width.
+- Imports are sorted and grouped via `@trivago/prettier-plugin-sort-imports`; keep local groups (config/services/middleware/utils/transformers/tools/resources) consistent.
+- ESLint (TypeScript strict) enforces `camelCase` for variables/functions, `PascalCase` for types/classes, `UPPER_CASE` for constants/enums. Leading `_` is allowed for intentionally unused params. Prefer type-only imports.
 
 ## Testing Guidelines
 
-- Test runner: Vitest; tests live under `tests/`.
-- Keep tests fast and deterministic; avoid network access.
-- Run `npm test` locally and `npm run test:coverage` for coverage checks.
+- Tests live in `tests/` with `*.test.ts` naming.
+- Use Vitest via `npm test`; add coverage with `npm run test:coverage`.
+- Add or update tests when changing tools, transformers, services, or HTTP routes.
 
 ## Commit & Pull Request Guidelines
 
-- Commit subjects use Conventional Commits (for example `refactor: tighten SSRF checks`), with occasional version-only commits like `1.1.1`.
-- PRs should include a concise summary, rationale, testing commands run, and any config/env changes.
-- Update `README.md` for user-facing behavior changes.
+- Commit history follows Conventional Commits (examples: `feat: ...`, `refactor: ...`, `chore: release vX.Y.Z`). Use the release script for version bumps.
+- Create branches like `feature/short-description`.
+- PRs should include a concise summary, testing notes (`npm run lint`, `npm test`), and any documentation updates.
 
 ## Security & Configuration Tips
 
-- Preserve SSRF protections and header sanitization in fetch logic.
-- Prefer configuration via environment variables (for example `FETCH_TIMEOUT`, `CACHE_TTL`, `LOG_LEVEL`).
-- Avoid committing secrets or tokens; use local env files or CI secrets instead.
+- This server fetches external URLs; avoid relaxing SSRF or CORS protections in production.
+- Configure behavior via environment variables (for example: `CACHE_TTL`, `FETCH_TIMEOUT`, `LOG_LEVEL`, `ALLOWED_ORIGINS`) and document new keys in `README.md`.
