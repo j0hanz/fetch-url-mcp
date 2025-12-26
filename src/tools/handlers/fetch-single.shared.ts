@@ -65,7 +65,7 @@ export async function performSharedFetch<T extends { content: string }>(
 
 export type InlineResult = ReturnType<typeof applyInlineContentLimit>;
 
-export interface DownloadContext {
+interface DownloadContext {
   cacheKey: string | null;
   url: string;
   title?: string;

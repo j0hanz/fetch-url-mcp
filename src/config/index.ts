@@ -1,4 +1,5 @@
 import packageJson from '../../package.json' with { type: 'json' };
+import { SIZE_LIMITS, TIMEOUT } from './constants.js';
 import type { LogLevel } from './types.js';
 
 function parseInteger(
@@ -69,9 +70,9 @@ export const config = {
     trustProxy: parseBoolean(process.env.TRUST_PROXY, false),
     sessionTtlMs: parseInteger(
       process.env.SESSION_TTL_MS,
-      30 * 60 * 1000,
-      60 * 1000,
-      24 * 60 * 60 * 1000
+      TIMEOUT.DEFAULT_SESSION_TTL_MS,
+      TIMEOUT.MIN_SESSION_TTL_MS,
+      TIMEOUT.MAX_SESSION_TTL_MS
     ),
     sessionInitTimeoutMs: parseInteger(
       process.env.SESSION_INIT_TIMEOUT_MS,
@@ -82,10 +83,15 @@ export const config = {
     maxSessions: parseInteger(process.env.MAX_SESSIONS, 200, 10, 10000),
   },
   fetcher: {
-    timeout: parseInteger(process.env.FETCH_TIMEOUT, 30000, 5000, 120000),
+    timeout: parseInteger(
+      process.env.FETCH_TIMEOUT,
+      TIMEOUT.DEFAULT_FETCH_TIMEOUT_MS,
+      TIMEOUT.MIN_FETCH_TIMEOUT_MS,
+      TIMEOUT.MAX_FETCH_TIMEOUT_MS
+    ),
     maxRedirects: 5,
     userAgent: process.env.USER_AGENT ?? 'superFetch-MCP/1.0',
-    maxContentLength: 10485760,
+    maxContentLength: SIZE_LIMITS.TEN_MB,
   },
   cache: {
     enabled: parseBoolean(process.env.CACHE_ENABLED, true),
@@ -103,8 +109,8 @@ export const config = {
     enabled: parseBoolean(process.env.ENABLE_LOGGING, true),
   },
   constants: {
-    maxHtmlSize: 10 * 1024 * 1024,
-    maxContentSize: 5 * 1024 * 1024,
+    maxHtmlSize: SIZE_LIMITS.TEN_MB,
+    maxContentSize: SIZE_LIMITS.FIVE_MB,
     maxUrlLength: 2048,
     maxInlineContentChars: parseInteger(
       process.env.MAX_INLINE_CONTENT_CHARS,

@@ -40,12 +40,6 @@ export interface ErrorResponse {
   };
 }
 
-export interface ToolResponse<T = Record<string, unknown>> {
-  [x: string]: unknown;
-  content: ToolContentBlock[];
-  structuredContent: T & Record<string, unknown>;
-}
-
 export interface ToolErrorResponse {
   [x: string]: unknown;
   content: ToolContentBlock[];

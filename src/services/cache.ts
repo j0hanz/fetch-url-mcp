@@ -1,8 +1,11 @@
 import { hash } from 'node:crypto';
 import { setInterval as setIntervalPromise } from 'node:timers/promises';
 
+import { CACHE_HASH } from '../config/constants.js';
 import { config } from '../config/index.js';
 import type { CacheEntry } from '../config/types.js';
+
+import { getErrorMessage } from '../utils/error-utils.js';
 
 import { logWarn } from './logger.js';
 
@@ -17,7 +20,11 @@ let cleanupController: AbortController | null = null;
 function startCleanupLoop(): void {
   if (cleanupController) return;
   cleanupController = new AbortController();
-  void runCleanupLoop(cleanupController.signal).catch(() => {});
+  void runCleanupLoop(cleanupController.signal).catch((error: unknown) => {
+    if (error instanceof Error && error.name !== 'AbortError') {
+      logWarn('Cache cleanup loop failed', { error: getErrorMessage(error) });
+    }
+  });
 }
 
 async function runCleanupLoop(signal: AbortSignal): Promise<void> {
@@ -97,6 +104,14 @@ function createHashFragment(input: string, length: number): string {
   return hash('sha256', input, 'hex').substring(0, length);
 }
 
+/**
+ * Constructs a cache key from namespace, URL hash, and optional vary hash.
+ * Format: "namespace:urlHash" or "namespace:urlHash.varyHash" if vary params exist.
+ * @param namespace - Cache namespace (e.g., "fetch-markdown")
+ * @param urlHash - SHA-256 hash of the URL (truncated to 16 chars)
+ * @param varyHash - Optional hash of vary parameters (e.g., headers, options)
+ * @returns Complete cache key string
+ */
 function buildCacheKey(
   namespace: string,
   urlHash: string,
@@ -113,7 +128,7 @@ function getVaryHash(
   if (!vary) return undefined;
   const varyString = typeof vary === 'string' ? vary : stableStringify(vary);
   if (!varyString) return undefined;
-  return createHashFragment(varyString, 12);
+  return createHashFragment(varyString, CACHE_HASH.VARY_HASH_LENGTH);
 }
 
 export function createCacheKey(
@@ -123,7 +138,7 @@ export function createCacheKey(
 ): string | null {
   if (!namespace || !url) return null;
 
-  const urlHash = createHashFragment(url, 16);
+  const urlHash = createHashFragment(url, CACHE_HASH.URL_HASH_LENGTH);
   const varyHash = getVaryHash(vary);
   return buildCacheKey(namespace, urlHash, varyHash);
 }
@@ -165,7 +180,7 @@ export function get(cacheKey: string | null): CacheEntry | undefined {
   } catch (error) {
     logWarn('Cache get error', {
       key: cacheKey.substring(0, 100),
-      error: error instanceof Error ? error.message : 'Unknown error',
+      error: getErrorMessage(error),
     });
     return undefined;
   }
@@ -207,7 +222,7 @@ export function set(
   } catch (error) {
     logWarn('Cache set error', {
       key: cacheKey.substring(0, 100),
-      error: resolveErrorMessage(error),
+      error: getErrorMessage(error),
     });
   }
 }
@@ -234,8 +249,4 @@ function persistCacheEntry(cacheKey: string, entry: CacheEntry): void {
   const expiresAt = Date.now() + config.cache.ttl * 1000;
   contentCache.set(cacheKey, { entry, expiresAt });
   emitCacheUpdate(cacheKey);
-}
-
-function resolveErrorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : 'Unknown error';
 }

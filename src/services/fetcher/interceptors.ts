@@ -2,6 +2,8 @@ import { randomUUID } from 'node:crypto';
 import diagnosticsChannel from 'node:diagnostics_channel';
 import { performance } from 'node:perf_hooks';
 
+import { isSystemError } from '../../utils/error-utils.js';
+
 import { logDebug, logError, logWarn } from '../logger.js';
 
 const fetchChannel = diagnosticsChannel.channel('superfetch.fetch');
@@ -109,10 +111,7 @@ export function recordFetchError(
 ): void {
   const duration = performance.now() - context.startTime;
   const err = error instanceof Error ? error : new Error(String(error));
-  const code =
-    typeof (err as NodeJS.ErrnoException).code === 'string'
-      ? (err as NodeJS.ErrnoException).code
-      : undefined;
+  const code = isSystemError(err) ? err.code : undefined;
 
   if (fetchChannel.hasSubscribers) {
     fetchChannel.publish({

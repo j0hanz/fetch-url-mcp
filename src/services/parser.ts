@@ -26,6 +26,7 @@ import {
   cleanParagraph,
   removeInlineTimestamps,
 } from '../utils/content-cleaner.js';
+import { getErrorMessage } from '../utils/error-utils.js';
 import { truncateHtml } from '../utils/html-truncator.js';
 import { sanitizeText } from '../utils/sanitizer.js';
 
@@ -221,7 +222,7 @@ function loadHtml(html: string): CheerioAPI | null {
     return cheerio.load(html);
   } catch (error) {
     logWarn('Failed to parse HTML', {
-      error: error instanceof Error ? error.message : 'Unknown error',
+      error: getErrorMessage(error),
       htmlLength: html.length,
     });
     return null;

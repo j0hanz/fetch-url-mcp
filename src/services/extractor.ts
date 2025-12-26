@@ -8,9 +8,10 @@ import type {
   ExtractionResult,
 } from '../config/types.js';
 
+import { getErrorMessage } from '../utils/error-utils.js';
 import { truncateHtml } from '../utils/html-truncator.js';
 
-import { logError, logWarn } from './logger.js';
+import { logError, logInfo, logWarn } from './logger.js';
 
 type MetaSource = 'og' | 'twitter' | 'standard';
 type MetaField = keyof ExtractedMetadata;
@@ -124,14 +125,19 @@ function extractMetadata(document: Document): ExtractedMetadata {
   };
 }
 
-function hasDocumentElement(document: unknown): document is Document {
-  if (!document || typeof document !== 'object') return false;
-  if (!('documentElement' in document)) return false;
-  return Boolean((document as { documentElement?: unknown }).documentElement);
+function isReadabilityCompatible(doc: unknown): doc is Document {
+  if (!doc || typeof doc !== 'object') return false;
+  if (!('documentElement' in doc)) return false;
+  if (!('querySelectorAll' in doc)) return false;
+  if (!('querySelector' in doc)) return false;
+  return true;
 }
 
 function extractArticle(document: unknown): ExtractedArticle | null {
-  if (!hasDocumentElement(document)) return null;
+  if (!isReadabilityCompatible(document)) {
+    logWarn('Document not compatible with Readability');
+    return null;
+  }
   const parsed = parseReadabilityArticle(document);
   return parsed ? mapReadabilityResult(parsed) : null;
 }
@@ -140,7 +146,8 @@ function parseReadabilityArticle(
   document: Document
 ): ReturnType<Readability['parse']> | null {
   try {
-    const reader = new Readability(document as unknown as Document);
+    // Type assertion is safe here due to isReadabilityCompatible check
+    const reader = new Readability(document);
     return reader.parse();
   } catch (error) {
     logError(
@@ -191,10 +198,8 @@ function tryExtractContent(
 
     applyBaseUri(document, url);
 
-    const metadata = extractMetadata(document as unknown as Document);
-    const article = options.extractArticle
-      ? extractArticle(document as unknown as Document)
-      : null;
+    const metadata = extractMetadata(document);
+    const article = options.extractArticle ? extractArticle(document) : null;
 
     return { article, metadata };
   } catch (error) {
@@ -226,7 +231,10 @@ function applyBaseUri(document: Document, url: string): void {
       value: url,
       writable: true,
     });
-  } catch {
-    // Ignore errors in setting baseURI
+  } catch (error) {
+    logInfo('Failed to set baseURI (non-critical)', {
+      url: url.substring(0, 100),
+      error: getErrorMessage(error),
+    });
   }
 }

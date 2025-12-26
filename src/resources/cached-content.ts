@@ -4,6 +4,8 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import * as cache from '../services/cache.js';
 import { logWarn } from '../services/logger.js';
 
+import { getErrorMessage } from '../utils/error-utils.js';
+
 function buildResourceEntry(
   namespace: string,
   urlHash: string
@@ -58,7 +60,7 @@ function notifyResourceUpdate(server: McpServer, uri: string): void {
   void server.server.sendResourceUpdated({ uri }).catch((error: unknown) => {
     logWarn('Failed to send resource update notification', {
       uri,
-      error: error instanceof Error ? error.message : 'Unknown error',
+      error: getErrorMessage(error),
     });
   });
 }

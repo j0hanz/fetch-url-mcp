@@ -1,5 +1,6 @@
 import { FetchError } from '../../errors/app-error.js';
 
+import { createErrorWithCode } from '../../utils/error-utils.js';
 import { validateAndNormalizeUrl } from '../../utils/url-validator.js';
 
 const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
@@ -61,18 +62,15 @@ function annotateRedirectError(error: unknown, url: string): void {
 
 function resolveRedirectTarget(baseUrl: string, location: string): string {
   if (!URL.canParse(location, baseUrl)) {
-    const error = new Error('Invalid redirect target') as NodeJS.ErrnoException;
-    error.code = 'EBADREDIRECT';
-    throw error;
+    throw createErrorWithCode('Invalid redirect target', 'EBADREDIRECT');
   }
 
   const resolved = new URL(location, baseUrl);
   if (resolved.username || resolved.password) {
-    const error = new Error(
-      'Redirect target includes credentials'
-    ) as NodeJS.ErrnoException;
-    error.code = 'EBADREDIRECT';
-    throw error;
+    throw createErrorWithCode(
+      'Redirect target includes credentials',
+      'EBADREDIRECT'
+    );
   }
 
   return validateAndNormalizeUrl(resolved.href);

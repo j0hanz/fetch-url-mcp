@@ -3,6 +3,7 @@ import os from 'node:os';
 
 import { Agent } from 'undici';
 
+import { createErrorWithCode } from '../../utils/error-utils.js';
 import { isBlockedIp } from '../../utils/url-validator.js';
 
 function resolveDns(
@@ -167,22 +168,20 @@ function findBlockedIpError(
       continue;
     }
 
-    const error = new Error(
-      `Blocked IP detected for ${hostname}`
-    ) as NodeJS.ErrnoException;
-    error.code = 'EBLOCKED';
-    return error;
+    return createErrorWithCode(
+      `Blocked IP detected for ${hostname}`,
+      'EBLOCKED'
+    );
   }
 
   return null;
 }
 
 function createNoDnsResultsError(hostname: string): NodeJS.ErrnoException {
-  const error = new Error(
-    `No DNS results returned for ${hostname}`
-  ) as NodeJS.ErrnoException;
-  error.code = 'ENODATA';
-  return error;
+  return createErrorWithCode(
+    `No DNS results returned for ${hostname}`,
+    'ENODATA'
+  );
 }
 
 function getAgentOptions(): ConstructorParameters<typeof Agent>[0] {

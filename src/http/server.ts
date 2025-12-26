@@ -9,6 +9,8 @@ import { logError, logInfo, logWarn } from '../services/logger.js';
 
 import { errorHandler } from '../middleware/error-handler.js';
 
+import { getErrorMessage } from '../utils/error-utils.js';
+
 import { createAuthMiddleware } from './auth.js';
 import { createCorsMiddleware } from './cors.js';
 import { registerDownloadRoutes } from './download-routes.js';
@@ -83,7 +85,7 @@ function createShutdownHandler(
       sessions.map((session) =>
         session.transport.close().catch((error: unknown) => {
           logWarn('Failed to close session during shutdown', {
-            error: error instanceof Error ? error.message : 'Unknown error',
+            error: getErrorMessage(error),
           });
         })
       )

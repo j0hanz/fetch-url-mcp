@@ -187,6 +187,9 @@ function getRateLimitDelay(error: Error): number | null {
   if (!(error instanceof FetchError)) return null;
   if (error.details.httpStatus !== 429) return null;
 
-  const retryAfter = (error.details.retryAfter as number) || 60;
+  const retryAfter =
+    typeof error.details.retryAfter === 'number'
+      ? error.details.retryAfter
+      : 60;
   return Math.min(retryAfter * 1000, 30000);
 }

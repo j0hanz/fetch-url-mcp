@@ -10,6 +10,8 @@ import type { McpRequestBody } from '../config/types.js';
 
 import { logError, logInfo, logWarn } from '../services/logger.js';
 
+import { getErrorMessage } from '../utils/error-utils.js';
+
 import { createMcpServer } from '../server.js';
 import {
   createSlotTracker,
@@ -41,7 +43,7 @@ function startSessionInitTimeout(
     tracker.releaseSlot();
     void transport.close().catch((error: unknown) => {
       logWarn('Failed to close stalled session', {
-        error: error instanceof Error ? error.message : 'Unknown error',
+        error: getErrorMessage(error),
       });
     });
     logWarn('Session initialization timed out', { timeoutMs });
@@ -221,7 +223,7 @@ export function evictExpiredSessions(store: SessionStore): number {
   for (const session of evicted) {
     void session.transport.close().catch((error: unknown) => {
       logWarn('Failed to close expired session', {
-        error: error instanceof Error ? error.message : 'Unknown error',
+        error: getErrorMessage(error),
       });
     });
   }
@@ -233,7 +235,7 @@ function evictOldestSession(store: SessionStore): boolean {
   if (!session) return false;
   void session.transport.close().catch((error: unknown) => {
     logWarn('Failed to close evicted session', {
-      error: error instanceof Error ? error.message : 'Unknown error',
+      error: getErrorMessage(error),
     });
   });
   return true;

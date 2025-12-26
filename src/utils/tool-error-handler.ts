@@ -20,7 +20,7 @@ const MCP_ERROR_CODE_MAP: Record<string, string> = {
 
 const NUMERIC_ERROR_CODE = /^-?\d+$/;
 
-export function normalizeToolErrorCode(code: string): string {
+function normalizeToolErrorCode(code: string): string {
   if (!code) return String(ErrorCode.InternalError);
   if (NUMERIC_ERROR_CODE.test(code)) return code;
   if (code.startsWith('HTTP_')) return String(ErrorCode.InternalError);

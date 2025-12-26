@@ -5,7 +5,7 @@ import * as cache from '../services/cache.js';
 
 import { generateSafeFilename } from './filename-generator.js';
 
-export interface DownloadInfoOptions {
+interface DownloadInfoOptions {
   cacheKey: string | null;
   url: string;
   title?: string;
