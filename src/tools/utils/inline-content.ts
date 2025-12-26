@@ -1,3 +1,4 @@
+import { TRUNCATION_SUFFIX } from '../../config/formatting.js';
 import { config } from '../../config/index.js';
 
 import * as cache from '../../services/cache.js';
@@ -46,8 +47,6 @@ function resolveResourceMimeType(format: InlineContentFormat): string {
   return format === 'markdown' ? 'text/markdown' : 'application/jsonl';
 }
 
-const INLINE_TRUNCATION_SUFFIX = '\n...[truncated]';
-
 function buildTruncatedFallback(
   content: string,
   contentSize: number,
@@ -55,11 +54,11 @@ function buildTruncatedFallback(
 ): InlineContentResult {
   const maxContentLength = Math.max(
     0,
-    inlineLimit - INLINE_TRUNCATION_SUFFIX.length
+    inlineLimit - TRUNCATION_SUFFIX.inline.length
   );
   const truncatedContent =
     content.length > inlineLimit
-      ? `${content.substring(0, maxContentLength)}${INLINE_TRUNCATION_SUFFIX}`
+      ? `${content.substring(0, maxContentLength)}${TRUNCATION_SUFFIX.inline}`
       : content;
 
   return {

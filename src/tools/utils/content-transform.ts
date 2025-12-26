@@ -1,3 +1,4 @@
+import { TRUNCATION_SUFFIX } from '../../config/formatting.js';
 import type {
   JsonlTransformResult,
   MarkdownTransformResult,
@@ -103,7 +104,7 @@ export function transformHtmlToMarkdown(
   const { content, truncated } = truncateContent(
     markdown,
     options.maxContentLength,
-    '\n\n...[truncated]'
+    TRUNCATION_SUFFIX.default
   );
 
   return {
@@ -128,7 +129,7 @@ export function transformHtmlToMarkdownWithBlocks(
   const { content, truncated } = truncateContent(
     htmlToMarkdown(sourceHtml, metadata),
     options.maxContentLength,
-    '\n\n...[truncated]'
+    TRUNCATION_SUFFIX.default
   );
 
   return {

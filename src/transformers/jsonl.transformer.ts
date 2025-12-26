@@ -1,3 +1,4 @@
+import { JSONL } from '../config/formatting.js';
 import { config } from '../config/index.js';
 import type { ContentBlockUnion, MetadataBlock } from '../config/types.js';
 
@@ -70,7 +71,7 @@ export function toJsonl(
   metadata?: MetadataBlock
 ): string {
   const lines = collectJsonlLines(blocks, metadata);
-  return lines.join('\n');
+  return JSONL.join(lines);
 }
 
 function collectJsonlLines(

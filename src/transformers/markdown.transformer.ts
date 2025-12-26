@@ -1,5 +1,12 @@
 import TurndownService from 'turndown';
 
+import {
+  CODE_BLOCK,
+  FRONTMATTER,
+  joinLines,
+  normalizeNewlines,
+  splitLines,
+} from '../config/formatting.js';
 import type { MetadataBlock } from '../config/types.js';
 
 import { detectLanguageFromCode } from '../services/parser.js';
@@ -16,8 +23,6 @@ const NOISE_LINE_PATTERNS: readonly RegExp[] = [
   /^\(\d+\)$/,
 ] as const;
 
-const MULTIPLE_NEWLINES = /\n{3,}/g;
-
 function isNoiseLine(line: string): boolean {
   const trimmed = line.trim();
 
@@ -31,15 +36,13 @@ function isNoiseLine(line: string): boolean {
   return NOISE_LINE_PATTERNS.some((pattern) => pattern.test(trimmed));
 }
 
-const CODE_FENCE = '```';
-
 function cleanMarkdownContent(markdown: string): string {
-  const lines = markdown.split('\n');
+  const lines = splitLines(markdown);
   const cleanedLines: string[] = [];
   let insideCodeBlock = false;
 
   for (const line of lines) {
-    if (line.trim().startsWith(CODE_FENCE)) {
+    if (line.trim().startsWith(CODE_BLOCK.fence)) {
       insideCodeBlock = !insideCodeBlock;
       cleanedLines.push(line);
       continue;
@@ -55,7 +58,7 @@ function cleanMarkdownContent(markdown: string): string {
     }
   }
 
-  return cleanedLines.join('\n');
+  return joinLines(cleanedLines);
 }
 
 let turndownInstance: TurndownService | null = null;
@@ -109,7 +112,7 @@ function formatFencedCodeBlock(node: TurndownService.Node): string {
   const codeNode = node.firstChild as HTMLElement;
   const code = codeNode.textContent || '';
   const language = resolveCodeLanguage(codeNode, code);
-  return `\n\n\`\`\`${language}\n${code.replace(/\n$/, '')}\n\`\`\`\n\n`;
+  return CODE_BLOCK.format(code, language);
 }
 
 function resolveCodeLanguage(codeNode: HTMLElement, code: string): string {
@@ -125,7 +128,7 @@ function resolveCodeLanguage(codeNode: HTMLElement, code: string): string {
   return languageMatch?.[1] ?? detectLanguageFromCode(code) ?? '';
 }
 
-const YAML_SPECIAL_CHARS = /[:[\]{}"\n\r\t'|>&*!?,#]/;
+const YAML_SPECIAL_CHARS = /[:[\]{}"\r\t'|>&*!?,#]|\n/;
 const YAML_NUMERIC = /^[\d.]+$/;
 const YAML_RESERVED_WORDS = /^(true|false|null|yes|no|on|off)$/i;
 
@@ -163,7 +166,7 @@ function escapeYamlValue(value: string): string {
 }
 
 function createFrontmatter(metadata: MetadataBlock): string {
-  const lines = ['---'];
+  const lines: string[] = [FRONTMATTER.delimiter];
 
   if (metadata.title) {
     lines.push(`title: ${escapeYamlValue(metadata.title)}`);
@@ -172,20 +175,20 @@ function createFrontmatter(metadata: MetadataBlock): string {
     lines.push(`source: ${escapeYamlValue(metadata.url)}`);
   }
 
-  lines.push('---');
-  return lines.join('\n');
+  lines.push(FRONTMATTER.delimiter);
+  return joinLines(lines);
 }
 
 function convertHtmlToMarkdown(html: string): string {
   let content = getTurndown().turndown(html);
-  content = content.replace(MULTIPLE_NEWLINES, '\n\n').trim();
+  content = normalizeNewlines(content);
   content = cleanMarkdownContent(content);
-  content = content.replace(MULTIPLE_NEWLINES, '\n\n').trim();
+  content = normalizeNewlines(content);
   return content;
 }
 
 function buildFrontmatterBlock(metadata?: MetadataBlock): string {
-  return metadata ? `${createFrontmatter(metadata)}\n\n` : '';
+  return metadata ? `${createFrontmatter(metadata)}${FRONTMATTER.suffix}` : '';
 }
 
 export function htmlToMarkdown(html: string, metadata?: MetadataBlock): string {
