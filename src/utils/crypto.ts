@@ -22,7 +22,7 @@ export function timingSafeEqualUtf8(a: string, b: string): boolean {
   return timingSafeEqual(aBuffer, bBuffer);
 }
 
-export function hashHex(
+function hashHex(
   algorithm: AllowedHashAlgorithm,
   input: string | Uint8Array
 ): string {
