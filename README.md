@@ -502,6 +502,7 @@ Configure SuperFetch behavior by adding environment variables to your MCP client
 | `HOST`                    | `127.0.0.1` | HTTP server host                             |
 | `PORT`                    | `3000`      | HTTP server port                             |
 | `ALLOW_REMOTE`            | `false`     | Allow binding to non-loopback interfaces     |
+| `ALLOWED_HOSTS`           | -           | Comma-separated list of allowed Host headers |
 | `TRUST_PROXY`             | `false`     | Trust proxy headers for client IP resolution |
 | `SESSION_TTL_MS`          | `1800000`   | Session TTL in milliseconds (30 min)         |
 | `SESSION_INIT_TIMEOUT_MS` | `10000`     | Time allowed for session initialization      |

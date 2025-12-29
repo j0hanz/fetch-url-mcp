@@ -117,6 +117,6 @@ describe('attachBaseMiddleware', () => {
 
     attachBaseMiddleware(app as never, jsonParser, rateLimit, auth, cors);
 
-    expect(uses.length).toBe(6);
+    expect(uses.length).toBe(7);
   });
 });

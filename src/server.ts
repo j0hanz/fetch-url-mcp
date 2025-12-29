@@ -40,8 +40,10 @@ export async function startStdioServer(): Promise<void> {
     logError('[MCP Error]', error instanceof Error ? error : { error });
   };
 
-  process.on('SIGINT', () => {
-    process.stderr.write('\nShutting down superFetch MCP server...\n');
+  const handleShutdown = (signal: string): void => {
+    process.stderr.write(
+      `\n${signal} received, shutting down superFetch MCP server...\n`
+    );
     destroyAgents();
     server
       .close()
@@ -54,6 +56,13 @@ export async function startStdioServer(): Promise<void> {
       .finally(() => {
         process.exit(0);
       });
+  };
+
+  process.on('SIGINT', () => {
+    handleShutdown('SIGINT');
+  });
+  process.on('SIGTERM', () => {
+    handleShutdown('SIGTERM');
   });
 
   try {
