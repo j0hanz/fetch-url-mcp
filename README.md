@@ -101,25 +101,8 @@ Add to `.vscode/mcp.json` in your workspace:
 
 ### With Custom Configuration
 
-Configure SuperFetch behavior by adding environment variables to the `env` property:
-
-```json
-{
-  "servers": {
-    "superFetch": {
-      "command": "npx",
-      "args": ["-y", "@j0hanz/superfetch@latest", "--stdio"],
-      "env": {
-        "CACHE_TTL": "7200",
-        "LOG_LEVEL": "debug",
-        "FETCH_TIMEOUT": "60000"
-      }
-    }
-  }
-}
-```
-
-See [Configuration](#configuration) for all available options.
+Add environment variables in your MCP client config under `env`.
+See [Configuration](#configuration) or `CONFIGURATION.md` for all available options and presets.
 
 ### Cursor
 
@@ -154,14 +137,7 @@ command = "npx"
 args = ["-y", "@j0hanz/superfetch@latest", "--stdio"]
 ```
 
-**With Environment Variables:**
-
-```toml
-[mcp_servers.superfetch]
-command = "npx"
-args = ["-y", "@j0hanz/superfetch@latest", "--stdio"]
-env = { CACHE_TTL = "7200", LOG_LEVEL = "debug", FETCH_TIMEOUT = "60000" }
-```
+**With Environment Variables:** See `CONFIGURATION.md` for examples.
 
 > **Access config file:** Click the gear icon -> "Codex Settings > Open config.toml"
 >
@@ -315,13 +291,13 @@ Sessions are managed via the `mcp-session-id` header (see [HTTP Mode Details](#h
 
 Both tools return:
 
-- `structuredContent` for machine-readable fields
+- `structuredContent` for machine-readable fields (includes `contentSize`, `cached`, and optional `resourceUri`/`resourceMimeType`/`truncated`)
 - `content` blocks that include:
   - a `text` block containing JSON of `structuredContent`
-  - a `resource` block with a `file:///...` URI containing the full content (stdio-friendly)
-  - a `resource_link` block when content exceeds `MAX_INLINE_CONTENT_CHARS` and cache is enabled
+  - in stdio mode, a `resource` block with a `file:///...` URI containing the full content
+  - in HTTP mode, a `resource` block when inline content is available; large payloads include a `resource_link` block when cache is enabled
 
-If content is too large and cache is disabled, the server truncates output and appends `...[truncated]`.
+If content exceeds `MAX_INLINE_CONTENT_CHARS` and cache is disabled, the server truncates output and appends `...[truncated]`.
 
 ---
 
@@ -396,21 +372,22 @@ Fetches a webpage and converts it to clean Markdown with optional frontmatter.
 
 ### Large Content Handling
 
-- Inline limit: `MAX_INLINE_CONTENT_CHARS` (default `20000`).
+- Inline limit is configurable via `MAX_INLINE_CONTENT_CHARS` (see `CONFIGURATION.md`).
 - If content exceeds the limit and cache is enabled, responses include `resourceUri` and a `resource_link` block.
 - If cache is disabled, content is truncated with `...[truncated]`.
 - Use `maxContentLength` per request to enforce a lower limit.
+- Upstream fetch size is capped at 10 MB of HTML; larger responses fail.
 
 ---
 
 ## Resources
 
-| URI                                        | Description                                           |
-| ------------------------------------------ | ----------------------------------------------------- |
-| `superfetch://health`                      | Real-time server health and memory checks             |
-| `superfetch://stats`                       | Server stats and cache metrics                        |
-| `superfetch://cache/list`                  | List cached entries and their resource URIs           |
-| `superfetch://cache/{namespace}/{urlHash}` | Cached content entry (`namespace`: `url`, `markdown`) |
+| URI                                        | Description                                                                |
+| ------------------------------------------ | -------------------------------------------------------------------------- |
+| `superfetch://health`                      | Real-time server health and memory checks                                  |
+| `superfetch://stats`                       | Server stats and cache metrics                                             |
+| `superfetch://cache/list`                  | List cached entries and their resource URIs                                |
+| `superfetch://cache/{namespace}/{urlHash}` | Cached content entry (`namespace`: `url`, `markdown`; `links` is reserved) |
 
 Resource subscriptions notify clients when cache entries update.
 
@@ -418,7 +395,7 @@ Resource subscriptions notify clients when cache entries update.
 
 ## Download Endpoint (HTTP Mode)
 
-When running in HTTP mode, cached content can be downloaded directly.
+When running in HTTP mode, cached content can be downloaded directly. Downloads are available only when cache is enabled.
 
 ### Endpoint
 
@@ -457,171 +434,7 @@ curl -H "Authorization: Bearer $API_KEY" \
 
 ## Configuration
 
-Configure SuperFetch behavior by adding environment variables to your MCP client configuration's `env` property.
-
-### Fetcher Settings
-
-| Variable        | Default              | Valid Values         | Description                     |
-| --------------- | -------------------- | -------------------- | ------------------------------- |
-| `FETCH_TIMEOUT` | `30000`              | `5000`-`120000`      | Request timeout in milliseconds |
-| `USER_AGENT`    | `superFetch-MCP/1.0` | Any valid user agent | Custom user agent               |
-
-### Cache Settings
-
-| Variable         | Default | Valid Values     | Description               |
-| ---------------- | ------- | ---------------- | ------------------------- |
-| `CACHE_ENABLED`  | `true`  | `true` / `false` | Enable response caching   |
-| `CACHE_TTL`      | `3600`  | `60`-`86400`     | Cache lifetime in seconds |
-| `CACHE_MAX_KEYS` | `100`   | `10`-`1000`      | Maximum cached entries    |
-
-### Output Settings
-
-| Variable                   | Default | Valid Values    | Description                               |
-| -------------------------- | ------- | --------------- | ----------------------------------------- |
-| `MAX_INLINE_CONTENT_CHARS` | `20000` | `1000`-`200000` | Inline content limit before resource_link |
-
-### Logging Settings
-
-| Variable         | Default | Valid Values                        | Description            |
-| ---------------- | ------- | ----------------------------------- | ---------------------- |
-| `LOG_LEVEL`      | `info`  | `debug` / `info` / `warn` / `error` | Logging verbosity      |
-| `ENABLE_LOGGING` | `true`  | `true` / `false`                    | Enable/disable logging |
-
-### Extraction Settings
-
-| Variable               | Default | Valid Values     | Description                             |
-| ---------------------- | ------- | ---------------- | --------------------------------------- |
-| `EXTRACT_MAIN_CONTENT` | `true`  | `true` / `false` | Use Readability to extract main content |
-| `INCLUDE_METADATA`     | `true`  | `true` / `false` | Include metadata/frontmatter            |
-
-### HTTP Server Settings
-
-| Variable                  | Default     | Description                                  |
-| ------------------------- | ----------- | -------------------------------------------- |
-| `API_KEY`                 | -           | **Required for HTTP mode**                   |
-| `HOST`                    | `127.0.0.1` | HTTP server host                             |
-| `PORT`                    | `3000`      | HTTP server port                             |
-| `ALLOW_REMOTE`            | `false`     | Allow binding to non-loopback interfaces     |
-| `ALLOWED_HOSTS`           | -           | Comma-separated list of allowed Host headers |
-| `TRUST_PROXY`             | `false`     | Trust proxy headers for client IP resolution |
-| `SESSION_TTL_MS`          | `1800000`   | Session TTL in milliseconds (30 min)         |
-| `SESSION_INIT_TIMEOUT_MS` | `10000`     | Time allowed for session initialization      |
-| `MAX_SESSIONS`            | `200`       | Maximum active sessions                      |
-
-### CORS Settings
-
-| Variable          | Default | Description                             |
-| ----------------- | ------- | --------------------------------------- |
-| `ALLOWED_ORIGINS` | `[]`    | Comma-separated list of allowed origins |
-| `CORS_ALLOW_ALL`  | `false` | Allow all origins (dev only)            |
-
-### Rate Limiting
-
-| Variable                | Default | Valid Values      | Description                          |
-| ----------------------- | ------- | ----------------- | ------------------------------------ |
-| `RATE_LIMIT_ENABLED`    | `true`  | `true` / `false`  | Enable/disable HTTP rate limiting    |
-| `RATE_LIMIT_MAX`        | `100`   | `1`-`10000`       | Max requests per window per IP       |
-| `RATE_LIMIT_WINDOW_MS`  | `60000` | `1000`-`3600000`  | Rate limit window in milliseconds    |
-| `RATE_LIMIT_CLEANUP_MS` | `60000` | `10000`-`3600000` | Cleanup interval for limiter entries |
-
-### Configuration Presets
-
-<details open>
-<summary><strong>Default (Recommended)</strong> - No configuration needed</summary>
-
-```json
-{
-  "servers": {
-    "superFetch": {
-      "command": "npx",
-      "args": ["-y", "@j0hanz/superfetch@latest", "--stdio"]
-    }
-  }
-}
-```
-
-</details>
-
-<details>
-<summary><strong>Debug Mode</strong> - Verbose logging and no cache</summary>
-
-```json
-{
-  "servers": {
-    "superFetch": {
-      "command": "npx",
-      "args": ["-y", "@j0hanz/superfetch@latest", "--stdio"],
-      "env": {
-        "LOG_LEVEL": "debug",
-        "CACHE_ENABLED": "false"
-      }
-    }
-  }
-}
-```
-
-</details>
-
-<details>
-<summary><strong>Performance Mode</strong> - Aggressive caching for speed</summary>
-
-```json
-{
-  "servers": {
-    "superFetch": {
-      "command": "npx",
-      "args": ["-y", "@j0hanz/superfetch@latest", "--stdio"],
-      "env": {
-        "CACHE_TTL": "7200",
-        "CACHE_MAX_KEYS": "500",
-        "LOG_LEVEL": "warn"
-      }
-    }
-  }
-}
-```
-
-</details>
-
-<details>
-<summary><strong>Custom User Agent</strong> - For sites that block bots</summary>
-
-```json
-{
-  "servers": {
-    "superFetch": {
-      "command": "npx",
-      "args": ["-y", "@j0hanz/superfetch@latest", "--stdio"],
-      "env": {
-        "USER_AGENT": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-      }
-    }
-  }
-}
-```
-
-</details>
-
-<details>
-<summary><strong>Slow Networks / CI</strong> - Extended timeouts</summary>
-
-```json
-{
-  "servers": {
-    "superFetch": {
-      "command": "npx",
-      "args": ["-y", "@j0hanz/superfetch@latest", "--stdio"],
-      "env": {
-        "FETCH_TIMEOUT": "60000",
-        "CACHE_ENABLED": "false",
-        "LOG_LEVEL": "warn"
-      }
-    }
-  }
-}
-```
-
-</details>
+Configuration details live in `CONFIGURATION.md`, including all environment variables, defaults, ranges, presets, and dev-only flags.
 
 ---
 
@@ -678,7 +491,7 @@ Blocked headers: `host`, `authorization`, `cookie`, `x-forwarded-for`, `x-real-i
 
 ### Rate Limiting
 
-Default: **100 requests/minute** per IP (HTTP mode only). Configure with `RATE_LIMIT_MAX` and `RATE_LIMIT_WINDOW_MS`.
+Rate limiting thresholds are configurable via `RATE_LIMIT_MAX` and `RATE_LIMIT_WINDOW_MS` (see `CONFIGURATION.md`).
 
 ---
 
