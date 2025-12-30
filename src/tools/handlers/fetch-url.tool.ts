@@ -37,6 +37,40 @@ interface FetchUrlOptions {
   readonly format: Format;
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object';
+}
+
+function deserializeJsonlTransformResult(
+  cached: string
+): JsonlTransformResult | undefined {
+  try {
+    const parsed = JSON.parse(cached) as unknown;
+    if (!isRecord(parsed)) return undefined;
+
+    const { content, contentBlocks, title, truncated } = parsed;
+    if (typeof content !== 'string') return undefined;
+    if (typeof contentBlocks !== 'number' || !Number.isFinite(contentBlocks)) {
+      return undefined;
+    }
+    if (title !== undefined && typeof title !== 'string') return undefined;
+    if (truncated !== undefined && typeof truncated !== 'boolean') {
+      return undefined;
+    }
+
+    const resolvedTitle = typeof title === 'string' ? title : undefined;
+
+    return {
+      content,
+      contentBlocks,
+      title: resolvedTitle,
+      ...(truncated !== undefined ? { truncated } : {}),
+    };
+  } catch {
+    return undefined;
+  }
+}
+
 function resolveFetchUrlOptions(input: FetchUrlInput): FetchUrlOptions {
   return {
     extractMainContent: input.extractMainContent ?? true,
@@ -112,6 +146,7 @@ async function fetchUrlPipeline(
     retries: input.retries,
     timeout: input.timeout,
     transform: buildFetchUrlTransform(options),
+    deserialize: deserializeJsonlTransformResult,
   });
 }
 

@@ -27,6 +27,8 @@ interface SharedFetchOptions<T extends { content: string }> {
   readonly retries?: number;
   readonly timeout?: number;
   readonly transform: (html: string, normalizedUrl: string) => T;
+  readonly serialize?: (result: T) => string;
+  readonly deserialize?: (cached: string) => T | undefined;
 }
 
 export async function performSharedFetch<T extends { content: string }>(
@@ -55,6 +57,8 @@ export async function performSharedFetch<T extends { content: string }>(
     timeout: options.timeout,
     cacheVary,
     transform: options.transform,
+    serialize: options.serialize,
+    deserialize: options.deserialize,
   });
 
   const inlineResult = applyInlineContentLimit(

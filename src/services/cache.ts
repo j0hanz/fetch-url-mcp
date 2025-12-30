@@ -28,7 +28,7 @@ function startCleanupLoop(): void {
 }
 
 async function runCleanupLoop(signal: AbortSignal): Promise<void> {
-  const intervalMs = Math.floor(config.cache.ttl * 100);
+  const intervalMs = Math.floor(config.cache.ttl * 1000);
   for await (const _ of setIntervalPromise(intervalMs, undefined, {
     signal,
     ref: false,

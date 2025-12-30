@@ -26,7 +26,7 @@ async function readStreamWithLimit(
   const reader = stream.getReader();
   const decoder = new TextDecoder();
   let total = 0;
-  let text = '';
+  const chunks: string[] = [];
 
   for (;;) {
     const { value, done } = await reader.read();
@@ -42,11 +42,11 @@ async function readStreamWithLimit(
       );
     }
 
-    text += decoder.decode(value, { stream: true });
+    chunks.push(decoder.decode(value, { stream: true }));
   }
 
-  text += decoder.decode();
-  return { text, size: total };
+  chunks.push(decoder.decode());
+  return { text: chunks.join(''), size: total };
 }
 
 export async function readResponseText(

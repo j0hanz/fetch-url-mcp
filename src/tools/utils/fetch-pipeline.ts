@@ -6,22 +6,11 @@ import type {
 
 import * as cache from '../../services/cache.js';
 import { fetchUrlWithRetry } from '../../services/fetcher.js';
-import { logDebug, logWarn } from '../../services/logger.js';
+import { logDebug } from '../../services/logger.js';
 
 import { validateAndNormalizeUrl } from '../../utils/url-validator.js';
 
 import { appendHeaderVary } from './cache-vary.js';
-
-function safeJsonParse(cached: string, cacheKey: string): unknown {
-  try {
-    return JSON.parse(cached);
-  } catch {
-    logWarn('Cache deserialize failed, treating as miss', {
-      key: cacheKey.substring(0, 100),
-    });
-    return undefined;
-  }
-}
 
 function attemptCacheRetrieval<T>(
   cacheKey: string | null,
@@ -34,11 +23,15 @@ function attemptCacheRetrieval<T>(
   const cached = cache.get(cacheKey);
   if (!cached) return null;
 
-  logDebug('Cache hit', { namespace: cacheNamespace, url: normalizedUrl });
+  if (!deserialize) {
+    logDebug('Cache miss due to missing deserializer', {
+      namespace: cacheNamespace,
+      url: normalizedUrl,
+    });
+    return null;
+  }
 
-  const data = deserialize
-    ? deserialize(cached.content)
-    : (safeJsonParse(cached.content, cacheKey) as T | undefined);
+  const data = deserialize(cached.content);
 
   if (data === undefined) {
     logDebug('Cache miss due to deserialize failure', {
@@ -47,6 +40,8 @@ function attemptCacheRetrieval<T>(
     });
     return null;
   }
+
+  logDebug('Cache hit', { namespace: cacheNamespace, url: normalizedUrl });
 
   return {
     data,

@@ -40,6 +40,38 @@ interface MarkdownOptions {
   readonly maxContentLength?: number;
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object';
+}
+
+function deserializeMarkdownPipelineResult(
+  cached: string
+): MarkdownPipelineResult | undefined {
+  try {
+    const parsed = JSON.parse(cached) as unknown;
+    if (!isRecord(parsed)) return undefined;
+
+    const { content, markdown, title, truncated } = parsed;
+    if (typeof content !== 'string') return undefined;
+    if (typeof markdown !== 'string') return undefined;
+    if (title !== undefined && typeof title !== 'string') return undefined;
+    if (truncated !== undefined && typeof truncated !== 'boolean') {
+      return undefined;
+    }
+
+    const resolvedTitle = typeof title === 'string' ? title : undefined;
+
+    return {
+      content,
+      markdown,
+      title: resolvedTitle,
+      truncated: truncated ?? false,
+    };
+  } catch {
+    return undefined;
+  }
+}
+
 function resolveMarkdownOptions(input: FetchMarkdownInput): MarkdownOptions {
   return {
     extractMainContent: input.extractMainContent ?? true,
@@ -108,6 +140,7 @@ async function fetchMarkdownPipeline(
     retries: input.retries,
     timeout: input.timeout,
     transform: buildMarkdownTransform(transformOptions),
+    deserialize: deserializeMarkdownPipelineResult,
   });
 }
 
