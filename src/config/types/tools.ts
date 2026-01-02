@@ -45,11 +45,10 @@ export interface ToolErrorResponse {
   [x: string]: unknown;
   content: ToolContentBlock[];
   structuredContent: {
-    [x: string]: unknown;
     error: string;
     url: string;
     errorCode: string;
-  };
+  } & Record<string, unknown>;
   isError: true;
 }
 

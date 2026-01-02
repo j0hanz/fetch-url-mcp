@@ -65,9 +65,12 @@ function setCachedDnsDecision(hostname: string, ok: boolean): void {
   });
 
   if (dnsDecisionCache.size <= DNS_DECISION_MAX) return;
-  const oldest = dnsDecisionCache.keys().next().value;
-  if (oldest) {
-    dnsDecisionCache.delete(oldest);
+  const evictCount = Math.ceil(DNS_DECISION_MAX * 0.05);
+  const iterator = dnsDecisionCache.keys();
+  for (let i = 0; i < evictCount; i++) {
+    const { value, done } = iterator.next();
+    if (done) break;
+    dnsDecisionCache.delete(value);
   }
 }
 

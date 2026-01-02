@@ -184,8 +184,6 @@ async function createAndConnectTransport(
   const mcpServer = createMcpServer();
 
   try {
-    // StreamableHTTPServerTransport's accessor-based callbacks are not assignable
-    // to Transport under exactOptionalPropertyTypes, but are runtime-compatible.
     await mcpServer.connect(transport as unknown as Transport);
   } catch (error) {
     clearInitTimeout();

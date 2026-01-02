@@ -33,21 +33,17 @@ async function runCleanupLoop(signal: AbortSignal): Promise<void> {
     signal,
     ref: false,
   })) {
-    evictExpiredEntries();
+    evictEntries();
   }
 }
 
-function evictExpiredEntries(): void {
+function evictEntries(): void {
   const now = Date.now();
   for (const [key, item] of contentCache.entries()) {
     if (now > item.expiresAt) {
       contentCache.delete(key);
     }
   }
-  enforceMaxKeys();
-}
-
-function enforceMaxKeys(): void {
   if (contentCache.size <= config.cache.maxKeys) return;
   const keysToRemove = contentCache.size - config.cache.maxKeys;
   const iterator = contentCache.keys();
@@ -257,6 +253,17 @@ function buildCacheEntry(
 function persistCacheEntry(cacheKey: string, entry: CacheEntry): void {
   const expiresAt = Date.now() + config.cache.ttl * 1000;
   contentCache.set(cacheKey, { entry, expiresAt });
-  enforceMaxKeys();
+  enforceMaxKeysLimit();
   emitCacheUpdate(cacheKey);
+}
+
+function enforceMaxKeysLimit(): void {
+  if (contentCache.size <= config.cache.maxKeys) return;
+  const keysToRemove = contentCache.size - config.cache.maxKeys;
+  const iterator = contentCache.keys();
+  for (let i = 0; i < keysToRemove; i++) {
+    const { value, done } = iterator.next();
+    if (done) break;
+    contentCache.delete(value);
+  }
 }
