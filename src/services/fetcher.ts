@@ -2,7 +2,6 @@ import { config } from '../config/index.js';
 import type { FetchOptions } from '../config/types/runtime.js';
 
 import { normalizeHeaderRecord } from '../utils/header-normalizer.js';
-import { validateAndNormalizeUrl } from '../utils/url-validator.js';
 
 import { destroyAgents, dispatcher } from './fetcher/agents.js';
 import {
@@ -118,15 +117,6 @@ async function fetchWithTelemetry(
     recordFetchError(telemetry, mapped, mapped.statusCode);
     throw mapped;
   }
-}
-
-export async function fetchUrlWithRetry(
-  url: string,
-  options?: FetchOptions,
-  maxRetries = 3
-): Promise<string> {
-  const normalizedUrl = await validateAndNormalizeUrl(url);
-  return fetchNormalizedUrlWithRetry(normalizedUrl, options, maxRetries);
 }
 
 export async function fetchNormalizedUrlWithRetry(

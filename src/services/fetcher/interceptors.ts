@@ -56,25 +56,6 @@ function publishFetchEvent(event: FetchChannelEvent): void {
   }
 }
 
-export function subscribeFetchEvents(
-  listener: (event: FetchChannelEvent) => void
-): () => void {
-  const handler = (message: unknown): void => {
-    if (!message || typeof message !== 'object') return;
-    const event = message as FetchChannelEvent;
-    try {
-      listener(event);
-    } catch {
-      // Avoid crashing the subscriber if handler throws.
-    }
-  };
-
-  diagnosticsChannel.subscribe(fetchChannel.name, handler);
-  return () => {
-    diagnosticsChannel.unsubscribe(fetchChannel.name, handler);
-  };
-}
-
 interface FetchTelemetryContext {
   requestId: string;
   startTime: number;
