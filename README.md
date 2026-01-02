@@ -499,20 +499,22 @@ Rate limiting thresholds are configurable via `RATE_LIMIT_MAX` and `RATE_LIMIT_W
 
 ### Scripts
 
-| Command                 | Description                        |
-| ----------------------- | ---------------------------------- |
-| `npm run dev`           | Development server with hot reload |
-| `npm run build`         | Compile TypeScript                 |
-| `npm start`             | Production server                  |
-| `npm run lint`          | Run ESLint                         |
-| `npm run type-check`    | TypeScript type checking           |
-| `npm run format`        | Format with Prettier               |
-| `npm test`              | Run Vitest tests                   |
-| `npm run test:coverage` | Run tests with coverage            |
-| `npm run bench`         | Run minimal performance benchmark  |
-| `npm run release`       | Create new release                 |
-| `npm run knip`          | Find unused exports/dependencies   |
-| `npm run knip:fix`      | Auto-fix unused code               |
+| Command                 | Description                          |
+| ----------------------- | ------------------------------------ |
+| `npm run dev`           | Development server with hot reload   |
+| `npm run build`         | Compile TypeScript                   |
+| `npm start`             | Production server                    |
+| `npm run lint`          | Run ESLint                           |
+| `npm run type-check`    | TypeScript type checking             |
+| `npm run format`        | Format with Prettier                 |
+| `npm test`              | Run Node test runner (builds dist)   |
+| `npm run test:coverage` | Run tests with experimental coverage |
+| `npm run bench`         | Run minimal performance benchmark    |
+| `npm run release`       | Create new release                   |
+| `npm run knip`          | Find unused exports/dependencies     |
+| `npm run knip:fix`      | Auto-fix unused code                 |
+
+> **Note:** Tests run via `node --test` with `--experimental-transform-types` to execute `.ts` test files. Node will emit an experimental warning.
 
 ### Tech Stack
 

@@ -1,6 +1,7 @@
-import { describe, expect, it, vi } from 'vitest';
+import assert from 'node:assert/strict';
+import { describe, it } from 'node:test';
 
-import { createCorsMiddleware } from '../src/http/cors.js';
+import { createCorsMiddleware } from '../dist/http/cors.js';
 
 describe('createCorsMiddleware', () => {
   it('exposes mcp-session-id for allowed origins', () => {
@@ -15,18 +16,21 @@ describe('createCorsMiddleware', () => {
         headers[key] = value;
         return res;
       },
-      vary: vi.fn(),
-      sendStatus: vi.fn(),
+      vary: () => res,
+      sendStatus: () => res,
     };
     const req = {
       headers: { origin: 'https://client.test' },
       method: 'POST',
     };
-    const next = vi.fn();
+    let nextCalled = 0;
+    const next = () => {
+      nextCalled += 1;
+    };
 
     middleware(req as never, res as never, next);
 
-    expect(headers['Access-Control-Expose-Headers']).toBe('mcp-session-id');
-    expect(next).toHaveBeenCalledOnce();
+    assert.equal(headers['Access-Control-Expose-Headers'], 'mcp-session-id');
+    assert.equal(nextCalled, 1);
   });
 });

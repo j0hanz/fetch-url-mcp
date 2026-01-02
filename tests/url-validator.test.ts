@@ -1,72 +1,80 @@
-import { describe, expect, it } from 'vitest';
+import assert from 'node:assert/strict';
+import { describe, it } from 'node:test';
 
-import { validateAndNormalizeUrl } from '../src/utils/url-validator.js';
+import { validateAndNormalizeUrl } from '../dist/utils/url-validator.js';
 
 describe('validateAndNormalizeUrl', () => {
   it('returns a normalized URL for valid input', async () => {
-    await expect(
-      validateAndNormalizeUrl('https://example.com/path')
-    ).resolves.toBe('https://example.com/path');
+    await assert.doesNotReject(async () => {
+      const result = await validateAndNormalizeUrl('https://example.com/path');
+      assert.equal(result, 'https://example.com/path');
+    });
   });
 
   it('trims surrounding whitespace', async () => {
-    await expect(
-      validateAndNormalizeUrl('  https://example.com/path  ')
-    ).resolves.toBe('https://example.com/path');
+    const result = await validateAndNormalizeUrl(
+      '  https://example.com/path  '
+    );
+    assert.equal(result, 'https://example.com/path');
   });
 
   it('rejects empty input', async () => {
-    await expect(validateAndNormalizeUrl('')).rejects.toThrow(
-      'URL is required'
-    );
+    await assert.rejects(() => validateAndNormalizeUrl(''), {
+      message: 'URL is required',
+    });
   });
 
   it('rejects whitespace-only input', async () => {
-    await expect(validateAndNormalizeUrl('   ')).rejects.toThrow(
-      'URL cannot be empty'
-    );
+    await assert.rejects(() => validateAndNormalizeUrl('   '), {
+      message: 'URL cannot be empty',
+    });
   });
 
   it('rejects overly long URLs', async () => {
     const longUrl = `https://example.com/${'a'.repeat(2050)}`;
-    await expect(validateAndNormalizeUrl(longUrl)).rejects.toThrow(
-      'URL exceeds maximum length'
-    );
+    await assert.rejects(() => validateAndNormalizeUrl(longUrl), {
+      message: 'URL exceeds maximum length of 2048 characters',
+    });
   });
 
   it('rejects invalid URL formats', async () => {
-    await expect(validateAndNormalizeUrl('http://:invalid')).rejects.toThrow(
-      'Invalid URL format'
-    );
+    await assert.rejects(() => validateAndNormalizeUrl('http://:invalid'), {
+      message: 'Invalid URL format',
+    });
   });
 
   it('rejects unsupported protocols', async () => {
-    await expect(validateAndNormalizeUrl('ftp://example.com')).rejects.toThrow(
-      'Invalid protocol'
-    );
+    await assert.rejects(() => validateAndNormalizeUrl('ftp://example.com'), {
+      message: 'Invalid protocol: ftp:. Only http: and https: are allowed',
+    });
   });
 
   it('rejects embedded credentials', async () => {
-    await expect(
-      validateAndNormalizeUrl('https://user:pass@example.com')
-    ).rejects.toThrow('embedded credentials');
+    await assert.rejects(
+      () => validateAndNormalizeUrl('https://user:pass@example.com'),
+      { message: 'URLs with embedded credentials are not allowed' }
+    );
   });
 
   it('rejects blocked hosts', async () => {
-    await expect(validateAndNormalizeUrl('http://localhost')).rejects.toThrow(
-      'Blocked host'
-    );
+    await assert.rejects(() => validateAndNormalizeUrl('http://localhost'), {
+      message: 'Blocked host: localhost. Internal hosts are not allowed',
+    });
   });
 
   it('rejects blocked IP ranges', async () => {
-    await expect(validateAndNormalizeUrl('http://10.0.0.1')).rejects.toThrow(
-      'Blocked IP range'
-    );
+    await assert.rejects(() => validateAndNormalizeUrl('http://10.0.0.1'), {
+      message: 'Blocked IP range: 10.0.0.1. Private IPs are not allowed',
+    });
   });
 
   it('rejects internal hostname suffixes', async () => {
-    await expect(
-      validateAndNormalizeUrl('https://example.local')
-    ).rejects.toThrow('Blocked hostname pattern');
+    await assert.rejects(
+      () => validateAndNormalizeUrl('https://example.local'),
+      {
+        message:
+          'Blocked hostname pattern: example.local. Internal domain suffixes are not allowed',
+      }
+    );
   });
 });

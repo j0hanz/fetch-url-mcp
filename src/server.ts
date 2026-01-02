@@ -5,6 +5,7 @@ import { config } from './config/index.js';
 
 import { destroyAgents } from './services/fetcher.js';
 import { logError, logInfo } from './services/logger.js';
+import { destroyTransformWorkers } from './services/transform-worker-pool.js';
 
 import { registerTools } from './tools/index.js';
 
@@ -45,6 +46,7 @@ export async function startStdioServer(): Promise<void> {
       `\n${signal} received, shutting down superFetch MCP server...\n`
     );
     destroyAgents();
+    destroyTransformWorkers();
     server
       .close()
       .catch((err: unknown) => {

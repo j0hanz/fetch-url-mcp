@@ -1,6 +1,7 @@
-import { describe, expect, it } from 'vitest';
+import assert from 'node:assert/strict';
+import { describe, it } from 'node:test';
 
-import { resolveDownloadPayload } from '../src/http/download-routes.js';
+import { resolveDownloadPayload } from '../dist/http/download-routes.js';
 
 describe('resolveDownloadPayload', () => {
   it('returns markdown content for markdown namespace', () => {
@@ -20,9 +21,9 @@ describe('resolveDownloadPayload', () => {
       cacheEntry
     );
 
-    expect(result?.content).toBe('# Title\n\nBody');
-    expect(result?.contentType).toBe('text/markdown; charset=utf-8');
-    expect(result?.fileName).toBe('article.md');
+    assert.equal(result?.content, '# Title\n\nBody');
+    assert.equal(result?.contentType, 'text/markdown; charset=utf-8');
+    assert.equal(result?.fileName, 'article.md');
   });
 
   it('falls back to content field for markdown payloads', () => {
@@ -40,7 +41,7 @@ describe('resolveDownloadPayload', () => {
       cacheEntry
     );
 
-    expect(result?.content).toBe('# Title\n\nBody');
+    assert.equal(result?.content, '# Title\n\nBody');
   });
 
   it('returns jsonl content for url namespace', () => {
@@ -58,9 +59,9 @@ describe('resolveDownloadPayload', () => {
       cacheEntry
     );
 
-    expect(result?.content).toBe('{"type":"paragraph","text":"Hello"}\n');
-    expect(result?.contentType).toBe('application/x-ndjson; charset=utf-8');
-    expect(result?.fileName).toBe('article.jsonl');
+    assert.equal(result?.content, '{"type":"paragraph","text":"Hello"}\n');
+    assert.equal(result?.contentType, 'application/x-ndjson; charset=utf-8');
+    assert.equal(result?.fileName, 'article.jsonl');
   });
 
   it('returns null for invalid cached payloads', () => {
@@ -76,6 +77,6 @@ describe('resolveDownloadPayload', () => {
       cacheEntry
     );
 
-    expect(result).toBeNull();
+    assert.equal(result, null);
   });
 });

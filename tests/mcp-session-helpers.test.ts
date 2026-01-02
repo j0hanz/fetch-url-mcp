@@ -1,12 +1,13 @@
-import { describe, expect, it, vi } from 'vitest';
+import assert from 'node:assert/strict';
+import { describe, it } from 'node:test';
 
 import {
   createSlotTracker,
   ensureSessionCapacity,
   releaseSessionSlot,
   reserveSessionSlot,
-} from '../src/http/mcp-session-helpers.js';
-import type { SessionStore } from '../src/http/sessions.js';
+} from '../dist/http/mcp-session-helpers.js';
+import type { SessionStore } from '../dist/http/sessions.js';
 
 function createStore(initialSize: number) {
   let currentSize = initialSize;
@@ -22,23 +23,27 @@ describe('mcp-session-helpers', () => {
   it('reserves and releases session slots', () => {
     const store = createStore(0);
     const reserved = reserveSessionSlot(store as SessionStore, 1);
-    expect(reserved).toBe(true);
+    assert.equal(reserved, true);
     releaseSessionSlot();
   });
 
   it('tracks initialization state', () => {
     const tracker = createSlotTracker();
-    expect(tracker.isInitialized()).toBe(false);
+    assert.equal(tracker.isInitialized(), false);
     tracker.markInitialized();
-    expect(tracker.isInitialized()).toBe(true);
+    assert.equal(tracker.isInitialized(), true);
     tracker.releaseSlot();
   });
 
   it('returns false and responds when at capacity without eviction', () => {
     const store = createStore(1);
+    let statusCode: number | undefined;
     const res = {
-      status: vi.fn().mockReturnThis(),
-      json: vi.fn(),
+      status: (code: number) => {
+        statusCode = code;
+        return res;
+      },
+      json: () => res,
     };
 
     const allowed = ensureSessionCapacity(
@@ -48,13 +53,13 @@ describe('mcp-session-helpers', () => {
       () => false
     );
 
-    expect(allowed).toBe(false);
-    expect(res.status).toHaveBeenCalledWith(503);
+    assert.equal(allowed, false);
+    assert.equal(statusCode, 503);
   });
 
   it('allows when eviction frees capacity', () => {
     const store = createStore(1);
-    const res = { status: vi.fn().mockReturnThis(), json: vi.fn() };
+    const res = { status: () => res, json: () => res };
 
     const allowed = ensureSessionCapacity(
       store as SessionStore,
@@ -66,6 +71,6 @@ describe('mcp-session-helpers', () => {
       }
     );
 
-    expect(allowed).toBe(true);
+    assert.equal(allowed, true);
   });
 });

@@ -29,17 +29,23 @@ interface SharedFetchOptions<T extends { content: string }> {
   readonly customHeaders?: Record<string, string>;
   readonly retries?: number;
   readonly timeout?: number;
-  readonly transform: (html: string, normalizedUrl: string) => T;
+  readonly transform: (html: string, normalizedUrl: string) => T | Promise<T>;
   readonly serialize?: (result: T) => string;
   readonly deserialize?: (cached: string) => T | undefined;
 }
 
+interface SharedFetchDeps {
+  readonly executeFetchPipeline?: typeof executeFetchPipeline;
+}
+
 export async function performSharedFetch<T extends { content: string }>(
-  options: SharedFetchOptions<T>
+  options: SharedFetchOptions<T>,
+  deps: SharedFetchDeps = {}
 ): Promise<{
   pipeline: PipelineResult<T>;
   inlineResult: ReturnType<typeof applyInlineContentLimit>;
 }> {
+  const executePipeline = deps.executeFetchPipeline ?? executeFetchPipeline;
   const cacheNamespace = options.format === 'markdown' ? 'markdown' : 'url';
   const cacheVary = appendHeaderVary(
     {
@@ -85,7 +91,7 @@ export async function performSharedFetch<T extends { content: string }>(
     pipelineOptions.deserialize = options.deserialize;
   }
 
-  const pipeline = await executeFetchPipeline<T>(pipelineOptions);
+  const pipeline = await executePipeline<T>(pipelineOptions);
 
   const inlineResult = applyInlineContentLimit(
     pipeline.data.content,

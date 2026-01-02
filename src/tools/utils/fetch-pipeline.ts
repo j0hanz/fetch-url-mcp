@@ -87,7 +87,7 @@ export async function executeFetchPipeline<T>(
     fetchOptions,
     options.retries
   );
-  const data = options.transform(html, normalizedUrl);
+  const data = await options.transform(html, normalizedUrl);
   if (cache.isEnabled()) {
     persistCache(cacheKey, data, options.serialize, normalizedUrl);
   }

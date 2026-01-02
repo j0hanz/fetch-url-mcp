@@ -3,7 +3,7 @@
 ## Project Structure & Module Organization
 
 - `src/` holds TypeScript source. Core areas: `config/`, `services/`, `tools/`, `transformers/`, `middleware/`, `utils/`, `resources/`. Entrypoints: `src/index.ts` and `src/server.ts`.
-- `tests/` contains Vitest suites named `*.test.ts`.
+- `tests/` contains Node test runner suites named `*.test.ts`.
 - `scripts/` provides release and benchmarking utilities.
 - `dist/` is the compiled output (generated).
 - `docs/` stores documentation and assets.
@@ -17,7 +17,7 @@
 - `npm run lint` / `npm run lint:fix` runs ESLint checks and fixes.
 - `npm run type-check` runs `tsc --noEmit`.
 - `npm run format` formats with Prettier.
-- `npm test` / `npm run test:coverage` runs Vitest (with coverage).
+- `npm test` / `npm run test:coverage` runs the Node test runner (builds `dist/` first; coverage is experimental).
 - `npm run bench` builds and runs the benchmark.
 - `npm run knip` / `npm run knip:fix` checks for unused exports and deps.
 
@@ -30,7 +30,7 @@
 ## Testing Guidelines
 
 - Tests live in `tests/` with `*.test.ts` naming.
-- Use Vitest via `npm test`; add coverage with `npm run test:coverage`.
+- Use the Node test runner via `npm test`; add coverage with `npm run test:coverage`.
 - Add or update tests when changing tools, transformers, services, or HTTP routes.
 
 ## Commit & Pull Request Guidelines

@@ -1,6 +1,7 @@
-import { describe, expect, it } from 'vitest';
+import assert from 'node:assert/strict';
+import { describe, it } from 'node:test';
 
-import { extractContent } from '../src/services/extractor.js';
+import { extractContent } from '../dist/services/extractor.js';
 
 describe('extractContent', () => {
   it('extracts metadata from title and meta tags', () => {
@@ -19,15 +20,15 @@ describe('extractContent', () => {
       extractArticle: false,
     });
 
-    expect(result.metadata.title).toBe('Example Title');
-    expect(result.metadata.description).toBe('Example description');
-    expect(result.metadata.author).toBe('Example Author');
-    expect(result.article).toBeNull();
+    assert.equal(result.metadata.title, 'Example Title');
+    assert.equal(result.metadata.description, 'Example description');
+    assert.equal(result.metadata.author, 'Example Author');
+    assert.equal(result.article, null);
   });
 
   it('returns empty result for invalid input', () => {
     const result = extractContent('', '', { extractArticle: false });
-    expect(result.article).toBeNull();
-    expect(result.metadata).toEqual({});
+    assert.equal(result.article, null);
+    assert.deepEqual(result.metadata, {});
   });
 });

@@ -1,10 +1,11 @@
-import { describe, expect, it } from 'vitest';
+import assert from 'node:assert/strict';
+import { describe, it } from 'node:test';
 
 import {
   createContentMetadataBlock,
   determineContentExtractionSource,
   truncateContent,
-} from '../src/tools/utils/common.js';
+} from '../dist/tools/utils/common.js';
 
 describe('determineContentExtractionSource', () => {
   it('returns true when extraction is enabled and article exists', () => {
@@ -12,7 +13,7 @@ describe('determineContentExtractionSource', () => {
       content: '<p>content</p>',
       textContent: 'content',
     });
-    expect(result).toBe(true);
+    assert.equal(result, true);
   });
 });
 
@@ -25,9 +26,9 @@ describe('createContentMetadataBlock', () => {
       true,
       true
     );
-    expect(metadata?.url).toBe('https://example.com');
-    expect(metadata?.title).toBe('Example');
-    expect(typeof metadata?.fetchedAt).toBe('string');
+    assert.equal(metadata?.url, 'https://example.com');
+    assert.equal(metadata?.title, 'Example');
+    assert.equal(typeof metadata?.fetchedAt, 'string');
   });
 
   it('returns undefined when metadata is disabled', () => {
@@ -38,21 +39,21 @@ describe('createContentMetadataBlock', () => {
       false,
       false
     );
-    expect(metadata).toBeUndefined();
+    assert.equal(metadata, undefined);
   });
 });
 
 describe('truncateContent', () => {
   it('does not truncate when below the limit', () => {
     const result = truncateContent('hello', 10);
-    expect(result.truncated).toBe(false);
-    expect(result.content).toBe('hello');
+    assert.equal(result.truncated, false);
+    assert.equal(result.content, 'hello');
   });
 
   it('truncates when exceeding the limit', () => {
     const result = truncateContent('hello world', 5);
-    expect(result.truncated).toBe(true);
-    expect(result.content).toHaveLength(5);
-    expect(result.content.startsWith('...[')).toBe(true);
+    assert.equal(result.truncated, true);
+    assert.equal(result.content.length, 5);
+    assert.equal(result.content.startsWith('...['), true);
   });
 });

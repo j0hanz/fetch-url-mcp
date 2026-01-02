@@ -44,8 +44,8 @@
     "type-check": "tsc --noEmit",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
-    "test": "vitest run",
-    "test:coverage": "vitest run --coverage",
+    "test": "npm run build --silent && node --test --experimental-transform-types",
+    "test:coverage": "npm run build --silent && node --test --experimental-transform-types --experimental-test-coverage",
     "bench": "npm run build && node scripts/bench.mjs",
     "knip": "knip",
     "knip:fix": "knip --fix"
@@ -67,7 +67,6 @@
     "@types/express": "^5.0.6",
     "@types/node": "^22.19.3",
     "@types/turndown": "^5.0.6",
-    "@vitest/coverage-v8": "^2.1.9",
     "eslint": "^9.23.2",
     "eslint-config-prettier": "^10.1.8",
     "eslint-plugin-unused-imports": "^4.3.0",
@@ -76,8 +75,7 @@
     "shx": "^0.4.0",
     "tsx": "^4.21.0",
     "typescript": "^5.9.3",
-    "typescript-eslint": "^8.51.0",
-    "vitest": "^2.1.9"
+    "typescript-eslint": "^8.51.0"
   },
   "engines": {
     "node": ">=20.12.0"

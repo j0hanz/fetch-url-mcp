@@ -16,7 +16,7 @@ import {
   createToolErrorResponse,
   handleToolError,
 } from '../../utils/tool-error-handler.js';
-import { transformHtmlToMarkdown } from '../utils/content-transform.js';
+import { transformHtmlToMarkdownAsync } from '../utils/content-transform-async.js';
 
 import {
   applyInlineResultToStructuredContent,
@@ -34,6 +34,11 @@ type MarkdownPipelineResult = MarkdownTransformResult & {
 export const FETCH_MARKDOWN_TOOL_NAME = 'fetch-markdown';
 export const FETCH_MARKDOWN_TOOL_DESCRIPTION =
   'Fetches a webpage and converts it to clean Markdown format with optional frontmatter and content length limits';
+
+interface FetchMarkdownDeps {
+  readonly performSharedFetch?: typeof performSharedFetch;
+  readonly transformHtmlToMarkdown?: typeof transformHtmlToMarkdownAsync;
+}
 
 interface MarkdownOptions {
   readonly extractMainContent: boolean;
@@ -118,9 +123,12 @@ function logFetchMarkdownStart(url: string, options: TransformOptions): void {
   logDebug('Fetching markdown', { url, ...options });
 }
 
-function buildMarkdownTransform(options: TransformOptions) {
-  return (html: string, url: string): MarkdownPipelineResult => {
-    const markdownResult = transformHtmlToMarkdown(html, url, options);
+function buildMarkdownTransform(
+  options: TransformOptions,
+  transform: typeof transformHtmlToMarkdownAsync
+) {
+  return async (html: string, url: string): Promise<MarkdownPipelineResult> => {
+    const markdownResult = await transform(html, url, options);
     return { ...markdownResult, content: markdownResult.markdown };
   };
 }
@@ -129,7 +137,9 @@ async function fetchMarkdownPipeline(
   url: string,
   input: FetchMarkdownInput,
   options: MarkdownOptions,
-  transformOptions: TransformOptions
+  transformOptions: TransformOptions,
+  performSharedFetchImpl: typeof performSharedFetch,
+  transformImpl: typeof transformHtmlToMarkdownAsync
 ): Promise<{
   pipeline: PipelineResult<MarkdownPipelineResult>;
   inlineResult: InlineResult;
@@ -147,11 +157,11 @@ async function fetchMarkdownPipeline(
     }),
     ...(input.retries !== undefined && { retries: input.retries }),
     ...(input.timeout !== undefined && { timeout: input.timeout }),
-    transform: buildMarkdownTransform(transformOptions),
+    transform: buildMarkdownTransform(transformOptions, transformImpl),
     deserialize: deserializeMarkdownPipelineResult,
   };
 
-  return performSharedFetch<MarkdownPipelineResult>(sharedOptions);
+  return performSharedFetchImpl<MarkdownPipelineResult>(sharedOptions);
 }
 
 function buildMarkdownResponse(
@@ -181,22 +191,36 @@ function buildMarkdownResponse(
   };
 }
 
-export async function fetchMarkdownToolHandler(
-  input: FetchMarkdownInput
-): Promise<ToolResponseBase> {
-  try {
-    return await executeFetchMarkdown(input);
-  } catch (error) {
-    logError(
-      'fetch-markdown tool error',
-      error instanceof Error ? error : undefined
-    );
-    return handleToolError(error, input.url, 'Failed to fetch markdown');
-  }
+export function createFetchMarkdownToolHandler(
+  deps: FetchMarkdownDeps = {}
+): (input: FetchMarkdownInput) => Promise<ToolResponseBase> {
+  const performSharedFetchImpl = deps.performSharedFetch ?? performSharedFetch;
+  const transformImpl =
+    deps.transformHtmlToMarkdown ?? transformHtmlToMarkdownAsync;
+
+  return async (input: FetchMarkdownInput): Promise<ToolResponseBase> => {
+    try {
+      return await executeFetchMarkdown(
+        input,
+        performSharedFetchImpl,
+        transformImpl
+      );
+    } catch (error) {
+      logError(
+        'fetch-markdown tool error',
+        error instanceof Error ? error : undefined
+      );
+      return handleToolError(error, input.url, 'Failed to fetch markdown');
+    }
+  };
 }
 
+export const fetchMarkdownToolHandler = createFetchMarkdownToolHandler();
+
 async function executeFetchMarkdown(
-  input: FetchMarkdownInput
+  input: FetchMarkdownInput,
+  performSharedFetchImpl: typeof performSharedFetch,
+  transformImpl: typeof transformHtmlToMarkdownAsync
 ): Promise<ToolResponseBase> {
   const { url } = input;
   if (!url) {
@@ -212,7 +236,9 @@ async function executeFetchMarkdown(
     url,
     input,
     options,
-    transformOptions
+    transformOptions,
+    performSharedFetchImpl,
+    transformImpl
   );
 
   const inlineError = getInlineErrorResponse(inlineResult, url);

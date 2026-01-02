@@ -1,4 +1,5 @@
-import { describe, expect, it, vi } from 'vitest';
+import assert from 'node:assert/strict';
+import { describe, it } from 'node:test';
 
 import {
   attachBaseMiddleware,
@@ -6,7 +7,7 @@ import {
   createContextMiddleware,
   createJsonParseErrorHandler,
   registerHealthRoute,
-} from '../src/http/server-middleware.js';
+} from '../dist/http/server-middleware.js';
 
 describe('buildCorsOptions', () => {
   it('reads allowed origins and allow-all flag', () => {
@@ -17,11 +18,11 @@ describe('buildCorsOptions', () => {
     process.env.CORS_ALLOW_ALL = 'true';
 
     const options = buildCorsOptions();
-    expect(options.allowedOrigins).toEqual([
+    assert.deepEqual(options.allowedOrigins, [
       'https://a.test',
       'https://b.test',
     ]);
-    expect(options.allowAllOrigins).toBe(true);
+    assert.equal(options.allowAllOrigins, true);
 
     process.env.ALLOWED_ORIGINS = originalOrigins;
     process.env.CORS_ALLOW_ALL = originalAllowAll;
@@ -34,39 +35,52 @@ describe('createJsonParseErrorHandler', () => {
     const err = new SyntaxError('bad json') as Error & { body?: string };
     err.body = '{}';
 
+    let statusCode: number | undefined;
+    let jsonBody: unknown;
     const res = {
-      status: vi.fn().mockReturnThis(),
-      json: vi.fn(),
+      status: (code: number) => {
+        statusCode = code;
+        return res;
+      },
+      json: (payload: unknown) => {
+        jsonBody = payload;
+      },
     };
-    const next = vi.fn();
+    let nextCalled = 0;
+    const next = () => {
+      nextCalled += 1;
+    };
 
     handler(err, {} as never, res as never, next);
 
-    expect(res.status).toHaveBeenCalledWith(400);
-    expect(res.json).toHaveBeenCalledWith(
-      expect.objectContaining({
-        jsonrpc: '2.0',
-        id: null,
-      })
-    );
-    expect(next).not.toHaveBeenCalled();
+    assert.equal(statusCode, 400);
+    assert.equal(typeof (jsonBody as { jsonrpc?: string }).jsonrpc, 'string');
+    assert.equal((jsonBody as { jsonrpc?: string }).jsonrpc, '2.0');
+    assert.equal((jsonBody as { id?: unknown }).id, null);
+    assert.equal(nextCalled, 0);
   });
 
   it('delegates to next for non-parse errors', () => {
     const handler = createJsonParseErrorHandler();
-    const res = { status: vi.fn(), json: vi.fn() };
-    const next = vi.fn();
+    const res = { status: () => res, json: () => res };
+    let nextCalled = 0;
+    const next = () => {
+      nextCalled += 1;
+    };
 
     handler(new Error('other'), {} as never, res as never, next);
 
-    expect(next).toHaveBeenCalledOnce();
+    assert.equal(nextCalled, 1);
   });
 });
 
 describe('createContextMiddleware', () => {
   it('invokes next handler', () => {
     const middleware = createContextMiddleware();
-    const next = vi.fn();
+    let nextCalled = 0;
+    const next = () => {
+      nextCalled += 1;
+    };
 
     middleware(
       { headers: { 'mcp-session-id': 'session-1' } } as never,
@@ -74,7 +88,7 @@ describe('createContextMiddleware', () => {
       next
     );
 
-    expect(next).toHaveBeenCalledOnce();
+    assert.equal(nextCalled, 1);
   });
 });
 
@@ -89,14 +103,13 @@ describe('registerHealthRoute', () => {
 
     registerHealthRoute(app as never);
 
-    expect(handlers['/health']).toBeDefined();
+    assert.equal(typeof handlers['/health'], 'function');
 
-    const res = { json: vi.fn() };
+    let jsonBody: unknown;
+    const res = { json: (payload: unknown) => (jsonBody = payload) };
     handlers['/health']({}, res);
 
-    expect(res.json).toHaveBeenCalledWith(
-      expect.objectContaining({ status: 'healthy' })
-    );
+    assert.equal((jsonBody as { status?: string }).status, 'healthy');
   });
 });
 
@@ -107,16 +120,16 @@ describe('attachBaseMiddleware', () => {
       use: (...args: unknown[]) => {
         uses.push(args);
       },
-      get: vi.fn(),
+      get: () => undefined,
     };
 
-    const jsonParser = vi.fn();
-    const rateLimit = vi.fn();
-    const auth = vi.fn();
-    const cors = vi.fn();
+    const jsonParser = () => undefined;
+    const rateLimit = () => undefined;
+    const auth = () => undefined;
+    const cors = () => undefined;
 
     attachBaseMiddleware(app as never, jsonParser, rateLimit, auth, cors);
 
-    expect(uses.length).toBe(7);
+    assert.equal(uses.length, 7);
   });
 });

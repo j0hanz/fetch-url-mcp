@@ -1,11 +1,12 @@
-import { describe, expect, it } from 'vitest';
+import assert from 'node:assert/strict';
+import { describe, it } from 'node:test';
 
 import {
   hasHeaderEntries,
   headersToRecord,
   normalizeHeaderEntries,
   normalizeHeaderRecord,
-} from '../src/utils/header-normalizer.js';
+} from '../dist/utils/header-normalizer.js';
 
 describe('header-normalizer', () => {
   it('filters blocked headers and preserves values by default', () => {
@@ -18,14 +19,14 @@ describe('header-normalizer', () => {
       blocked
     );
 
-    expect(hasHeaderEntries(normalized)).toBe(true);
-    expect(headersToRecord(normalized)).toEqual({ accept: 'text/html' });
+    assert.equal(hasHeaderEntries(normalized), true);
+    assert.deepEqual(headersToRecord(normalized), { accept: 'text/html' });
   });
 
   it('returns undefined when no headers remain after filtering', () => {
     const blocked = new Set(['x-test']);
     const result = normalizeHeaderRecord({ 'X-Test': 'value' }, blocked);
-    expect(result).toBeUndefined();
+    assert.equal(result, undefined);
   });
 
   it('trims values when requested', () => {
@@ -38,6 +39,6 @@ describe('header-normalizer', () => {
       { trimValues: true }
     );
 
-    expect(headersToRecord(normalized)).toEqual({ 'x-test': 'value' });
+    assert.deepEqual(headersToRecord(normalized), { 'x-test': 'value' });
   });
 });

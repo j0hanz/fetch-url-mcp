@@ -6,7 +6,7 @@ import { isSystemError } from '../../utils/error-utils.js';
 
 import { logDebug, logError, logWarn } from '../logger.js';
 
-type FetchChannelEvent =
+export type FetchChannelEvent =
   | {
       v: 1;
       type: 'start';
@@ -54,6 +54,25 @@ function publishFetchEvent(event: FetchChannelEvent): void {
   } catch {
     // Avoid crashing the publisher if a subscriber throws.
   }
+}
+
+export function subscribeFetchEvents(
+  listener: (event: FetchChannelEvent) => void
+): () => void {
+  const handler = (message: unknown): void => {
+    if (!message || typeof message !== 'object') return;
+    const event = message as FetchChannelEvent;
+    try {
+      listener(event);
+    } catch {
+      // Avoid crashing the subscriber if handler throws.
+    }
+  };
+
+  diagnosticsChannel.subscribe(fetchChannel.name, handler);
+  return () => {
+    diagnosticsChannel.unsubscribe(fetchChannel.name, handler);
+  };
 }
 
 interface FetchTelemetryContext {

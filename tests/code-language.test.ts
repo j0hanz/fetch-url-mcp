@@ -1,32 +1,35 @@
-import { describe, expect, it } from 'vitest';
+import assert from 'node:assert/strict';
+import { describe, it } from 'node:test';
 
 import {
   detectLanguageFromCode,
   resolveLanguageFromAttributes,
-} from '../src/utils/code-language.js';
+} from '../dist/utils/code-language.js';
 
 describe('detectLanguageFromCode', () => {
   it('detects JavaScript snippets', () => {
-    expect(detectLanguageFromCode('const x = 1;')).toBe('javascript');
+    assert.equal(detectLanguageFromCode('const x = 1;'), 'javascript');
   });
 
   it('detects Python snippets', () => {
-    expect(detectLanguageFromCode('def run():\n  print(\"ok\")')).toBe(
+    assert.equal(
+      detectLanguageFromCode('def run():\n  print(\"ok\")'),
       'python'
     );
   });
 
   it('returns undefined for unknown snippets', () => {
-    expect(detectLanguageFromCode('this is not code')).toBeUndefined();
+    assert.equal(detectLanguageFromCode('this is not code'), undefined);
   });
 
   it('extracts language from class names', () => {
-    expect(resolveLanguageFromAttributes('language-typescript', '')).toBe(
+    assert.equal(
+      resolveLanguageFromAttributes('language-typescript', ''),
       'typescript'
     );
   });
 
   it('extracts language from data-language', () => {
-    expect(resolveLanguageFromAttributes('', 'python')).toBe('python');
+    assert.equal(resolveLanguageFromAttributes('', 'python'), 'python');
   });
 });

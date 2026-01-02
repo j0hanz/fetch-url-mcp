@@ -81,7 +81,7 @@ export interface FetchPipelineOptions<T> {
   /** Optional: cache variation input for headers/flags */
   cacheVary?: Record<string, unknown> | string;
   /** Transform function to process HTML into desired format */
-  transform: (html: string, url: string) => T;
+  transform: (html: string, url: string) => T | Promise<T>;
   /** Optional: serialize result for caching (defaults to JSON.stringify) */
   serialize?: (result: T) => string;
   /** Optional: deserialize cached content */

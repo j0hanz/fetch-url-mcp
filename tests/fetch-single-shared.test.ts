@@ -1,38 +1,42 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import assert from 'node:assert/strict';
+import { beforeEach, describe, it } from 'node:test';
 
-const executeFetchPipeline = vi.fn();
+import { performSharedFetch } from '../dist/tools/handlers/fetch-single.shared.js';
 
-vi.mock('../src/tools/utils/fetch-pipeline.js', () => ({
-  executeFetchPipeline,
-}));
+let executeFetchPipelineCalls: Array<unknown> = [];
 
-const { performSharedFetch } =
-  await import('../src/tools/handlers/fetch-single.shared.js');
+const executeFetchPipeline = async (options: unknown) => {
+  executeFetchPipelineCalls.push(options);
+  return {
+    data: { content: 'hello' },
+    fromCache: false,
+    url: 'https://example.com',
+    fetchedAt: new Date().toISOString(),
+    cacheKey: 'url:abc',
+  };
+};
 
 describe('performSharedFetch', () => {
   beforeEach(() => {
-    executeFetchPipeline.mockReset();
-    executeFetchPipeline.mockResolvedValue({
-      data: { content: 'hello' },
-      fromCache: false,
-      url: 'https://example.com',
-      fetchedAt: new Date().toISOString(),
-      cacheKey: 'url:abc',
-    });
+    executeFetchPipelineCalls = [];
   });
 
   it('forwards timeout to executeFetchPipeline', async () => {
-    await performSharedFetch({
-      url: 'https://example.com',
-      format: 'markdown',
-      extractMainContent: true,
-      includeMetadata: true,
-      timeout: 1234,
-      transform: () => ({ content: 'hello' }),
-    });
-
-    expect(executeFetchPipeline).toHaveBeenCalledWith(
-      expect.objectContaining({ timeout: 1234 })
+    await performSharedFetch(
+      {
+        url: 'https://example.com',
+        format: 'markdown',
+        extractMainContent: true,
+        includeMetadata: true,
+        timeout: 1234,
+        transform: () => ({ content: 'hello' }),
+      },
+      { executeFetchPipeline }
     );
+
+    const call = executeFetchPipelineCalls[0] as
+      | { timeout?: number }
+      | undefined;
+    assert.equal(call?.timeout, 1234);
   });
 });

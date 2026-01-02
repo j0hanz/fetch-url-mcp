@@ -11,27 +11,38 @@ interface DownloadInfoOptions {
   title?: string;
 }
 
+interface DownloadInfoDeps {
+  readonly config?: typeof config;
+  readonly cache?: Pick<typeof cache, 'get' | 'parseCacheKey'>;
+  readonly generateSafeFilename?: typeof generateSafeFilename;
+}
+
 export function buildFileDownloadInfo(
-  options: DownloadInfoOptions
+  options: DownloadInfoOptions,
+  deps: DownloadInfoDeps = {}
 ): FileDownloadInfo | null {
-  if (!config.runtime.httpMode) {
+  const resolvedConfig = deps.config ?? config;
+  const resolvedCache = deps.cache ?? cache;
+  const resolveFilename = deps.generateSafeFilename ?? generateSafeFilename;
+
+  if (!resolvedConfig.runtime.httpMode) {
     return null;
   }
 
-  if (!config.cache.enabled || !options.cacheKey) {
+  if (!resolvedConfig.cache.enabled || !options.cacheKey) {
     return null;
   }
 
-  const parts = cache.parseCacheKey(options.cacheKey);
+  const parts = resolvedCache.parseCacheKey(options.cacheKey);
   if (!parts) return null;
 
-  const cacheEntry = cache.get(options.cacheKey);
+  const cacheEntry = resolvedCache.get(options.cacheKey);
   if (!cacheEntry) return null;
 
   const { expiresAt, title, url } = cacheEntry;
 
   const downloadUrl = buildDownloadUrl(parts.namespace, parts.urlHash);
-  const fileName = generateSafeFilename(
+  const fileName = resolveFilename(
     url,
     title ?? options.title,
     parts.urlHash,
