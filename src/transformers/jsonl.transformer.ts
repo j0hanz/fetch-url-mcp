@@ -22,7 +22,7 @@ function isTextBlock(
 
 function isListBlock(
   block: ContentBlockUnion
-): block is Extract<ContentBlockUnion, { items: string[] }> {
+): block is Extract<ContentBlockUnion, { readonly items: readonly string[] }> {
   return block.type === 'list';
 }
 
@@ -35,7 +35,7 @@ function truncateTextBlock(
 }
 
 function truncateListBlock(
-  block: Extract<ContentBlockUnion, { items: string[] }>,
+  block: Extract<ContentBlockUnion, { readonly items: readonly string[] }>,
   maxLength: number
 ): ContentBlockUnion {
   const truncatedItems = block.items.map((item) =>

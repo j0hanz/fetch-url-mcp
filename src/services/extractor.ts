@@ -12,31 +12,11 @@ import { getErrorMessage } from '../utils/error-utils.js';
 import { truncateHtml } from '../utils/html-truncator.js';
 
 import { logError, logInfo, logWarn } from './logger.js';
-
-type MetaSource = 'og' | 'twitter' | 'standard';
-type MetaField = keyof ExtractedMetadata;
-
-interface MetaCollectorState {
-  title: Partial<Record<MetaSource, string>>;
-  description: Partial<Record<MetaSource, string>>;
-  author: Partial<Record<MetaSource, string>>;
-}
-
-function resolveMetaField(
-  state: MetaCollectorState,
-  field: MetaField
-): string | undefined {
-  const sources = state[field];
-  return sources.og ?? sources.twitter ?? sources.standard;
-}
-
-function createMetaCollectorState(): MetaCollectorState {
-  return {
-    title: {},
-    description: {},
-    author: {},
-  };
-}
+import {
+  createMetaCollectorState,
+  type MetaCollectorState,
+  resolveMetaField,
+} from './metadata-collector.js';
 
 function collectMetaTag(state: MetaCollectorState, tag: HTMLMetaElement): void {
   const content = getMetaContent(tag);

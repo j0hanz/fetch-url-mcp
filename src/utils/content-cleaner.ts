@@ -59,7 +59,7 @@ export function cleanHeading(text: string): string | null {
   return cleaned.trim();
 }
 
-export function cleanListItems(items: string[]): string[] {
+export function cleanListItems(items: readonly string[]): readonly string[] {
   return items
     .map((item) => item.trim())
     .filter((item) => {

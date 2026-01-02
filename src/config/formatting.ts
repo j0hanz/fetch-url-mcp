@@ -9,4 +9,4 @@ export const CODE_BLOCK = {
 
 export const FRONTMATTER_DELIMITER = '---';
 
-export const joinLines = (lines: string[]): string => lines.join('\n');
+export const joinLines = (lines: readonly string[]): string => lines.join('\n');

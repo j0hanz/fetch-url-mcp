@@ -223,7 +223,7 @@ export function set(
   }
 }
 
-export function keys(): string[] {
+export function keys(): readonly string[] {
   return Array.from(contentCache.keys());
 }
 

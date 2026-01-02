@@ -35,7 +35,7 @@ export interface ParagraphBlock extends ContentBlock {
 export interface ListBlock extends ContentBlock {
   type: 'list';
   ordered: boolean;
-  items: string[];
+  readonly items: readonly string[];
 }
 
 export interface CodeBlock extends ContentBlock {
@@ -46,8 +46,8 @@ export interface CodeBlock extends ContentBlock {
 
 export interface TableBlock extends ContentBlock {
   type: 'table';
-  headers?: string[];
-  rows: string[][];
+  readonly headers?: readonly string[];
+  readonly rows: readonly (readonly string[])[];
 }
 
 export interface ImageBlock extends ContentBlock {

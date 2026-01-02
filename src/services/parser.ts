@@ -32,34 +32,13 @@ import { truncateHtml } from '../utils/html-truncator.js';
 import { sanitizeText } from '../utils/sanitizer.js';
 
 import { logWarn } from './logger.js';
+import {
+  createMetaCollectorState,
+  resolveMetaField,
+} from './metadata-collector.js';
 
 const CONTENT_SELECTOR =
   'h1, h2, h3, h4, h5, h6, p, ul, ol, pre, code:not(pre code), table, img, blockquote';
-
-type MetaSource = 'og' | 'twitter' | 'standard';
-type MetaField = keyof ExtractedMetadata;
-
-interface MetaCollectorState {
-  title: Partial<Record<MetaSource, string>>;
-  description: Partial<Record<MetaSource, string>>;
-  author: Partial<Record<MetaSource, string>>;
-}
-
-function createMetaCollectorState(): MetaCollectorState {
-  return {
-    title: {},
-    description: {},
-    author: {},
-  };
-}
-
-function resolveMetaField(
-  state: MetaCollectorState,
-  field: MetaField
-): string | undefined {
-  const sources = state[field];
-  return sources.og ?? sources.twitter ?? sources.standard;
-}
 
 function extractMetadata($: CheerioAPI): ExtractedMetadata {
   const state = createMetaCollectorState();
@@ -211,16 +190,9 @@ function parseTable($: CheerioAPI, element: Element): TableBlock | null {
 
   if (rows.length === 0) return null;
 
-  const table: TableBlock = {
-    type: 'table',
-    rows,
-  };
-
-  if (headers.length > 0) {
-    table.headers = headers;
-  }
-
-  return table;
+  return headers.length > 0
+    ? { type: 'table', headers, rows }
+    : { type: 'table', rows };
 }
 
 function parseImage($: CheerioAPI, element: Element): ImageBlock | null {
