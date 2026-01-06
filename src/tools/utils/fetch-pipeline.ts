@@ -8,6 +8,7 @@ import * as cache from '../../services/cache.js';
 import { fetchNormalizedUrlWithRetry } from '../../services/fetcher.js';
 import { logDebug } from '../../services/logger.js';
 
+import { transformToRawUrl } from '../../utils/url-transformer.js';
 import { normalizeUrl } from '../../utils/url-validator.js';
 
 import { appendHeaderVary } from './cache-vary.js';
@@ -53,18 +54,15 @@ function attemptCacheRetrieval<T>(
   };
 }
 
-/**
- * Unified fetch pipeline that handles caching, fetching, and transformation.
- * Implements cache-first strategy with automatic serialization.
- *
- * @template T - Type of the transformed result
- * @param options - Pipeline configuration options
- * @returns Promise resolving to the pipeline result
- */
 export async function executeFetchPipeline<T>(
   options: FetchPipelineOptions<T>
 ): Promise<PipelineResult<T>> {
-  const { normalizedUrl } = normalizeUrl(options.url);
+  const { normalizedUrl: validatedUrl } = normalizeUrl(options.url);
+  const { url: normalizedUrl, transformed } = transformToRawUrl(validatedUrl);
+  if (transformed) {
+    logDebug('Using transformed raw content URL', { original: validatedUrl });
+  }
+
   const cacheKey = resolveCacheKey(options, normalizedUrl);
 
   const cachedResult = attemptCacheRetrieval<T>(

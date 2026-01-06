@@ -8,11 +8,12 @@ import type {
 } from '../../config/types/content.js';
 
 import { extractContent } from '../../services/extractor.js';
-import { logWarn } from '../../services/logger.js';
+import { logDebug, logWarn } from '../../services/logger.js';
 import { parseHtml, parseHtmlWithMetadata } from '../../services/parser.js';
 import { transformInWorker } from '../../services/transform-worker-pool.js';
 
 import { getErrorMessage } from '../../utils/error-utils.js';
+import { isRawTextContentUrl } from '../../utils/url-transformer.js';
 
 import { toJsonl } from '../../transformers/jsonl.transformer.js';
 import { htmlToMarkdown } from '../../transformers/markdown.transformer.js';
@@ -143,6 +144,89 @@ function buildMarkdownPayload(
   return { content, truncated };
 }
 
+function buildRawMarkdownPayload(
+  rawContent: string,
+  url: string,
+  includeMetadata: boolean,
+  maxContentLength?: number
+): { content: string; truncated: boolean; title: string | undefined } {
+  const title = extractTitleFromRawMarkdown(rawContent);
+  let content: string;
+  if (includeMetadata) {
+    content = addSourceToMarkdown(rawContent, url);
+  } else {
+    content = rawContent;
+  }
+
+  const truncateResult = truncateContent(content, maxContentLength);
+  return {
+    content: truncateResult.content,
+    truncated: truncateResult.truncated,
+    title,
+  };
+}
+
+function extractTitleFromRawMarkdown(content: string): string | undefined {
+  const frontmatterMatch = /^---\r?\n([\s\S]*?)\r?\n---/.exec(content);
+  if (!frontmatterMatch) return undefined;
+
+  const frontmatter = frontmatterMatch[1] ?? '';
+
+  const titleMatch = /^(?:title|name):\s*["']?(.+?)["']?\s*$/im.exec(
+    frontmatter
+  );
+  return titleMatch?.[1]?.trim();
+}
+
+function addSourceToMarkdown(content: string, url: string): string {
+  const frontmatterMatch = /^(---\r?\n)([\s\S]*?)(\r?\n---)/.exec(content);
+
+  if (frontmatterMatch) {
+    const start = frontmatterMatch[1] ?? '---\n';
+    const existingFields = frontmatterMatch[2] ?? '';
+    const end = frontmatterMatch[3] ?? '\n---';
+    const rest = content.slice(frontmatterMatch[0].length);
+
+    if (/^source:/im.test(existingFields)) {
+      return content;
+    }
+
+    return `${start}${existingFields}\nsource: "${url}"${end}${rest}`;
+  }
+
+  return `---\nsource: "${url}"\n---\n\n${content}`;
+}
+
+function isRawTextContent(content: string): boolean {
+  const trimmed = content.trim();
+
+  // Check for common HTML indicators
+  if (trimmed.startsWith('<!DOCTYPE') || trimmed.startsWith('<!doctype')) {
+    return false;
+  }
+  if (trimmed.startsWith('<html') || trimmed.startsWith('<HTML')) {
+    return false;
+  }
+
+  if (/^---\r?\n/.test(trimmed)) {
+    return true;
+  }
+  const htmlTagCount = (
+    content.match(/<(html|head|body|div|span|script|style|meta|link)\b/gi) ?? []
+  ).length;
+  if (htmlTagCount > 2) {
+    return false;
+  }
+  const hasMarkdownHeadings = /^#{1,6}\s+/m.test(content);
+  const hasMarkdownLists = /^[\s]*[-*+]\s+/m.test(content);
+  const hasMarkdownCodeBlocks = /```[\s\S]*?```/.test(content);
+  if (hasMarkdownHeadings || hasMarkdownLists || hasMarkdownCodeBlocks) {
+    return true;
+  }
+
+  return false;
+}
+
 export function transformHtmlToJsonlSync(
   html: string,
   url: string,
@@ -190,6 +274,21 @@ export function transformHtmlToMarkdownSync(
   url: string,
   options: MarkdownOptions
 ): MarkdownTransformResult {
+  if (isRawTextContentUrl(url) || isRawTextContent(html)) {
+    logDebug('Preserving raw markdown content', { url: url.substring(0, 80) });
+    const { content, truncated, title } = buildRawMarkdownPayload(
+      html,
+      url,
+      options.includeMetadata,
+      options.maxContentLength
+    );
+    return {
+      markdown: content,
+      title,
+      truncated,
+    };
+  }
+
   const context = resolveContentSource(html, url, options);
   const { content, truncated } = buildMarkdownPayload(
     context,
@@ -208,6 +307,24 @@ export function transformHtmlToMarkdownWithBlocksSync(
   url: string,
   options: MarkdownWithBlocksOptions
 ): JsonlTransformResult {
+  if (isRawTextContentUrl(url) || isRawTextContent(html)) {
+    logDebug('Preserving raw markdown content (with blocks)', {
+      url: url.substring(0, 80),
+    });
+    const { content, truncated, title } = buildRawMarkdownPayload(
+      html,
+      url,
+      options.includeMetadata,
+      options.maxContentLength
+    );
+    return {
+      content,
+      contentBlocks: 0,
+      title,
+      ...(truncated && { truncated }),
+    };
+  }
+
   const includeContentBlocks = options.includeContentBlocks ?? true;
 
   if (
