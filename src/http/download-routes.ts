@@ -117,7 +117,7 @@ function resolvePayloadContent(
   return typeof payload.content === 'string' ? payload.content : null;
 }
 
-export function resolveDownloadPayload(
+function resolveDownloadPayload(
   params: DownloadParams,
   cacheEntry: CacheEntry
 ): DownloadPayload | null {

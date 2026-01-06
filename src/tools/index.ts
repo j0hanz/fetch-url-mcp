@@ -2,9 +2,9 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { ToolAnnotations } from '@modelcontextprotocol/sdk/types.js';
 
 import {
+  createFetchMarkdownToolHandler,
   FETCH_MARKDOWN_TOOL_DESCRIPTION,
   FETCH_MARKDOWN_TOOL_NAME,
-  fetchMarkdownToolHandler,
 } from './handlers/fetch-markdown.tool.js';
 import {
   FETCH_URL_TOOL_DESCRIPTION,
@@ -17,6 +17,8 @@ import {
   fetchUrlInputSchema,
   fetchUrlOutputSchema,
 } from './schemas.js';
+
+const fetchMarkdownToolHandler = createFetchMarkdownToolHandler();
 
 const TOOL_DEFINITIONS: readonly {
   name: string;

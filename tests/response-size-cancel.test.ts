@@ -12,15 +12,8 @@ function createResponseWithTrackableBody(
 } {
   const cancelled = { value: false };
 
-  let sent = false;
   const tracked = new ReadableStream<Uint8Array>({
-    pull(controller) {
-      if (cancelled.value || sent) {
-        controller.close();
-        return;
-      }
-
-      sent = true;
+    start(controller) {
       controller.enqueue(new TextEncoder().encode(bodyText));
       controller.close();
     },

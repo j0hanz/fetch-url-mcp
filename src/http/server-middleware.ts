@@ -99,7 +99,7 @@ export function buildCorsOptions(): {
   return { allowedOrigins, allowAllOrigins };
 }
 
-export function createJsonParseErrorHandler(): (
+function createJsonParseErrorHandler(): (
   err: Error,
   _req: Request,
   res: Response,
@@ -126,7 +126,7 @@ export function createJsonParseErrorHandler(): (
   };
 }
 
-export function createContextMiddleware(): (
+function createContextMiddleware(): (
   req: Request,
   _res: Response,
   next: NextFunction
@@ -145,7 +145,7 @@ export function createContextMiddleware(): (
   };
 }
 
-export function registerHealthRoute(app: Express): void {
+function registerHealthRoute(app: Express): void {
   app.get('/health', (_req, res) => {
     res.json({
       status: 'healthy',

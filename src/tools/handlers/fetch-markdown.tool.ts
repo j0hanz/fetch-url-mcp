@@ -228,8 +228,6 @@ export function createFetchMarkdownToolHandler(
   };
 }
 
-export const fetchMarkdownToolHandler = createFetchMarkdownToolHandler();
-
 async function executeFetchMarkdown(
   input: FetchMarkdownInput,
   performSharedFetchImpl: typeof performSharedFetch,

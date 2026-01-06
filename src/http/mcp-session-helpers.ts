@@ -21,7 +21,7 @@ export function reserveSessionSlot(
   return true;
 }
 
-export function releaseSessionSlot(): void {
+function releaseSessionSlot(): void {
   if (inFlightSessions > 0) {
     inFlightSessions -= 1;
   }

@@ -15,7 +15,7 @@ export function normalizeHeaderRecord(
   return headersToRecord(normalized);
 }
 
-export function normalizeHeaderEntries(
+function normalizeHeaderEntries(
   headers: Record<string, string>,
   blockedHeaders: Set<string>,
   options: NormalizeOptions = {}
@@ -28,11 +28,11 @@ export function normalizeHeaderEntries(
   return normalized;
 }
 
-export function hasHeaderEntries(headers: Headers): boolean {
+function hasHeaderEntries(headers: Headers): boolean {
   return !headers.keys().next().done;
 }
 
-export function headersToRecord(headers: Headers): Record<string, string> {
+function headersToRecord(headers: Headers): Record<string, string> {
   return Object.fromEntries(headers.entries());
 }
 

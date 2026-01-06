@@ -4,10 +4,7 @@ import { beforeEach, describe, it } from 'node:test';
 import { buildFileDownloadInfo } from '../dist/utils/download-url.js';
 
 let cacheEntry: unknown;
-const mockCacheGet = (key: string | null) => {
-  if (!key) return undefined;
-  return cacheEntry;
-};
+const mockCacheGet = () => cacheEntry;
 
 const mockConfig = {
   cache: { enabled: true, ttl: 3600 },
@@ -19,7 +16,7 @@ const mockCache = {
     const [namespace, hash] = key.split(':');
     return namespace && hash ? { namespace, urlHash: hash } : null;
   },
-  get: (key: string) => mockCacheGet(key) as never,
+  get: () => mockCacheGet() as never,
 };
 
 describe('buildFileDownloadInfo', () => {

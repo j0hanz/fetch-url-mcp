@@ -5,7 +5,7 @@ import {
   createContentMetadataBlock,
   determineContentExtractionSource,
   truncateContent,
-} from '../dist/tools/utils/common.js';
+} from '../dist/tools/utils/content-shaping.js';
 
 describe('determineContentExtractionSource', () => {
   it('returns true when extraction is enabled and article exists', () => {

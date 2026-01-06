@@ -3,31 +3,27 @@ import { afterEach, beforeEach, describe, it } from 'node:test';
 
 import { fetchWithRedirects } from '../dist/services/fetcher/redirects.js';
 
-let originalFetch: typeof globalThis.fetch | undefined;
+let originalFetch: typeof globalThis.fetch;
 
 beforeEach(() => {
   originalFetch = globalThis.fetch;
 });
 
 afterEach(() => {
-  if (originalFetch) {
-    globalThis.fetch = originalFetch;
-  }
+  globalThis.fetch = originalFetch;
 });
 
 describe('fetchWithRedirects', () => {
   it('follows validated redirect targets', async () => {
     let callCount = 0;
-    const fetchMock = async () => {
-      callCount += 1;
-      if (callCount === 1) {
-        return new Response(null, {
-          status: 302,
-          headers: { location: '/next' },
-        });
-      }
-      return new Response('ok', { status: 200 });
-    };
+    const responses: [Response, Response] = [
+      new Response(null, {
+        status: 302,
+        headers: { location: '/next' },
+      }),
+      new Response('ok', { status: 200 }),
+    ];
+    const fetchMock = async () => responses[callCount++];
 
     globalThis.fetch = fetchMock as typeof fetch;
 

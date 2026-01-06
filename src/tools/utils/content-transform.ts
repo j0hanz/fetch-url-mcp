@@ -1,4 +1,3 @@
-import { TRUNCATION_MARKER } from '../../config/formatting.js';
 import type {
   ContentBlockUnion,
   JsonlTransformResult,
@@ -8,16 +7,15 @@ import type {
 import { extractContent } from '../../services/extractor.js';
 import { parseHtml, parseHtmlWithMetadata } from '../../services/parser.js';
 
-import { sanitizeText } from '../../utils/sanitizer.js';
-
 import { toJsonl } from '../../transformers/jsonl.transformer.js';
 import { htmlToMarkdown } from '../../transformers/markdown.transformer.js';
 
 import {
   createContentMetadataBlock,
   determineContentExtractionSource,
+  extractTitleFromHtml,
   truncateContent,
-} from './common.js';
+} from './content-shaping.js';
 
 interface ExtractionOptions {
   readonly extractMainContent: boolean;
@@ -39,8 +37,6 @@ interface MarkdownWithBlocksOptions
   extends ExtractionOptions, ContentLengthOptions {
   readonly includeContentBlocks?: boolean;
 }
-
-const TITLE_PATTERN = /<title[^>]*>([\s\S]*?)<\/title>/i;
 
 function resolveContentSource(
   html: string,
@@ -77,39 +73,6 @@ function resolveContentSource(
   return { sourceHtml, title, metadata };
 }
 
-function extractTitleFromHtml(html: string): string | undefined {
-  const match = TITLE_PATTERN.exec(html);
-  if (!match?.[1]) return undefined;
-  const decoded = decodeHtmlEntities(match[1]);
-  const text = sanitizeText(decoded);
-  return text || undefined;
-}
-
-function decodeHtmlEntities(value: string): string {
-  if (!value.includes('&')) return value;
-
-  const basicDecoded = value
-    .replace(/&amp;/g, '&')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'");
-
-  return basicDecoded
-    .replace(/&#(\d+);/g, (match: string, code: string) => {
-      const parsed = Number.parseInt(code, 10);
-      return Number.isFinite(parsed) && parsed >= 0 && parsed <= 0x10ffff
-        ? String.fromCodePoint(parsed)
-        : match;
-    })
-    .replace(/&#x([0-9a-fA-F]+);/g, (match: string, code: string) => {
-      const parsed = Number.parseInt(code, 16);
-      return Number.isFinite(parsed) && parsed >= 0 && parsed <= 0x10ffff
-        ? String.fromCodePoint(parsed)
-        : match;
-    });
-}
-
 function buildJsonlPayload(
   context: ContentSource,
   maxContentLength?: number
@@ -144,11 +107,7 @@ function buildMarkdownPayload(
   maxContentLength?: number
 ): { content: string; truncated: boolean } {
   const markdown = htmlToMarkdown(context.sourceHtml, context.metadata);
-  const { content, truncated } = truncateContent(
-    markdown,
-    maxContentLength,
-    TRUNCATION_MARKER
-  );
+  const { content, truncated } = truncateContent(markdown, maxContentLength);
 
   return { content, truncated };
 }

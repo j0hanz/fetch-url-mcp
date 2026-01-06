@@ -9,35 +9,28 @@ enableHttpMode();
 
 const longContent = `# Title\n\n${'a'.repeat(21000)}`;
 
-let performSharedFetchResult:
-  | {
-      pipeline: {
-        data: {
-          content: string;
-          markdown: string;
-          title: string;
-          truncated: boolean;
-        };
-        fromCache: boolean;
-        url: string;
-        fetchedAt: string;
-        cacheKey: string | null;
-      };
-      inlineResult: {
-        content?: string;
-        contentSize: number;
-        resourceUri?: string;
-        resourceMimeType?: string;
-      };
-    }
-  | undefined;
-
-const performSharedFetch = async () => {
-  if (!performSharedFetchResult) {
-    throw new Error('performSharedFetchResult not set');
-  }
-  return performSharedFetchResult;
+let performSharedFetchResult: {
+  pipeline: {
+    data: {
+      content: string;
+      markdown: string;
+      title: string;
+      truncated: boolean;
+    };
+    fromCache: boolean;
+    url: string;
+    fetchedAt: string;
+    cacheKey: string | null;
+  };
+  inlineResult: {
+    content?: string;
+    contentSize: number;
+    resourceUri?: string;
+    resourceMimeType?: string;
+  };
 };
+
+const performSharedFetch = async () => performSharedFetchResult;
 
 const fetchMarkdownToolHandler = createFetchMarkdownToolHandler({
   performSharedFetch,

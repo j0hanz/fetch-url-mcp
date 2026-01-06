@@ -4,7 +4,6 @@ import { describe, it } from 'node:test';
 import {
   createSlotTracker,
   ensureSessionCapacity,
-  releaseSessionSlot,
   reserveSessionSlot,
 } from '../dist/http/mcp-session-helpers.js';
 import type { SessionStore } from '../dist/http/sessions.js';
@@ -24,7 +23,8 @@ describe('mcp-session-helpers', () => {
     const store = createStore(0);
     const reserved = reserveSessionSlot(store as SessionStore, 1);
     assert.equal(reserved, true);
-    releaseSessionSlot();
+    const tracker = createSlotTracker();
+    tracker.releaseSlot();
   });
 
   it('tracks initialization state', () => {

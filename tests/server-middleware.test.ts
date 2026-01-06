@@ -4,10 +4,28 @@ import { describe, it } from 'node:test';
 import {
   attachBaseMiddleware,
   buildCorsOptions,
-  createContextMiddleware,
-  createJsonParseErrorHandler,
-  registerHealthRoute,
 } from '../dist/http/server-middleware.js';
+
+function captureMiddleware() {
+  const uses: unknown[][] = [];
+  const routes: Record<string, (req: unknown, res: unknown) => void> = {};
+  const app = {
+    use: (...args: unknown[]) => {
+      uses.push(args);
+    },
+    get: (path: string, handler: (req: unknown, res: unknown) => void) => {
+      routes[path] = handler;
+    },
+  };
+  const jsonParser = () => undefined;
+  const rateLimit = () => undefined;
+  const auth = () => undefined;
+  const cors = () => undefined;
+
+  attachBaseMiddleware(app as never, jsonParser, rateLimit, auth, cors);
+
+  return { uses, routes };
+}
 
 describe('buildCorsOptions', () => {
   it('reads allowed origins and allow-all flag', () => {
@@ -31,7 +49,16 @@ describe('buildCorsOptions', () => {
 
 describe('createJsonParseErrorHandler', () => {
   it('returns JSON-RPC parse error for invalid JSON', () => {
-    const handler = createJsonParseErrorHandler();
+    const { uses } = captureMiddleware();
+    const handler = uses[3][0] as (
+      err: Error,
+      _req: unknown,
+      res: {
+        status: (code: number) => unknown;
+        json: (payload: unknown) => void;
+      },
+      next: () => void
+    ) => void;
     const err = new SyntaxError('bad json') as Error & { body?: string };
     err.body = '{}';
 
@@ -61,7 +88,13 @@ describe('createJsonParseErrorHandler', () => {
   });
 
   it('delegates to next for non-parse errors', () => {
-    const handler = createJsonParseErrorHandler();
+    const { uses } = captureMiddleware();
+    const handler = uses[3][0] as (
+      err: Error,
+      _req: unknown,
+      res: { status: () => unknown; json: () => unknown },
+      next: () => void
+    ) => void;
     const res = { status: () => res, json: () => res };
     let nextCalled = 0;
     const next = () => {
@@ -76,7 +109,12 @@ describe('createJsonParseErrorHandler', () => {
 
 describe('createContextMiddleware', () => {
   it('invokes next handler', () => {
-    const middleware = createContextMiddleware();
+    const { uses } = captureMiddleware();
+    const middleware = uses[2][0] as (
+      req: { headers?: Record<string, string> },
+      _res: unknown,
+      next: () => void
+    ) => void;
     let nextCalled = 0;
     const next = () => {
       nextCalled += 1;
@@ -94,20 +132,13 @@ describe('createContextMiddleware', () => {
 
 describe('registerHealthRoute', () => {
   it('registers /health and responds with status', () => {
-    const handlers: Record<string, (req: unknown, res: unknown) => void> = {};
-    const app = {
-      get: (path: string, handler: (req: unknown, res: unknown) => void) => {
-        handlers[path] = handler;
-      },
-    };
+    const { routes } = captureMiddleware();
 
-    registerHealthRoute(app as never);
-
-    assert.equal(typeof handlers['/health'], 'function');
+    assert.equal(typeof routes['/health'], 'function');
 
     let jsonBody: unknown;
     const res = { json: (payload: unknown) => (jsonBody = payload) };
-    handlers['/health']({}, res);
+    routes['/health']({}, res);
 
     assert.equal((jsonBody as { status?: string }).status, 'healthy');
   });
@@ -115,21 +146,7 @@ describe('registerHealthRoute', () => {
 
 describe('attachBaseMiddleware', () => {
   it('registers middleware in expected order', () => {
-    const uses: unknown[] = [];
-    const app = {
-      use: (...args: unknown[]) => {
-        uses.push(args);
-      },
-      get: () => undefined,
-    };
-
-    const jsonParser = () => undefined;
-    const rateLimit = () => undefined;
-    const auth = () => undefined;
-    const cors = () => undefined;
-
-    attachBaseMiddleware(app as never, jsonParser, rateLimit, auth, cors);
-
+    const { uses } = captureMiddleware();
     assert.equal(uses.length, 7);
   });
 });
