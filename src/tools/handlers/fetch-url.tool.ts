@@ -98,9 +98,9 @@ function buildFetchUrlErrorDetails(format: Format): Record<string, unknown> {
 }
 
 function buildFetchUrlTransform(options: FetchUrlOptions) {
-  return (html: string, url: string): JsonlTransformResult =>
+  return async (html: string, url: string): Promise<JsonlTransformResult> =>
     options.format === 'markdown'
-      ? transformHtmlToMarkdownWithBlocks(html, url, {
+      ? await transformHtmlToMarkdownWithBlocks(html, url, {
           extractMainContent: options.extractMainContent,
           includeMetadata: options.includeMetadata,
           ...(options.maxContentLength !== undefined && {
@@ -108,7 +108,7 @@ function buildFetchUrlTransform(options: FetchUrlOptions) {
           }),
           includeContentBlocks: options.includeContentBlocks,
         })
-      : transformHtmlToJsonl(html, url, options);
+      : await transformHtmlToJsonl(html, url, options);
 }
 
 function buildFetchUrlStructuredContent(

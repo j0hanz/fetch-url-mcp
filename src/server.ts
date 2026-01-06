@@ -5,6 +5,7 @@ import { config } from './config/index.js';
 
 import { destroyAgents } from './services/fetcher.js';
 import { logError, logInfo } from './services/logger.js';
+import { destroyTransformWorkers } from './services/transform-worker-pool.js';
 
 import { registerTools } from './tools/index.js';
 
@@ -40,11 +41,12 @@ export async function startStdioServer(): Promise<void> {
     logError('[MCP Error]', error instanceof Error ? error : { error });
   };
 
-  const handleShutdown = (signal: string): void => {
+  const handleShutdown = async (signal: string): Promise<void> => {
     process.stderr.write(
       `\n${signal} received, shutting down superFetch MCP server...\n`
     );
     destroyAgents();
+    await destroyTransformWorkers();
     server
       .close()
       .catch((err: unknown) => {
@@ -59,10 +61,10 @@ export async function startStdioServer(): Promise<void> {
   };
 
   process.on('SIGINT', () => {
-    handleShutdown('SIGINT');
+    void handleShutdown('SIGINT');
   });
   process.on('SIGTERM', () => {
-    handleShutdown('SIGTERM');
+    void handleShutdown('SIGTERM');
   });
 
   try {

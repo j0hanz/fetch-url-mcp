@@ -17,14 +17,7 @@ export function runWithRequestContext<T>(
 export function bindToRequestContext<T extends (...args: unknown[]) => unknown>(
   fn: T
 ): T {
-  const store = requestContext.getStore();
-
-  if (!store) {
-    return fn;
-  }
-
-  return ((...args: Parameters<T>): ReturnType<T> =>
-    requestContext.run(store, () => fn(...args)) as ReturnType<T>) as T;
+  return AsyncLocalStorage.bind(fn);
 }
 
 export function getRequestId(): string | undefined {

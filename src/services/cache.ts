@@ -12,6 +12,7 @@ import { logWarn } from './logger.js';
 interface CacheItem {
   entry: CacheEntry;
   expiresAt: number;
+  parsed?: unknown;
 }
 
 const contentCache = new Map<string, CacheItem>();
@@ -187,6 +188,14 @@ function isCacheReadable(cacheKey: string | null): cacheKey is string {
 }
 
 function readCacheEntry(cacheKey: string): CacheEntry | undefined {
+  return readCacheItem(cacheKey)?.entry;
+}
+
+function isExpired(item: CacheItem): boolean {
+  return Date.now() > item.expiresAt;
+}
+
+function readCacheItem(cacheKey: string): CacheItem | undefined {
   const item = contentCache.get(cacheKey);
   if (!item) return undefined;
 
@@ -195,17 +204,14 @@ function readCacheEntry(cacheKey: string): CacheEntry | undefined {
     return undefined;
   }
 
-  return item.entry;
-}
-
-function isExpired(item: CacheItem): boolean {
-  return Date.now() > item.expiresAt;
+  return item;
 }
 
 export function set(
   cacheKey: string | null,
   content: string,
-  metadata: CacheEntryMetadata
+  metadata: CacheEntryMetadata,
+  parsed?: unknown
 ): void {
   if (!config.cache.enabled) return;
   if (!cacheKey) return;
@@ -214,12 +220,34 @@ export function set(
   try {
     startCleanupLoop();
     const entry = buildCacheEntry(cacheKey, content, metadata);
-    persistCacheEntry(cacheKey, entry);
+    persistCacheEntry(cacheKey, entry, parsed);
   } catch (error) {
     logWarn('Cache set error', {
       key: cacheKey.substring(0, 100),
       error: getErrorMessage(error),
     });
+  }
+}
+
+export function getParsed<T>(
+  cacheKey: string | null,
+  guard?: (value: unknown) => value is T
+): T | undefined {
+  if (!isCacheReadable(cacheKey)) return undefined;
+
+  try {
+    const item = readCacheItem(cacheKey);
+    const value = item?.parsed;
+    if (!guard) {
+      return value as T | undefined;
+    }
+    return guard(value) ? value : undefined;
+  } catch (error) {
+    logWarn('Cache get parsed error', {
+      key: cacheKey.substring(0, 100),
+      error: getErrorMessage(error),
+    });
+    return undefined;
   }
 }
 
@@ -250,9 +278,13 @@ function buildCacheEntry(
   return entry;
 }
 
-function persistCacheEntry(cacheKey: string, entry: CacheEntry): void {
+function persistCacheEntry(
+  cacheKey: string,
+  entry: CacheEntry,
+  parsed?: unknown
+): void {
   const expiresAt = Date.now() + config.cache.ttl * 1000;
-  contentCache.set(cacheKey, { entry, expiresAt });
+  contentCache.set(cacheKey, { entry, expiresAt, parsed });
   enforceMaxKeysLimit();
   emitCacheUpdate(cacheKey);
 }

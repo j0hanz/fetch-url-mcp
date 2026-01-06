@@ -1,11 +1,18 @@
+import { isMainThread } from 'node:worker_threads';
+
 import type {
   ContentBlockUnion,
   JsonlTransformResult,
   MarkdownTransformResult,
+  TransformOptions,
 } from '../../config/types/content.js';
 
 import { extractContent } from '../../services/extractor.js';
+import { logWarn } from '../../services/logger.js';
 import { parseHtml, parseHtmlWithMetadata } from '../../services/parser.js';
+import { transformInWorker } from '../../services/transform-worker-pool.js';
+
+import { getErrorMessage } from '../../utils/error-utils.js';
 
 import { toJsonl } from '../../transformers/jsonl.transformer.js';
 import { htmlToMarkdown } from '../../transformers/markdown.transformer.js';
@@ -36,6 +43,30 @@ interface MarkdownOptions extends ExtractionOptions, ContentLengthOptions {}
 interface MarkdownWithBlocksOptions
   extends ExtractionOptions, ContentLengthOptions {
   readonly includeContentBlocks?: boolean;
+}
+
+async function tryWorkerTransform<T>(
+  kind: Parameters<typeof transformInWorker>[0]['kind'],
+  html: string,
+  url: string,
+  options: TransformOptions & { includeContentBlocks?: boolean }
+): Promise<T | null> {
+  // Don't use workers from within a worker thread
+  if (!isMainThread) return null;
+
+  try {
+    return (await transformInWorker({
+      kind,
+      html,
+      url,
+      options,
+    })) as T;
+  } catch (error) {
+    logWarn('Worker transform failed, falling back to inline', {
+      error: getErrorMessage(error),
+    });
+    return null;
+  }
 }
 
 function resolveContentSource(
@@ -112,7 +143,7 @@ function buildMarkdownPayload(
   return { content, truncated };
 }
 
-export function transformHtmlToJsonl(
+export function transformHtmlToJsonlSync(
   html: string,
   url: string,
   options: ExtractionOptions & ContentLengthOptions
@@ -154,7 +185,7 @@ export function transformHtmlToJsonl(
   };
 }
 
-export function transformHtmlToMarkdown(
+export function transformHtmlToMarkdownSync(
   html: string,
   url: string,
   options: MarkdownOptions
@@ -172,7 +203,7 @@ export function transformHtmlToMarkdown(
   };
 }
 
-export function transformHtmlToMarkdownWithBlocks(
+export function transformHtmlToMarkdownWithBlocksSync(
   html: string,
   url: string,
   options: MarkdownWithBlocksOptions
@@ -224,4 +255,54 @@ export function transformHtmlToMarkdownWithBlocks(
     title: context.title,
     ...(truncated && { truncated }),
   };
+}
+
+export async function transformHtmlToJsonl(
+  html: string,
+  url: string,
+  options: ExtractionOptions & ContentLengthOptions
+): Promise<JsonlTransformResult> {
+  const workerResult = await tryWorkerTransform<JsonlTransformResult>(
+    'jsonl',
+    html,
+    url,
+    options
+  );
+  if (workerResult) return workerResult;
+  return transformHtmlToJsonlSync(html, url, options);
+}
+
+export async function transformHtmlToMarkdown(
+  html: string,
+  url: string,
+  options: MarkdownOptions
+): Promise<MarkdownTransformResult> {
+  const workerResult = await tryWorkerTransform<MarkdownTransformResult>(
+    'markdown',
+    html,
+    url,
+    options
+  );
+  if (workerResult) return workerResult;
+  return transformHtmlToMarkdownSync(html, url, options);
+}
+
+export async function transformHtmlToMarkdownWithBlocks(
+  html: string,
+  url: string,
+  options: MarkdownWithBlocksOptions
+): Promise<JsonlTransformResult> {
+  const workerResult = await tryWorkerTransform<JsonlTransformResult>(
+    'markdown-with-blocks',
+    html,
+    url,
+    {
+      ...options,
+      ...(options.includeContentBlocks !== undefined && {
+        includeContentBlocks: options.includeContentBlocks,
+      }),
+    }
+  );
+  if (workerResult) return workerResult;
+  return transformHtmlToMarkdownWithBlocksSync(html, url, options);
 }

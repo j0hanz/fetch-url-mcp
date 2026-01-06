@@ -6,6 +6,7 @@ import { config, enableHttpMode } from '../config/index.js';
 
 import { destroyAgents } from '../services/fetcher.js';
 import { logError, logInfo, logWarn } from '../services/logger.js';
+import { destroyTransformWorkers } from '../services/transform-worker-pool.js';
 
 import { errorHandler } from '../middleware/error-handler.js';
 
@@ -92,6 +93,7 @@ function createShutdownHandler(
     );
 
     destroyAgents();
+    await destroyTransformWorkers();
 
     server.close(() => {
       logInfo('HTTP server closed');

@@ -134,8 +134,8 @@ function buildMarkdownTransform(
   options: TransformOptions,
   transform: typeof transformHtmlToMarkdown
 ) {
-  return (html: string, url: string): MarkdownPipelineResult => {
-    const markdownResult = transform(html, url, options);
+  return async (html: string, url: string): Promise<MarkdownPipelineResult> => {
+    const markdownResult = await transform(html, url, options);
     return { ...markdownResult, content: markdownResult.markdown };
   };
 }

@@ -135,6 +135,50 @@ function createTransportForNewSession(options: McpSessionOptions): {
   return { transport, releaseSlot: tracker.releaseSlot, clearInitTimeout };
 }
 
+function createTransportAdapter(
+  transport: StreamableHTTPServerTransport
+): Transport {
+  const adapter: Transport = {
+    start: () => transport.start(),
+    send: (message, options) => transport.send(message, options),
+    close: () => transport.close(),
+  };
+
+  Object.defineProperties(adapter, {
+    onclose: {
+      get: () => transport.onclose,
+      set: (handler: (() => void) | undefined) => {
+        transport.onclose = handler;
+      },
+      enumerable: true,
+      configurable: true,
+    },
+    onerror: {
+      get: () => transport.onerror,
+      set: (handler: ((error: Error) => void) | undefined) => {
+        transport.onerror = handler;
+      },
+      enumerable: true,
+      configurable: true,
+    },
+    onmessage: {
+      get: () => transport.onmessage,
+      set: (handler: Transport['onmessage']) => {
+        transport.onmessage = handler as typeof transport.onmessage;
+      },
+      enumerable: true,
+      configurable: true,
+    },
+    sessionId: {
+      get: () => transport.sessionId,
+      enumerable: true,
+      configurable: true,
+    },
+  });
+
+  return adapter;
+}
+
 function findExistingTransport(
   sessionId: string | undefined,
   options: McpSessionOptions
@@ -182,9 +226,10 @@ async function createAndConnectTransport(
   const { transport, releaseSlot, clearInitTimeout } =
     createTransportForNewSession(options);
   const mcpServer = createMcpServer();
+  const transportAdapter = createTransportAdapter(transport);
 
   try {
-    await mcpServer.connect(transport as unknown as Transport);
+    await mcpServer.connect(transportAdapter);
   } catch (error) {
     clearInitTimeout();
     releaseSlot();

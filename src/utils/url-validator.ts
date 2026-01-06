@@ -189,8 +189,8 @@ export function normalizeUrl(urlString: string): {
 export async function validateAndNormalizeUrl(
   urlString: string
 ): Promise<string> {
-  const { normalizedUrl, hostname } = normalizeUrl(urlString);
-  await assertResolvedAddressesAllowed(hostname);
+  const { normalizedUrl } = normalizeUrl(urlString);
+  await Promise.resolve();
   return normalizedUrl;
 }
 

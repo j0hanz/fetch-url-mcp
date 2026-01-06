@@ -8,10 +8,7 @@ import * as cache from '../../services/cache.js';
 import { fetchNormalizedUrlWithRetry } from '../../services/fetcher.js';
 import { logDebug } from '../../services/logger.js';
 
-import {
-  assertResolvedAddressesAllowed,
-  normalizeUrl,
-} from '../../utils/url-validator.js';
+import { normalizeUrl } from '../../utils/url-validator.js';
 
 import { appendHeaderVary } from './cache-vary.js';
 
@@ -34,7 +31,8 @@ function attemptCacheRetrieval<T>(
     return null;
   }
 
-  const data = deserialize(cached.content);
+  const parsed = cache.getParsed<T>(cacheKey);
+  const data = parsed ?? deserialize(cached.content);
 
   if (data === undefined) {
     logDebug('Cache miss due to deserialize failure', {
@@ -66,7 +64,7 @@ function attemptCacheRetrieval<T>(
 export async function executeFetchPipeline<T>(
   options: FetchPipelineOptions<T>
 ): Promise<PipelineResult<T>> {
-  const { normalizedUrl, hostname } = normalizeUrl(options.url);
+  const { normalizedUrl } = normalizeUrl(options.url);
   const cacheKey = resolveCacheKey(options, normalizedUrl);
 
   const cachedResult = attemptCacheRetrieval<T>(
@@ -76,8 +74,6 @@ export async function executeFetchPipeline<T>(
     normalizedUrl
   );
   if (cachedResult) return cachedResult;
-
-  await assertResolvedAddressesAllowed(hostname);
 
   const fetchOptions = buildFetchOptions(options);
   logDebug('Fetching URL', { url: normalizedUrl, retries: options.retries });
@@ -134,7 +130,7 @@ function persistCache<T>(
   if (title !== undefined) {
     metadata.title = title;
   }
-  cache.set(cacheKey, serializer(data), metadata);
+  cache.set(cacheKey, serializer(data), metadata, data);
 }
 
 function extractTitle(value: unknown): string | undefined {
