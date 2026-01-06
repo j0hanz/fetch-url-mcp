@@ -10,7 +10,7 @@ import {
   type McpSessionOptions,
   resolveTransportForPost,
 } from './mcp-session.js';
-import { isMcpRequestBody } from './mcp-validation.js';
+import { isJsonRpcBatchRequest, isMcpRequestBody } from './mcp-validation.js';
 import { getSessionId } from './sessions.js';
 
 function sendJsonRpcError(
@@ -115,6 +115,12 @@ async function handlePost(
 ): Promise<void> {
   const sessionId = getSessionId(req);
   const { body } = req as { body: unknown };
+
+  if (isJsonRpcBatchRequest(body)) {
+    sendJsonRpcError(res, -32600, 'Batch requests are not supported', 400);
+    return;
+  }
+
   if (!isMcpRequestBody(body)) {
     respondInvalidRequestBody(res);
     return;

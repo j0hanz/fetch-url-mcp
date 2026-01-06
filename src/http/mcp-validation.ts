@@ -4,6 +4,10 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object';
 }
 
+export function isJsonRpcBatchRequest(body: unknown): boolean {
+  return Array.isArray(body);
+}
+
 export function isMcpRequestBody(body: unknown): body is McpRequestBody {
   if (!isRecord(body) || Array.isArray(body)) return false;
 
