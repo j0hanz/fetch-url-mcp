@@ -48,7 +48,8 @@
     "test:coverage": "npm run build --silent && node --test --experimental-transform-types --experimental-test-coverage",
     "bench": "npm run build && node scripts/bench.mjs",
     "knip": "knip",
-    "knip:fix": "knip --fix"
+    "knip:fix": "knip --fix",
+    "inspector": "npx @modelcontextprotocol/inspector"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.25.1",
