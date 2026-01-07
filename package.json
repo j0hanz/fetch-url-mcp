@@ -39,14 +39,12 @@
     "prepare": "npm run build",
     "prepublishOnly": "npm run build && npm run lint",
     "start": "node dist/index.js",
-    "release": "node scripts/release.js",
     "format": "prettier --write .",
     "type-check": "tsc --noEmit",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "test": "npm run build --silent && node --test --experimental-transform-types",
     "test:coverage": "npm run build --silent && node --test --experimental-transform-types --experimental-test-coverage",
-    "bench": "npm run build && node scripts/bench.mjs",
     "knip": "knip",
     "knip:fix": "knip --fix",
     "inspector": "npx @modelcontextprotocol/inspector"
@@ -54,8 +52,6 @@
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.25.1",
     "@mozilla/readability": "^0.6.0",
-    "cheerio": "^1.1.2",
-    "domhandler": "^5.0.3",
     "express": "^5.2.1",
     "linkedom": "^0.18.12",
     "turndown": "^7.2.2",

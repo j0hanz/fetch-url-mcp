@@ -32,7 +32,7 @@ function createResponseFromChunks(
 ): Response {
   const stream = new ReadableStream<Uint8Array>({
     start(controller) {
-      for (const chunk of chunks) controller.enqueue(chunk);
+      chunks.forEach((chunk) => controller.enqueue(chunk));
       controller.close();
     },
   });

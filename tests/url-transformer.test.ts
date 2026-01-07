@@ -1,10 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import {
-  isTransformableUrl,
-  transformToRawUrl,
-} from '../dist/utils/url-transformer.js';
+import { transformToRawUrl } from '../dist/utils/url-transformer.js';
 
 describe('url-transformer', () => {
   describe('transformToRawUrl', () => {
@@ -230,37 +227,6 @@ describe('url-transformer', () => {
 
         assert.equal(result.transformed, false);
       });
-    });
-  });
-
-  describe('isTransformableUrl', () => {
-    it('returns true for GitHub blob URLs', () => {
-      const url = 'https://github.com/owner/repo/blob/main/file.js';
-      assert.equal(isTransformableUrl(url), true);
-    });
-
-    it('returns true for GitLab blob URLs', () => {
-      const url = 'https://gitlab.com/owner/repo/-/blob/main/file.ts';
-      assert.equal(isTransformableUrl(url), true);
-    });
-
-    it('returns true for Bitbucket src URLs', () => {
-      const url = 'https://bitbucket.org/owner/repo/src/main/file.py';
-      assert.equal(isTransformableUrl(url), true);
-    });
-
-    it('returns false for already raw URLs', () => {
-      const url = 'https://raw.githubusercontent.com/owner/repo/main/file.js';
-      assert.equal(isTransformableUrl(url), false);
-    });
-
-    it('returns false for regular URLs', () => {
-      const url = 'https://example.com/page.html';
-      assert.equal(isTransformableUrl(url), false);
-    });
-
-    it('returns false for empty string', () => {
-      assert.equal(isTransformableUrl(''), false);
     });
   });
 });

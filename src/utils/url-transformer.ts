@@ -84,7 +84,6 @@ function isRawUrl(url: string): boolean {
 function getUrlWithoutParams(url: string): {
   base: string;
   hash: string;
-  query: string;
 } {
   const hashIndex = url.indexOf('#');
   const queryIndex = url.indexOf('?');
@@ -99,17 +98,9 @@ function getUrlWithoutParams(url: string): {
 
   const hash = hashIndex !== -1 ? url.slice(hashIndex) : '';
 
-  let query = '';
-  if (queryIndex !== -1) {
-    const queryEnd =
-      hashIndex !== -1 && hashIndex > queryIndex ? hashIndex : url.length;
-    query = url.slice(queryIndex, queryEnd);
-  }
-
   return {
     base: url.slice(0, endIndex),
     hash,
-    query,
   };
 }
 
@@ -146,12 +137,6 @@ export function transformToRawUrl(url: string): TransformResult {
   }
 
   return { url, transformed: false };
-}
-
-export function isTransformableUrl(url: string): boolean {
-  if (!url || isRawUrl(url)) return false;
-  const { base } = getUrlWithoutParams(url);
-  return TRANSFORM_RULES.some((rule) => rule.pattern.test(base));
 }
 
 const RAW_TEXT_EXTENSIONS = new Set([

@@ -426,8 +426,6 @@ Rate limiting applies to `/mcp` and `/mcp/downloads` and is configurable via `RA
 | `npm run format`        | Format with Prettier                 |
 | `npm test`              | Run Node test runner (builds dist)   |
 | `npm run test:coverage` | Run tests with experimental coverage |
-| `npm run bench`         | Run minimal performance benchmark    |
-| `npm run release`       | Create new release                   |
 | `npm run knip`          | Find unused exports/dependencies     |
 | `npm run knip:fix`      | Auto-fix unused code                 |
 
