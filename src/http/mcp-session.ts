@@ -162,13 +162,12 @@ export async function resolveTransportForPost(
       return existingSession.transport;
     }
 
-    // Client supplied a session id, but it doesn't exist.
-    // Streamable HTTP contract: invalid session IDs => 404.
+    // Client supplied a session id but it doesn't exist; Streamable HTTP: invalid session IDs => 404.
     sendJsonRpcError(res, -32600, 'Session not found', 404);
     return null;
   }
 
-  if (sessionId || !isInitializeRequest(body)) {
+  if (!isInitializeRequest(body)) {
     respondBadRequest(res);
     return null;
   }

@@ -4,7 +4,7 @@ import { sendJsonRpcError } from './jsonrpc-http.js';
 
 const MCP_PROTOCOL_VERSION_HEADER = 'mcp-protocol-version';
 
-export const MCP_PROTOCOL_VERSIONS = {
+const MCP_PROTOCOL_VERSIONS = {
   defaultVersion: '2025-03-26',
   supported: new Set<string>(['2025-03-26', '2025-11-25']),
 };

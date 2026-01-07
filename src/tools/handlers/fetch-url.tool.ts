@@ -7,6 +7,7 @@ import type {
 
 import { logDebug, logError } from '../../services/logger.js';
 
+import { isRecord } from '../../utils/guards.js';
 import {
   createToolErrorResponse,
   handleToolError,
@@ -26,10 +27,6 @@ export const FETCH_URL_TOOL_DESCRIPTION =
 type MarkdownPipelineResult = MarkdownTransformResult & {
   readonly content: string;
 };
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === 'object';
-}
 
 function deserializeMarkdownResult(
   cached: string

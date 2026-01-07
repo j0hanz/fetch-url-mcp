@@ -1,100 +1,18 @@
 import packageJson from '../../package.json' with { type: 'json' };
+import { buildAuthConfig } from './auth-config.js';
 import { SIZE_LIMITS, TIMEOUT } from './constants.js';
-import type { LogLevel } from './types/runtime.js';
-
-function parseInteger(
-  envValue: string | undefined,
-  defaultValue: number,
-  min?: number,
-  max?: number
-): number {
-  if (!envValue) return defaultValue;
-  const parsed = parseInt(envValue, 10);
-  if (Number.isNaN(parsed)) return defaultValue;
-  if (min !== undefined && parsed < min) return defaultValue;
-  if (max !== undefined && parsed > max) return defaultValue;
-  return parsed;
-}
-
-function parseBoolean(
-  envValue: string | undefined,
-  defaultValue: boolean
-): boolean {
-  if (!envValue) return defaultValue;
-  return envValue !== 'false';
-}
-
-function parseList(envValue: string | undefined): string[] {
-  if (!envValue) return [];
-  return envValue
-    .split(/[\s,]+/)
-    .map((entry) => entry.trim())
-    .filter((entry) => entry.length > 0);
-}
-
-function parseScopes(envValue: string | undefined): string[] {
-  return parseList(envValue);
-}
+import {
+  parseAllowedHosts,
+  parseBoolean,
+  parseInteger,
+  parseLogLevel,
+} from './env-parsers.js';
 
 function formatHostForUrl(hostname: string): string {
   if (hostname.includes(':') && !hostname.startsWith('[')) {
     return `[${hostname}]`;
   }
   return hostname;
-}
-
-function parseUrlEnv(value: string | undefined, name: string): URL | undefined {
-  if (!value) return undefined;
-  if (!URL.canParse(value)) {
-    throw new Error(`Invalid ${name} value: ${value}`);
-  }
-  return new URL(value);
-}
-
-function normalizeHostValue(value: string): string | null {
-  const trimmed = value.trim().toLowerCase();
-  if (!trimmed) return null;
-
-  if (trimmed.startsWith('[')) {
-    const end = trimmed.indexOf(']');
-    if (end === -1) return null;
-    return trimmed.slice(1, end);
-  }
-
-  const colonIndex = trimmed.indexOf(':');
-  if (colonIndex !== -1) {
-    return trimmed.slice(0, colonIndex);
-  }
-
-  return trimmed;
-}
-
-function parseAllowedHosts(envValue: string | undefined): Set<string> {
-  const hosts = new Set<string>();
-  for (const entry of parseList(envValue)) {
-    const normalized = normalizeHostValue(entry);
-    if (normalized) {
-      hosts.add(normalized);
-    }
-  }
-  return hosts;
-}
-
-function parseLogLevel(envValue: string | undefined): LogLevel {
-  const level = envValue?.toLowerCase();
-  if (!level) return 'info';
-  return isLogLevel(level) ? level : 'info';
-}
-
-const ALLOWED_LOG_LEVELS: ReadonlySet<string> = new Set([
-  'debug',
-  'info',
-  'warn',
-  'error',
-]);
-
-function isLogLevel(value: string): value is LogLevel {
-  return ALLOWED_LOG_LEVELS.has(value);
 }
 
 const host = process.env.HOST ?? '127.0.0.1';
@@ -177,78 +95,7 @@ export const config = {
     apiKey: process.env.API_KEY,
     allowRemote: isRemoteHost,
   },
-  auth: (() => {
-    const issuerUrl = parseUrlEnv(
-      process.env.OAUTH_ISSUER_URL,
-      'OAUTH_ISSUER_URL'
-    );
-    const authorizationUrl = parseUrlEnv(
-      process.env.OAUTH_AUTHORIZATION_URL,
-      'OAUTH_AUTHORIZATION_URL'
-    );
-    const tokenUrl = parseUrlEnv(
-      process.env.OAUTH_TOKEN_URL,
-      'OAUTH_TOKEN_URL'
-    );
-    const revocationUrl = parseUrlEnv(
-      process.env.OAUTH_REVOCATION_URL,
-      'OAUTH_REVOCATION_URL'
-    );
-    const registrationUrl = parseUrlEnv(
-      process.env.OAUTH_REGISTRATION_URL,
-      'OAUTH_REGISTRATION_URL'
-    );
-    const introspectionUrl = parseUrlEnv(
-      process.env.OAUTH_INTROSPECTION_URL,
-      'OAUTH_INTROSPECTION_URL'
-    );
-    const resourceUrl =
-      parseUrlEnv(process.env.OAUTH_RESOURCE_URL, 'OAUTH_RESOURCE_URL') ??
-      new URL('/mcp', baseUrl);
-
-    const authModeEnv = process.env.AUTH_MODE?.toLowerCase();
-    const oauthConfigured = [
-      issuerUrl,
-      authorizationUrl,
-      tokenUrl,
-      introspectionUrl,
-    ].some((value) => value !== undefined);
-    const mode =
-      authModeEnv === 'oauth'
-        ? 'oauth'
-        : authModeEnv === 'static'
-          ? 'static'
-          : oauthConfigured
-            ? 'oauth'
-            : 'static';
-
-    const requiredScopes = parseScopes(process.env.OAUTH_REQUIRED_SCOPES);
-    const staticTokens = new Set<string>(parseList(process.env.ACCESS_TOKENS));
-    if (process.env.API_KEY) {
-      staticTokens.add(process.env.API_KEY);
-    }
-
-    return {
-      mode,
-      issuerUrl,
-      authorizationUrl,
-      tokenUrl,
-      revocationUrl,
-      registrationUrl,
-      introspectionUrl,
-      resourceUrl,
-      requiredScopes,
-      clientId: process.env.OAUTH_CLIENT_ID,
-      clientSecret: process.env.OAUTH_CLIENT_SECRET,
-      introspectionTimeoutMs: parseInteger(
-        process.env.OAUTH_INTROSPECTION_TIMEOUT_MS,
-        5000,
-        1000,
-        30000
-      ),
-      staticTokens: Array.from(staticTokens),
-    };
-  })(),
+  auth: buildAuthConfig(baseUrl),
   rateLimit: {
     enabled: true,
     maxRequests: 100,

@@ -1,8 +1,6 @@
 import type { McpRequestBody } from '../config/types/runtime.js';
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === 'object';
-}
+import { isRecord } from '../utils/guards.js';
 
 export function isJsonRpcBatchRequest(body: unknown): boolean {
   return Array.isArray(body);

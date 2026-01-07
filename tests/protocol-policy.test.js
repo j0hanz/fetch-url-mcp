@@ -1,10 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import {
-  ensureMcpProtocolVersionHeader,
-  MCP_PROTOCOL_VERSIONS,
-} from '../dist/http/protocol-policy.js';
+import { ensureMcpProtocolVersionHeader } from '../dist/http/protocol-policy.js';
 
 describe('protocol-policy', () => {
   it('defaults missing MCP-Protocol-Version header', () => {
@@ -17,10 +14,7 @@ describe('protocol-policy', () => {
     const ok = ensureMcpProtocolVersionHeader(req, res);
 
     assert.equal(ok, true);
-    assert.equal(
-      req.headers['mcp-protocol-version'],
-      MCP_PROTOCOL_VERSIONS.defaultVersion
-    );
+    assert.equal(req.headers['mcp-protocol-version'], '2025-03-26');
   });
 
   it('rejects unsupported MCP-Protocol-Version header', () => {
