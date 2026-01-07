@@ -75,6 +75,56 @@ function addNoiseRule(instance: TurndownService): void {
     },
     replacement: () => '',
   });
+
+  instance.addRule('removeNavigationByRole', {
+    filter: (node) => {
+      if (!isElement(node)) return false;
+      const role = node.getAttribute('role');
+      return (
+        role === 'navigation' ||
+        role === 'banner' ||
+        role === 'complementary' ||
+        role === 'contentinfo' ||
+        role === 'tree' ||
+        role === 'menubar' ||
+        role === 'menu'
+      );
+    },
+    replacement: () => '',
+  });
+
+  instance.addRule('removeFixedPositioned', {
+    filter: (node) => {
+      if (!isElement(node)) return false;
+      const className = node.getAttribute('class') ?? '';
+      return /\b(fixed|sticky)\b/.test(className);
+    },
+    replacement: () => '',
+  });
+
+  instance.addRule('removePromotionalContent', {
+    filter: (node) => {
+      if (!isElement(node)) return false;
+      const className = node.getAttribute('class') ?? '';
+      const id = node.getAttribute('id') ?? '';
+      const combined = `${className} ${id}`.toLowerCase();
+      return /banner|promo|announcement|cta|callout|advert|newsletter|subscribe|cookie|consent|popup|modal|overlay|toast/.test(
+        combined
+      );
+    },
+    replacement: () => '',
+  });
+
+  instance.addRule('removeHighZIndexOverlays', {
+    filter: (node) => {
+      if (!isElement(node)) return false;
+      const className = node.getAttribute('class') ?? '';
+      const hasHighZIndex = /\bz-(?:4[0-9]|50)\b/.test(className);
+      const hasIsolate = /\bisolate\b/.test(className);
+      return hasHighZIndex && hasIsolate;
+    },
+    replacement: () => '',
+  });
 }
 
 function addFencedCodeRule(instance: TurndownService): void {
