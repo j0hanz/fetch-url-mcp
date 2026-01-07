@@ -138,6 +138,11 @@ async function createAndConnectTransport(
   } catch (error) {
     clearInitTimeout();
     releaseSlot();
+    void transport.close().catch((closeError: unknown) => {
+      logWarn('Failed to close transport after connect error', {
+        error: getErrorMessage(closeError),
+      });
+    });
     logError(
       'Failed to initialize MCP session',
       error instanceof Error ? error : undefined

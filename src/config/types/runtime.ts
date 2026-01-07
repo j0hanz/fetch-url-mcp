@@ -50,11 +50,16 @@ export type LogLevel = 'debug' | 'info' | 'warn' | 'error';
 export type LogMetadata = Record<string, unknown>;
 
 // MCP request types
+export interface McpRequestParams {
+  _meta?: Record<string, unknown>;
+  [key: string]: unknown;
+}
+
 export interface McpRequestBody {
-  method?: string;
+  jsonrpc: '2.0';
+  method: string;
   id?: string | number;
-  jsonrpc?: '2.0';
-  params?: unknown;
+  params?: McpRequestParams;
 }
 
 // Fetch pipeline types

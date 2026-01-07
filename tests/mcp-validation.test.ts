@@ -64,6 +64,12 @@ describe('mcp-validation', () => {
       );
     });
 
+    it('rejects missing method or jsonrpc', () => {
+      assert.equal(isMcpRequestBody({}), false);
+      assert.equal(isMcpRequestBody({ method: 'test', id: 1 }), false);
+      assert.equal(isMcpRequestBody({ jsonrpc: '2.0', id: 1 }), false);
+    });
+
     it('rejects array (batch) payloads', () => {
       assert.equal(isMcpRequestBody([]), false);
       assert.equal(
@@ -96,6 +102,18 @@ describe('mcp-validation', () => {
     it('rejects invalid id type', () => {
       assert.equal(
         isMcpRequestBody({ jsonrpc: '2.0', method: 'test', id: [] }),
+        false
+      );
+    });
+
+    it('rejects params arrays', () => {
+      assert.equal(
+        isMcpRequestBody({
+          jsonrpc: '2.0',
+          method: 'tools/call',
+          params: [],
+          id: 1,
+        }),
         false
       );
     });
