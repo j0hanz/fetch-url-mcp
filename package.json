@@ -1,6 +1,6 @@
 {
   "name": "@j0hanz/superfetch",
-  "version": "1.2.5",
+  "version": "2.0.0",
   "mcpName": "io.github.j0hanz/superfetch",
   "description": "Intelligent web content fetcher MCP server that converts HTML to clean, AI-readable Markdown",
   "type": "module",
