@@ -3,35 +3,29 @@ import { describe, it } from 'node:test';
 
 import { attachBaseMiddleware } from '../dist/http/server-middleware.js';
 
+type HeaderRequest = { headers?: Record<string, string> };
+type JsonResponder = { json: (payload: unknown) => void };
+type StatusJsonResponder = {
+  status: (code: number) => StatusJsonResponder;
+  json: (payload: unknown) => void;
+};
 type JsonParseErrorHandler = (
   err: Error,
   _req: unknown,
-  res: {
-    status: (code: number) => unknown;
-    json: (payload: unknown) => void;
-  },
+  res: StatusJsonResponder,
   next: () => void
 ) => void;
-
 type ContextMiddleware = (
-  req: { headers?: Record<string, string> },
+  req: HeaderRequest,
   _res: unknown,
   next: () => void
 ) => void;
-
 type OriginValidationMiddleware = (
-  req: { headers?: Record<string, string> },
-  res: {
-    status: (code: number) => unknown;
-    json: (payload: unknown) => void;
-  },
+  req: HeaderRequest,
+  res: StatusJsonResponder,
   next: () => void
 ) => void;
-
-type HealthRouteHandler = (
-  _req: unknown,
-  res: { json: (payload: unknown) => void }
-) => void;
+type HealthRouteHandler = (_req: unknown, res: JsonResponder) => void;
 
 function captureMiddleware() {
   const uses: unknown[][] = [];
@@ -51,26 +45,6 @@ function captureMiddleware() {
   attachBaseMiddleware(app as never, jsonParser, rateLimit, cors);
 
   return { uses, routes };
-}
-
-function getJsonParseErrorHandler(uses: unknown[][]): JsonParseErrorHandler {
-  return uses[4][0] as JsonParseErrorHandler;
-}
-
-function getContextMiddleware(uses: unknown[][]): ContextMiddleware {
-  return uses[3][0] as ContextMiddleware;
-}
-
-function getOriginValidationMiddleware(
-  uses: unknown[][]
-): OriginValidationMiddleware {
-  return uses[1][0] as OriginValidationMiddleware;
-}
-
-function getHealthRouteHandler(
-  routes: Record<string, (req: unknown, res: unknown) => void>
-): HealthRouteHandler {
-  return routes['/health'] as HealthRouteHandler;
 }
 
 function createStatusJsonCapture() {
@@ -113,145 +87,106 @@ function createNextTracker() {
   return { next, getCalls: () => nextCalled };
 }
 
-function testReturnsParseErrorForInvalidJson() {
-  const { uses } = captureMiddleware();
-  const handler = getJsonParseErrorHandler(uses);
-  const err = new SyntaxError('bad json') as Error & { body?: string };
-  err.body = '{}';
+describe('createJsonParseErrorHandler', () => {
+  it('returns JSON-RPC parse error for invalid JSON', () => {
+    const { uses } = captureMiddleware();
+    const handler = uses[4][0] as JsonParseErrorHandler;
+    const err = new SyntaxError('bad json') as Error & { body?: string };
+    err.body = '{}';
 
-  const { res, getStatusCode, getJsonBody } = createStatusJsonCapture();
-  const { next, getCalls } = createNextTracker();
+    const { res, getStatusCode, getJsonBody } = createStatusJsonCapture();
+    const { next, getCalls } = createNextTracker();
 
-  handler(err, {} as never, res as never, next);
+    handler(err, {} as never, res as never, next);
 
-  const jsonBody = getJsonBody() as { id?: unknown; jsonrpc?: string };
-  assert.equal(getStatusCode(), 400);
-  assert.equal(jsonBody.jsonrpc, '2.0');
-  assert.equal(jsonBody.id, null);
-  assert.equal(getCalls(), 0);
-}
-
-function testDelegatesToNextForNonParseErrors() {
-  const { uses } = captureMiddleware();
-  const handler = getJsonParseErrorHandler(uses);
-  const res = { status: () => res, json: () => res };
-  const { next, getCalls } = createNextTracker();
-
-  handler(new Error('other'), {} as never, res as never, next);
-
-  assert.equal(getCalls(), 1);
-}
-
-function registerCreateJsonParseErrorHandlerTests() {
-  describe('createJsonParseErrorHandler', () => {
-    it('returns JSON-RPC parse error for invalid JSON', () => {
-      testReturnsParseErrorForInvalidJson();
-    });
-    it('delegates to next for non-parse errors', () => {
-      testDelegatesToNextForNonParseErrors();
-    });
+    const jsonBody = getJsonBody() as { id?: unknown; jsonrpc?: string };
+    assert.equal(getStatusCode(), 400);
+    assert.equal(jsonBody.jsonrpc, '2.0');
+    assert.equal(jsonBody.id, null);
+    assert.equal(getCalls(), 0);
   });
-}
 
-function testContextMiddlewareInvokesNext() {
-  const { uses } = captureMiddleware();
-  const middleware = getContextMiddleware(uses);
-  const { next, getCalls } = createNextTracker();
+  it('delegates to next for non-parse errors', () => {
+    const { uses } = captureMiddleware();
+    const handler = uses[4][0] as JsonParseErrorHandler;
+    const res = { status: () => res, json: () => res };
+    const { next, getCalls } = createNextTracker();
 
-  middleware(
-    { headers: { 'mcp-session-id': 'session-1' } } as never,
-    {} as never,
-    next
-  );
+    handler(new Error('other'), {} as never, res as never, next);
 
-  assert.equal(getCalls(), 1);
-}
-
-function registerCreateContextMiddlewareTests() {
-  describe('createContextMiddleware', () => {
-    it('invokes next handler', () => {
-      testContextMiddlewareInvokesNext();
-    });
+    assert.equal(getCalls(), 1);
   });
-}
+});
 
-function testRegistersHealthRoute() {
-  const { routes } = captureMiddleware();
-  const handler = getHealthRouteHandler(routes);
-  const { res, getJsonBody } = createJsonCapture();
+describe('createContextMiddleware', () => {
+  it('invokes next handler', () => {
+    const { uses } = captureMiddleware();
+    const middleware = uses[3][0] as ContextMiddleware;
+    const { next, getCalls } = createNextTracker();
 
-  assert.equal(typeof handler, 'function');
+    middleware(
+      { headers: { 'mcp-session-id': 'session-1' } } as never,
+      {} as never,
+      next
+    );
 
-  handler({} as never, res);
-
-  assert.equal((getJsonBody() as { status?: string }).status, 'healthy');
-}
-
-function registerHealthRouteTests() {
-  describe('registerHealthRoute', () => {
-    it('registers /health and responds with status', () => {
-      testRegistersHealthRoute();
-    });
+    assert.equal(getCalls(), 1);
   });
-}
+});
 
-function testRejectsNonLoopbackOrigins() {
-  const { uses } = captureMiddleware();
-  const middleware = getOriginValidationMiddleware(uses);
-  const { res, getStatusCode, getJsonBody } = createStatusJsonCapture();
-  const { next, getCalls } = createNextTracker();
+describe('registerHealthRoute', () => {
+  it('registers /health and responds with status', () => {
+    const { routes } = captureMiddleware();
+    const handler = routes['/health'] as HealthRouteHandler;
+    const { res, getJsonBody } = createJsonCapture();
 
-  middleware(
-    { headers: { origin: 'https://evil.example' } } as never,
-    res as never,
-    next
-  );
+    assert.equal(typeof handler, 'function');
 
-  assert.equal(getStatusCode(), 403);
-  assert.equal((getJsonBody() as { code?: string }).code, 'ORIGIN_NOT_ALLOWED');
-  assert.equal(getCalls(), 0);
-}
+    handler({} as never, res);
 
-function testAllowsLoopbackOrigins() {
-  const { uses } = captureMiddleware();
-  const middleware = getOriginValidationMiddleware(uses);
-  const { next, getCalls } = createNextTracker();
-
-  middleware(
-    { headers: { origin: 'http://127.0.0.1:3000' } } as never,
-    {} as never,
-    next
-  );
-
-  assert.equal(getCalls(), 1);
-}
-
-function registerOriginValidationMiddlewareTests() {
-  describe('createOriginValidationMiddleware', () => {
-    it('rejects non-loopback origins when bound to loopback', () => {
-      testRejectsNonLoopbackOrigins();
-    });
-    it('allows loopback origins when bound to loopback', () => {
-      testAllowsLoopbackOrigins();
-    });
+    assert.equal((getJsonBody() as { status?: string }).status, 'healthy');
   });
-}
+});
 
-function testRegistersMiddlewareOrder() {
-  const { uses } = captureMiddleware();
-  assert.equal(uses.length, 7);
-}
+describe('createOriginValidationMiddleware', () => {
+  it('rejects non-loopback origins when bound to loopback', () => {
+    const { uses } = captureMiddleware();
+    const middleware = uses[1][0] as OriginValidationMiddleware;
+    const { res, getStatusCode, getJsonBody } = createStatusJsonCapture();
+    const { next, getCalls } = createNextTracker();
 
-function registerAttachBaseMiddlewareTests() {
-  describe('attachBaseMiddleware', () => {
-    it('registers middleware in expected order', () => {
-      testRegistersMiddlewareOrder();
-    });
+    middleware(
+      { headers: { origin: 'https://evil.example' } } as never,
+      res as never,
+      next
+    );
+
+    assert.equal(getStatusCode(), 403);
+    assert.equal(
+      (getJsonBody() as { code?: string }).code,
+      'ORIGIN_NOT_ALLOWED'
+    );
+    assert.equal(getCalls(), 0);
   });
-}
 
-registerCreateJsonParseErrorHandlerTests();
-registerCreateContextMiddlewareTests();
-registerHealthRouteTests();
-registerOriginValidationMiddlewareTests();
-registerAttachBaseMiddlewareTests();
+  it('allows loopback origins when bound to loopback', () => {
+    const { uses } = captureMiddleware();
+    const middleware = uses[1][0] as OriginValidationMiddleware;
+    const { next, getCalls } = createNextTracker();
+
+    middleware(
+      { headers: { origin: 'http://127.0.0.1:3000' } } as never,
+      {} as never,
+      next
+    );
+
+    assert.equal(getCalls(), 1);
+  });
+});
+
+describe('attachBaseMiddleware', () => {
+  it('registers middleware in expected order', () => {
+    const { uses } = captureMiddleware();
+    assert.equal(uses.length, 7);
+  });
+});

@@ -16,6 +16,34 @@ import { getSessionId } from './sessions.js';
 
 const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '::1']);
 
+function getNonEmptyStringHeader(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  return trimmed === '' ? null : trimmed;
+}
+
+function respondHostNotAllowed(res: Response): void {
+  res.status(403).json({
+    error: 'Host not allowed',
+    code: 'HOST_NOT_ALLOWED',
+  });
+}
+
+function respondOriginNotAllowed(res: Response): void {
+  res.status(403).json({
+    error: 'Origin not allowed',
+    code: 'ORIGIN_NOT_ALLOWED',
+  });
+}
+
+function tryParseOriginHostname(originHeader: string): string | null {
+  try {
+    return new URL(originHeader).hostname.toLowerCase();
+  } catch {
+    return null;
+  }
+}
+
 function takeFirstHostValue(value: string): string | null {
   const first = value.split(',')[0];
   if (!first) return null;
@@ -92,10 +120,7 @@ function createHostValidationMiddleware(): RequestHandler {
     const normalized = normalizeHost(hostHeader);
 
     if (!normalized || !allowedHosts.has(normalized)) {
-      res.status(403).json({
-        error: 'Host not allowed',
-        code: 'HOST_NOT_ALLOWED',
-      });
+      respondHostNotAllowed(res);
       return;
     }
 
@@ -107,28 +132,15 @@ function createOriginValidationMiddleware(): RequestHandler {
   const allowedHosts = buildAllowedHosts();
 
   return (req: Request, res: Response, next: NextFunction): void => {
-    const originHeader = req.headers.origin;
-    if (typeof originHeader !== 'string' || originHeader.trim() === '') {
+    const originHeader = getNonEmptyStringHeader(req.headers.origin);
+    if (!originHeader) {
       next();
       return;
     }
 
-    let originUrl: URL;
-    try {
-      originUrl = new URL(originHeader);
-    } catch {
-      res.status(403).json({
-        error: 'Origin not allowed',
-        code: 'ORIGIN_NOT_ALLOWED',
-      });
-      return;
-    }
-
-    if (!allowedHosts.has(originUrl.hostname.toLowerCase())) {
-      res.status(403).json({
-        error: 'Origin not allowed',
-        code: 'ORIGIN_NOT_ALLOWED',
-      });
+    const originHostname = tryParseOriginHostname(originHeader);
+    if (!originHostname || !allowedHosts.has(originHostname)) {
+      respondOriginNotAllowed(res);
       return;
     }
 

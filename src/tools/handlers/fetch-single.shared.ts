@@ -20,6 +20,19 @@ interface SharedFetchDeps {
   readonly executeFetchPipeline?: typeof executeFetchPipeline;
 }
 
+function applyOptionalPipelineSerialization<T extends { content: string }>(
+  pipelineOptions: FetchPipelineOptions<T>,
+  options: SharedFetchOptions<T>
+): void {
+  if (options.serialize !== undefined) {
+    pipelineOptions.serialize = options.serialize;
+  }
+
+  if (options.deserialize !== undefined) {
+    pipelineOptions.deserialize = options.deserialize;
+  }
+}
+
 export async function performSharedFetch<T extends { content: string }>(
   options: SharedFetchOptions<T>,
   deps: SharedFetchDeps = {}
@@ -35,13 +48,7 @@ export async function performSharedFetch<T extends { content: string }>(
     transform: options.transform,
   };
 
-  if (options.serialize !== undefined) {
-    pipelineOptions.serialize = options.serialize;
-  }
-
-  if (options.deserialize !== undefined) {
-    pipelineOptions.deserialize = options.deserialize;
-  }
+  applyOptionalPipelineSerialization(pipelineOptions, options);
 
   const pipeline = await executePipeline<T>(pipelineOptions);
 
@@ -147,6 +154,16 @@ function maybeAppendResourceLink(
   }
 }
 
+function buildTextBlock(
+  structuredContent: Record<string, unknown>,
+  fromCache: boolean
+): ToolContentBlock {
+  return {
+    type: 'text',
+    text: serializeStructuredContent(structuredContent, fromCache),
+  };
+}
+
 export function buildToolContentBlocks(
   structuredContent: Record<string, unknown>,
   fromCache: boolean,
@@ -157,12 +174,9 @@ export function buildToolContentBlocks(
   url?: string,
   title?: string
 ): ToolContentBlock[] {
-  const textBlock: ToolContentBlock = {
-    type: 'text',
-    text: serializeStructuredContent(structuredContent, fromCache),
-  };
-
-  const blocks: ToolContentBlock[] = [textBlock];
+  const blocks: ToolContentBlock[] = [
+    buildTextBlock(structuredContent, fromCache),
+  ];
 
   const contentToEmbed = resolveContentToEmbed(
     inlineResult,

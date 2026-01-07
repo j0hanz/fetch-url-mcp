@@ -123,16 +123,12 @@ interface ElementMetadata {
 }
 
 function readElementMetadata(element: HTMLElement): ElementMetadata {
-  const className = element.getAttribute('class') ?? '';
-  const id = element.getAttribute('id') ?? '';
-  const role = element.getAttribute('role');
-  const isHidden = isElementHidden(element);
   return {
     tagName: element.tagName.toLowerCase(),
-    className,
-    id,
-    role,
-    isHidden,
+    className: element.getAttribute('class') ?? '',
+    id: element.getAttribute('id') ?? '',
+    role: element.getAttribute('role'),
+    isHidden: isElementHidden(element),
   };
 }
 

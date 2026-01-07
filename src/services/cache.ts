@@ -150,16 +150,13 @@ function buildCacheEntry(
   content: string,
   metadata: CacheEntryMetadata
 ): CacheEntry {
-  const fetchedAt = new Date().toISOString();
-  const expiresAt = new Date(resolveExpiryTimestamp()).toISOString();
-  const entry: CacheEntry = {
+  return {
     url: metadata.url,
     content,
-    fetchedAt,
-    expiresAt,
-    ...(metadata.title !== undefined ? { title: metadata.title } : {}),
+    fetchedAt: new Date().toISOString(),
+    expiresAt: new Date(resolveExpiryTimestamp()).toISOString(),
+    ...(metadata.title === undefined ? {} : { title: metadata.title }),
   };
-  return entry;
 }
 
 function persistCacheEntry(cacheKey: string, entry: CacheEntry): void {
@@ -171,12 +168,17 @@ function persistCacheEntry(cacheKey: string, entry: CacheEntry): void {
 
 function trimCacheToMaxKeys(): void {
   if (contentCache.size <= config.cache.maxKeys) return;
-  const keysToRemove = contentCache.size - config.cache.maxKeys;
-  const iterator = contentCache.keys();
-  for (let i = 0; i < keysToRemove; i++) {
-    const { value, done } = iterator.next();
-    if (done) break;
-    contentCache.delete(value);
+  removeOldestEntries(contentCache.size - config.cache.maxKeys);
+}
+
+function removeOldestEntries(count: number): void {
+  if (count <= 0) return;
+
+  let removed = 0;
+  for (const key of contentCache.keys()) {
+    contentCache.delete(key);
+    removed += 1;
+    if (removed >= count) return;
   }
 }
 
@@ -190,7 +192,7 @@ function logCacheError(
   error: unknown
 ): void {
   logWarn(message, {
-    key: cacheKey.substring(0, 100),
+    key: cacheKey.length > 100 ? cacheKey.slice(0, 100) : cacheKey,
     error: getErrorMessage(error),
   });
 }

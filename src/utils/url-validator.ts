@@ -150,23 +150,30 @@ function normalizeHostname(url: URL): string {
 const BLOCKED_HOST_SUFFIXES: readonly string[] = ['.local', '.internal'];
 
 function assertHostnameAllowed(hostname: string): void {
-  if (config.security.blockedHosts.has(hostname)) {
-    throw createValidationError(
-      `Blocked host: ${hostname}. Internal hosts are not allowed`
-    );
-  }
+  assertNotBlockedHost(hostname);
+  assertNotBlockedIp(hostname);
+  assertNotBlockedHostnameSuffix(hostname);
+}
 
-  if (isBlockedIp(hostname)) {
-    throw createValidationError(
-      `Blocked IP range: ${hostname}. Private IPs are not allowed`
-    );
-  }
+function assertNotBlockedHost(hostname: string): void {
+  if (!config.security.blockedHosts.has(hostname)) return;
+  throw createValidationError(
+    `Blocked host: ${hostname}. Internal hosts are not allowed`
+  );
+}
 
-  if (matchesBlockedSuffix(hostname)) {
-    throw createValidationError(
-      `Blocked hostname pattern: ${hostname}. Internal domain suffixes are not allowed`
-    );
-  }
+function assertNotBlockedIp(hostname: string): void {
+  if (!isBlockedIp(hostname)) return;
+  throw createValidationError(
+    `Blocked IP range: ${hostname}. Private IPs are not allowed`
+  );
+}
+
+function assertNotBlockedHostnameSuffix(hostname: string): void {
+  if (!matchesBlockedSuffix(hostname)) return;
+  throw createValidationError(
+    `Blocked hostname pattern: ${hostname}. Internal domain suffixes are not allowed`
+  );
 }
 
 function matchesBlockedSuffix(hostname: string): boolean {

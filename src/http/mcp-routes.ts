@@ -31,6 +31,23 @@ function respondSessionNotFound(res: Response): void {
   sendJsonRpcError(res, -32600, 'Session not found', 404);
 }
 
+function validatePostPayload(
+  payload: unknown,
+  res: Response
+): McpRequestBody | null {
+  if (isJsonRpcBatchRequest(payload)) {
+    sendJsonRpcError(res, -32600, 'Batch requests are not supported', 400);
+    return null;
+  }
+
+  if (!isMcpRequestBody(payload)) {
+    respondInvalidRequestBody(res);
+    return null;
+  }
+
+  return payload;
+}
+
 function logPostRequest(
   body: McpRequestBody,
   sessionId: string | undefined,
@@ -108,18 +125,8 @@ async function handlePost(
   if (!ensureMcpProtocolVersionHeader(req, res)) return;
 
   const sessionId = getSessionId(req);
-  const { body } = req;
-  const payload = body;
-
-  if (isJsonRpcBatchRequest(payload)) {
-    sendJsonRpcError(res, -32600, 'Batch requests are not supported', 400);
-    return;
-  }
-
-  if (!isMcpRequestBody(payload)) {
-    respondInvalidRequestBody(res);
-    return;
-  }
+  const payload = validatePostPayload(req.body, res);
+  if (!payload) return;
 
   logPostRequest(payload, sessionId, options);
 

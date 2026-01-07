@@ -84,6 +84,23 @@ async function throwIfAborted(
   throw createAbortError(url);
 }
 
+async function readAllChunks(
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+  state: StreamReadState,
+  url: string,
+  maxBytes: number,
+  signal?: AbortSignal
+): Promise<void> {
+  await throwIfAborted(signal, url, reader);
+
+  let result = await reader.read();
+  while (!result.done) {
+    appendChunk(state, result.value, maxBytes, url);
+    await throwIfAborted(signal, url, reader);
+    result = await reader.read();
+  }
+}
+
 async function readStreamWithLimit(
   stream: ReadableStream<Uint8Array>,
   url: string,
@@ -94,16 +111,7 @@ async function readStreamWithLimit(
   const reader = stream.getReader();
 
   try {
-    await throwIfAborted(signal, url, reader);
-
-    let result = await reader.read();
-    while (!result.done) {
-      appendChunk(state, result.value, maxBytes, url);
-
-      await throwIfAborted(signal, url, reader);
-
-      result = await reader.read();
-    }
+    await readAllChunks(reader, state, url, maxBytes, signal);
   } catch (error) {
     if (!signal?.aborted) {
       await cancelReaderQuietly(reader);

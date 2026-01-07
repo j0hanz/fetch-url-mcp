@@ -32,6 +32,8 @@ type FetchChannelEvent =
       duration: number;
     };
 
+type FetchErrorChannelEvent = Extract<FetchChannelEvent, { type: 'error' }>;
+
 const fetchChannel = diagnosticsChannel.channel('superfetch.fetch');
 
 function redactUrl(rawUrl: string): string {
@@ -63,18 +65,7 @@ interface FetchTelemetryContext {
   method: string;
 }
 
-export function startFetchTelemetry(
-  url: string,
-  method: string
-): FetchTelemetryContext {
-  const safeUrl = redactUrl(url);
-  const context: FetchTelemetryContext = {
-    requestId: randomUUID(),
-    startTime: performance.now(),
-    url: safeUrl,
-    method: method.toUpperCase(),
-  };
-
+function publishAndLogFetchStart(context: FetchTelemetryContext): void {
   publishFetchEvent({
     v: 1,
     type: 'start',
@@ -88,6 +79,21 @@ export function startFetchTelemetry(
     method: context.method,
     url: context.url,
   });
+}
+
+export function startFetchTelemetry(
+  url: string,
+  method: string
+): FetchTelemetryContext {
+  const safeUrl = redactUrl(url);
+  const context: FetchTelemetryContext = {
+    requestId: randomUUID(),
+    startTime: performance.now(),
+    url: safeUrl,
+    method: method.toUpperCase(),
+  };
+
+  publishAndLogFetchStart(context);
 
   return context;
 }
@@ -170,7 +176,7 @@ function buildFetchErrorEvent(
   duration: number,
   status?: number
 ): FetchChannelEvent {
-  const event: FetchChannelEvent = {
+  const event: FetchErrorChannelEvent = {
     v: 1,
     type: 'error',
     requestId: context.requestId,
@@ -179,6 +185,16 @@ function buildFetchErrorEvent(
     duration,
   };
 
+  addOptionalErrorFields(event, err, status);
+
+  return event;
+}
+
+function addOptionalErrorFields(
+  event: FetchErrorChannelEvent,
+  err: Error,
+  status?: number
+): void {
   const code = isSystemError(err) ? err.code : undefined;
   if (code !== undefined) {
     event.code = code;
@@ -186,8 +202,6 @@ function buildFetchErrorEvent(
   if (status !== undefined) {
     event.status = status;
   }
-
-  return event;
 }
 
 function selectErrorLogger(status?: number): typeof logWarn {

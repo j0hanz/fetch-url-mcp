@@ -4,6 +4,21 @@ import { FetchError } from '../errors/app-error.js';
 
 import { isSystemError } from './error-utils.js';
 
+function createFallbackErrorResponse(
+  fallbackMessage: string,
+  url: string,
+  error: Error
+): ToolErrorResponse {
+  return createToolErrorResponse(`${fallbackMessage}: ${error.message}`, url);
+}
+
+function createUnknownErrorResponse(
+  fallbackMessage: string,
+  url: string
+): ToolErrorResponse {
+  return createToolErrorResponse(`${fallbackMessage}: Unknown error`, url);
+}
+
 export function createToolErrorResponse(
   message: string,
   url: string
@@ -34,11 +49,10 @@ export function handleToolError(
   }
 
   if (error instanceof Error) {
-    const message = `${fallbackMessage}: ${error.message}`;
-    return createToolErrorResponse(message, url);
+    return createFallbackErrorResponse(fallbackMessage, url, error);
   }
 
-  return createToolErrorResponse(`${fallbackMessage}: Unknown error`, url);
+  return createUnknownErrorResponse(fallbackMessage, url);
 }
 
 function isValidationError(error: unknown): error is NodeJS.ErrnoException {

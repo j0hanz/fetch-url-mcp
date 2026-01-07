@@ -80,6 +80,32 @@ function logQualityGateFallback(
   );
 }
 
+function tryBuildExtractedArticleContentSource(
+  html: string,
+  url: string,
+  article: ExtractedArticle | null,
+  extractedMeta: ExtractedMetadata,
+  options: TransformOptions
+): ContentSource | null {
+  if (!article) return null;
+
+  const shouldExtractFromArticle = determineContentExtractionSource(article);
+  if (shouldExtractFromArticle && isExtractionSufficient(article, html)) {
+    return buildArticleContentSource(
+      url,
+      article,
+      extractedMeta,
+      options.includeMetadata
+    );
+  }
+
+  if (shouldExtractFromArticle) {
+    logQualityGateFallback(url, article);
+  }
+
+  return null;
+}
+
 function resolveContentSource(
   html: string,
   url: string,
@@ -89,18 +115,14 @@ function resolveContentSource(
     extractArticle: true,
   });
 
-  if (determineContentExtractionSource(article)) {
-    if (isExtractionSufficient(article, html)) {
-      return buildArticleContentSource(
-        url,
-        article,
-        extractedMeta,
-        options.includeMetadata
-      );
-    }
-
-    logQualityGateFallback(url, article);
-  }
+  const extracted = tryBuildExtractedArticleContentSource(
+    html,
+    url,
+    article,
+    extractedMeta,
+    options
+  );
+  if (extracted) return extracted;
 
   return buildFullHtmlContentSource(
     html,
@@ -206,24 +228,35 @@ function isRawTextContent(content: string): boolean {
   return false;
 }
 
+function tryTransformRawContent(
+  html: string,
+  url: string,
+  options: TransformOptions
+): MarkdownTransformResult | null {
+  if (!isRawTextContentUrl(url) && !isRawTextContent(html)) {
+    return null;
+  }
+
+  logDebug('Preserving raw markdown content', { url: url.substring(0, 80) });
+  const { content, title } = buildRawMarkdownPayload(
+    html,
+    url,
+    options.includeMetadata
+  );
+  return {
+    markdown: content,
+    title,
+    truncated: false,
+  };
+}
+
 export function transformHtmlToMarkdown(
   html: string,
   url: string,
   options: TransformOptions
 ): MarkdownTransformResult {
-  if (isRawTextContentUrl(url) || isRawTextContent(html)) {
-    logDebug('Preserving raw markdown content', { url: url.substring(0, 80) });
-    const { content, title } = buildRawMarkdownPayload(
-      html,
-      url,
-      options.includeMetadata
-    );
-    return {
-      markdown: content,
-      title,
-      truncated: false,
-    };
-  }
+  const raw = tryTransformRawContent(html, url, options);
+  if (raw) return raw;
 
   const context = resolveContentSource(html, url, options);
   const content = buildMarkdownPayload(context);

@@ -24,17 +24,12 @@ function attemptCacheRetrieval<T>(
   const cached = cache.get(cacheKey);
   if (!cached) return null;
 
-  if (!deserialize) {
-    logCacheMiss('missing deserializer', cacheNamespace, normalizedUrl);
-    return null;
-  }
+  if (!deserialize)
+    return logCacheMiss('missing deserializer', cacheNamespace, normalizedUrl);
 
   const data = deserialize(cached.content);
-
-  if (data === undefined) {
-    logCacheMiss('deserialize failure', cacheNamespace, normalizedUrl);
-    return null;
-  }
+  if (data === undefined)
+    return logCacheMiss('deserialize failure', cacheNamespace, normalizedUrl);
 
   logDebug('Cache hit', { namespace: cacheNamespace, url: normalizedUrl });
 
@@ -55,11 +50,7 @@ export async function executeFetchPipeline<T>(
   options: FetchPipelineOptions<T>
 ): Promise<PipelineResult<T>> {
   const resolvedUrl = resolveNormalizedUrl(options.url);
-  if (resolvedUrl.transformed) {
-    logDebug('Using transformed raw content URL', {
-      original: resolvedUrl.originalUrl,
-    });
-  }
+  logRawUrlTransformation(resolvedUrl);
 
   const cacheKey = resolveCacheKey(options, resolvedUrl.normalizedUrl);
   const cachedResult = attemptCacheRetrieval(
@@ -101,13 +92,7 @@ async function fetchAndTransform<T>(
 }
 
 function buildFetchOptions<T>(options: FetchPipelineOptions<T>): FetchOptions {
-  const fetchOptions: FetchOptions = {};
-
-  if (options.signal !== undefined) {
-    fetchOptions.signal = options.signal;
-  }
-
-  return fetchOptions;
+  return options.signal === undefined ? {} : { signal: options.signal };
 }
 
 function resolveCacheMetadata(
@@ -150,10 +135,23 @@ function logCacheMiss(
   reason: string,
   cacheNamespace: string,
   normalizedUrl: string
-): void {
+): null {
   logDebug(`Cache miss due to ${reason}`, {
     namespace: cacheNamespace,
     url: normalizedUrl,
+  });
+
+  return null;
+}
+
+function logRawUrlTransformation(resolvedUrl: {
+  originalUrl: string;
+  transformed: boolean;
+}): void {
+  if (!resolvedUrl.transformed) return;
+
+  logDebug('Using transformed raw content URL', {
+    original: resolvedUrl.originalUrl,
   });
 }
 

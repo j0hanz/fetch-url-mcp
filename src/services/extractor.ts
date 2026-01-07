@@ -92,15 +92,15 @@ function tryExtractContent(
   options: { extractArticle?: boolean }
 ): ExtractionResult {
   try {
-    const processedHtml = truncateHtml(html);
-    const { document } = parseHTML(processedHtml);
+    const { document } = parseHTML(truncateHtml(html));
 
     applyBaseUri(document, url);
 
     const metadata = extractMetadata(document);
-    const article = options.extractArticle ? extractArticle(document) : null;
-
-    return { article, metadata };
+    return {
+      article: options.extractArticle ? extractArticle(document) : null,
+      metadata,
+    };
   } catch (error) {
     logError(
       'Failed to extract content',

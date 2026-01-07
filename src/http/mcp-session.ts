@@ -40,11 +40,9 @@ function startSessionInitTimeout(
   timeoutMs: number
 ): NodeJS.Timeout | null {
   if (timeoutMs <= 0) return null;
-
   const timeout = setTimeout(() => {
     clearInitTimeout();
     if (tracker.isInitialized()) return;
-
     tracker.releaseSlot();
     void transport.close().catch((error: unknown) => {
       logWarn('Failed to close stalled session', {
@@ -53,86 +51,8 @@ function startSessionInitTimeout(
     });
     logWarn('Session initialization timed out', { timeoutMs });
   }, timeoutMs);
-
   timeout.unref();
   return timeout;
-}
-
-function registerPreInitCloseHandler(
-  transport: StreamableHTTPServerTransport,
-  tracker: SlotTracker,
-  clearInitTimeout: () => void
-): void {
-  transport.onclose = () => {
-    clearInitTimeout();
-    if (!tracker.isInitialized()) {
-      tracker.releaseSlot();
-    }
-  };
-}
-
-function createStreamableTransport(
-  tracker: SlotTracker,
-  clearInitTimeout: () => void
-): StreamableHTTPServerTransport {
-  const transport = new StreamableHTTPServerTransport({
-    sessionIdGenerator: () => randomUUID(),
-  });
-
-  registerPreInitCloseHandler(transport, tracker, clearInitTimeout);
-
-  return transport;
-}
-
-function createTransportForNewSession(): {
-  transport: StreamableHTTPServerTransport;
-  tracker: SlotTracker;
-  releaseSlot: () => void;
-  clearInitTimeout: () => void;
-} {
-  const tracker = createSlotTracker();
-  const timeoutController = createTimeoutController();
-  const { clear: clearInitTimeout } = timeoutController;
-  const transport = createStreamableTransport(tracker, clearInitTimeout);
-
-  timeoutController.set(
-    startSessionInitTimeout(
-      transport,
-      tracker,
-      clearInitTimeout,
-      config.server.sessionInitTimeoutMs
-    )
-  );
-
-  return {
-    transport,
-    tracker,
-    releaseSlot: tracker.releaseSlot,
-    clearInitTimeout,
-  };
-}
-
-function ensureCapacityOrRespond(
-  options: McpSessionOptions,
-  res: Response
-): boolean {
-  return ensureSessionCapacity(
-    options.sessionStore,
-    options.maxSessions,
-    res,
-    evictOldestSession
-  );
-}
-
-function reserveSlotOrRespond(
-  options: McpSessionOptions,
-  res: Response
-): boolean {
-  if (reserveSessionSlot(options.sessionStore, options.maxSessions)) {
-    return true;
-  }
-  respondServerBusy(res);
-  return false;
 }
 
 async function connectTransportOrThrow(
@@ -142,7 +62,6 @@ async function connectTransportOrThrow(
 ): Promise<void> {
   const mcpServer = createMcpServer();
   const transportAdapter = createTransportAdapter(transport);
-
   try {
     await mcpServer.connect(transportAdapter);
   } catch (error) {
@@ -161,72 +80,70 @@ async function connectTransportOrThrow(
   }
 }
 
-function resolveSessionIdOrRespond(
-  transport: StreamableHTTPServerTransport,
-  res: Response,
-  clearInitTimeout: () => void,
-  releaseSlot: () => void
-): string | null {
+async function createAndConnectTransport(
+  options: McpSessionOptions,
+  res: Response
+): Promise<StreamableHTTPServerTransport | null> {
+  if (
+    !ensureSessionCapacity(
+      options.sessionStore,
+      options.maxSessions,
+      res,
+      evictOldestSession
+    )
+  ) {
+    return null;
+  }
+  if (!reserveSessionSlot(options.sessionStore, options.maxSessions)) {
+    respondServerBusy(res);
+    return null;
+  }
+  const tracker = createSlotTracker();
+  const timeoutController = createTimeoutController();
+  const { clear: clearInitTimeout } = timeoutController;
+  const transport = new StreamableHTTPServerTransport({
+    sessionIdGenerator: () => randomUUID(),
+  });
+  transport.onclose = () => {
+    clearInitTimeout();
+    if (!tracker.isInitialized()) {
+      tracker.releaseSlot();
+    }
+  };
+  timeoutController.set(
+    startSessionInitTimeout(
+      transport,
+      tracker,
+      clearInitTimeout,
+      config.server.sessionInitTimeoutMs
+    )
+  );
+  await connectTransportOrThrow(
+    transport,
+    clearInitTimeout,
+    tracker.releaseSlot
+  );
   const { sessionId } = transport;
-  if (typeof sessionId === 'string') return sessionId;
-  clearInitTimeout();
-  releaseSlot();
-  respondBadRequest(res);
-  return null;
-}
-
-function finalizeSessionInitialization(
-  sessionId: string,
-  transport: StreamableHTTPServerTransport,
-  tracker: SlotTracker,
-  releaseSlot: () => void,
-  clearInitTimeout: () => void,
-  store: SessionStore
-): void {
+  if (typeof sessionId !== 'string') {
+    clearInitTimeout();
+    tracker.releaseSlot();
+    respondBadRequest(res);
+    return null;
+  }
   clearInitTimeout();
   tracker.markInitialized();
-  releaseSlot();
+  tracker.releaseSlot();
   const now = Date.now();
-  store.set(sessionId, {
+  options.sessionStore.set(sessionId, {
     transport,
     createdAt: now,
     lastSeen: now,
   });
   transport.onclose = () => {
-    store.remove(sessionId);
+    options.sessionStore.remove(sessionId);
     logInfo('Session closed');
   };
   logInfo('Session initialized');
-}
-
-async function createAndConnectTransport(
-  options: McpSessionOptions,
-  res: Response
-): Promise<StreamableHTTPServerTransport | null> {
-  if (!ensureCapacityOrRespond(options, res)) return null;
-  if (!reserveSlotOrRespond(options, res)) return null;
-
-  const { transport, tracker, releaseSlot, clearInitTimeout } =
-    createTransportForNewSession();
-  await connectTransportOrThrow(transport, clearInitTimeout, releaseSlot);
-
-  const sessionId = resolveSessionIdOrRespond(
-    transport,
-    res,
-    clearInitTimeout,
-    releaseSlot
-  );
-  if (!sessionId) return null;
-
-  finalizeSessionInitialization(
-    sessionId,
-    transport,
-    tracker,
-    releaseSlot,
-    clearInitTimeout,
-    options.sessionStore
-  );
-
   return transport;
 }
 
@@ -248,12 +165,10 @@ export async function resolveTransportForPost(
     sendJsonRpcError(res, -32600, 'Session not found', 404);
     return null;
   }
-
   if (!isInitializeRequest(body)) {
     respondBadRequest(res);
     return null;
   }
-
   evictExpiredSessions(options.sessionStore);
   return createAndConnectTransport(options, res);
 }

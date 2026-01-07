@@ -66,6 +66,32 @@ function resolveOptionalScopes(
   return requiredScopes.length > 0 ? [...requiredScopes] : undefined;
 }
 
+type OAuthAuthConfig = typeof config.auth;
+
+function resolveOAuthMetadataParams(
+  authConfig: OAuthAuthConfig
+): OAuthMetadataParams | null {
+  const {
+    issuerUrl,
+    authorizationUrl,
+    tokenUrl,
+    revocationUrl,
+    registrationUrl,
+    requiredScopes,
+  } = authConfig;
+
+  if (!issuerUrl || !authorizationUrl || !tokenUrl) return null;
+
+  return {
+    issuerUrl,
+    authorizationUrl,
+    tokenUrl,
+    revocationUrl,
+    registrationUrl,
+    requiredScopes,
+  };
+}
+
 interface OAuthMetadata extends Record<string, unknown> {
   issuer: string;
   authorization_endpoint: string;
@@ -83,8 +109,8 @@ interface OAuthMetadataParams {
   issuerUrl: URL;
   authorizationUrl: URL;
   tokenUrl: URL;
-  revocationUrl?: URL;
-  registrationUrl?: URL;
+  revocationUrl: URL | undefined;
+  registrationUrl: URL | undefined;
   requiredScopes: readonly string[];
 }
 
@@ -156,29 +182,13 @@ export function createAuthMiddleware(): RequestHandler {
 export function createAuthMetadataRouter(): Router | null {
   if (config.auth.mode !== 'oauth') return null;
 
-  const {
-    issuerUrl,
-    authorizationUrl,
-    tokenUrl,
-    revocationUrl,
-    registrationUrl,
-    requiredScopes,
-    resourceUrl,
-  } = config.auth;
-
-  if (!issuerUrl || !authorizationUrl || !tokenUrl) return null;
+  const oauthMetadataParams = resolveOAuthMetadataParams(config.auth);
+  if (!oauthMetadataParams) return null;
 
   return mcpAuthMetadataRouter({
-    oauthMetadata: buildOAuthMetadata({
-      issuerUrl,
-      authorizationUrl,
-      tokenUrl,
-      ...(revocationUrl ? { revocationUrl } : {}),
-      ...(registrationUrl ? { registrationUrl } : {}),
-      requiredScopes,
-    }),
-    resourceServerUrl: resourceUrl,
-    scopesSupported: requiredScopes,
+    oauthMetadata: buildOAuthMetadata(oauthMetadataParams),
+    resourceServerUrl: config.auth.resourceUrl,
+    scopesSupported: config.auth.requiredScopes,
     resourceName: config.server.name,
   });
 }

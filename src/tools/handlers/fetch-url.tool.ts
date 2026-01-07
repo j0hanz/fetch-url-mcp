@@ -28,6 +28,8 @@ type MarkdownPipelineResult = MarkdownTransformResult & {
   readonly content: string;
 };
 
+type ToolContentBlocks = ReturnType<typeof buildToolContentBlocks>;
+
 function deserializeMarkdownResult(
   cached: string
 ): MarkdownPipelineResult | undefined {
@@ -62,6 +64,23 @@ function buildStructuredContent(
   };
 }
 
+function buildFetchUrlContentBlocks(
+  structuredContent: Record<string, unknown>,
+  pipeline: PipelineResult<MarkdownPipelineResult>,
+  inlineResult: InlineResult
+): ToolContentBlocks {
+  return buildToolContentBlocks(
+    structuredContent,
+    pipeline.fromCache,
+    inlineResult,
+    'Fetched markdown',
+    pipeline.cacheKey,
+    pipeline.data.content,
+    pipeline.url,
+    pipeline.data.title
+  );
+}
+
 function logFetchStart(url: string): void {
   logDebug('Fetching URL', { url });
 }
@@ -83,18 +102,14 @@ function buildResponse(
   inlineResult: InlineResult
 ): ToolResponseBase {
   const structuredContent = buildStructuredContent(pipeline, inlineResult);
+  const content = buildFetchUrlContentBlocks(
+    structuredContent,
+    pipeline,
+    inlineResult
+  );
 
   return {
-    content: buildToolContentBlocks(
-      structuredContent,
-      pipeline.fromCache,
-      inlineResult,
-      'Fetched markdown',
-      pipeline.cacheKey,
-      pipeline.data.content,
-      pipeline.url,
-      pipeline.data.title
-    ),
+    content,
     structuredContent,
   };
 }

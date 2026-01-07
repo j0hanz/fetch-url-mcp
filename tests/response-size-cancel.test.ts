@@ -85,3 +85,26 @@ test('readResponseText preserves UTF-8 decoding across chunk boundaries', async 
   assert.equal(result.text, 'a€b');
   assert.equal(result.size, 5);
 });
+
+test('readResponseText rejects with an abort error when signal is already aborted', async () => {
+  const controller = new AbortController();
+  controller.abort();
+
+  const response = createResponseFromChunks([
+    new TextEncoder().encode('hello'),
+  ]);
+
+  await assert.rejects(
+    () =>
+      readResponseText(
+        response,
+        'https://example.com',
+        10_000,
+        controller.signal
+      ),
+    (error: unknown) => {
+      if (!(error instanceof Error)) return false;
+      return error.message.includes('aborted');
+    }
+  );
+});

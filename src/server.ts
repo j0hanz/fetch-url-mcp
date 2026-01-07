@@ -10,21 +10,34 @@ import { registerTools } from './tools/index.js';
 
 import { registerCachedContentResource } from './resources/cached-content.js';
 
+function createServerInfo(): { name: string; version: string } {
+  return {
+    name: config.server.name,
+    version: config.server.version,
+  };
+}
+
+function createServerCapabilities(): {
+  tools: { listChanged: false };
+  resources: { listChanged: true; subscribe: true };
+  logging: Record<string, never>;
+} {
+  return {
+    tools: { listChanged: false },
+    resources: { listChanged: true, subscribe: true },
+    logging: {},
+  };
+}
+
+function createServerInstructions(serverVersion: string): string {
+  return `superFetch MCP server |${serverVersion}| A high-performance web content fetching and processing server.`;
+}
+
 export function createMcpServer(): McpServer {
-  const server = new McpServer(
-    {
-      name: config.server.name,
-      version: config.server.version,
-    },
-    {
-      capabilities: {
-        tools: { listChanged: false },
-        resources: { listChanged: true, subscribe: true },
-        logging: {},
-      },
-      instructions: `superFetch MCP server |${config.server.version}| A high-performance web content fetching and processing server.`,
-    }
-  );
+  const server = new McpServer(createServerInfo(), {
+    capabilities: createServerCapabilities(),
+    instructions: createServerInstructions(config.server.version),
+  });
 
   registerTools(server);
   registerCachedContentResource(server);
@@ -38,23 +51,24 @@ function attachServerErrorHandler(server: McpServer): void {
   };
 }
 
+function handleShutdownSignal(server: McpServer, signal: string): void {
+  process.stderr.write(
+    `\n${signal} received, shutting down superFetch MCP server...\n`
+  );
+  destroyAgents();
+  server
+    .close()
+    .catch((err: unknown) => {
+      logError('Error during shutdown', err instanceof Error ? err : undefined);
+    })
+    .finally(() => {
+      process.exit(0);
+    });
+}
+
 function createShutdownHandler(server: McpServer): (signal: string) => void {
   return (signal: string): void => {
-    process.stderr.write(
-      `\n${signal} received, shutting down superFetch MCP server...\n`
-    );
-    destroyAgents();
-    server
-      .close()
-      .catch((err: unknown) => {
-        logError(
-          'Error during shutdown',
-          err instanceof Error ? err : undefined
-        );
-      })
-      .finally(() => {
-        process.exit(0);
-      });
+    handleShutdownSignal(server, signal);
   };
 }
 

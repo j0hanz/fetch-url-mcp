@@ -85,25 +85,33 @@ async function fetchWithTelemetry(
   const telemetry = startFetchTelemetry(normalizedUrl, 'GET');
 
   try {
-    const { response, url: finalUrl } = await fetchWithRedirects(
-      normalizedUrl,
-      requestInit,
-      config.fetcher.maxRedirects
-    );
-
-    telemetry.url = finalUrl;
-    return await handleFetchResponse(
-      response,
-      finalUrl,
-      telemetry,
-      requestInit.signal ?? undefined
-    );
+    return await fetchAndHandle(normalizedUrl, requestInit, telemetry);
   } catch (error) {
     const mapped = mapFetchError(error, normalizedUrl, timeoutMs);
     telemetry.url = mapped.url;
     recordFetchError(telemetry, mapped, mapped.statusCode);
     throw mapped;
   }
+}
+
+async function fetchAndHandle(
+  normalizedUrl: string,
+  requestInit: RequestInit,
+  telemetry: ReturnType<typeof startFetchTelemetry>
+): Promise<string> {
+  const { response, url: finalUrl } = await fetchWithRedirects(
+    normalizedUrl,
+    requestInit,
+    config.fetcher.maxRedirects
+  );
+
+  telemetry.url = finalUrl;
+  return handleFetchResponse(
+    response,
+    finalUrl,
+    telemetry,
+    requestInit.signal ?? undefined
+  );
 }
 
 export async function fetchNormalizedUrl(
