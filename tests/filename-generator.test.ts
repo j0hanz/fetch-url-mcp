@@ -126,21 +126,21 @@ function registerFilenameCases(
   cases: readonly FilenameCase[]
 ): void {
   describe(title, () => {
-    for (const testCase of cases) {
+    cases.forEach((testCase) => {
       it(testCase.name, () => {
         assertFilenameCase(testCase);
       });
-    }
+    });
   });
 }
 
 function registerRegexCases(title: string, cases: readonly RegexCase[]): void {
   describe(title, () => {
-    for (const testCase of cases) {
+    cases.forEach((testCase) => {
       it(testCase.name, () => {
         assertRegexCase(testCase);
       });
-    }
+    });
   });
 }
 

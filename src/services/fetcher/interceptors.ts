@@ -6,7 +6,7 @@ import { isSystemError } from '../../utils/error-utils.js';
 
 import { logDebug, logError, logWarn } from '../logger.js';
 
-export type FetchChannelEvent =
+type FetchChannelEvent =
   | {
       v: 1;
       type: 'start';

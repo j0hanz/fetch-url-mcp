@@ -84,11 +84,11 @@ function assertMetadataCase(testCase: MetadataCase): void {
 }
 
 describe('extractContent', () => {
-  for (const testCase of METADATA_CASES) {
+  METADATA_CASES.forEach((testCase) => {
     it(testCase.name, () => {
       assertMetadataCase(testCase);
     });
-  }
+  });
 
   it('returns empty result for invalid input', () => {
     const result = extractContent('', '', { extractArticle: false });

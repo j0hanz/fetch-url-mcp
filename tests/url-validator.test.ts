@@ -74,18 +74,18 @@ const INVALID_CASES: readonly InvalidCase[] = [
 ];
 
 describe('validateAndNormalizeUrl', () => {
-  for (const testCase of VALID_CASES) {
+  VALID_CASES.forEach((testCase) => {
     it(testCase.name, () => {
       const result = validateAndNormalizeUrl(testCase.url);
       assert.equal(result, testCase.expected);
     });
-  }
+  });
 
-  for (const testCase of INVALID_CASES) {
+  INVALID_CASES.forEach((testCase) => {
     it(testCase.name, () => {
       assert.throws(() => validateAndNormalizeUrl(testCase.url), {
         message: testCase.message,
       });
     });
-  }
+  });
 });

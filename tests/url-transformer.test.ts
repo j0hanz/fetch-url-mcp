@@ -28,28 +28,33 @@ const GITHUB_BLOB_CASES: readonly TransformCase[] = [
     url: 'https://github.com/owner/repo/blob/develop/src/index.ts',
     expected:
       'https://raw.githubusercontent.com/owner/repo/develop/src/index.ts',
+    platform: 'github',
   },
   {
     name: 'transforms GitHub blob URL with commit SHA',
     url: 'https://github.com/owner/repo/blob/abc123def456/README.md',
     expected:
       'https://raw.githubusercontent.com/owner/repo/abc123def456/README.md',
+    platform: 'github',
   },
   {
     name: 'transforms GitHub blob URL with www prefix',
     url: 'https://www.github.com/owner/repo/blob/main/file.js',
     expected: 'https://raw.githubusercontent.com/owner/repo/main/file.js',
+    platform: 'github',
   },
   {
     name: 'transforms GitHub blob URL with nested path',
     url: 'https://github.com/owner/repo/blob/main/src/deep/nested/path/file.ts',
     expected:
       'https://raw.githubusercontent.com/owner/repo/main/src/deep/nested/path/file.ts',
+    platform: 'github',
   },
   {
     name: 'handles GitHub blob URL with query string',
     url: 'https://github.com/owner/repo/blob/main/file.js?raw=true',
     expected: 'https://raw.githubusercontent.com/owner/repo/main/file.js',
+    platform: 'github',
   },
 ];
 
@@ -65,6 +70,7 @@ const GITHUB_GIST_CASES: readonly TransformCase[] = [
     url: 'https://gist.github.com/user/abc123def456789#file-example-js',
     expected:
       'https://gist.githubusercontent.com/user/abc123def456789/raw/example.js',
+    platform: 'github-gist',
   },
 ];
 
@@ -79,6 +85,7 @@ const GITLAB_BLOB_CASES: readonly TransformCase[] = [
     name: 'transforms GitLab blob URL with subdomain',
     url: 'https://code.gitlab.com/owner/project/-/blob/develop/README.md',
     expected: 'https://code.gitlab.com/owner/project/-/raw/develop/README.md',
+    platform: 'gitlab',
   },
 ];
 
@@ -93,6 +100,7 @@ const BITBUCKET_SRC_CASES: readonly TransformCase[] = [
     name: 'transforms Bitbucket src URL with www',
     url: 'https://www.bitbucket.org/owner/repo/src/develop/src/app.ts',
     expected: 'https://www.bitbucket.org/owner/repo/raw/develop/src/app.ts',
+    platform: 'bitbucket',
   },
 ];
 
@@ -138,9 +146,7 @@ function assertTransformCase(testCase: TransformCase): void {
   const result = transformToRawUrl(testCase.url);
 
   assert.equal(result.transformed, true);
-  if (testCase.platform) {
-    assert.equal(result.platform, testCase.platform);
-  }
+  assert.equal(result.platform, testCase.platform);
   assert.equal(result.url, testCase.expected);
 }
 
@@ -156,11 +162,11 @@ function registerTransformCases(
   cases: readonly TransformCase[]
 ): void {
   describe(title, () => {
-    for (const testCase of cases) {
+    cases.forEach((testCase) => {
       it(testCase.name, () => {
         assertTransformCase(testCase);
       });
-    }
+    });
   });
 }
 
@@ -169,11 +175,11 @@ function registerPassThroughCases(
   cases: readonly PassThroughCase[]
 ): void {
   describe(title, () => {
-    for (const testCase of cases) {
+    cases.forEach((testCase) => {
       it(testCase.name, () => {
         assertPassThroughCase(testCase);
       });
-    }
+    });
   });
 }
 

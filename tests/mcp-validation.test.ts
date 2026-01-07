@@ -117,18 +117,18 @@ function assertCase<T>(
 
 describe('mcp-validation', () => {
   describe('isJsonRpcBatchRequest', () => {
-    for (const testCase of BATCH_CASES) {
+    BATCH_CASES.forEach((testCase) => {
       it(testCase.name, () => {
         assertCase(testCase, isJsonRpcBatchRequest);
       });
-    }
+    });
   });
 
   describe('isMcpRequestBody', () => {
-    for (const testCase of MCP_REQUEST_CASES) {
+    MCP_REQUEST_CASES.forEach((testCase) => {
       it(testCase.name, () => {
         assertCase(testCase, isMcpRequestBody);
       });
-    }
+    });
   });
 });
