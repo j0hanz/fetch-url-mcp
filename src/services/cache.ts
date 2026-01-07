@@ -6,6 +6,7 @@ import type { CacheEntry } from '../config/types/content.js';
 
 import { sha256Hex } from '../utils/crypto.js';
 import { getErrorMessage } from '../utils/error-utils.js';
+import { isRecord } from '../utils/guards.js';
 
 import { logWarn } from './logger.js';
 
@@ -74,11 +75,10 @@ type CacheUpdateListener = (event: CacheUpdateEvent) => void;
 const updateListeners = new Set<CacheUpdateListener>();
 
 function stableStringify(value: unknown): string {
-  if (value === null || value === undefined) {
-    return '';
-  }
-
-  if (typeof value !== 'object') {
+  if (!isRecord(value)) {
+    if (value === null || value === undefined) {
+      return '';
+    }
     return JSON.stringify(value);
   }
 
@@ -86,7 +86,7 @@ function stableStringify(value: unknown): string {
     return `[${value.map((item) => stableStringify(item)).join(',')}]`;
   }
 
-  const entries = Object.entries(value as Record<string, unknown>)
+  const entries = Object.entries(value)
     .filter(([, entryValue]) => entryValue !== undefined)
     .sort(([a], [b]) => a.localeCompare(b))
     .map(

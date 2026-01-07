@@ -5,6 +5,8 @@ import type {
   TransformOptions,
 } from '../config/types/content.js';
 
+import { isRecord } from '../utils/guards.js';
+
 import { transformHtmlToMarkdownSync } from '../tools/utils/content-transform.js';
 
 interface WorkerTransformRequest {
@@ -23,13 +25,12 @@ const port = parentPort;
 function isWorkerTransformRequest(
   value: unknown
 ): value is WorkerTransformRequest {
-  if (!value || typeof value !== 'object') return false;
-  const record = value as Record<string, unknown>;
+  if (!isRecord(value)) return false;
   return (
-    typeof record.id === 'number' &&
-    typeof record.html === 'string' &&
-    typeof record.url === 'string' &&
-    typeof record.options === 'object'
+    typeof value.id === 'number' &&
+    typeof value.html === 'string' &&
+    typeof value.url === 'string' &&
+    typeof value.options === 'object'
   );
 }
 

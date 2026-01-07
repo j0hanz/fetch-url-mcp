@@ -4,6 +4,7 @@ import os from 'node:os';
 import { Agent, type Dispatcher } from 'undici';
 
 import { createErrorWithCode } from '../../utils/error-utils.js';
+import { isRecord } from '../../utils/guards.js';
 import { isBlockedIp } from '../../utils/url-validator.js';
 
 const DNS_LOOKUP_TIMEOUT_MS = 5000;
@@ -83,20 +84,23 @@ function resolveResultOrder(
 }
 
 function getLegacyVerbatim(options: dns.LookupOptions): boolean | undefined {
-  const legacy = (options as Record<string, unknown>).verbatim;
-  return typeof legacy === 'boolean' ? legacy : undefined;
+  if (isRecord(options)) {
+    // eslint-disable-next-line @typescript-eslint/dot-notation
+    const legacy = options['verbatim'];
+    return typeof legacy === 'boolean' ? legacy : undefined;
+  }
+  return undefined;
 }
 
 function buildLookupOptions(
   normalizedOptions: dns.LookupOptions
 ): dns.LookupOptions {
-  const options: Record<string, unknown> = {
-    ...normalizedOptions,
-    order: resolveResultOrder(normalizedOptions),
+  return {
+    family: normalizedOptions.family,
+    hints: normalizedOptions.hints,
     all: true,
+    order: resolveResultOrder(normalizedOptions),
   };
-  delete options.verbatim;
-  return options as dns.LookupOptions;
 }
 
 function createLookupCallback(

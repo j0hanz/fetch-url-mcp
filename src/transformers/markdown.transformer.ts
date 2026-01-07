@@ -11,6 +11,7 @@ import {
   detectLanguageFromCode,
   resolveLanguageFromAttributes,
 } from '../utils/code-language.js';
+import { isRecord } from '../utils/guards.js';
 
 let turndownInstance: TurndownService | null = null;
 
@@ -35,12 +36,8 @@ function createTurndownInstance(): TurndownService {
 }
 
 function isElement(node: unknown): node is HTMLElement {
-  return (
-    node !== null &&
-    typeof node === 'object' &&
-    'getAttribute' in node &&
-    typeof (node as HTMLElement).getAttribute === 'function'
-  );
+  if (!isRecord(node)) return false;
+  return 'getAttribute' in node && typeof node.getAttribute === 'function';
 }
 
 function addNoiseRule(instance: TurndownService): void {

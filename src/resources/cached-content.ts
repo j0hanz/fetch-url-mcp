@@ -6,6 +6,7 @@ import * as cache from '../services/cache.js';
 import { logWarn } from '../services/logger.js';
 
 import { getErrorMessage } from '../utils/error-utils.js';
+import { isRecord } from '../utils/guards.js';
 
 const VALID_NAMESPACES = new Set(['markdown', 'links']);
 const HASH_PATTERN = /^[a-f0-9.]+$/i;
@@ -61,10 +62,17 @@ export function registerCachedContentResource(server: McpServer): void {
   registerCacheUpdateSubscription(server);
 }
 
-function resolveCacheParams(params: Record<string, unknown>): {
+function resolveCacheParams(params: unknown): {
   namespace: string;
   urlHash: string;
 } {
+  if (!isRecord(params)) {
+    throw new McpError(
+      ErrorCode.InvalidParams,
+      'Invalid cache resource parameters'
+    );
+  }
+
   const namespace = resolveStringParam(params.namespace);
   const urlHash = resolveStringParam(params.urlHash);
 
@@ -145,9 +153,7 @@ function registerCacheContentResource(server: McpServer): void {
       mimeType: 'text/plain',
     },
     (uri, params) => {
-      const { namespace, urlHash } = resolveCacheParams(
-        params as Record<string, unknown>
-      );
+      const { namespace, urlHash } = resolveCacheParams(params);
       const cacheKey = `${namespace}:${urlHash}`;
       return buildCachedContentResponse(uri, cacheKey, namespace);
     }
@@ -199,11 +205,10 @@ function parseCachedPayload(raw: string): CachedPayload | null {
 }
 
 function isCachedPayload(value: unknown): value is CachedPayload {
-  if (!value || typeof value !== 'object') return false;
-  const record = value as Record<string, unknown>;
+  if (!isRecord(value)) return false;
   return (
-    (record.content === undefined || typeof record.content === 'string') &&
-    (record.markdown === undefined || typeof record.markdown === 'string')
+    (value.content === undefined || typeof value.content === 'string') &&
+    (value.markdown === undefined || typeof value.markdown === 'string')
   );
 }
 

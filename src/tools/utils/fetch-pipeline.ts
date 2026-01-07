@@ -8,6 +8,7 @@ import * as cache from '../../services/cache.js';
 import { fetchNormalizedUrl } from '../../services/fetcher.js';
 import { logDebug } from '../../services/logger.js';
 
+import { isRecord } from '../../utils/guards.js';
 import { transformToRawUrl } from '../../utils/url-transformer.js';
 import { normalizeUrl } from '../../utils/url-validator.js';
 
@@ -121,9 +122,8 @@ function persistCache<T>(
 }
 
 function extractTitle(value: unknown): string | undefined {
-  if (!value || typeof value !== 'object') return undefined;
-  if (!('title' in value)) return undefined;
-  const { title } = value as { title?: unknown };
+  if (!isRecord(value)) return undefined;
+  const { title } = value;
   return typeof title === 'string' ? title : undefined;
 }
 

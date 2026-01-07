@@ -114,7 +114,7 @@ async function handlePost(
   options: McpSessionOptions
 ): Promise<void> {
   const sessionId = getSessionId(req);
-  const { body } = req as { body: unknown };
+  const body = req.body as unknown;
 
   if (isJsonRpcBatchRequest(body)) {
     sendJsonRpcError(res, -32600, 'Batch requests are not supported', 400);

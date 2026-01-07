@@ -79,13 +79,16 @@ function parseCachedPayload(raw: string): CachedPayload | null {
   }
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
 function isCachedPayload(value: unknown): value is CachedPayload {
-  if (!value || typeof value !== 'object') return false;
-  const record = value as Record<string, unknown>;
+  if (!isRecord(value)) return false;
   return (
-    (record.content === undefined || typeof record.content === 'string') &&
-    (record.markdown === undefined || typeof record.markdown === 'string') &&
-    (record.title === undefined || typeof record.title === 'string')
+    (value.content === undefined || typeof value.content === 'string') &&
+    (value.markdown === undefined || typeof value.markdown === 'string') &&
+    (value.title === undefined || typeof value.title === 'string')
   );
 }
 

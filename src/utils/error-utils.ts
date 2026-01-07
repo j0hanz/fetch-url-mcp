@@ -14,6 +14,6 @@ export function isSystemError(error: unknown): error is NodeJS.ErrnoException {
   return (
     error instanceof Error &&
     'code' in error &&
-    typeof (error as { code: unknown }).code === 'string'
+    typeof Reflect.get(error, 'code') === 'string'
   );
 }

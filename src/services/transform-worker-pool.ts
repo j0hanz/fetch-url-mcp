@@ -7,6 +7,7 @@ import type {
 } from '../config/types/content.js';
 
 import { getErrorMessage } from '../utils/error-utils.js';
+import { isRecord } from '../utils/guards.js';
 
 import { logWarn } from './logger.js';
 
@@ -261,14 +262,13 @@ class TransformWorkerPool {
 }
 
 function isWorkerResponse(value: unknown): value is WorkerTransformResponse {
-  if (!value || typeof value !== 'object') return false;
-  const record = value as Record<string, unknown>;
-  if (typeof record.id !== 'number') return false;
-  if (record.ok === true) {
-    return 'result' in record;
+  if (!isRecord(value)) return false;
+  if (typeof value.id !== 'number') return false;
+  if (value.ok === true) {
+    return 'result' in value;
   }
-  if (record.ok === false) {
-    return typeof record.error === 'string';
+  if (value.ok === false) {
+    return typeof value.error === 'string';
   }
   return false;
 }

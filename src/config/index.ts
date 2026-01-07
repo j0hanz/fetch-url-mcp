@@ -32,7 +32,7 @@ function parseLogLevel(envValue: string | undefined): LogLevel {
   return isLogLevel(level) ? level : 'info';
 }
 
-const ALLOWED_LOG_LEVELS: ReadonlySet<LogLevel> = new Set([
+const ALLOWED_LOG_LEVELS: ReadonlySet<string> = new Set([
   'debug',
   'info',
   'warn',
@@ -40,7 +40,7 @@ const ALLOWED_LOG_LEVELS: ReadonlySet<LogLevel> = new Set([
 ]);
 
 function isLogLevel(value: string): value is LogLevel {
-  return ALLOWED_LOG_LEVELS.has(value as LogLevel);
+  return ALLOWED_LOG_LEVELS.has(value);
 }
 
 const host = process.env.HOST ?? '127.0.0.1';

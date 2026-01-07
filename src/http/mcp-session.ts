@@ -164,7 +164,7 @@ function createTransportAdapter(
     onmessage: {
       get: () => transport.onmessage,
       set: (handler: Transport['onmessage']) => {
-        transport.onmessage = handler as typeof transport.onmessage;
+        transport.onmessage = handler;
       },
       enumerable: true,
       configurable: true,
