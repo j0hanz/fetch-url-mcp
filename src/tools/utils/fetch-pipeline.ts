@@ -31,8 +31,7 @@ function attemptCacheRetrieval<T>(
     return null;
   }
 
-  const parsed = cache.getParsed<T>(cacheKey);
-  const data = parsed ?? deserialize(cached.content);
+  const data = deserialize(cached.content);
 
   if (data === undefined) {
     logDebug('Cache miss due to deserialize failure', {
@@ -118,7 +117,7 @@ function persistCache<T>(
   if (title !== undefined) {
     metadata.title = title;
   }
-  cache.set(cacheKey, serializer(data), metadata, data);
+  cache.set(cacheKey, serializer(data), metadata);
 }
 
 function extractTitle(value: unknown): string | undefined {

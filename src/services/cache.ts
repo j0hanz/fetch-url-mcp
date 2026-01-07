@@ -1,21 +1,20 @@
 import { setInterval as setIntervalPromise } from 'node:timers/promises';
 
-import { CACHE_HASH } from '../config/constants.js';
 import { config } from '../config/index.js';
 import type { CacheEntry } from '../config/types/content.js';
 
-import { sha256Hex } from '../utils/crypto.js';
 import { getErrorMessage } from '../utils/error-utils.js';
-import { isRecord } from '../utils/guards.js';
 
+import type { CacheKeyParts } from './cache-keys.js';
+import { parseCacheKey } from './cache-keys.js';
 import { logWarn } from './logger.js';
+
+export { createCacheKey, parseCacheKey, toResourceUri } from './cache-keys.js';
 
 interface CacheItem {
   entry: CacheEntry;
   expiresAt: number;
-  parsed?: unknown;
 }
-
 const contentCache = new Map<string, CacheItem>();
 let cleanupController: AbortController | null = null;
 
@@ -35,30 +34,18 @@ async function runCleanupLoop(signal: AbortSignal): Promise<void> {
     signal,
     ref: false,
   })) {
-    evictEntries();
+    enforceCacheLimits();
   }
 }
 
-function evictEntries(): void {
+function enforceCacheLimits(): void {
   const now = Date.now();
   for (const [key, item] of contentCache.entries()) {
     if (now > item.expiresAt) {
       contentCache.delete(key);
     }
   }
-  if (contentCache.size <= config.cache.maxKeys) return;
-  const keysToRemove = contentCache.size - config.cache.maxKeys;
-  const iterator = contentCache.keys();
-  for (let i = 0; i < keysToRemove; i++) {
-    const { value, done } = iterator.next();
-    if (done) break;
-    contentCache.delete(value);
-  }
-}
-
-interface CacheKeyParts {
-  namespace: string;
-  urlHash: string;
+  trimCacheToMaxKeys();
 }
 
 interface CacheUpdateEvent extends CacheKeyParts {
@@ -73,86 +60,6 @@ interface CacheEntryMetadata {
 type CacheUpdateListener = (event: CacheUpdateEvent) => void;
 
 const updateListeners = new Set<CacheUpdateListener>();
-
-function stableStringify(value: unknown): string {
-  if (!isRecord(value)) {
-    if (value === null || value === undefined) {
-      return '';
-    }
-    return JSON.stringify(value);
-  }
-
-  if (Array.isArray(value)) {
-    return `[${value.map((item) => stableStringify(item)).join(',')}]`;
-  }
-
-  const entries = Object.entries(value)
-    .filter(([, entryValue]) => entryValue !== undefined)
-    .sort(([a], [b]) => a.localeCompare(b))
-    .map(
-      ([key, entryValue]) =>
-        `${JSON.stringify(key)}:${stableStringify(entryValue)}`
-    );
-
-  return `{${entries.join(',')}}`;
-}
-
-function createHashFragment(input: string, length: number): string {
-  return sha256Hex(input).substring(0, length);
-}
-
-/**
- * Constructs a cache key from namespace, URL hash, and optional vary hash.
- * Format: "namespace:urlHash" or "namespace:urlHash.varyHash" if vary params exist.
- * @param namespace - Cache namespace (e.g., "fetch-markdown")
- * @param urlHash - SHA-256 hash of the URL (truncated to 16 chars)
- * @param varyHash - Optional hash of vary parameters (e.g., headers, options)
- * @returns Complete cache key string
- */
-function buildCacheKey(
-  namespace: string,
-  urlHash: string,
-  varyHash?: string
-): string {
-  return varyHash
-    ? `${namespace}:${urlHash}.${varyHash}`
-    : `${namespace}:${urlHash}`;
-}
-
-function getVaryHash(
-  vary?: Record<string, unknown> | string
-): string | undefined {
-  if (!vary) return undefined;
-  const varyString = typeof vary === 'string' ? vary : stableStringify(vary);
-  if (!varyString) return undefined;
-  return createHashFragment(varyString, CACHE_HASH.VARY_HASH_LENGTH);
-}
-
-export function createCacheKey(
-  namespace: string,
-  url: string,
-  vary?: Record<string, unknown> | string
-): string | null {
-  if (!namespace || !url) return null;
-
-  const urlHash = createHashFragment(url, CACHE_HASH.URL_HASH_LENGTH);
-  const varyHash = getVaryHash(vary);
-  return buildCacheKey(namespace, urlHash, varyHash);
-}
-
-export function parseCacheKey(cacheKey: string): CacheKeyParts | null {
-  if (!cacheKey) return null;
-  const [namespace, ...rest] = cacheKey.split(':');
-  const urlHash = rest.join(':');
-  if (!namespace || !urlHash) return null;
-  return { namespace, urlHash };
-}
-
-export function toResourceUri(cacheKey: string): string | null {
-  const parts = parseCacheKey(cacheKey);
-  if (!parts) return null;
-  return `superfetch://cache/${parts.namespace}/${parts.urlHash}`;
-}
 
 export function onCacheUpdate(listener: CacheUpdateListener): () => void {
   updateListeners.add(listener);
@@ -210,8 +117,7 @@ function readCacheItem(cacheKey: string): CacheItem | undefined {
 export function set(
   cacheKey: string | null,
   content: string,
-  metadata: CacheEntryMetadata,
-  parsed?: unknown
+  metadata: CacheEntryMetadata
 ): void {
   if (!config.cache.enabled) return;
   if (!cacheKey) return;
@@ -219,35 +125,13 @@ export function set(
 
   try {
     startCleanupLoop();
-    const entry = buildCacheEntry(cacheKey, content, metadata);
-    persistCacheEntry(cacheKey, entry, parsed);
+    const entry = buildCacheEntry(content, metadata);
+    persistCacheEntry(cacheKey, entry);
   } catch (error) {
     logWarn('Cache set error', {
       key: cacheKey.substring(0, 100),
       error: getErrorMessage(error),
     });
-  }
-}
-
-export function getParsed<T>(
-  cacheKey: string | null,
-  guard?: (value: unknown) => value is T
-): T | undefined {
-  if (!isCacheReadable(cacheKey)) return undefined;
-
-  try {
-    const item = readCacheItem(cacheKey);
-    const value = item?.parsed;
-    if (!guard) {
-      return value as T | undefined;
-    }
-    return guard(value) ? value : undefined;
-  } catch (error) {
-    logWarn('Cache get parsed error', {
-      key: cacheKey.substring(0, 100),
-      error: getErrorMessage(error),
-    });
-    return undefined;
   }
 }
 
@@ -260,7 +144,6 @@ export function isEnabled(): boolean {
 }
 
 function buildCacheEntry(
-  cacheKey: string,
   content: string,
   metadata: CacheEntryMetadata
 ): CacheEntry {
@@ -278,18 +161,14 @@ function buildCacheEntry(
   return entry;
 }
 
-function persistCacheEntry(
-  cacheKey: string,
-  entry: CacheEntry,
-  parsed?: unknown
-): void {
+function persistCacheEntry(cacheKey: string, entry: CacheEntry): void {
   const expiresAt = Date.now() + config.cache.ttl * 1000;
-  contentCache.set(cacheKey, { entry, expiresAt, parsed });
-  enforceMaxKeysLimit();
+  contentCache.set(cacheKey, { entry, expiresAt });
+  trimCacheToMaxKeys();
   emitCacheUpdate(cacheKey);
 }
 
-function enforceMaxKeysLimit(): void {
+function trimCacheToMaxKeys(): void {
   if (contentCache.size <= config.cache.maxKeys) return;
   const keysToRemove = contentCache.size - config.cache.maxKeys;
   const iterator = contentCache.keys();

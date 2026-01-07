@@ -3,7 +3,7 @@ import type { Dispatcher } from 'undici';
 import { config } from '../config/index.js';
 import type { FetchOptions } from '../config/types/runtime.js';
 
-import { destroyAgents, dispatcher } from './fetcher/agents.js';
+import { dispatcher } from './fetcher/agents.js';
 import {
   createHttpError,
   createRateLimitError,
@@ -16,8 +16,6 @@ import {
 } from './fetcher/interceptors.js';
 import { fetchWithRedirects } from './fetcher/redirects.js';
 import { readResponseText } from './fetcher/response.js';
-
-export { destroyAgents };
 
 const DEFAULT_HEADERS = {
   'User-Agent': config.fetcher.userAgent,

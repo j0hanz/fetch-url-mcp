@@ -10,10 +10,7 @@ import type {
 
 import { config } from '../config/index.js';
 
-import {
-  bindToRequestContext,
-  runWithRequestContext,
-} from '../services/context.js';
+import { runWithRequestContext } from '../services/context.js';
 
 import { getSessionId } from './sessions.js';
 
@@ -130,8 +127,7 @@ function createContextMiddleware(): (
       sessionId === undefined ? { requestId } : { requestId, sessionId };
 
     runWithRequestContext(context, () => {
-      const boundNext = bindToRequestContext(next);
-      boundNext();
+      next();
     });
   };
 }

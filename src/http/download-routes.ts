@@ -6,6 +6,10 @@ import type { CacheEntry } from '../config/types/content.js';
 import * as cache from '../services/cache.js';
 import { logDebug } from '../services/logger.js';
 
+import {
+  parseCachedPayload,
+  resolveCachedPayloadContent,
+} from '../utils/cached-payload.js';
 import { generateSafeFilename } from '../utils/filename-generator.js';
 
 const HASH_PATTERN = /^[a-f0-9.]+$/i;
@@ -13,12 +17,6 @@ const HASH_PATTERN = /^[a-f0-9.]+$/i;
 interface DownloadParams {
   namespace: string;
   hash: string;
-}
-
-interface CachedPayload {
-  content?: string;
-  markdown?: string;
-  title?: string;
 }
 
 interface DownloadPayload {
@@ -70,38 +68,6 @@ function respondServiceUnavailable(res: Response): void {
   });
 }
 
-function parseCachedPayload(raw: string): CachedPayload | null {
-  try {
-    const parsed: unknown = JSON.parse(raw);
-    return isCachedPayload(parsed) ? parsed : null;
-  } catch {
-    return null;
-  }
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null;
-}
-
-function isCachedPayload(value: unknown): value is CachedPayload {
-  if (!isRecord(value)) return false;
-  return (
-    (value.content === undefined || typeof value.content === 'string') &&
-    (value.markdown === undefined || typeof value.markdown === 'string') &&
-    (value.title === undefined || typeof value.title === 'string')
-  );
-}
-
-function resolvePayloadContent(payload: CachedPayload): string | null {
-  if (typeof payload.markdown === 'string') {
-    return payload.markdown;
-  }
-  if (typeof payload.content === 'string') {
-    return payload.content;
-  }
-  return null;
-}
-
 function resolveDownloadPayload(
   params: DownloadParams,
   cacheEntry: CacheEntry
@@ -109,7 +75,7 @@ function resolveDownloadPayload(
   const payload = parseCachedPayload(cacheEntry.content);
   if (!payload) return null;
 
-  const content = resolvePayloadContent(payload);
+  const content = resolveCachedPayloadContent(payload);
   if (!content) return null;
 
   const safeTitle =

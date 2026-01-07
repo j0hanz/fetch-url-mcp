@@ -4,6 +4,8 @@ import type { ReadableStream as WebReadableStream } from 'node:stream/web';
 
 import { FetchError } from '../../errors/app-error.js';
 
+type WritableChunk = string | Buffer | Uint8Array;
+
 function assertContentLengthWithinLimit(
   response: Response,
   url: string,
@@ -24,53 +26,86 @@ function assertContentLengthWithinLimit(
   );
 }
 
+interface StreamReadState {
+  decoder: TextDecoder;
+  parts: string[];
+  total: number;
+}
+
+function createReadState(): StreamReadState {
+  return {
+    decoder: new TextDecoder(),
+    parts: [],
+    total: 0,
+  };
+}
+
+function toBuffer(chunk: WritableChunk): Buffer {
+  if (typeof chunk === 'string') {
+    return Buffer.from(chunk);
+  }
+
+  return Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+}
+
+function appendChunk(
+  state: StreamReadState,
+  chunk: WritableChunk,
+  maxBytes: number,
+  url: string
+): void {
+  const buffer = toBuffer(chunk);
+  state.total += buffer.length;
+
+  if (state.total > maxBytes) {
+    throw new FetchError(
+      `Response exceeds maximum size of ${maxBytes} bytes`,
+      url
+    );
+  }
+
+  const decoded = state.decoder.decode(buffer, { stream: true });
+  if (decoded) state.parts.push(decoded);
+}
+
+function finalizeRead(state: StreamReadState): void {
+  const decoded = state.decoder.decode();
+  if (decoded) state.parts.push(decoded);
+}
+
+function createLimitedSink(
+  state: StreamReadState,
+  maxBytes: number,
+  url: string
+): Writable {
+  return new Writable({
+    write(
+      chunk: WritableChunk,
+      _encoding: BufferEncoding,
+      callback: (error?: Error | null) => void
+    ): void {
+      try {
+        appendChunk(state, chunk, maxBytes, url);
+        callback();
+      } catch (error) {
+        callback(error instanceof Error ? error : new Error(String(error)));
+      }
+    },
+    final(callback: (error?: Error | null) => void): void {
+      finalizeRead(state);
+      callback();
+    },
+  });
+}
+
 async function readStreamWithLimit(
   stream: ReadableStream<Uint8Array>,
   url: string,
   maxBytes: number,
   signal?: AbortSignal
 ): Promise<{ text: string; size: number }> {
-  const decoder = new TextDecoder();
-  let total = 0;
-  const parts: string[] = [];
-  type WritableChunk = string | Buffer | Uint8Array;
-  const toBuffer = (chunk: WritableChunk): Buffer => {
-    if (typeof chunk === 'string') {
-      return Buffer.from(chunk);
-    }
-
-    return Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
-  };
-
-  const sink = new Writable({
-    write(
-      chunk: WritableChunk,
-      _encoding: BufferEncoding,
-      callback: (error?: Error | null) => void
-    ): void {
-      const buffer = toBuffer(chunk);
-      total += buffer.length;
-
-      if (total > maxBytes) {
-        callback(
-          new FetchError(
-            `Response exceeds maximum size of ${maxBytes} bytes`,
-            url
-          )
-        );
-        return;
-      }
-
-      const decoded = decoder.decode(buffer, { stream: true });
-      if (decoded) parts.push(decoded);
-      callback();
-    },
-    final(callback: (error?: Error | null) => void): void {
-      const decoded = decoder.decode();
-      if (decoded) parts.push(decoded);
-      callback();
-    },
-  });
+  const state = createReadState();
+  const sink = createLimitedSink(state, maxBytes, url);
 
   try {
     const readable = Readable.fromWeb(stream as WebReadableStream, { signal });
@@ -87,7 +122,7 @@ async function readStreamWithLimit(
     throw error;
   }
 
-  return { text: parts.join(''), size: total };
+  return { text: state.parts.join(''), size: state.total };
 }
 
 export async function readResponseText(

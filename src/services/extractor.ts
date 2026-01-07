@@ -4,7 +4,6 @@ import { Readability } from '@mozilla/readability';
 
 import type {
   ExtractedArticle,
-  ExtractedMetadata,
   ExtractionResult,
 } from '../config/types/content.js';
 
@@ -12,103 +11,7 @@ import { getErrorMessage } from '../utils/error-utils.js';
 import { truncateHtml } from '../utils/html-truncator.js';
 
 import { logError, logInfo, logWarn } from './logger.js';
-import {
-  createMetaCollectorState,
-  type MetaCollectorState,
-  resolveMetaField,
-} from './metadata-collector.js';
-
-function collectMetaTag(state: MetaCollectorState, tag: HTMLMetaElement): void {
-  const content = getMetaContent(tag);
-  if (!content) return;
-
-  if (collectOpenGraphMeta(state, tag, content)) return;
-  if (collectTwitterMeta(state, tag, content)) return;
-  collectStandardMeta(state, tag, content);
-}
-
-function getMetaContent(tag: HTMLMetaElement): string | null {
-  return tag.getAttribute('content')?.trim() ?? null;
-}
-
-function collectOpenGraphMeta(
-  state: MetaCollectorState,
-  tag: HTMLMetaElement,
-  content: string
-): boolean {
-  const property = tag.getAttribute('property');
-  if (!property?.startsWith('og:')) return false;
-
-  const key = property.replace('og:', '');
-  if (key === 'title') state.title.og = content;
-  if (key === 'description') state.description.og = content;
-  return true;
-}
-
-function collectTwitterMeta(
-  state: MetaCollectorState,
-  tag: HTMLMetaElement,
-  content: string
-): boolean {
-  const name = tag.getAttribute('name');
-  if (!name?.startsWith('twitter:')) return false;
-
-  const key = name.replace('twitter:', '');
-  if (key === 'title') state.title.twitter = content;
-  if (key === 'description') state.description.twitter = content;
-  return true;
-}
-
-function collectStandardMeta(
-  state: MetaCollectorState,
-  tag: HTMLMetaElement,
-  content: string
-): void {
-  const name = tag.getAttribute('name');
-  if (name === 'description') {
-    state.description.standard = content;
-  }
-
-  if (name === 'author') {
-    state.author.standard = content;
-  }
-}
-
-function scanMetaTags(document: Document, state: MetaCollectorState): void {
-  const metaTags = document.querySelectorAll('meta');
-  for (const tag of metaTags) {
-    collectMetaTag(state, tag);
-  }
-}
-
-function ensureTitleFallback(
-  document: Document,
-  state: MetaCollectorState
-): void {
-  if (state.title.standard) return;
-  const titleEl = document.querySelector('title');
-  if (titleEl?.textContent) {
-    state.title.standard = titleEl.textContent.trim();
-  }
-}
-
-function extractMetadata(document: Document): ExtractedMetadata {
-  const state = createMetaCollectorState();
-
-  scanMetaTags(document, state);
-  ensureTitleFallback(document, state);
-
-  const metadata: ExtractedMetadata = {};
-  const title = resolveMetaField(state, 'title');
-  const description = resolveMetaField(state, 'description');
-  const author = resolveMetaField(state, 'author');
-
-  if (title !== undefined) metadata.title = title;
-  if (description !== undefined) metadata.description = description;
-  if (author !== undefined) metadata.author = author;
-
-  return metadata;
-}
+import { extractMetadata } from './metadata-collector.js';
 
 function isReadabilityCompatible(doc: unknown): doc is Document {
   if (!doc || typeof doc !== 'object') return false;

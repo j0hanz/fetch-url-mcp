@@ -2,7 +2,7 @@ import { setInterval as setIntervalPromise } from 'node:timers/promises';
 
 import { logInfo, logWarn } from '../services/logger.js';
 
-import { evictExpiredSessions } from './mcp-routes.js';
+import { evictExpiredSessions } from './mcp-session.js';
 import type { SessionStore } from './sessions.js';
 
 export function startSessionCleanupLoop(

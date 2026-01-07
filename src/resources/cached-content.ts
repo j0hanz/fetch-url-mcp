@@ -5,16 +5,15 @@ import { ErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js';
 import * as cache from '../services/cache.js';
 import { logWarn } from '../services/logger.js';
 
+import {
+  parseCachedPayload,
+  resolveCachedPayloadContent,
+} from '../utils/cached-payload.js';
 import { getErrorMessage } from '../utils/error-utils.js';
 import { isRecord } from '../utils/guards.js';
 
-const VALID_NAMESPACES = new Set(['markdown', 'links']);
+const CACHE_NAMESPACE = 'markdown';
 const HASH_PATTERN = /^[a-f0-9.]+$/i;
-
-interface CachedPayload {
-  content?: string;
-  markdown?: string;
-}
 
 function buildResourceEntry(
   namespace: string,
@@ -29,7 +28,7 @@ function buildResourceEntry(
     name: `${namespace}:${urlHash}`,
     uri: `superfetch://cache/${namespace}/${urlHash}`,
     description: `Cached content entry for ${namespace}`,
-    mimeType: resolveCacheMimeType(namespace),
+    mimeType: 'text/markdown',
   };
 }
 
@@ -40,7 +39,8 @@ function listCachedResources(): {
     .keys()
     .map((key) => {
       const parts = cache.parseCacheKey(key);
-      return parts ? buildResourceEntry(parts.namespace, parts.urlHash) : null;
+      if (parts?.namespace !== CACHE_NAMESPACE) return null;
+      return buildResourceEntry(parts.namespace, parts.urlHash);
     })
     .filter((entry): entry is NonNullable<typeof entry> => entry !== null);
 
@@ -95,49 +95,10 @@ function resolveCacheParams(params: unknown): {
 
 function buildCachedContentResponse(
   uri: URL,
-  cacheKey: string,
-  namespace: string
+  cacheKey: string
 ): { contents: { uri: string; mimeType: string; text: string }[] } {
-  const cached = cache.get(cacheKey);
-
-  if (!cached) {
-    throw new McpError(
-      ErrorCode.InvalidParams,
-      `Content not found in cache for key: ${cacheKey}`
-    );
-  }
-
-  if (namespace !== 'markdown') {
-    return {
-      contents: [
-        {
-          uri: uri.href,
-          mimeType: resolveCacheMimeType(namespace),
-          text: cached.content,
-        },
-      ],
-    };
-  }
-
-  const payload = parseCachedPayload(cached.content);
-  const resolvedContent = payload ? resolvePayloadContent(payload) : null;
-
-  if (!resolvedContent) {
-    throw new McpError(
-      ErrorCode.InternalError,
-      `Cached content is missing for namespace ${namespace}`
-    );
-  }
-
-  return {
-    contents: [
-      {
-        uri: uri.href,
-        mimeType: 'text/markdown',
-        text: resolvedContent,
-      },
-    ],
-  };
+  const cached = requireCacheEntry(cacheKey);
+  return buildMarkdownContentResponse(uri, cached.content);
 }
 
 function registerCacheContentResource(server: McpServer): void {
@@ -149,13 +110,13 @@ function registerCacheContentResource(server: McpServer): void {
     {
       title: 'Cached Content',
       description:
-        'Access previously fetched web content from cache. Namespace: markdown, links. UrlHash: SHA-256 hash of the URL.',
+        'Access previously fetched web content from cache. Namespace: markdown. UrlHash: SHA-256 hash of the URL.',
       mimeType: 'text/plain',
     },
     (uri, params) => {
       const { namespace, urlHash } = resolveCacheParams(params);
       const cacheKey = `${namespace}:${urlHash}`;
-      return buildCachedContentResponse(uri, cacheKey, namespace);
+      return buildCachedContentResponse(uri, cacheKey);
     }
   );
 }
@@ -178,13 +139,8 @@ function registerCacheUpdateSubscription(server: McpServer): void {
   };
 }
 
-function resolveCacheMimeType(namespace: string): string {
-  if (namespace === 'markdown') return 'text/markdown';
-  return 'application/json';
-}
-
 function isValidNamespace(namespace: string): boolean {
-  return VALID_NAMESPACES.has(namespace);
+  return namespace === CACHE_NAMESPACE;
 }
 
 function isValidHash(hash: string): boolean {
@@ -195,29 +151,38 @@ function resolveStringParam(value: unknown): string | null {
   return typeof value === 'string' ? value : null;
 }
 
-function parseCachedPayload(raw: string): CachedPayload | null {
-  try {
-    const parsed: unknown = JSON.parse(raw);
-    return isCachedPayload(parsed) ? parsed : null;
-  } catch {
-    return null;
+function requireCacheEntry(cacheKey: string): { content: string } {
+  const cached = cache.get(cacheKey);
+  if (!cached) {
+    throw new McpError(
+      ErrorCode.InvalidParams,
+      `Content not found in cache for key: ${cacheKey}`
+    );
   }
+  return cached;
 }
 
-function isCachedPayload(value: unknown): value is CachedPayload {
-  if (!isRecord(value)) return false;
-  return (
-    (value.content === undefined || typeof value.content === 'string') &&
-    (value.markdown === undefined || typeof value.markdown === 'string')
-  );
-}
+function buildMarkdownContentResponse(
+  uri: URL,
+  content: string
+): { contents: { uri: string; mimeType: string; text: string }[] } {
+  const payload = parseCachedPayload(content);
+  const resolvedContent = payload ? resolveCachedPayloadContent(payload) : null;
 
-function resolvePayloadContent(payload: CachedPayload): string | null {
-  if (typeof payload.markdown === 'string') {
-    return payload.markdown;
+  if (!resolvedContent) {
+    throw new McpError(
+      ErrorCode.InternalError,
+      'Cached markdown content is missing'
+    );
   }
-  if (typeof payload.content === 'string') {
-    return payload.content;
-  }
-  return null;
+
+  return {
+    contents: [
+      {
+        uri: uri.href,
+        mimeType: 'text/markdown',
+        text: resolvedContent,
+      },
+    ],
+  };
 }

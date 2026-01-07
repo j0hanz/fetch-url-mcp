@@ -5,7 +5,8 @@ import { Agent, type Dispatcher } from 'undici';
 
 import { createErrorWithCode } from '../../utils/error-utils.js';
 import { isRecord } from '../../utils/guards.js';
-import { isBlockedIp } from '../../utils/url-validator.js';
+
+import { handleLookupResult } from './dns-selection.js';
 
 const DNS_LOOKUP_TIMEOUT_MS = 5000;
 
@@ -22,27 +23,8 @@ function resolveDns(
     buildLookupContext(options);
   const lookupOptions = buildLookupOptions(normalizedOptions);
 
-  let done = false;
-  const timer = setTimeout(() => {
-    if (done) return;
-    done = true;
-    callback(
-      createErrorWithCode(`DNS lookup timed out for ${hostname}`, 'ETIMEOUT'),
-      []
-    );
-  }, DNS_LOOKUP_TIMEOUT_MS);
-  timer.unref();
-
-  const safeCallback = (
-    err: NodeJS.ErrnoException | null,
-    address: string | dns.LookupAddress[],
-    family?: number
-  ): void => {
-    if (done) return;
-    done = true;
-    clearTimeout(timer);
-    callback(err, address, family);
-  };
+  const timeout = createLookupTimeout(hostname, callback);
+  const safeCallback = wrapLookupCallback(callback, timeout);
 
   dns.lookup(
     hostname,
@@ -136,134 +118,57 @@ function resolveFamily(
   return family;
 }
 
-function normalizeLookupResults(
-  addresses: string | dns.LookupAddress[],
-  family: number | undefined
-): dns.LookupAddress[] {
-  if (Array.isArray(addresses)) {
-    return addresses;
-  }
-
-  return [{ address: addresses, family: family ?? 4 }];
-}
-
-function handleLookupResult(
-  error: NodeJS.ErrnoException | null,
-  addresses: string | dns.LookupAddress[],
+function createLookupTimeout(
   hostname: string,
-  resolvedFamily: number | undefined,
-  useAll: boolean,
   callback: (
     err: NodeJS.ErrnoException | null,
     address: string | dns.LookupAddress[],
     family?: number
   ) => void
-): void {
-  if (error) {
-    callback(error, addresses);
-    return;
-  }
-
-  const list = normalizeLookupResults(addresses, resolvedFamily);
-  const invalidFamilyError = findInvalidFamilyError(list, hostname);
-  if (invalidFamilyError) {
-    callback(invalidFamilyError, list);
-    return;
-  }
-
-  const blockedError = findBlockedIpError(list, hostname);
-  if (blockedError) {
-    callback(blockedError, list);
-    return;
-  }
-
-  const selection = selectLookupResult(list, useAll, hostname);
-  if (selection.error) {
-    callback(selection.error, selection.fallback);
-    return;
-  }
-
-  callback(null, selection.address, selection.family);
-}
-
-function selectLookupResult(
-  list: dns.LookupAddress[],
-  useAll: boolean,
-  hostname: string
 ): {
-  address: string | dns.LookupAddress[];
-  family?: number;
-  error?: NodeJS.ErrnoException;
-  fallback: dns.LookupAddress[];
+  isDone: () => boolean;
+  markDone: () => void;
 } {
-  if (list.length === 0) {
-    return {
-      error: createNoDnsResultsError(hostname),
-      fallback: [],
-      address: [],
-    };
-  }
-
-  if (useAll) {
-    return { address: list, fallback: list };
-  }
-
-  const first = list.at(0);
-  if (!first) {
-    return {
-      error: createNoDnsResultsError(hostname),
-      fallback: [],
-      address: [],
-    };
-  }
+  let done = false;
+  const timer = setTimeout(() => {
+    if (done) return;
+    done = true;
+    callback(
+      createErrorWithCode(`DNS lookup timed out for ${hostname}`, 'ETIMEOUT'),
+      []
+    );
+  }, DNS_LOOKUP_TIMEOUT_MS);
+  timer.unref();
 
   return {
-    address: first.address,
-    family: first.family,
-    fallback: list,
+    isDone: (): boolean => done,
+    markDone: (): void => {
+      done = true;
+      clearTimeout(timer);
+    },
   };
 }
 
-function findBlockedIpError(
-  list: dns.LookupAddress[],
-  hostname: string
-): NodeJS.ErrnoException | null {
-  for (const addr of list) {
-    const ip = typeof addr === 'string' ? addr : addr.address;
-    if (!isBlockedIp(ip)) {
-      continue;
-    }
-
-    return createErrorWithCode(
-      `Blocked IP detected for ${hostname}`,
-      'EBLOCKED'
-    );
+function wrapLookupCallback(
+  callback: (
+    err: NodeJS.ErrnoException | null,
+    address: string | dns.LookupAddress[],
+    family?: number
+  ) => void,
+  timeout: {
+    isDone: () => boolean;
+    markDone: () => void;
   }
-
-  return null;
-}
-
-function findInvalidFamilyError(
-  list: dns.LookupAddress[],
-  hostname: string
-): NodeJS.ErrnoException | null {
-  for (const addr of list) {
-    const family = typeof addr === 'string' ? 0 : addr.family;
-    if (family === 4 || family === 6) continue;
-    return createErrorWithCode(
-      `Invalid address family returned for ${hostname}`,
-      'EINVAL'
-    );
-  }
-
-  return null;
-}
-
-function createNoDnsResultsError(hostname: string): NodeJS.ErrnoException {
-  return createErrorWithCode(
-    `No DNS results returned for ${hostname}`,
-    'ENODATA'
-  );
+): (
+  err: NodeJS.ErrnoException | null,
+  address: string | dns.LookupAddress[],
+  family?: number
+) => void {
+  return (err, address, family): void => {
+    if (timeout.isDone()) return;
+    timeout.markDone();
+    callback(err, address, family);
+  };
 }
 
 function getAgentOptions(): ConstructorParameters<typeof Agent>[0] {

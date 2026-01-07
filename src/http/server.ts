@@ -4,9 +4,8 @@ import type { Express, RequestHandler } from 'express';
 
 import { config, enableHttpMode } from '../config/index.js';
 
-import { destroyAgents } from '../services/fetcher.js';
+import { destroyAgents } from '../services/fetcher/agents.js';
 import { logError, logInfo, logWarn } from '../services/logger.js';
-import { destroyTransformWorkers } from '../services/transform-worker-pool.js';
 
 import { errorHandler } from '../middleware/error-handler.js';
 
@@ -21,12 +20,11 @@ import { attachBaseMiddleware } from './server-middleware.js';
 import { startSessionCleanupLoop } from './session-cleanup.js';
 import { createSessionStore } from './sessions.js';
 
-function isLoopbackHost(host: string): boolean {
-  return host === '127.0.0.1' || host === '::1' || host === 'localhost';
-}
-
 function assertHttpConfiguration(): void {
-  if (!config.security.allowRemote && !isLoopbackHost(config.server.host)) {
+  const isLoopback = ['127.0.0.1', '::1', 'localhost'].includes(
+    config.server.host
+  );
+  if (!config.security.allowRemote && !isLoopback) {
     logError(
       'Refusing to bind to non-loopback host without ALLOW_REMOTE=true',
       { host: config.server.host }
@@ -48,17 +46,12 @@ function startListening(app: Express): ReturnType<Express['listen']> {
         port: config.server.port,
       });
 
+      const baseUrl = `http://${config.server.host}:${config.server.port}`;
       process.stdout.write(
-        `${styleText('green', '✓')} superFetch MCP server running at ${styleText('cyan', `http://${config.server.host}:${config.server.port}`)}\n`
-      );
-      process.stdout.write(
-        `  Health check: ${styleText('dim', `http://${config.server.host}:${config.server.port}/health`)}\n`
-      );
-      process.stdout.write(
-        `  MCP endpoint: ${styleText('dim', `http://${config.server.host}:${config.server.port}/mcp`)}\n`
-      );
-      process.stdout.write(
-        `\n${styleText('dim', 'Run with --stdio flag for direct stdio integration')}\n`
+        `${styleText('green', 'V')} superFetch MCP server running at ${styleText('cyan', baseUrl)}\n` +
+          `  Health check: ${styleText('dim', `${baseUrl}/health`)}\n` +
+          `  MCP endpoint: ${styleText('dim', `${baseUrl}/mcp`)}\n` +
+          `\n${styleText('dim', 'Run with --stdio flag for direct stdio integration')}\n`
       );
     })
     .on('error', (err) => {
@@ -93,7 +86,6 @@ function createShutdownHandler(
     );
 
     destroyAgents();
-    await destroyTransformWorkers();
 
     server.close(() => {
       logInfo('HTTP server closed');
@@ -118,17 +110,62 @@ function registerSignalHandlers(
   });
 }
 
+function buildMiddleware(): {
+  rateLimitMiddleware: RequestHandler;
+  stopRateLimitCleanup: () => void;
+  authMiddleware: RequestHandler;
+  corsMiddleware: RequestHandler;
+} {
+  const { middleware: rateLimitMiddleware, stop: stopRateLimitCleanup } =
+    createRateLimitMiddleware(config.rateLimit);
+  const authMiddleware = createAuthMiddleware(config.security.apiKey ?? '');
+  // No CORS - MCP clients don't run in browsers
+  const corsMiddleware = createCorsMiddleware();
+
+  return {
+    rateLimitMiddleware,
+    stopRateLimitCleanup,
+    authMiddleware,
+    corsMiddleware,
+  };
+}
+
+function createSessionInfrastructure(): {
+  sessionStore: ReturnType<typeof createSessionStore>;
+  sessionCleanupController: AbortController;
+} {
+  const sessionStore = createSessionStore(config.server.sessionTtlMs);
+  const sessionCleanupController = startSessionCleanupLoop(
+    sessionStore,
+    config.server.sessionTtlMs
+  );
+  return { sessionStore, sessionCleanupController };
+}
+
+function registerHttpRoutes(
+  app: Express,
+  sessionStore: ReturnType<typeof createSessionStore>
+): void {
+  registerMcpRoutes(app, {
+    sessionStore,
+    maxSessions: config.server.maxSessions,
+  });
+  registerDownloadRoutes(app);
+  app.use(errorHandler);
+}
+
 export async function startHttpServer(): Promise<{
   shutdown: (signal: string) => Promise<void>;
 }> {
   enableHttpMode();
 
   const { app, jsonParser } = await createExpressApp();
-  const { middleware: rateLimitMiddleware, stop: stopRateLimitCleanup } =
-    createRateLimitMiddleware(config.rateLimit);
-  const authMiddleware = createAuthMiddleware(config.security.apiKey ?? '');
-  // No CORS - MCP clients don't run in browsers
-  const corsMiddleware = createCorsMiddleware();
+  const {
+    rateLimitMiddleware,
+    stopRateLimitCleanup,
+    authMiddleware,
+    corsMiddleware,
+  } = buildMiddleware();
 
   attachBaseMiddleware(
     app,
@@ -139,18 +176,9 @@ export async function startHttpServer(): Promise<{
   );
   assertHttpConfiguration();
 
-  const sessionStore = createSessionStore(config.server.sessionTtlMs);
-  const sessionCleanupController = startSessionCleanupLoop(
-    sessionStore,
-    config.server.sessionTtlMs
-  );
-
-  registerMcpRoutes(app, {
-    sessionStore,
-    maxSessions: config.server.maxSessions,
-  });
-  registerDownloadRoutes(app);
-  app.use(errorHandler);
+  const { sessionStore, sessionCleanupController } =
+    createSessionInfrastructure();
+  registerHttpRoutes(app, sessionStore);
 
   const server = startListening(app);
   const shutdown = createShutdownHandler(

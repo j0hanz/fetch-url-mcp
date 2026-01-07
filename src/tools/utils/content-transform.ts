@@ -1,15 +1,11 @@
-import { isMainThread } from 'node:worker_threads';
-
 import type {
   MarkdownTransformResult,
   TransformOptions,
 } from '../../config/types/content.js';
 
 import { extractContent } from '../../services/extractor.js';
-import { logDebug, logWarn } from '../../services/logger.js';
-import { transformInWorker } from '../../services/transform-worker-pool.js';
+import { logDebug } from '../../services/logger.js';
 
-import { getErrorMessage } from '../../utils/error-utils.js';
 import { isRawTextContentUrl } from '../../utils/url-transformer.js';
 
 import { htmlToMarkdown } from '../../transformers/markdown.transformer.js';
@@ -20,41 +16,16 @@ import {
   isExtractionSufficient,
 } from './content-shaping.js';
 
-interface ExtractionOptions {
-  readonly includeMetadata: boolean;
-}
-
 interface ContentSource {
   readonly sourceHtml: string;
   readonly title: string | undefined;
   readonly metadata: ReturnType<typeof createContentMetadataBlock>;
 }
 
-async function tryWorkerTransform(
-  html: string,
-  url: string,
-  options: TransformOptions
-): Promise<MarkdownTransformResult | null> {
-  if (!isMainThread) return null;
-
-  try {
-    return await transformInWorker({
-      html,
-      url,
-      options,
-    });
-  } catch (error) {
-    logWarn('Worker transform failed, falling back to inline', {
-      error: getErrorMessage(error),
-    });
-    return null;
-  }
-}
-
 function resolveContentSource(
   html: string,
   url: string,
-  options: ExtractionOptions
+  options: TransformOptions
 ): ContentSource {
   const { article, metadata: extractedMeta } = extractContent(html, url, {
     extractArticle: true,
@@ -164,10 +135,10 @@ function isRawTextContent(content: string): boolean {
   return false;
 }
 
-export function transformHtmlToMarkdownSync(
+export function transformHtmlToMarkdown(
   html: string,
   url: string,
-  options: ExtractionOptions
+  options: TransformOptions
 ): MarkdownTransformResult {
   if (isRawTextContentUrl(url) || isRawTextContent(html)) {
     logDebug('Preserving raw markdown content', { url: url.substring(0, 80) });
@@ -191,14 +162,4 @@ export function transformHtmlToMarkdownSync(
     title: context.title,
     truncated: false,
   };
-}
-
-export async function transformHtmlToMarkdown(
-  html: string,
-  url: string,
-  options: ExtractionOptions
-): Promise<MarkdownTransformResult> {
-  const workerResult = await tryWorkerTransform(html, url, options);
-  if (workerResult) return workerResult;
-  return transformHtmlToMarkdownSync(html, url, options);
 }

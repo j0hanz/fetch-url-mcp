@@ -185,5 +185,3 @@ export function registerMcpRoutes(
     asyncHandler((req, res) => handleDelete(req, res, options))
   );
 }
-
-export { evictExpiredSessions } from './mcp-session.js';

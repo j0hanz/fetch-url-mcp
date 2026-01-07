@@ -3,7 +3,6 @@ import { randomUUID } from 'node:crypto';
 import type { Request, Response } from 'express';
 
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
-import type { Transport } from '@modelcontextprotocol/sdk/shared/transport.js';
 import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
 
 import { config } from '../config/index.js';
@@ -22,6 +21,10 @@ import {
   respondServerBusy,
   type SlotTracker,
 } from './mcp-session-helpers.js';
+import {
+  createTimeoutController,
+  createTransportAdapter,
+} from './mcp-session-transport.js';
 import { type SessionStore } from './sessions.js';
 
 export interface McpSessionOptions {
@@ -54,153 +57,54 @@ function startSessionInitTimeout(
   return timeout;
 }
 
-function handleSessionInitialized(
-  id: string,
-  transport: StreamableHTTPServerTransport,
-  options: McpSessionOptions,
-  tracker: SlotTracker,
-  clearInitTimeout: () => void
-): void {
-  clearInitTimeout();
-  tracker.markInitialized();
-  tracker.releaseSlot();
-  const now = Date.now();
-  options.sessionStore.set(id, {
-    transport,
-    createdAt: now,
-    lastSeen: now,
-  });
-  logInfo('Session initialized', { sessionId: id });
-}
-
-function handleSessionClosed(id: string, options: McpSessionOptions): void {
-  options.sessionStore.remove(id);
-  logInfo('Session closed', { sessionId: id });
-}
-
-function handleTransportClose(
-  transport: StreamableHTTPServerTransport,
-  options: McpSessionOptions,
-  tracker: SlotTracker,
-  clearInitTimeout: () => void
-): void {
-  clearInitTimeout();
-  if (!tracker.isInitialized()) {
-    tracker.releaseSlot();
-  }
-  if (transport.sessionId) {
-    options.sessionStore.remove(transport.sessionId);
-  }
-}
-
 function createTransportForNewSession(options: McpSessionOptions): {
   transport: StreamableHTTPServerTransport;
   releaseSlot: () => void;
   clearInitTimeout: () => void;
 } {
   const tracker = createSlotTracker();
-  let initTimeout: NodeJS.Timeout | null = null;
-  const clearInitTimeout = (): void => {
-    if (!initTimeout) return;
-    clearTimeout(initTimeout);
-    initTimeout = null;
-  };
+  const timeoutController = createTimeoutController();
+  const clearInitTimeout = timeoutController.clear;
   const transport = new StreamableHTTPServerTransport({
     sessionIdGenerator: () => randomUUID(),
     onsessioninitialized: (id) => {
-      handleSessionInitialized(
-        id,
+      clearInitTimeout();
+      tracker.markInitialized();
+      tracker.releaseSlot();
+      const now = Date.now();
+      options.sessionStore.set(id, {
         transport,
-        options,
-        tracker,
-        clearInitTimeout
-      );
+        createdAt: now,
+        lastSeen: now,
+      });
+      logInfo('Session initialized', { sessionId: id });
     },
     onsessionclosed: (id) => {
-      handleSessionClosed(id, options);
+      options.sessionStore.remove(id);
+      logInfo('Session closed', { sessionId: id });
     },
   });
 
   transport.onclose = () => {
-    handleTransportClose(transport, options, tracker, clearInitTimeout);
+    clearInitTimeout();
+    if (!tracker.isInitialized()) {
+      tracker.releaseSlot();
+    }
+    if (transport.sessionId) {
+      options.sessionStore.remove(transport.sessionId);
+    }
   };
 
-  initTimeout = startSessionInitTimeout(
-    transport,
-    tracker,
-    clearInitTimeout,
-    config.server.sessionInitTimeoutMs
+  timeoutController.set(
+    startSessionInitTimeout(
+      transport,
+      tracker,
+      clearInitTimeout,
+      config.server.sessionInitTimeoutMs
+    )
   );
 
   return { transport, releaseSlot: tracker.releaseSlot, clearInitTimeout };
-}
-
-function createTransportAdapter(
-  transport: StreamableHTTPServerTransport
-): Transport {
-  const adapter: Transport = {
-    start: () => transport.start(),
-    send: (message, options) => transport.send(message, options),
-    close: () => transport.close(),
-  };
-
-  Object.defineProperties(adapter, {
-    onclose: {
-      get: () => transport.onclose,
-      set: (handler: (() => void) | undefined) => {
-        transport.onclose = handler;
-      },
-      enumerable: true,
-      configurable: true,
-    },
-    onerror: {
-      get: () => transport.onerror,
-      set: (handler: ((error: Error) => void) | undefined) => {
-        transport.onerror = handler;
-      },
-      enumerable: true,
-      configurable: true,
-    },
-    onmessage: {
-      get: () => transport.onmessage,
-      set: (handler: Transport['onmessage']) => {
-        transport.onmessage = handler;
-      },
-      enumerable: true,
-      configurable: true,
-    },
-    sessionId: {
-      get: () => transport.sessionId,
-      enumerable: true,
-      configurable: true,
-    },
-  });
-
-  return adapter;
-}
-
-function findExistingTransport(
-  sessionId: string | undefined,
-  options: McpSessionOptions
-): StreamableHTTPServerTransport | null {
-  if (!sessionId) {
-    return null;
-  }
-
-  const existingSession = options.sessionStore.get(sessionId);
-  if (!existingSession) {
-    return null;
-  }
-
-  options.sessionStore.touch(sessionId);
-  return existingSession.transport;
-}
-
-function shouldInitializeSession(
-  sessionId: string | undefined,
-  body: McpRequestBody
-): boolean {
-  return !sessionId && isInitializeRequest(body);
 }
 
 async function createAndConnectTransport(
@@ -250,12 +154,15 @@ export async function resolveTransportForPost(
   sessionId: string | undefined,
   options: McpSessionOptions
 ): Promise<StreamableHTTPServerTransport | null> {
-  const existingTransport = findExistingTransport(sessionId, options);
-  if (existingTransport) {
-    return existingTransport;
+  if (sessionId) {
+    const existingSession = options.sessionStore.get(sessionId);
+    if (existingSession) {
+      options.sessionStore.touch(sessionId);
+      return existingSession.transport;
+    }
   }
 
-  if (!shouldInitializeSession(sessionId, body)) {
+  if (sessionId || !isInitializeRequest(body)) {
     respondBadRequest(res);
     return null;
   }

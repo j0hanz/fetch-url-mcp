@@ -17,11 +17,6 @@ let turndownInstance: TurndownService | null = null;
 
 function getTurndown(): TurndownService {
   if (turndownInstance) return turndownInstance;
-  turndownInstance = createTurndownInstance();
-  return turndownInstance;
-}
-
-function createTurndownInstance(): TurndownService {
   const instance = new TurndownService({
     headingStyle: 'atx',
     codeBlockStyle: 'fenced',
@@ -32,7 +27,8 @@ function createTurndownInstance(): TurndownService {
   addNoiseRule(instance);
   addFencedCodeRule(instance);
 
-  return instance;
+  turndownInstance = instance;
+  return turndownInstance;
 }
 
 function isElement(node: unknown): node is HTMLElement {
@@ -40,88 +36,67 @@ function isElement(node: unknown): node is HTMLElement {
   return 'getAttribute' in node && typeof node.getAttribute === 'function';
 }
 
+const STRUCTURAL_TAGS = new Set([
+  'script',
+  'style',
+  'noscript',
+  'iframe',
+  'nav',
+  'footer',
+  'aside',
+  'header',
+  'form',
+  'button',
+  'input',
+  'select',
+  'textarea',
+]);
+
+const NAVIGATION_ROLES = new Set([
+  'navigation',
+  'banner',
+  'complementary',
+  'contentinfo',
+  'tree',
+  'menubar',
+  'menu',
+]);
+
+const PROMO_PATTERN =
+  /banner|promo|announcement|cta|callout|advert|newsletter|subscribe|cookie|consent|popup|modal|overlay|toast/;
+const FIXED_PATTERN = /\b(fixed|sticky)\b/;
+const HIGH_Z_PATTERN = /\bz-(?:4[0-9]|50)\b/;
+const ISOLATE_PATTERN = /\bisolate\b/;
+
 function addNoiseRule(instance: TurndownService): void {
   instance.addRule('removeNoise', {
-    filter: [
-      'script',
-      'style',
-      'noscript',
-      'iframe',
-      'nav',
-      'footer',
-      'aside',
-      'header',
-      'form',
-      'button',
-      'input',
-      'select',
-      'textarea',
-    ],
+    filter: (node) => isNoiseNode(node),
     replacement: () => '',
   });
+}
 
-  instance.addRule('removeHiddenAndGraphics', {
-    filter: (node) => {
-      if (!isElement(node)) return false;
-      const tagName = node.tagName.toLowerCase();
-      if (tagName === 'svg' || tagName === 'canvas') return true;
-      return (
-        node.getAttribute('hidden') !== null ||
-        node.getAttribute('aria-hidden') === 'true'
-      );
-    },
-    replacement: () => '',
-  });
+function isNoiseNode(node: TurndownService.Node): boolean {
+  if (!isElement(node)) return false;
+  const tagName = node.tagName.toLowerCase();
+  if (STRUCTURAL_TAGS.has(tagName)) return true;
+  if (tagName === 'svg' || tagName === 'canvas') return true;
 
-  instance.addRule('removeNavigationByRole', {
-    filter: (node) => {
-      if (!isElement(node)) return false;
-      const role = node.getAttribute('role');
-      return (
-        role === 'navigation' ||
-        role === 'banner' ||
-        role === 'complementary' ||
-        role === 'contentinfo' ||
-        role === 'tree' ||
-        role === 'menubar' ||
-        role === 'menu'
-      );
-    },
-    replacement: () => '',
-  });
+  const hidden =
+    node.getAttribute('hidden') !== null ||
+    node.getAttribute('aria-hidden') === 'true';
+  if (hidden) return true;
 
-  instance.addRule('removeFixedPositioned', {
-    filter: (node) => {
-      if (!isElement(node)) return false;
-      const className = node.getAttribute('class') ?? '';
-      return /\b(fixed|sticky)\b/.test(className);
-    },
-    replacement: () => '',
-  });
+  const role = node.getAttribute('role');
+  if (role && NAVIGATION_ROLES.has(role)) return true;
 
-  instance.addRule('removePromotionalContent', {
-    filter: (node) => {
-      if (!isElement(node)) return false;
-      const className = node.getAttribute('class') ?? '';
-      const id = node.getAttribute('id') ?? '';
-      const combined = `${className} ${id}`.toLowerCase();
-      return /banner|promo|announcement|cta|callout|advert|newsletter|subscribe|cookie|consent|popup|modal|overlay|toast/.test(
-        combined
-      );
-    },
-    replacement: () => '',
-  });
+  const className = node.getAttribute('class') ?? '';
+  if (FIXED_PATTERN.test(className)) return true;
 
-  instance.addRule('removeHighZIndexOverlays', {
-    filter: (node) => {
-      if (!isElement(node)) return false;
-      const className = node.getAttribute('class') ?? '';
-      const hasHighZIndex = /\bz-(?:4[0-9]|50)\b/.test(className);
-      const hasIsolate = /\bisolate\b/.test(className);
-      return hasHighZIndex && hasIsolate;
-    },
-    replacement: () => '',
-  });
+  const id = node.getAttribute('id') ?? '';
+  const combined = `${className} ${id}`.toLowerCase();
+  if (PROMO_PATTERN.test(combined)) return true;
+
+  return HIGH_Z_PATTERN.test(className) && ISOLATE_PATTERN.test(className);
 }
 
 function addFencedCodeRule(instance: TurndownService): void {
@@ -209,29 +184,16 @@ function createFrontmatter(metadata: MetadataBlock): string {
   return joinLines(lines);
 }
 
-function convertHtmlToMarkdown(html: string): string {
-  return getTurndown().turndown(html).trim();
-}
-
-function buildFrontmatterBlock(metadata?: MetadataBlock): string {
-  return metadata ? createFrontmatter(metadata) : '';
-}
-
 export function htmlToMarkdown(html: string, metadata?: MetadataBlock): string {
-  const frontmatter = buildFrontmatterBlock(metadata);
-
-  if (!isValidHtmlInput(html)) {
+  const frontmatter = metadata ? createFrontmatter(metadata) : '';
+  if (!html || typeof html !== 'string') {
     return frontmatter;
   }
 
   try {
-    const content = convertHtmlToMarkdown(html);
+    const content = getTurndown().turndown(html).trim();
     return frontmatter ? `${frontmatter}\n${content}` : content;
   } catch {
     return frontmatter;
   }
-}
-
-function isValidHtmlInput(html: string): boolean {
-  return Boolean(html && typeof html === 'string');
 }

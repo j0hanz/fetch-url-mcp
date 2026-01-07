@@ -1,5 +1,3 @@
-import os from 'node:os';
-
 import packageJson from '../../package.json' with { type: 'json' };
 import { SIZE_LIMITS, TIMEOUT } from './constants.js';
 import type { LogLevel } from './types/runtime.js';
@@ -79,9 +77,6 @@ export const config = {
   extraction: {
     maxBlockLength: 5000,
     minParagraphLength: 10,
-  },
-  workers: {
-    poolSize: Math.min(Math.max(os.availableParallelism() - 1, 1), 32),
   },
   logging: {
     level: parseLogLevel(process.env.LOG_LEVEL),

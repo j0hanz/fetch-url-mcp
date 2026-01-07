@@ -3,9 +3,8 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 
 import { config } from './config/index.js';
 
-import { destroyAgents } from './services/fetcher.js';
+import { destroyAgents } from './services/fetcher/agents.js';
 import { logError, logInfo } from './services/logger.js';
-import { destroyTransformWorkers } from './services/transform-worker-pool.js';
 
 import { registerTools } from './tools/index.js';
 
@@ -33,20 +32,18 @@ export function createMcpServer(): McpServer {
   return server;
 }
 
-export async function startStdioServer(): Promise<void> {
-  const server = createMcpServer();
-  const transport = new StdioServerTransport();
-
+function attachServerErrorHandler(server: McpServer): void {
   server.server.onerror = (error) => {
     logError('[MCP Error]', error instanceof Error ? error : { error });
   };
+}
 
-  const handleShutdown = async (signal: string): Promise<void> => {
+function createShutdownHandler(server: McpServer): (signal: string) => void {
+  return (signal: string): void => {
     process.stderr.write(
       `\n${signal} received, shutting down superFetch MCP server...\n`
     );
     destroyAgents();
-    await destroyTransformWorkers();
     server
       .close()
       .catch((err: unknown) => {
@@ -59,14 +56,21 @@ export async function startStdioServer(): Promise<void> {
         process.exit(0);
       });
   };
+}
 
+function registerSignalHandlers(handler: (signal: string) => void): void {
   process.on('SIGINT', () => {
-    void handleShutdown('SIGINT');
+    handler('SIGINT');
   });
   process.on('SIGTERM', () => {
-    void handleShutdown('SIGTERM');
+    handler('SIGTERM');
   });
+}
 
+async function connectStdioServer(
+  server: McpServer,
+  transport: StdioServerTransport
+): Promise<void> {
   try {
     await server.connect(transport);
     logInfo('superFetch MCP server running on stdio');
@@ -77,4 +81,13 @@ export async function startStdioServer(): Promise<void> {
     );
     process.exit(1);
   }
+}
+
+export async function startStdioServer(): Promise<void> {
+  const server = createMcpServer();
+  const transport = new StdioServerTransport();
+
+  attachServerErrorHandler(server);
+  registerSignalHandlers(createShutdownHandler(server));
+  await connectStdioServer(server, transport);
 }

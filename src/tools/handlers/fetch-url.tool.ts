@@ -55,8 +55,8 @@ function deserializeMarkdownResult(
 }
 
 function buildMarkdownTransform() {
-  return async (html: string, url: string): Promise<MarkdownPipelineResult> => {
-    const result = await transformHtmlToMarkdown(html, url, {
+  return (html: string, url: string): MarkdownPipelineResult => {
+    const result = transformHtmlToMarkdown(html, url, {
       includeMetadata: true,
     });
     return { ...result, content: result.markdown };

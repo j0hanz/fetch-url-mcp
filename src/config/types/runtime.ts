@@ -61,7 +61,7 @@ export interface McpRequestBody {
 export interface FetchPipelineOptions<T> {
   /** URL to fetch */
   url: string;
-  /** Cache namespace (e.g., 'url', 'links', 'markdown') */
+  /** Cache namespace (e.g., 'markdown') */
   cacheNamespace: string;
   /** Optional: AbortSignal for request cancellation */
   signal?: AbortSignal;
