@@ -22,7 +22,7 @@ export function createMcpServer(): McpServer {
         resources: { listChanged: true, subscribe: true },
         logging: {},
       },
-      instructions: `superFetch MCP server v${config.server.version} - AI-optimized web content fetching with Markdown output. Provides a tool for fetching and transforming web content into clean Markdown suitable for LLM consumption. Supports resource subscriptions for cache updates.`,
+      instructions: `superFetch MCP server |${config.server.version}| A high-performance web content fetching and processing server.`,
     }
   );
 
