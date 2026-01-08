@@ -1,5 +1,7 @@
 import eslint from '@eslint/js';
 import eslintConfigPrettier from 'eslint-config-prettier';
+import depend from 'eslint-plugin-depend';
+import sonarjs from 'eslint-plugin-sonarjs';
 import unusedImports from 'eslint-plugin-unused-imports';
 import { defineConfig } from 'eslint/config';
 import tseslint from 'typescript-eslint';
@@ -8,9 +10,9 @@ export default defineConfig(
   {
     ignores: ['dist', 'node_modules', '*.config.mjs', '*.config.js'],
   },
-
   eslint.configs.recommended,
-
+  sonarjs.configs.recommended,
+  depend.configs['flat/recommended'],
   {
     files: ['src/**/*.ts'],
     extends: [
@@ -21,7 +23,7 @@ export default defineConfig(
       ecmaVersion: 2022,
       sourceType: 'module',
       parserOptions: {
-        projectService: true,
+        project: ['./tsconfig.json'],
         tsconfigRootDir: import.meta.dirname,
       },
     },
@@ -107,15 +109,6 @@ export default defineConfig(
         },
       ],
 
-      '@typescript-eslint/no-unused-vars': [
-        'error',
-        {
-          vars: 'all',
-          varsIgnorePattern: '^_',
-          args: 'after-used',
-          argsIgnorePattern: '^_',
-        },
-      ],
       '@typescript-eslint/no-non-null-assertion': 'warn',
       '@typescript-eslint/prefer-namespace-keyword': 'error',
       '@typescript-eslint/prefer-nullish-coalescing': 'error',
