@@ -3,35 +3,47 @@ import { BlockList, isIP } from 'node:net';
 import { config } from '../config/index.js';
 
 import { createErrorWithCode } from './error-utils.js';
+import { buildIpv4, buildIpv6 } from './ip-address.js';
 
 const BLOCK_LIST = new BlockList();
+
+const IPV6_ZERO = buildIpv6([0, 0, 0, 0, 0, 0, 0, 0]);
+const IPV6_LOOPBACK = buildIpv6([0, 0, 0, 0, 0, 0, 0, 1]);
+const IPV6_64_FF9B = buildIpv6(['64', 'ff9b', 0, 0, 0, 0, 0, 0]);
+const IPV6_64_FF9B_1 = buildIpv6(['64', 'ff9b', 1, 0, 0, 0, 0, 0]);
+const IPV6_2001 = buildIpv6(['2001', 0, 0, 0, 0, 0, 0, 0]);
+const IPV6_2002 = buildIpv6(['2002', 0, 0, 0, 0, 0, 0, 0]);
+const IPV6_FC00 = buildIpv6(['fc00', 0, 0, 0, 0, 0, 0, 0]);
+const IPV6_FE80 = buildIpv6(['fe80', 0, 0, 0, 0, 0, 0, 0]);
+const IPV6_FF00 = buildIpv6(['ff00', 0, 0, 0, 0, 0, 0, 0]);
+
 const BLOCKED_IPV4_SUBNETS: readonly {
   subnet: string;
   prefix: number;
 }[] = [
-  { subnet: '0.0.0.0', prefix: 8 },
-  { subnet: '10.0.0.0', prefix: 8 },
-  { subnet: '100.64.0.0', prefix: 10 },
-  { subnet: '127.0.0.0', prefix: 8 },
-  { subnet: '169.254.0.0', prefix: 16 },
-  { subnet: '172.16.0.0', prefix: 12 },
-  { subnet: '192.168.0.0', prefix: 16 },
-  { subnet: '224.0.0.0', prefix: 4 },
-  { subnet: '240.0.0.0', prefix: 4 },
+  { subnet: buildIpv4([0, 0, 0, 0]), prefix: 8 },
+  { subnet: buildIpv4([10, 0, 0, 0]), prefix: 8 },
+  { subnet: buildIpv4([100, 64, 0, 0]), prefix: 10 },
+  { subnet: buildIpv4([127, 0, 0, 0]), prefix: 8 },
+  { subnet: buildIpv4([169, 254, 0, 0]), prefix: 16 },
+  { subnet: buildIpv4([172, 16, 0, 0]), prefix: 12 },
+  { subnet: buildIpv4([192, 168, 0, 0]), prefix: 16 },
+  { subnet: buildIpv4([224, 0, 0, 0]), prefix: 4 },
+  { subnet: buildIpv4([240, 0, 0, 0]), prefix: 4 },
 ];
 const BLOCKED_IPV6_SUBNETS: readonly {
   subnet: string;
   prefix: number;
 }[] = [
-  { subnet: '::', prefix: 128 },
-  { subnet: '::1', prefix: 128 },
-  { subnet: '64:ff9b::', prefix: 96 },
-  { subnet: '64:ff9b:1::', prefix: 48 },
-  { subnet: '2001::', prefix: 32 },
-  { subnet: '2002::', prefix: 16 },
-  { subnet: 'fc00::', prefix: 7 },
-  { subnet: 'fe80::', prefix: 10 },
-  { subnet: 'ff00::', prefix: 8 },
+  { subnet: IPV6_ZERO, prefix: 128 },
+  { subnet: IPV6_LOOPBACK, prefix: 128 },
+  { subnet: IPV6_64_FF9B, prefix: 96 },
+  { subnet: IPV6_64_FF9B_1, prefix: 48 },
+  { subnet: IPV6_2001, prefix: 32 },
+  { subnet: IPV6_2002, prefix: 16 },
+  { subnet: IPV6_FC00, prefix: 7 },
+  { subnet: IPV6_FE80, prefix: 10 },
+  { subnet: IPV6_FF00, prefix: 8 },
 ];
 
 for (const entry of BLOCKED_IPV4_SUBNETS) {

@@ -7,11 +7,29 @@ import type {
 const MIN_CONTENT_RATIO = 0.3;
 const MIN_HTML_LENGTH_FOR_GATE = 100;
 
+function stripHtmlTags(html: string): string {
+  const parts: string[] = [];
+  let inTag = false;
+
+  for (const char of html) {
+    if (char === '<') {
+      inTag = true;
+      continue;
+    }
+    if (char === '>') {
+      inTag = false;
+      continue;
+    }
+    if (!inTag) {
+      parts.push(char);
+    }
+  }
+
+  return parts.join('');
+}
+
 function estimateTextLength(html: string): number {
-  return html
-    .replace(/<[^>]*>/g, '')
-    .replace(/\s+/g, ' ')
-    .trim().length;
+  return stripHtmlTags(html).replace(/\s+/g, ' ').trim().length;
 }
 
 export function isExtractionSufficient(

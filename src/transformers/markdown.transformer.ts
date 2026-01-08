@@ -14,7 +14,6 @@ import {
 import { isRecord } from '../utils/guards.js';
 
 let turndownInstance: TurndownService | null = null;
-
 function createTurndownInstance(): TurndownService {
   const instance = new TurndownService({
     headingStyle: 'atx',
@@ -22,23 +21,18 @@ function createTurndownInstance(): TurndownService {
     emDelimiter: '_',
     bulletListMarker: '-',
   });
-
   addNoiseRule(instance);
   addFencedCodeRule(instance);
-
   return instance;
 }
-
 function getTurndown(): TurndownService {
   turndownInstance ??= createTurndownInstance();
   return turndownInstance;
 }
-
 function isElement(node: unknown): node is HTMLElement {
   if (!isRecord(node)) return false;
   return 'getAttribute' in node && typeof node.getAttribute === 'function';
 }
-
 const STRUCTURAL_TAGS = new Set([
   'script',
   'style',
@@ -54,7 +48,6 @@ const STRUCTURAL_TAGS = new Set([
   'select',
   'textarea',
 ]);
-
 const NAVIGATION_ROLES = new Set([
   'navigation',
   'banner',
@@ -64,13 +57,11 @@ const NAVIGATION_ROLES = new Set([
   'menubar',
   'menu',
 ]);
-
 const PROMO_PATTERN =
   /banner|promo|announcement|cta|callout|advert|newsletter|subscribe|cookie|consent|popup|modal|overlay|toast/;
 const FIXED_PATTERN = /\b(fixed|sticky)\b/;
-const HIGH_Z_PATTERN = /\bz-(?:4[0-9]|50)\b/;
+const HIGH_Z_PATTERN = /\bz-(?:4\d|50)\b/;
 const ISOLATE_PATTERN = /\bisolate\b/;
-
 function isStructuralNoiseTag(tagName: string): boolean {
   return (
     STRUCTURAL_TAGS.has(tagName) || tagName === 'svg' || tagName === 'canvas'

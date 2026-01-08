@@ -4,6 +4,20 @@ const UNSAFE_CHARS_REGEX = /[<>:"/\\|?*]|\p{C}/gu;
 const WHITESPACE_REGEX = /\s+/g;
 const DEFAULT_EXTENSION = '.md';
 
+function trimHyphens(value: string): string {
+  let start = 0;
+  let end = value.length;
+
+  while (start < end && value[start] === '-') {
+    start += 1;
+  }
+  while (end > start && value[end - 1] === '-') {
+    end -= 1;
+  }
+
+  return value.slice(start, end);
+}
+
 export function generateSafeFilename(
   url: string,
   title?: string,
@@ -60,10 +74,10 @@ function slugifyTitle(title: string): string | null {
     .trim()
     .replace(UNSAFE_CHARS_REGEX, '')
     .replace(WHITESPACE_REGEX, '-')
-    .replace(/-+/g, '-')
-    .replace(/^-|-$/g, '');
+    .replace(/-+/g, '-');
+  const trimmed = trimHyphens(slug);
 
-  return slug || null;
+  return trimmed || null;
 }
 
 function sanitizeFilename(name: string, extension: string): string {

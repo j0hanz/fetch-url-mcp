@@ -28,16 +28,15 @@ function startCleanupLoop(): void {
 
 async function runCleanupLoop(signal: AbortSignal): Promise<void> {
   const intervalMs = Math.floor(config.cache.ttl * 1000);
-  for await (const _ of setIntervalPromise(intervalMs, undefined, {
+  for await (const getNow of setIntervalPromise(intervalMs, Date.now, {
     signal,
     ref: false,
   })) {
-    enforceCacheLimits();
+    enforceCacheLimits(getNow());
   }
 }
 
-function enforceCacheLimits(): void {
-  const now = Date.now();
+function enforceCacheLimits(now: number): void {
   for (const [key, item] of contentCache.entries()) {
     if (now > item.expiresAt) {
       contentCache.delete(key);

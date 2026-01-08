@@ -84,6 +84,36 @@ async function createAndConnectTransport(
   options: McpSessionOptions,
   res: Response
 ): Promise<StreamableHTTPServerTransport | null> {
+  if (!reserveSessionIfPossible(options, res)) return null;
+
+  const tracker = createSlotTracker();
+  const timeoutController = createTimeoutController();
+  const transport = createSessionTransport(tracker, timeoutController);
+
+  await connectTransportOrThrow(
+    transport,
+    timeoutController.clear,
+    tracker.releaseSlot
+  );
+
+  const sessionId = resolveSessionId(
+    transport,
+    res,
+    tracker,
+    timeoutController.clear
+  );
+  if (!sessionId) return null;
+
+  finalizeSession(options.sessionStore, transport, sessionId, tracker, {
+    clearInitTimeout: timeoutController.clear,
+  });
+  return transport;
+}
+
+function reserveSessionIfPossible(
+  options: McpSessionOptions,
+  res: Response
+): boolean {
   if (
     !ensureSessionCapacity(
       options.sessionStore,
@@ -92,20 +122,24 @@ async function createAndConnectTransport(
       evictOldestSession
     )
   ) {
-    return null;
+    return false;
   }
   if (!reserveSessionSlot(options.sessionStore, options.maxSessions)) {
     respondServerBusy(res);
-    return null;
+    return false;
   }
-  const tracker = createSlotTracker();
-  const timeoutController = createTimeoutController();
-  const { clear: clearInitTimeout } = timeoutController;
+  return true;
+}
+
+function createSessionTransport(
+  tracker: SlotTracker,
+  timeoutController: ReturnType<typeof createTimeoutController>
+): StreamableHTTPServerTransport {
   const transport = new StreamableHTTPServerTransport({
     sessionIdGenerator: () => randomUUID(),
   });
   transport.onclose = () => {
-    clearInitTimeout();
+    timeoutController.clear();
     if (!tracker.isInitialized()) {
       tracker.releaseSlot();
     }
@@ -114,15 +148,19 @@ async function createAndConnectTransport(
     startSessionInitTimeout(
       transport,
       tracker,
-      clearInitTimeout,
+      timeoutController.clear,
       config.server.sessionInitTimeoutMs
     )
   );
-  await connectTransportOrThrow(
-    transport,
-    clearInitTimeout,
-    tracker.releaseSlot
-  );
+  return transport;
+}
+
+function resolveSessionId(
+  transport: StreamableHTTPServerTransport,
+  res: Response,
+  tracker: SlotTracker,
+  clearInitTimeout: () => void
+): string | null {
   const { sessionId } = transport;
   if (typeof sessionId !== 'string') {
     clearInitTimeout();
@@ -130,21 +168,30 @@ async function createAndConnectTransport(
     respondBadRequest(res);
     return null;
   }
+  return sessionId;
+}
+
+function finalizeSession(
+  store: SessionStore,
+  transport: StreamableHTTPServerTransport,
+  sessionId: string,
+  tracker: SlotTracker,
+  { clearInitTimeout }: { clearInitTimeout: () => void }
+): void {
   clearInitTimeout();
   tracker.markInitialized();
   tracker.releaseSlot();
   const now = Date.now();
-  options.sessionStore.set(sessionId, {
+  store.set(sessionId, {
     transport,
     createdAt: now,
     lastSeen: now,
   });
   transport.onclose = () => {
-    options.sessionStore.remove(sessionId);
+    store.remove(sessionId);
     logInfo('Session closed');
   };
   logInfo('Session initialized');
-  return transport;
 }
 
 export async function resolveTransportForPost(

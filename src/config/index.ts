@@ -1,3 +1,5 @@
+import { buildIpv4 } from '../utils/ip-address.js';
+
 import packageJson from '../../package.json' with { type: 'json' };
 import { buildAuthConfig } from './auth-config.js';
 import { SIZE_LIMITS, TIMEOUT } from './constants.js';
@@ -15,11 +17,16 @@ function formatHostForUrl(hostname: string): string {
   return hostname;
 }
 
-const host = process.env.HOST ?? '127.0.0.1';
+const LOOPBACK_V4 = buildIpv4([127, 0, 0, 1]);
+const ANY_V4 = buildIpv4([0, 0, 0, 0]);
+const METADATA_V4_AWS = buildIpv4([169, 254, 169, 254]);
+const METADATA_V4_AZURE = buildIpv4([100, 100, 100, 200]);
+
+const host = process.env.HOST ?? LOOPBACK_V4;
 const port = parseInteger(process.env.PORT, 3000, 1024, 65535);
 const baseUrl = new URL(`http://${formatHostForUrl(host)}:${port}`);
 
-const isRemoteHost = host === '0.0.0.0' || host === '::';
+const isRemoteHost = host === ANY_V4 || host === '::';
 
 interface RuntimeState {
   httpMode: boolean;
@@ -65,13 +72,13 @@ export const config = {
   security: {
     blockedHosts: new Set([
       'localhost',
-      '127.0.0.1',
-      '0.0.0.0',
+      LOOPBACK_V4,
+      ANY_V4,
       '::1',
-      '169.254.169.254',
+      METADATA_V4_AWS,
       'metadata.google.internal',
       'metadata.azure.com',
-      '100.100.100.200',
+      METADATA_V4_AZURE,
       'instance-data',
     ]),
     blockedIpPatterns: [

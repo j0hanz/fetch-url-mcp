@@ -10,6 +10,15 @@ function isRedirectStatus(status: number): boolean {
   return REDIRECT_STATUSES.has(status);
 }
 
+function cancelResponseBody(response: Response): void {
+  const cancelPromise = response.body?.cancel();
+  if (cancelPromise) {
+    cancelPromise.catch(() => {
+      // Best-effort cancellation; ignore failures.
+    });
+  }
+}
+
 interface FetchCycleResult {
   response: Response;
   nextUrl?: string;
@@ -30,7 +39,7 @@ async function performFetchCycle(
   assertRedirectWithinLimit(response, currentUrl, redirectLimit, redirectCount);
   const location = getRedirectLocation(response, currentUrl);
 
-  void response.body?.cancel();
+  cancelResponseBody(response);
   return {
     response,
     nextUrl: resolveRedirectTarget(currentUrl, location),
@@ -44,7 +53,7 @@ function assertRedirectWithinLimit(
   redirectCount: number
 ): void {
   if (redirectCount < redirectLimit) return;
-  void response.body?.cancel();
+  cancelResponseBody(response);
   throw new FetchError('Too many redirects', currentUrl);
 }
 
@@ -52,7 +61,7 @@ function getRedirectLocation(response: Response, currentUrl: string): string {
   const location = response.headers.get('location');
   if (location) return location;
 
-  void response.body?.cancel();
+  cancelResponseBody(response);
   throw new FetchError('Redirect response missing Location header', currentUrl);
 }
 

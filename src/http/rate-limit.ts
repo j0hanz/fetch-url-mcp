@@ -79,12 +79,12 @@ async function startCleanupLoop(
   options: RateLimitConfig,
   signal: AbortSignal
 ): Promise<void> {
-  for await (const _ of setIntervalPromise(
+  for await (const getNow of setIntervalPromise(
     options.cleanupIntervalMs,
-    undefined,
+    Date.now,
     { signal, ref: false }
   )) {
-    evictStaleEntries(store, options, Date.now());
+    evictStaleEntries(store, options, getNow());
   }
 }
 

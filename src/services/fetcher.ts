@@ -51,6 +51,15 @@ function buildRequestInit(
   };
 }
 
+function cancelResponseBody(response: Response): void {
+  const cancelPromise = response.body?.cancel();
+  if (cancelPromise) {
+    cancelPromise.catch(() => {
+      // Best-effort cancellation; ignore failures.
+    });
+  }
+}
+
 async function handleFetchResponse(
   response: Response,
   finalUrl: string,
@@ -58,12 +67,12 @@ async function handleFetchResponse(
   signal?: AbortSignal
 ): Promise<string> {
   if (response.status === 429) {
-    void response.body?.cancel();
+    cancelResponseBody(response);
     throw createRateLimitError(finalUrl, response.headers.get('retry-after'));
   }
 
   if (!response.ok) {
-    void response.body?.cancel();
+    cancelResponseBody(response);
     throw createHttpError(finalUrl, response.status, response.statusText);
   }
 

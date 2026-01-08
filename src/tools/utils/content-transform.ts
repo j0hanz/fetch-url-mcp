@@ -17,6 +17,12 @@ import {
   determineContentExtractionSource,
   isExtractionSufficient,
 } from './content-shaping.js';
+import {
+  addSourceToMarkdown,
+  extractTitleFromRawMarkdown,
+  hasFrontmatter,
+} from './frontmatter.js';
+import { looksLikeMarkdown } from './markdown-heuristics.js';
 
 interface ContentSource {
   readonly sourceHtml: string;
@@ -150,37 +156,6 @@ function buildRawMarkdownPayload(
   return { content, title };
 }
 
-function extractTitleFromRawMarkdown(content: string): string | undefined {
-  const frontmatterMatch = /^---\r?\n([\s\S]*?)\r?\n---/.exec(content);
-  if (!frontmatterMatch) return undefined;
-
-  const frontmatter = frontmatterMatch[1] ?? '';
-
-  const titleMatch = /^(?:title|name):\s*["']?(.+?)["']?\s*$/im.exec(
-    frontmatter
-  );
-  return titleMatch?.[1]?.trim();
-}
-
-function addSourceToMarkdown(content: string, url: string): string {
-  const frontmatterMatch = /^(---\r?\n)([\s\S]*?)(\r?\n---)/.exec(content);
-
-  if (frontmatterMatch) {
-    const start = frontmatterMatch[1] ?? '---\n';
-    const existingFields = frontmatterMatch[2] ?? '';
-    const end = frontmatterMatch[3] ?? '\n---';
-    const rest = content.slice(frontmatterMatch[0].length);
-
-    if (/^source:/im.test(existingFields)) {
-      return content;
-    }
-
-    return `${start}${existingFields}\nsource: "${url}"${end}${rest}`;
-  }
-
-  return `---\nsource: "${url}"\n---\n\n${content}`;
-}
-
 function looksLikeHtmlDocument(trimmed: string): boolean {
   return (
     trimmed.startsWith('<!DOCTYPE') ||
@@ -190,22 +165,11 @@ function looksLikeHtmlDocument(trimmed: string): boolean {
   );
 }
 
-function hasFrontmatter(trimmed: string): boolean {
-  return /^---\r?\n/.test(trimmed);
-}
-
 function countCommonHtmlTags(content: string): number {
   const matches =
     content.match(/<(html|head|body|div|span|script|style|meta|link)\b/gi) ??
     [];
   return matches.length;
-}
-
-function looksLikeMarkdown(content: string): boolean {
-  const hasMarkdownHeadings = /^#{1,6}\s+/m.test(content);
-  const hasMarkdownLists = /^[\s]*[-*+]\s+/m.test(content);
-  const hasMarkdownCodeBlocks = /```[\s\S]*?```/.test(content);
-  return hasMarkdownHeadings || hasMarkdownLists || hasMarkdownCodeBlocks;
 }
 
 function isRawTextContent(content: string): boolean {

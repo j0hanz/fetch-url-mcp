@@ -12,7 +12,7 @@ function assertContentLengthWithinLimit(
     return;
   }
 
-  void response.body?.cancel();
+  cancelResponseBody(response);
 
   throw new FetchError(
     `Response exceeds maximum size of ${maxBytes} bytes`,
@@ -62,6 +62,15 @@ function createAbortError(url: string): FetchError {
   return new FetchError('Request was aborted during response read', url, 499, {
     reason: 'aborted',
   });
+}
+
+function cancelResponseBody(response: Response): void {
+  const cancelPromise = response.body?.cancel();
+  if (cancelPromise) {
+    cancelPromise.catch(() => {
+      // Best-effort cancellation; ignore failures.
+    });
+  }
 }
 
 async function cancelReaderQuietly(

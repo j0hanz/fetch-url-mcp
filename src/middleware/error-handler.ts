@@ -63,8 +63,12 @@ export function errorHandler(
   err: Error,
   req: Request,
   res: Response,
-  _next: NextFunction
+  next: NextFunction
 ): void {
+  if (res.headersSent) {
+    next(err);
+    return;
+  }
   const statusCode = getStatusCode(err);
 
   logError(

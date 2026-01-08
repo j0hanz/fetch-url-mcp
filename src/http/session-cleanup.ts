@@ -22,11 +22,11 @@ async function runSessionCleanupLoop(
   signal: AbortSignal
 ): Promise<void> {
   const intervalMs = getCleanupIntervalMs(sessionTtlMs);
-  for await (const _ of setIntervalPromise(intervalMs, undefined, {
+  for await (const getNow of setIntervalPromise(intervalMs, Date.now, {
     signal,
     ref: false,
   })) {
-    handleSessionEvictions(store);
+    handleSessionEvictions(store, getNow());
   }
 }
 
@@ -38,10 +38,13 @@ function isAbortError(error: unknown): boolean {
   return error instanceof Error && error.name === 'AbortError';
 }
 
-function handleSessionEvictions(store: SessionStore): void {
+function handleSessionEvictions(store: SessionStore, now: number): void {
   const evicted = evictExpiredSessions(store);
   if (evicted > 0) {
-    logInfo('Expired sessions evicted', { evicted });
+    logInfo('Expired sessions evicted', {
+      evicted,
+      timestamp: new Date(now).toISOString(),
+    });
   }
 }
 
