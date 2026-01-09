@@ -23,15 +23,15 @@ A [Model Context Protocol](https://modelcontextprotocol.io/) (MCP) server that f
 
 ## Features
 
-| Feature              | Description                                                                           |
-| -------------------- | ------------------------------------------------------------------------------------- |
-| Smart extraction     | Mozilla Readability with quality gates to strip boilerplate when it improves results  |
-| Clean Markdown       | Markdown output with optional YAML frontmatter (title + source)                       |
-| Raw content handling | Preserves raw markdown/text and rewrites GitHub/GitLab/Bitbucket blob URLs to raw     |
-| Built-in caching     | In-memory cache with TTL, max keys, and resource subscriptions                        |
-| Resilient fetching   | Redirect handling with validation, timeouts, and response size limits                 |
-| Security first       | URL validation plus SSRF/DNS/IP blocklists                                            |
-| HTTP mode            | Static token or OAuth auth, session management, rate limiting, host/origin validation |
+| Feature              | Description                                                                                                        |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| Smart extraction     | Mozilla Readability with quality gates to strip boilerplate when it improves results                               |
+| Clean Markdown       | Markdown output with optional YAML frontmatter (title + source)                                                    |
+| Raw content handling | Preserves raw markdown/text, detects common text extensions, and rewrites GitHub/GitLab/Bitbucket/Gist URLs to raw |
+| Built-in caching     | In-memory cache with TTL, max keys, and resource subscriptions                                                     |
+| Resilient fetching   | Redirect handling with validation, timeouts, and response size limits                                              |
+| Security first       | URL validation plus SSRF/DNS/IP blocklists                                                                         |
+| HTTP mode            | Static token or OAuth auth, session management, rate limiting, host/origin validation                              |
 
 ---
 
@@ -243,13 +243,15 @@ npx -y @j0hanz/superfetch@latest
 
 For multiple static tokens, set `ACCESS_TOKENS` (comma/space separated).
 
-Endpoints (auth required via `Authorization: Bearer <token>`; in static token mode, `X-API-Key` is also accepted):
+Auth is required for `/mcp` and `/mcp/downloads` via `Authorization: Bearer <token>` (static mode also accepts `X-API-Key`).
 
-- `GET /health`
-- `POST /mcp`
-- `GET /mcp` (SSE stream)
-- `DELETE /mcp`
-- `GET /mcp/downloads/:namespace/:hash`
+Endpoints:
+
+- `GET /health` (no auth; returns status, name, version, uptime)
+- `POST /mcp` (auth required)
+- `GET /mcp` (auth required; SSE stream; requires `Accept: text/event-stream`)
+- `DELETE /mcp` (auth required)
+- `GET /mcp/downloads/:namespace/:hash` (auth required)
 
 Sessions are managed via the `mcp-session-id` header (see [HTTP Mode Details](#http-mode-details)).
 
@@ -268,6 +270,7 @@ The response includes:
 - a `text` block containing JSON of `structuredContent`
 - a `resource` block embedding markdown when inline content is available (always in stdio mode)
 - when content exceeds the inline limit and cache is enabled, a `resource_link` block pointing to `superfetch://cache/...` (inline markdown may be omitted)
+- error responses set `isError: true` and return `structuredContent` with `error` and `url`
 
 ---
 
@@ -415,6 +418,7 @@ Optional:
 - Inline markdown limit: 20,000 characters
 - Cache max entries: 100
 - Session TTL: 30 minutes
+- Session init timeout: 10 seconds
 - Max sessions: 200
 - Rate limit: 100 req/min per IP (60s window)
 
@@ -433,6 +437,11 @@ HTTP mode uses the MCP Streamable HTTP transport. The workflow is:
 If the `mcp-protocol-version` header is missing, the server defaults it to `2025-03-26`. Supported versions are `2025-03-26` and `2025-11-25`.
 
 `GET /mcp` and `DELETE /mcp` require `mcp-session-id`. `POST /mcp` without an `initialize` request will return 400.
+
+Additional HTTP transport notes:
+
+- `GET /mcp` requires `Accept: text/event-stream` (otherwise 406).
+- JSON-RPC batch requests are not supported (400).
 
 If the server reaches its session cap (200), it evicts the oldest session when possible; otherwise it returns a 503.
 
@@ -484,12 +493,14 @@ Rate limiting applies to `/mcp` and `/mcp/downloads` (100 req/min per IP, 60s wi
 | `npm run build`         | Compile TypeScript                   |
 | `npm start`             | Production server                    |
 | `npm run lint`          | Run ESLint                           |
+| `npm run lint:fix`      | Auto-fix lint issues                 |
 | `npm run type-check`    | TypeScript type checking             |
 | `npm run format`        | Format with Prettier                 |
 | `npm test`              | Run Node test runner (builds dist)   |
 | `npm run test:coverage` | Run tests with experimental coverage |
 | `npm run knip`          | Find unused exports/dependencies     |
 | `npm run knip:fix`      | Auto-fix unused code                 |
+| `npm run inspector`     | Launch MCP Inspector                 |
 
 > **Note:** Tests run via `node --test` with `--experimental-transform-types` to execute `.ts` test files. Node will emit an experimental warning.
 
@@ -499,9 +510,9 @@ Rate limiting applies to `/mcp` and `/mcp/downloads` (100 req/min per IP, 60s wi
 | ------------------ | --------------------------------- |
 | Runtime            | Node.js >=20.12                   |
 | Language           | TypeScript 5.9                    |
-| MCP SDK            | @modelcontextprotocol/sdk ^1.25.1 |
+| MCP SDK            | @modelcontextprotocol/sdk ^1.25.2 |
 | Content Extraction | @mozilla/readability ^0.6.0       |
-| HTML Parsing       | LinkeDOM ^0.18.12                 |
+| HTML Parsing       | linkedom ^0.18.12                 |
 | Markdown           | Turndown ^7.2.2                   |
 | HTTP               | Express ^5.2.1, undici ^6.23.0    |
 | Validation         | Zod ^4.3.5                        |
