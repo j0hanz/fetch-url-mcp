@@ -117,15 +117,13 @@ function buildResponse(
 export async function fetchUrlToolHandler(
   input: FetchUrlInput
 ): Promise<ToolResponseBase> {
-  try {
-    return await executeFetch(input);
-  } catch (error) {
+  return executeFetch(input).catch((error: unknown) => {
     logError(
       'fetch-url tool error',
       error instanceof Error ? error : undefined
     );
     return handleToolError(error, input.url, 'Failed to fetch URL');
-  }
+  });
 }
 
 async function executeFetch(input: FetchUrlInput): Promise<ToolResponseBase> {

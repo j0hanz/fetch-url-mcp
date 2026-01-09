@@ -6,38 +6,43 @@ import { FetchError } from '../errors/app-error.js';
 
 import { logError } from '../services/logger.js';
 
-function getStatusCode(err: Error): number {
-  return err instanceof FetchError ? err.statusCode : 500;
+function getStatusCode(fetchError: FetchError | null): number {
+  return fetchError ? fetchError.statusCode : 500;
 }
 
-function getErrorCode(err: Error): string {
-  return err instanceof FetchError ? err.code : 'INTERNAL_ERROR';
+function getErrorCode(fetchError: FetchError | null): string {
+  return fetchError ? fetchError.code : 'INTERNAL_ERROR';
 }
 
-function getErrorMessage(err: Error): string {
-  return err instanceof FetchError ? err.message : 'Internal Server Error';
+function getErrorMessage(fetchError: FetchError | null): string {
+  return fetchError ? fetchError.message : 'Internal Server Error';
 }
 
-function getErrorDetails(err: Error): Record<string, unknown> | undefined {
-  if (err instanceof FetchError && Object.keys(err.details).length > 0) {
-    return err.details;
+function getErrorDetails(
+  fetchError: FetchError | null
+): Record<string, unknown> | undefined {
+  if (fetchError && Object.keys(fetchError.details).length > 0) {
+    return fetchError.details;
   }
   return undefined;
 }
 
-function setRetryAfterHeader(res: Response, err: Error): void {
-  const retryAfter = resolveRetryAfter(err);
-  if (!retryAfter) return;
+function setRetryAfterHeader(
+  res: Response,
+  fetchError: FetchError | null
+): void {
+  const retryAfter = resolveRetryAfter(fetchError);
+  if (retryAfter === undefined) return;
   res.set('Retry-After', retryAfter);
 }
 
-function buildErrorResponse(err: Error): ErrorResponse {
-  const details = getErrorDetails(err);
+function buildErrorResponse(fetchError: FetchError | null): ErrorResponse {
+  const details = getErrorDetails(fetchError);
   const response: ErrorResponse = {
     error: {
-      message: getErrorMessage(err),
-      code: getErrorCode(err),
-      statusCode: getStatusCode(err),
+      message: getErrorMessage(fetchError),
+      code: getErrorCode(fetchError),
+      statusCode: getStatusCode(fetchError),
       ...(details && { details }),
     },
   };
@@ -46,13 +51,11 @@ function buildErrorResponse(err: Error): ErrorResponse {
   return response;
 }
 
-function resolveRetryAfter(err: Error): string | null {
-  if (!(err instanceof FetchError)) return null;
-  if (err.statusCode !== 429) return null;
+function resolveRetryAfter(fetchError: FetchError | null): string | undefined {
+  if (fetchError?.statusCode !== 429) return undefined;
 
-  const { retryAfter } = err.details;
-  if (!isRetryAfterValue(retryAfter)) return null;
-  return String(retryAfter);
+  const { retryAfter } = fetchError.details;
+  return isRetryAfterValue(retryAfter) ? String(retryAfter) : undefined;
 }
 
 function isRetryAfterValue(value: unknown): boolean {
@@ -69,14 +72,15 @@ export function errorHandler(
     next(err);
     return;
   }
-  const statusCode = getStatusCode(err);
+  const fetchError = err instanceof FetchError ? err : null;
+  const statusCode = getStatusCode(fetchError);
 
   logError(
     `HTTP ${statusCode}: ${err.message} - ${req.method} ${req.path}`,
     err
   );
 
-  setRetryAfterHeader(res, err);
+  setRetryAfterHeader(res, fetchError);
 
-  res.status(statusCode).json(buildErrorResponse(err));
+  res.status(statusCode).json(buildErrorResponse(fetchError));
 }

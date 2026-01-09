@@ -133,10 +133,11 @@ function assertUrlLength(url: string): void {
 }
 
 function parseUrl(urlString: string): URL {
-  if (!URL.canParse(urlString)) {
+  try {
+    return new URL(urlString);
+  } catch {
     throw createValidationError('Invalid URL format');
   }
-  return new URL(urlString);
 }
 
 function assertHttpProtocol(url: URL): void {

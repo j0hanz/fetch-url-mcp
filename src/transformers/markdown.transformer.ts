@@ -30,8 +30,11 @@ function getTurndown(): TurndownService {
   return turndownInstance;
 }
 function isElement(node: unknown): node is HTMLElement {
-  if (!isRecord(node)) return false;
-  return 'getAttribute' in node && typeof node.getAttribute === 'function';
+  return (
+    isRecord(node) &&
+    'getAttribute' in node &&
+    typeof node.getAttribute === 'function'
+  );
 }
 const STRUCTURAL_TAGS = new Set([
   'script',
@@ -76,7 +79,7 @@ function isElementHidden(element: HTMLElement): boolean {
 }
 
 function hasNoiseRole(role: string | null): boolean {
-  return role ? NAVIGATION_ROLES.has(role) : false;
+  return role !== null && NAVIGATION_ROLES.has(role);
 }
 
 function matchesPromoIdOrClass(className: string, id: string): boolean {
@@ -89,8 +92,7 @@ function matchesHighZIsolate(className: string): boolean {
 }
 
 function matchesFixedOrHighZIsolate(className: string): boolean {
-  if (FIXED_PATTERN.test(className)) return true;
-  return matchesHighZIsolate(className);
+  return FIXED_PATTERN.test(className) || matchesHighZIsolate(className);
 }
 
 function addNoiseRule(instance: TurndownService): void {
@@ -101,8 +103,7 @@ function addNoiseRule(instance: TurndownService): void {
 }
 
 function isNoiseNode(node: TurndownService.Node): boolean {
-  if (!isElement(node)) return false;
-  return isNoiseElement(node);
+  return isElement(node) && isNoiseElement(node);
 }
 
 interface ElementMetadata {
@@ -125,11 +126,13 @@ function readElementMetadata(element: HTMLElement): ElementMetadata {
 
 function isNoiseElement(node: HTMLElement): boolean {
   const metadata = readElementMetadata(node);
-  if (isStructuralNoiseTag(metadata.tagName)) return true;
-  if (metadata.isHidden) return true;
-  if (hasNoiseRole(metadata.role)) return true;
-  if (matchesFixedOrHighZIsolate(metadata.className)) return true;
-  return matchesPromoIdOrClass(metadata.className, metadata.id);
+  return (
+    isStructuralNoiseTag(metadata.tagName) ||
+    metadata.isHidden ||
+    hasNoiseRole(metadata.role) ||
+    matchesFixedOrHighZIsolate(metadata.className) ||
+    matchesPromoIdOrClass(metadata.className, metadata.id)
+  );
 }
 
 function addFencedCodeRule(instance: TurndownService): void {
@@ -143,11 +146,11 @@ function isFencedCodeBlock(
   node: TurndownService.Node,
   options: TurndownService.Options
 ): boolean {
-  if (options.codeBlockStyle !== 'fenced') return false;
-  if (node.nodeName !== 'PRE') return false;
-  const { firstChild } = node;
-  if (!firstChild) return false;
-  return firstChild.nodeName === 'CODE';
+  return (
+    options.codeBlockStyle === 'fenced' &&
+    node.nodeName === 'PRE' &&
+    node.firstChild?.nodeName === 'CODE'
+  );
 }
 
 function formatFencedCodeBlock(node: TurndownService.Node): string {
@@ -189,16 +192,16 @@ const ESCAPE_PATTERNS = {
   tab: /\t/g,
 };
 
-function needsYamlQuotes(value: string): boolean {
-  const checks = [
-    (input: string) => YAML_SPECIAL_CHARS.test(input),
-    (input: string) => input.startsWith(' ') || input.endsWith(' '),
-    (input: string) => input === '',
-    (input: string) => YAML_NUMERIC.test(input),
-    (input: string) => YAML_RESERVED_WORDS.test(input),
-  ];
+const YAML_QUOTE_CHECKS: readonly ((input: string) => boolean)[] = [
+  (input) => YAML_SPECIAL_CHARS.test(input),
+  (input) => input.startsWith(' ') || input.endsWith(' '),
+  (input) => input === '',
+  (input) => YAML_NUMERIC.test(input),
+  (input) => YAML_RESERVED_WORDS.test(input),
+];
 
-  return checks.some((check) => check(value));
+function needsYamlQuotes(value: string): boolean {
+  return YAML_QUOTE_CHECKS.some((check) => check(value));
 }
 
 function escapeYamlValue(value: string): string {

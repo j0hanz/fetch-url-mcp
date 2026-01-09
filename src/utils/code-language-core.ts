@@ -71,6 +71,11 @@ const SQL_KEYWORDS = [
   'alter',
   'drop',
 ];
+const JS_WORD_REGEX =
+  /\b(?:const|let|var|function|class|async|await|export|import)\b/;
+const PYTHON_WORD_REGEX = /\b(?:def|class|import|from)\b/;
+const RUST_WORD_REGEX = /\b(?:fn|impl|struct|enum)\b/;
+const CSS_DIRECTIVE_REGEX = /@media|@import|@keyframes/;
 
 export function detectLanguageFromCode(code: string): string | undefined {
   for (const { language, detect } of CODE_DETECTORS) {
@@ -108,36 +113,22 @@ function detectTypescript(code: string): boolean {
 
 function detectRust(code: string): boolean {
   const lower = code.toLowerCase();
-  if (containsWord(lower, 'fn')) return true;
-  if (lower.includes('let mut')) return true;
-  if (containsWord(lower, 'impl')) return true;
-  if (containsWord(lower, 'struct')) return true;
-  if (containsWord(lower, 'enum')) return true;
-  return lower.includes('use ') && lower.includes('::');
+  return (
+    RUST_WORD_REGEX.test(lower) ||
+    lower.includes('let mut') ||
+    (lower.includes('use ') && lower.includes('::'))
+  );
 }
 
 function detectJavascript(code: string): boolean {
   const lower = code.toLowerCase();
-  return (
-    containsWord(lower, 'const') ||
-    containsWord(lower, 'let') ||
-    containsWord(lower, 'var') ||
-    containsWord(lower, 'function') ||
-    containsWord(lower, 'class') ||
-    containsWord(lower, 'async') ||
-    containsWord(lower, 'await') ||
-    containsWord(lower, 'export') ||
-    containsWord(lower, 'import')
-  );
+  return JS_WORD_REGEX.test(lower);
 }
 
 function detectPython(code: string): boolean {
   const lower = code.toLowerCase();
   return (
-    containsWord(lower, 'def') ||
-    containsWord(lower, 'class') ||
-    containsWord(lower, 'import') ||
-    containsWord(lower, 'from') ||
+    PYTHON_WORD_REGEX.test(lower) ||
     lower.includes('print(') ||
     lower.includes('__name__')
   );
@@ -148,31 +139,20 @@ function detectBash(code: string): boolean {
   for (const line of lines) {
     const trimmed = line.trimStart();
     if (!trimmed) continue;
-    if (trimmed.startsWith('#!')) return true;
-    if (trimmed.startsWith('$ ') || trimmed.startsWith('# ')) return true;
-
-    if (startsWithCommand(trimmed, BASH_COMMANDS)) return true;
-    if (startsWithPackageManagerCommand(trimmed)) return true;
+    if (isBashIndicator(trimmed)) return true;
   }
   return false;
 }
 
 function detectCss(code: string): boolean {
   const lower = code.toLowerCase();
-  if (
-    lower.includes('@media') ||
-    lower.includes('@import') ||
-    lower.includes('@keyframes')
-  ) {
-    return true;
-  }
+  if (CSS_DIRECTIVE_REGEX.test(lower)) return true;
+
   const lines = splitLines(code);
   for (const line of lines) {
     const trimmed = line.trimStart();
-    if (trimmed.startsWith('.') || trimmed.startsWith('#')) {
-      if (trimmed.includes('{')) return true;
-    }
-    if (trimmed.includes(':') && trimmed.includes(';')) return true;
+    if (!trimmed) continue;
+    if (isCssSelectorLine(trimmed) || isCssPropertyLine(trimmed)) return true;
   }
   return false;
 }
@@ -219,6 +199,32 @@ function startsWithCommand(line: string, commands: readonly string[]): boolean {
   return commands.some(
     (command) => line === command || line.startsWith(`${command} `)
   );
+}
+
+function isCssSelectorLine(line: string): boolean {
+  if (!line.startsWith('.') && !line.startsWith('#')) return false;
+  return line.includes('{');
+}
+
+function isCssPropertyLine(line: string): boolean {
+  return line.includes(':') && line.includes(';');
+}
+
+function isBashIndicator(line: string): boolean {
+  return (
+    isShebang(line) ||
+    isPromptLine(line) ||
+    startsWithCommand(line, BASH_COMMANDS) ||
+    startsWithPackageManagerCommand(line)
+  );
+}
+
+function isShebang(line: string): boolean {
+  return line.startsWith('#!');
+}
+
+function isPromptLine(line: string): boolean {
+  return line.startsWith('$ ') || line.startsWith('# ');
 }
 
 function startsWithPackageManagerCommand(line: string): boolean {

@@ -17,7 +17,7 @@ import {
 import { fetchWithRedirects } from './fetcher/redirects.js';
 import { readResponseText } from './fetcher/response.js';
 
-const DEFAULT_HEADERS = {
+const DEFAULT_HEADERS: Record<string, string> = {
   'User-Agent': config.fetcher.userAgent,
   Accept:
     'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
@@ -26,8 +26,8 @@ const DEFAULT_HEADERS = {
   Connection: 'keep-alive',
 };
 
-function buildHeaders(): Headers {
-  return new Headers(DEFAULT_HEADERS);
+function buildHeaders(): Record<string, string> {
+  return DEFAULT_HEADERS;
 }
 
 function buildRequestSignal(
@@ -40,7 +40,7 @@ function buildRequestSignal(
 }
 
 function buildRequestInit(
-  headers: Headers,
+  headers: HeadersInit,
   signal: AbortSignal
 ): RequestInit & { dispatcher: Dispatcher } {
   return {
@@ -52,12 +52,39 @@ function buildRequestInit(
 }
 
 function cancelResponseBody(response: Response): void {
-  const cancelPromise = response.body?.cancel();
-  if (cancelPromise) {
-    cancelPromise.catch(() => {
-      // Best-effort cancellation; ignore failures.
-    });
-  }
+  const { body } = response;
+  if (!body) return;
+  body.cancel().catch(() => {
+    // Best-effort cancellation; ignore failures.
+  });
+}
+
+function resolveResponseError(
+  response: Response,
+  finalUrl: string
+): ReturnType<typeof createHttpError> | null {
+  return (
+    resolveRateLimitError(response, finalUrl) ??
+    resolveHttpError(response, finalUrl)
+  );
+}
+
+function resolveRateLimitError(
+  response: Response,
+  finalUrl: string
+): ReturnType<typeof createHttpError> | null {
+  return response.status === 429
+    ? createRateLimitError(finalUrl, response.headers.get('retry-after'))
+    : null;
+}
+
+function resolveHttpError(
+  response: Response,
+  finalUrl: string
+): ReturnType<typeof createHttpError> | null {
+  return response.ok
+    ? null
+    : createHttpError(finalUrl, response.status, response.statusText);
 }
 
 async function handleFetchResponse(
@@ -66,14 +93,10 @@ async function handleFetchResponse(
   telemetry: ReturnType<typeof startFetchTelemetry>,
   signal?: AbortSignal
 ): Promise<string> {
-  if (response.status === 429) {
+  const responseError = resolveResponseError(response, finalUrl);
+  if (responseError) {
     cancelResponseBody(response);
-    throw createRateLimitError(finalUrl, response.headers.get('retry-after'));
-  }
-
-  if (!response.ok) {
-    cancelResponseBody(response);
-    throw createHttpError(finalUrl, response.status, response.statusText);
+    throw responseError;
   }
 
   const { text, size } = await readResponseText(

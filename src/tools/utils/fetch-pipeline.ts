@@ -13,6 +13,8 @@ import { isRecord } from '../../utils/guards.js';
 import { transformToRawUrl } from '../../utils/url-transformer.js';
 import { normalizeUrl } from '../../utils/url-validator.js';
 
+type CachedEntry = NonNullable<ReturnType<typeof cache.get>>;
+
 function attemptCacheRetrieval<T>(
   cacheKey: string | null,
   deserialize: ((cached: string) => T | undefined) | undefined,
@@ -21,15 +23,16 @@ function attemptCacheRetrieval<T>(
 ): PipelineResult<T> | null {
   if (!cacheKey) return null;
 
-  const cached = cache.get(cacheKey);
+  const cached = readCacheEntry(cacheKey);
   if (!cached) return null;
 
-  if (!deserialize)
-    return logCacheMiss('missing deserializer', cacheNamespace, normalizedUrl);
-
-  const data = deserialize(cached.content);
-  if (data === undefined)
-    return logCacheMiss('deserialize failure', cacheNamespace, normalizedUrl);
+  const data = resolveCachedData(
+    cached.content,
+    deserialize,
+    cacheNamespace,
+    normalizedUrl
+  );
+  if (data === undefined) return null;
 
   logDebug('Cache hit', { namespace: cacheNamespace, url: normalizedUrl });
 
@@ -99,12 +102,11 @@ function resolveCacheMetadata(
   data: unknown,
   normalizedUrl: string
 ): { url: string; title?: string } {
-  const metadata: { url: string; title?: string } = { url: normalizedUrl };
   const title = extractTitle(data);
-  if (title !== undefined) {
-    metadata.title = title;
-  }
-  return metadata;
+  return {
+    url: normalizedUrl,
+    ...(title === undefined ? {} : { title }),
+  };
 }
 
 function resolveSerializer<T>(
@@ -129,6 +131,30 @@ function extractTitle(value: unknown): string | undefined {
   if (!isRecord(value)) return undefined;
   const { title } = value;
   return typeof title === 'string' ? title : undefined;
+}
+
+function readCacheEntry(cacheKey: string): CachedEntry | null {
+  return cache.get(cacheKey) ?? null;
+}
+
+function resolveCachedData<T>(
+  cachedContent: string,
+  deserialize: ((cached: string) => T | undefined) | undefined,
+  cacheNamespace: string,
+  normalizedUrl: string
+): T | undefined {
+  if (!deserialize) {
+    logCacheMiss('missing deserializer', cacheNamespace, normalizedUrl);
+    return undefined;
+  }
+
+  const data = deserialize(cachedContent);
+  if (data === undefined) {
+    logCacheMiss('deserialize failure', cacheNamespace, normalizedUrl);
+    return undefined;
+  }
+
+  return data;
 }
 
 function logCacheMiss(

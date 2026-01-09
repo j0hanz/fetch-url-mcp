@@ -1,7 +1,7 @@
 import eslint from '@eslint/js';
 import eslintConfigPrettier from 'eslint-config-prettier';
+import deMorgan from 'eslint-plugin-de-morgan';
 import depend from 'eslint-plugin-depend';
-import deMorgan from 'eslint-plugin-de-morgan'
 import sonarjs from 'eslint-plugin-sonarjs';
 import unusedImports from 'eslint-plugin-unused-imports';
 import { defineConfig } from 'eslint/config';

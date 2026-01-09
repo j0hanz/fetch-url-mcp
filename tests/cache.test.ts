@@ -63,8 +63,33 @@ function registerUpdateListenerTest(): void {
   });
 }
 
+function registerKeysTest(): void {
+  it('returns keys for stored entries', () => {
+    const cacheKey = createCacheKey('keys');
+    cache.set(cacheKey, 'payload', { url: 'https://example.com/keys' });
+
+    const keys = cache.keys();
+    assert.ok(keys.includes(cacheKey));
+  });
+}
+
+function registerEnabledTest(): void {
+  it('reports cache enabled state', () => {
+    assert.equal(cache.isEnabled(), true);
+  });
+}
+
+function registerNullKeyTest(): void {
+  it('returns undefined for null cache key', () => {
+    assert.equal(cache.get(null), undefined);
+  });
+}
+
 describe('cache', () => {
   registerCacheEntryTest();
   registerEmptyContentTest();
   registerUpdateListenerTest();
+  registerKeysTest();
+  registerEnabledTest();
+  registerNullKeyTest();
 });

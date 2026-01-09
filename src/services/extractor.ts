@@ -16,10 +16,18 @@ import { extractMetadata } from './metadata-collector.js';
 
 function isReadabilityCompatible(doc: unknown): doc is Document {
   if (!isRecord(doc)) return false;
-  if (!('documentElement' in doc)) return false;
-  if (typeof doc.querySelectorAll !== 'function') return false;
-  if (typeof doc.querySelector !== 'function') return false;
-  return true;
+  return hasDocumentElement(doc) && hasQuerySelectors(doc);
+}
+
+function hasDocumentElement(record: Record<string, unknown>): boolean {
+  return 'documentElement' in record;
+}
+
+function hasQuerySelectors(record: Record<string, unknown>): boolean {
+  return (
+    typeof record.querySelectorAll === 'function' &&
+    typeof record.querySelector === 'function'
+  );
 }
 
 function extractArticle(document: unknown): ExtractedArticle | null {
@@ -27,8 +35,7 @@ function extractArticle(document: unknown): ExtractedArticle | null {
     logWarn('Document not compatible with Readability');
     return null;
   }
-  const parsed = parseReadabilityArticle(document);
-  return parsed ? mapReadabilityResult(parsed) : null;
+  return mapParsedArticle(parseReadabilityArticle(document));
 }
 
 function parseReadabilityArticle(
@@ -39,39 +46,52 @@ function parseReadabilityArticle(
     const reader = new Readability(document);
     return reader.parse();
   } catch (error) {
-    logError(
-      'Failed to extract article with Readability',
-      error instanceof Error ? error : undefined
-    );
+    logError('Failed to extract article with Readability', asError(error));
     return null;
   }
+}
+
+function asError(error: unknown): Error | undefined {
+  if (error instanceof Error) {
+    return error;
+  }
+  return undefined;
+}
+
+function mapParsedArticle(
+  parsed: ReturnType<Readability['parse']> | null
+): ExtractedArticle | null {
+  return parsed ? mapReadabilityResult(parsed) : null;
 }
 
 function mapReadabilityResult(
   parsed: NonNullable<ReturnType<Readability['parse']>>
 ): ExtractedArticle {
-  const article: ExtractedArticle = {
+  return {
     content: parsed.content ?? '',
     textContent: parsed.textContent ?? '',
+    ...buildOptionalArticleFields(parsed),
   };
-
-  const title = toOptional(parsed.title);
-  if (title !== undefined) article.title = title;
-
-  const byline = toOptional(parsed.byline);
-  if (byline !== undefined) article.byline = byline;
-
-  const excerpt = toOptional(parsed.excerpt);
-  if (excerpt !== undefined) article.excerpt = excerpt;
-
-  const siteName = toOptional(parsed.siteName);
-  if (siteName !== undefined) article.siteName = siteName;
-
-  return article;
 }
 
-function toOptional(value: string | null | undefined): string | undefined {
-  return value ?? undefined;
+function buildOptionalArticleFields(
+  parsed: NonNullable<ReturnType<Readability['parse']>>
+): Partial<ExtractedArticle> {
+  const optional: Partial<ExtractedArticle> = {};
+  addOptionalField(optional, 'title', parsed.title);
+  addOptionalField(optional, 'byline', parsed.byline);
+  addOptionalField(optional, 'excerpt', parsed.excerpt);
+  addOptionalField(optional, 'siteName', parsed.siteName);
+  return optional;
+}
+
+function addOptionalField<Key extends keyof ExtractedArticle>(
+  target: Partial<ExtractedArticle>,
+  key: Key,
+  value: ExtractedArticle[Key] | null | undefined
+): void {
+  if (value == null) return;
+  target[key] = value;
 }
 
 export function extractContent(
@@ -98,7 +118,7 @@ function tryExtractContent(
 
     const metadata = extractMetadata(document);
     return {
-      article: options.extractArticle ? extractArticle(document) : null,
+      article: resolveArticleExtraction(document, options.extractArticle),
       metadata,
     };
   } catch (error) {
@@ -111,17 +131,29 @@ function tryExtractContent(
 }
 
 function isValidInput(html: string, url: string): boolean {
-  if (!html || typeof html !== 'string') {
-    logWarn('extractContent called with invalid HTML input');
-    return false;
-  }
+  return (
+    validateRequiredString(
+      html,
+      'extractContent called with invalid HTML input'
+    ) && validateRequiredString(url, 'extractContent called with invalid URL')
+  );
+}
 
-  if (!url || typeof url !== 'string') {
-    logWarn('extractContent called with invalid URL');
-    return false;
-  }
+function validateRequiredString(value: unknown, message: string): boolean {
+  if (isNonEmptyString(value)) return true;
+  logWarn(message);
+  return false;
+}
 
-  return true;
+function isNonEmptyString(value: unknown): value is string {
+  return typeof value === 'string' && value.length > 0;
+}
+
+function resolveArticleExtraction(
+  document: Document,
+  shouldExtract: boolean | undefined
+): ExtractedArticle | null {
+  return shouldExtract ? extractArticle(document) : null;
 }
 
 function applyBaseUri(document: Document, url: string): void {

@@ -34,3 +34,17 @@ describe('htmlToMarkdown noise filtering', () => {
     assert.ok(!markdown.includes('ZISO'));
   });
 });
+
+describe('htmlToMarkdown frontmatter', () => {
+  it('quotes frontmatter values that require YAML escaping', () => {
+    const html = '<p>Hello</p>';
+    const markdown = htmlToMarkdown(html, {
+      title: 'hello:world',
+      url: 'https://example.com/path?x=1',
+    });
+
+    assert.ok(markdown.startsWith('---'));
+    assert.ok(markdown.includes('title: "hello:world"'));
+    assert.ok(markdown.includes('source: "https://example.com/path?x=1"'));
+  });
+});

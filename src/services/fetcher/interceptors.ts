@@ -130,27 +130,28 @@ function publishFetchEnd(
   });
 }
 
+function formatDuration(duration: number): string {
+  return `${Math.round(duration)}ms`;
+}
+
 function buildResponseMeta(
   response: Response,
   contentSize: number | undefined,
   duration: number
 ): { contentType?: string; duration: string; size?: string } {
-  const contentLength =
-    response.headers.get('content-length') ?? contentSize?.toString();
-
   const meta: { contentType?: string; duration: string; size?: string } = {
-    duration: `${Math.round(duration)}ms`,
+    duration: formatDuration(duration),
   };
-
   const contentType = response.headers.get('content-type');
-  if (contentType !== null) {
+  if (contentType) {
     meta.contentType = contentType;
   }
-
-  if (contentLength !== undefined) {
+  const contentLength =
+    response.headers.get('content-length') ??
+    (contentSize === undefined ? undefined : String(contentSize));
+  if (contentLength) {
     meta.size = contentLength;
   }
-
   return meta;
 }
 
@@ -162,7 +163,7 @@ function logSlowRequestIfNeeded(
   logWarn('Slow HTTP request detected', {
     requestId: context.requestId,
     url: context.url,
-    duration: `${Math.round(duration)}ms`,
+    duration: formatDuration(duration),
   });
 }
 

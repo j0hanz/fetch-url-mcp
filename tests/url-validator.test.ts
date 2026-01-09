@@ -1,7 +1,11 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { validateAndNormalizeUrl } from '../dist/utils/url-validator.js';
+import {
+  isBlockedIp,
+  normalizeUrl,
+  validateAndNormalizeUrl,
+} from '../dist/utils/url-validator.js';
 
 type ValidCase = {
   name: string;
@@ -87,5 +91,28 @@ describe('validateAndNormalizeUrl', () => {
         message: testCase.message,
       });
     });
+  });
+});
+
+describe('isBlockedIp', () => {
+  it('blocks private IPv4 ranges', () => {
+    assert.equal(isBlockedIp('10.0.0.1'), true);
+  });
+
+  it('blocks IPv6 loopback', () => {
+    assert.equal(isBlockedIp('::1'), true);
+  });
+
+  it('allows public IPs', () => {
+    assert.equal(isBlockedIp('8.8.8.8'), false);
+  });
+});
+
+describe('normalizeUrl', () => {
+  it('returns normalized hostnames', () => {
+    const result = normalizeUrl('https://Example.COM/Path');
+
+    assert.equal(result.hostname, 'example.com');
+    assert.equal(result.normalizedUrl, 'https://example.com/Path');
   });
 });

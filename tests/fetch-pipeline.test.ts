@@ -8,6 +8,19 @@ import { normalizeUrl } from '../dist/utils/url-validator.js';
 
 type CachedPayload = { value: string };
 
+function withMockedFetch(
+  mock: typeof fetch,
+  execute: () => Promise<void>
+): Promise<void> {
+  const originalFetch: typeof fetch = fetch;
+  (globalThis as typeof globalThis & { fetch: typeof fetch }).fetch = mock;
+
+  return execute().finally(() => {
+    (globalThis as typeof globalThis & { fetch: typeof fetch }).fetch =
+      originalFetch;
+  });
+}
+
 function createCachedPayload(value: string): CachedPayload {
   return { value };
 }
@@ -55,5 +68,62 @@ describe('executeFetchPipeline', () => {
     assert.equal(result.url, normalizedUrl);
     assert.equal(result.fetchedAt, cachedEntry.fetchedAt);
     assert.deepEqual(result.data, payload);
+  });
+
+  it('bypasses cache when a deserializer is missing', async () => {
+    const url = buildTestUrl();
+    const normalizedUrl = normalizeUrl(url).normalizedUrl;
+    const cacheNamespace = 'pipeline-test-missing-deserializer';
+    const cacheKey = createCacheKey(cacheNamespace, normalizedUrl);
+
+    assert.ok(cacheKey);
+
+    cache.set(cacheKey, serializePayload(createCachedPayload('cached')), {
+      url: normalizedUrl,
+    });
+
+    await withMockedFetch(
+      async () => {
+        return new Response('<p>fresh</p>', { status: 200 });
+      },
+      async () => {
+        const result = await executeFetchPipeline<CachedPayload>({
+          url,
+          cacheNamespace,
+          transform: async (html) => createCachedPayload(`fresh:${html}`),
+        });
+
+        assert.equal(result.fromCache, false);
+        assert.equal(result.cacheKey, cacheKey);
+        assert.equal(result.url, normalizedUrl);
+        assert.equal(result.data.value, 'fresh:<p>fresh</p>');
+      }
+    );
+  });
+
+  it('returns transformed raw URL when source is a GitHub blob', async () => {
+    const url = 'https://github.com/octocat/Hello-World/blob/main/README.md';
+    const expectedRaw =
+      'https://raw.githubusercontent.com/octocat/Hello-World/main/README.md';
+    const cacheNamespace = 'pipeline-test-raw-url';
+
+    await withMockedFetch(
+      async () => {
+        return new Response('raw content', { status: 200 });
+      },
+      async () => {
+        const result = await executeFetchPipeline<string>({
+          url,
+          cacheNamespace,
+          transform: async (html, normalizedUrl) => {
+            assert.equal(normalizedUrl, expectedRaw);
+            return html;
+          },
+        });
+
+        assert.equal(result.fromCache, false);
+        assert.equal(result.url, expectedRaw);
+      }
+    );
   });
 });

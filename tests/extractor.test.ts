@@ -90,6 +90,30 @@ describe('extractContent', () => {
     });
   });
 
+  it('extracts article content when enabled', () => {
+    const html = `
+      <html>
+        <head>
+          <title>Example Title</title>
+        </head>
+        <body>
+          <article>
+            <h1>Example Title</h1>
+            <p>Hello world</p>
+          </article>
+        </body>
+      </html>
+    `;
+
+    const result = extractContent(html, 'https://example.com', {
+      extractArticle: true,
+    });
+
+    assert.ok(result.article);
+    assert.ok(result.article.content.length > 0);
+    assert.ok(result.article.textContent.includes('Hello world'));
+  });
+
   it('returns empty result for invalid input', () => {
     const result = extractContent('', '', { extractArticle: false });
     assert.equal(result.article, null);

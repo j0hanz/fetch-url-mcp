@@ -66,11 +66,17 @@ export function onCacheUpdate(listener: CacheUpdateListener): () => void {
 }
 
 function emitCacheUpdate(cacheKey: string): void {
-  const parts = parseCacheKey(cacheKey);
-  if (!parts) return;
+  const event = resolveCacheUpdateEvent(cacheKey);
+  if (!event) return;
   for (const listener of updateListeners) {
-    listener({ cacheKey, ...parts });
+    listener(event);
   }
+}
+
+function resolveCacheUpdateEvent(cacheKey: string): CacheUpdateEvent | null {
+  if (updateListeners.size === 0) return null;
+  const parts = parseCacheKey(cacheKey);
+  return parts ? { cacheKey, ...parts } : null;
 }
 
 export function get(cacheKey: string | null): CacheEntry | undefined {
@@ -105,18 +111,19 @@ function runCacheOperation<T>(
 }
 
 function readCacheEntry(cacheKey: string): CacheEntry | undefined {
-  return readCacheItem(cacheKey)?.entry;
+  const now = Date.now();
+  return readCacheItem(cacheKey, now)?.entry;
 }
 
-function isExpired(item: CacheItem): boolean {
-  return Date.now() > item.expiresAt;
+function isExpired(item: CacheItem, now: number): boolean {
+  return now > item.expiresAt;
 }
 
-function readCacheItem(cacheKey: string): CacheItem | undefined {
+function readCacheItem(cacheKey: string, now: number): CacheItem | undefined {
   const item = contentCache.get(cacheKey);
   if (!item) return undefined;
 
-  if (isExpired(item)) {
+  if (isExpired(item, now)) {
     contentCache.delete(cacheKey);
     return undefined;
   }
@@ -132,8 +139,10 @@ export function set(
   if (!isCacheWritable(cacheKey, content)) return;
   runCacheOperation(cacheKey, 'Cache set error', () => {
     startCleanupLoop();
-    const entry = buildCacheEntry(content, metadata);
-    persistCacheEntry(cacheKey, entry);
+    const now = Date.now();
+    const expiresAtMs = now + config.cache.ttl * 1000;
+    const entry = buildCacheEntry(content, metadata, now, expiresAtMs);
+    persistCacheEntry(cacheKey, entry, expiresAtMs);
   });
 }
 
@@ -147,20 +156,25 @@ export function isEnabled(): boolean {
 
 function buildCacheEntry(
   content: string,
-  metadata: CacheEntryMetadata
+  metadata: CacheEntryMetadata,
+  fetchedAtMs: number,
+  expiresAtMs: number
 ): CacheEntry {
   return {
     url: metadata.url,
     content,
-    fetchedAt: new Date().toISOString(),
-    expiresAt: new Date(resolveExpiryTimestamp()).toISOString(),
+    fetchedAt: new Date(fetchedAtMs).toISOString(),
+    expiresAt: new Date(expiresAtMs).toISOString(),
     ...(metadata.title === undefined ? {} : { title: metadata.title }),
   };
 }
 
-function persistCacheEntry(cacheKey: string, entry: CacheEntry): void {
-  const expiresAt = resolveExpiryTimestamp();
-  contentCache.set(cacheKey, { entry, expiresAt });
+function persistCacheEntry(
+  cacheKey: string,
+  entry: CacheEntry,
+  expiresAtMs: number
+): void {
+  contentCache.set(cacheKey, { entry, expiresAt: expiresAtMs });
   trimCacheToMaxKeys();
   emitCacheUpdate(cacheKey);
 }
@@ -171,18 +185,12 @@ function trimCacheToMaxKeys(): void {
 }
 
 function removeOldestEntries(count: number): void {
-  if (count <= 0) return;
-
-  let removed = 0;
-  for (const key of contentCache.keys()) {
-    contentCache.delete(key);
-    removed += 1;
-    if (removed >= count) return;
+  const iterator = contentCache.keys();
+  for (let removed = 0; removed < count; removed += 1) {
+    const next = iterator.next();
+    if (next.done) break;
+    contentCache.delete(next.value);
   }
-}
-
-function resolveExpiryTimestamp(): number {
-  return Date.now() + config.cache.ttl * 1000;
 }
 
 function logCacheError(

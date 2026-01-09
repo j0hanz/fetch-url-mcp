@@ -156,13 +156,10 @@ function buildRawMarkdownPayload(
   return { content, title };
 }
 
+const HTML_DOCUMENT_PATTERN = /^(<!doctype|<html)/i;
+
 function looksLikeHtmlDocument(trimmed: string): boolean {
-  return (
-    trimmed.startsWith('<!DOCTYPE') ||
-    trimmed.startsWith('<!doctype') ||
-    trimmed.startsWith('<html') ||
-    trimmed.startsWith('<HTML')
-  );
+  return HTML_DOCUMENT_PATTERN.test(trimmed);
 }
 
 function countCommonHtmlTags(content: string): number {
@@ -174,22 +171,15 @@ function countCommonHtmlTags(content: string): number {
 
 function isRawTextContent(content: string): boolean {
   const trimmed = content.trim();
+  const isHtmlDocument = looksLikeHtmlDocument(trimmed);
+  const hasMarkdownFrontmatter = hasFrontmatter(trimmed);
+  const hasTooManyHtmlTags = countCommonHtmlTags(content) > 2;
+  const isMarkdown = looksLikeMarkdown(content);
 
-  if (looksLikeHtmlDocument(trimmed)) {
-    return false;
-  }
-
-  if (hasFrontmatter(trimmed)) {
-    return true;
-  }
-  if (countCommonHtmlTags(content) > 2) {
-    return false;
-  }
-  if (looksLikeMarkdown(content)) {
-    return true;
-  }
-
-  return false;
+  return (
+    !isHtmlDocument &&
+    (hasMarkdownFrontmatter || (!hasTooManyHtmlTags && isMarkdown))
+  );
 }
 
 function tryTransformRawContent(

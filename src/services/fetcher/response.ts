@@ -41,7 +41,6 @@ function appendChunk(
   url: string
 ): void {
   state.total += chunk.byteLength;
-
   if (state.total > maxBytes) {
     throw new FetchError(
       `Response exceeds maximum size of ${maxBytes} bytes`,
@@ -93,6 +92,20 @@ async function throwIfAborted(
   throw createAbortError(url);
 }
 
+async function handleReadFailure(
+  error: unknown,
+  signal: AbortSignal | undefined,
+  url: string,
+  reader: ReadableStreamDefaultReader<Uint8Array>
+): Promise<never> {
+  const aborted = signal?.aborted ?? false;
+  await cancelReaderQuietly(reader);
+  if (aborted) {
+    throw createAbortError(url);
+  }
+  throw error;
+}
+
 async function readAllChunks(
   reader: ReadableStreamDefaultReader<Uint8Array>,
   state: StreamReadState,
@@ -122,13 +135,7 @@ async function readStreamWithLimit(
   try {
     await readAllChunks(reader, state, url, maxBytes, signal);
   } catch (error) {
-    if (!signal?.aborted) {
-      await cancelReaderQuietly(reader);
-    }
-    if (signal?.aborted) {
-      throw createAbortError(url);
-    }
-    throw error;
+    await handleReadFailure(error, signal, url, reader);
   } finally {
     reader.releaseLock();
   }
