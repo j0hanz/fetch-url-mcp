@@ -40,6 +40,8 @@
     "start": "node dist/index.js",
     "format": "prettier --write .",
     "type-check": "tsc --noEmit",
+    "type-check:diagnostics": "tsc --noEmit --extendedDiagnostics",
+    "type-check:trace": "node -e \"require('fs').rmSync('.ts-trace',{recursive:true,force:true})\" && tsc --noEmit --generateTrace .ts-trace",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "test": "npm run build --silent && node --test --experimental-transform-types",
