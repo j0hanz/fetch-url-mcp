@@ -1,5 +1,7 @@
 # superFetch MCP Server
 
+<!-- markdownlint-disable MD033 -->
+
 <img src="docs/logo.png" alt="SuperFetch MCP Logo" width="200">
 
 [![npm version](https://img.shields.io/npm/v/@j0hanz/superfetch.svg)](https://www.npmjs.com/package/@j0hanz/superfetch) [![Node.js](https://img.shields.io/badge/Node.js-%3E=20.18.1-339933?logo=nodedotjs&logoColor=white)](https://nodejs.org/) [![TypeScript](https://img.shields.io/badge/TypeScript-5.9-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
@@ -12,6 +14,17 @@
 
 A [Model Context Protocol](https://modelcontextprotocol.io/) (MCP) server that fetches web pages, extracts readable content with Mozilla Readability, and returns AI-friendly Markdown.
 
+Built for AI workflows that need _clean text_, _stable metadata_, and _safe-by-default fetching_.
+
+**You get, in one tool call:**
+
+- **Readable Markdown** (HTML → Readability → Markdown)
+- **Metadata frontmatter** for HTML (title, source, author, description, fetchedAt)
+- **Raw markdown passthrough** (GitHub/GitLab/Bitbucket/Gist URLs auto-rewritten to raw when possible)
+- **Cache + resources** for large pages (MCP `superfetch://cache/...` resources and optional download endpoint in HTTP mode)
+
+**Great for:** docs ingestion, RAG pipelines, research agents, changelog/news summarization, and “fetch this URL and cite it” workflows.
+
 [Quick Start](#quick-start) | [Tool](#available-tools) | [Resources](#resources) | [Configuration](#configuration) | [Security](#security) | [Development](#development)
 
 > **Published to [MCP Registry](https://registry.modelcontextprotocol.io/)** - Search for `io.github.j0hanz/superfetch`
@@ -23,21 +36,39 @@ A [Model Context Protocol](https://modelcontextprotocol.io/) (MCP) server that f
 
 ## Features
 
-| Feature              | Description                                                                                                                                                |
-| -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Smart extraction     | Mozilla Readability with quality gates to strip boilerplate when it improves results                                                                       |
-| Clean Markdown       | Markdown output with YAML frontmatter (title, source, author, description, fetchedAt) for HTML; raw markdown is preserved and source is added when missing |
-| Raw content handling | Preserves raw markdown/text, detects common text extensions, and rewrites GitHub/GitLab/Bitbucket/Gist URLs to raw                                         |
-| Built-in caching     | In-memory cache with TTL, max keys, and resource subscriptions                                                                                             |
-| Resilient fetching   | Redirect handling with validation, timeouts, and response size limits                                                                                      |
-| Security first       | URL validation plus SSRF/DNS/IP blocklists                                                                                                                 |
-| HTTP mode            | Static token or OAuth auth, session management, rate limiting, host/origin validation                                                                      |
+- **Cleaner outputs for LLMs**: Readability extraction with a quality gate to avoid making pages worse
+- **Markdown that’s easy to consume**: YAML frontmatter for HTML + consistent Markdown formatting
+- **Handles “raw content” sources**: preserves markdown/text; rewrites GitHub/GitLab/Bitbucket/Gist URLs to raw
+- **Works for both local and hosted setups**:
+  - **Stdio mode**: best for MCP clients (VS Code / Claude Desktop / Cursor)
+  - **HTTP mode**: best for self-hosting (auth, sessions, rate limiting, Host/Origin validation)
+- **Fast and resilient**: redirect validation, timeouts, and response size limits
+- **Security-first defaults**: URL validation + SSRF/DNS/IP blocklists (blocks private ranges and cloud metadata endpoints)
+
+If you’re comparing “just call `fetch()`” vs superFetch: superFetch focuses on _readability_, _consistent structure_, and _safe URL access_ for agent environments.
+
+## What it is (and isn’t)
+
+- **It is** a “URL → clean Markdown” tool designed for agent/RAG workflows.
+- **It isn’t** a headless browser: pages that require heavy client-side rendering may not extract well.
+- **It isn’t** a crawler: it fetches a single URL per call (your agent can decide what to fetch next).
+- **It’s opinionated on safety**: blocked private IP ranges and metadata endpoints are a feature, not a bug.
 
 ---
 
 ## Quick Start
 
-Add superFetch to your MCP client configuration - no installation required.
+Recommended: use **stdio mode** with your MCP client (no HTTP server).
+
+### Try it in 60 seconds
+
+1. Add the MCP server config (below)
+2. Restart your MCP client
+3. Call the `fetch-url` tool with any public URL
+
+### What the tool returns
+
+You’ll get `structuredContent` with `url`, `resolvedUrl`, optional `title`, and `markdown` (plus a `superfetch://cache/...` resource link when cache is enabled and content is large).
 
 ### Claude Desktop
 
@@ -74,6 +105,23 @@ Add to `.vscode/mcp.json` in your workspace:
 Add environment variables in your MCP client config under `env`.
 See [Configuration](#configuration) or `CONFIGURATION.md` for all available options and presets.
 
+### Example output (trimmed)
+
+```json
+{
+  "url": "https://example.com/docs",
+  "inputUrl": "https://example.com/docs",
+  "resolvedUrl": "https://example.com/docs",
+  "title": "Documentation",
+  "markdown": "---\ntitle: Documentation\nsource: https://example.com/docs\nfetchedAt: 2026-01-12T12:00:00.000Z\n---\n\n# Getting Started\n\n..."
+}
+```
+
+> **Tip (Windows):** If you encounter issues, try: `cmd /c "npx -y @j0hanz/superfetch@latest --stdio"`
+
+<details>
+<summary><strong>Other clients (Cursor, Cline, Windsurf, Codex)</strong></summary>
+
 ### Cursor
 
 1. Open Cursor Settings
@@ -91,8 +139,6 @@ See [Configuration](#configuration) or `CONFIGURATION.md` for all available opti
   }
 }
 ```
-
-> **Tip (Windows):** If you encounter issues, try: `cmd /c "npx -y @j0hanz/superfetch@latest --stdio"`
 
 <details>
 <summary><strong>Codex IDE</strong></summary>
@@ -187,6 +233,35 @@ code %APPDATA%\Claude\claude_desktop_config.json
 ```
 
 </details>
+
+</details>
+
+---
+
+## Use cases
+
+### 1) Turn a docs page into “LLM-ready” Markdown
+
+- Call `fetch-url` with the docs URL
+- Feed the returned `markdown` into your summarizer / chunker
+- Use the YAML frontmatter fields (especially `source`) for citations
+
+### 2) Fetch a GitHub/GitLab/Bitbucket file as raw markdown
+
+- Pass the normal “web UI” URL to `fetch-url`
+- superFetch will rewrite it to the raw content URL when possible
+- This avoids navigation UI and reduces boilerplate
+
+### 3) Large pages: keep responses stable with cache resources
+
+- When content is large, the tool can include a `superfetch://cache/...` resource link
+- In MCP clients that support resources, you can read the full content via the resource URI
+- In HTTP mode, you can also download cached content via `/mcp/downloads/:namespace/:hash` when cache is enabled
+
+### 4) Safe-by-default web access for agents
+
+- superFetch blocks private IP ranges and common cloud metadata endpoints
+- If your agent needs internal access, this is intentionally not supported by default (see Security)
 
 ---
 
@@ -535,3 +610,5 @@ Rate limiting applies to `/mcp` and `/mcp/downloads` (100 req/min per IP, 60s wi
 7. Open a Pull Request
 
 For examples of other MCP servers, see: [github.com/modelcontextprotocol/servers](https://github.com/modelcontextprotocol/servers)
+
+<!-- markdownlint-enable MD033 -->
