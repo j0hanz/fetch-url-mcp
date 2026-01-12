@@ -4,7 +4,12 @@ import type { Express, Request, Response } from 'express';
 
 import { ResourceTemplate } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { ErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js';
+import {
+  ErrorCode,
+  McpError,
+  SubscribeRequestSchema,
+  UnsubscribeRequestSchema,
+} from '@modelcontextprotocol/sdk/types.js';
 
 import { config } from './config.js';
 import { sha256Hex } from './crypto.js';
@@ -441,8 +446,41 @@ function listCachedResources(): {
   return { resources };
 }
 
-function notifyResourceUpdate(server: McpServer, uri: string): void {
+function appendServerOnClose(server: McpServer, handler: () => void): void {
+  const previousOnClose = server.server.onclose;
+  server.server.onclose = () => {
+    previousOnClose?.();
+    handler();
+  };
+}
+
+function registerResourceSubscriptionHandlers(server: McpServer): Set<string> {
+  const subscriptions = new Set<string>();
+
+  server.server.setRequestHandler(SubscribeRequestSchema, (request) => {
+    subscriptions.add(request.params.uri);
+    return {};
+  });
+
+  server.server.setRequestHandler(UnsubscribeRequestSchema, (request) => {
+    subscriptions.delete(request.params.uri);
+    return {};
+  });
+
+  appendServerOnClose(server, () => {
+    subscriptions.clear();
+  });
+
+  return subscriptions;
+}
+
+function notifyResourceUpdate(
+  server: McpServer,
+  uri: string,
+  subscriptions: Set<string>
+): void {
   if (!server.isConnected()) return;
+  if (!subscriptions.has(uri)) return;
   void server.server.sendResourceUpdated({ uri }).catch((error: unknown) => {
     logWarn('Failed to send resource update notification', {
       uri,
@@ -452,8 +490,9 @@ function notifyResourceUpdate(server: McpServer, uri: string): void {
 }
 
 export function registerCachedContentResource(server: McpServer): void {
+  const subscriptions = registerResourceSubscriptionHandlers(server);
   registerCacheContentResource(server);
-  registerCacheUpdateSubscription(server);
+  registerCacheUpdateSubscription(server, subscriptions);
 }
 
 function buildCachedContentResponse(
@@ -484,22 +523,21 @@ function registerCacheContentResource(server: McpServer): void {
   );
 }
 
-function registerCacheUpdateSubscription(server: McpServer): void {
+function registerCacheUpdateSubscription(
+  server: McpServer,
+  subscriptions: Set<string>
+): void {
   const unsubscribe = onCacheUpdate(({ cacheKey }) => {
     const resourceUri = toResourceUri(cacheKey);
     if (!resourceUri) return;
 
-    notifyResourceUpdate(server, resourceUri);
+    notifyResourceUpdate(server, resourceUri, subscriptions);
     if (server.isConnected()) {
       server.sendResourceListChanged();
     }
   });
 
-  const previousOnClose = server.server.onclose;
-  server.server.onclose = () => {
-    previousOnClose?.();
-    unsubscribe();
-  };
+  appendServerOnClose(server, unsubscribe);
 }
 
 function requireCacheEntry(cacheKey: string): { content: string } {

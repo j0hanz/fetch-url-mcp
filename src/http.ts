@@ -949,8 +949,11 @@ function stripHash(url: URL): string {
   return copy.href;
 }
 
-function ensureResourceMatch(resource: URL | undefined): URL | undefined {
-  if (resource && stripHash(resource) !== stripHash(config.auth.resourceUrl)) {
+function ensureResourceMatch(resource: URL | undefined): URL {
+  if (!resource) {
+    throw new InvalidTokenError('Token resource mismatch');
+  }
+  if (stripHash(resource) !== stripHash(config.auth.resourceUrl)) {
     throw new InvalidTokenError('Token resource mismatch');
   }
   return resource;
@@ -967,7 +970,7 @@ function buildIntrospectionAuthInfo(
     clientId: resolveClientId(data),
     scopes: extractScopes(data),
     expiresAt: readExpiresAt(data),
-    resource: resource ?? config.auth.resourceUrl,
+    resource,
     extra: data,
   };
 }
@@ -1998,7 +2001,7 @@ function resolveSessionTransport(
 const MCP_PROTOCOL_VERSION_HEADER = 'mcp-protocol-version';
 
 const MCP_PROTOCOL_VERSIONS = {
-  defaultVersion: '2025-11-25',
+  defaultVersion: '2025-03-26',
   supported: new Set<string>(['2025-11-25']),
 };
 
@@ -2026,11 +2029,17 @@ export function ensureMcpProtocolVersionHeader(
   const version = raw?.trim();
 
   if (!version) {
-    setHeaderValue(
-      req,
-      MCP_PROTOCOL_VERSION_HEADER,
-      MCP_PROTOCOL_VERSIONS.defaultVersion
-    );
+    const assumed = MCP_PROTOCOL_VERSIONS.defaultVersion;
+    setHeaderValue(req, MCP_PROTOCOL_VERSION_HEADER, assumed);
+    if (!MCP_PROTOCOL_VERSIONS.supported.has(assumed)) {
+      sendJsonRpcError(
+        res,
+        -32600,
+        `Unsupported MCP-Protocol-Version: ${assumed}`,
+        400
+      );
+      return false;
+    }
     return true;
   }
 

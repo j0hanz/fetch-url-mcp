@@ -30,12 +30,14 @@ function createStatusJsonCapture() {
 
 function testDefaultsMissingHeader() {
   const req = { headers: {} };
-  const res = createResponse();
+  const { res, getStatusCode, getJsonBody } = createStatusJsonCapture();
 
   const ok = ensureMcpProtocolVersionHeader(req, res);
 
-  assert.equal(ok, true);
-  assert.equal(req.headers['mcp-protocol-version'], '2025-11-25');
+  assert.equal(ok, false);
+  assert.equal(getStatusCode(), 400);
+  assert.equal(getJsonBody().jsonrpc, '2.0');
+  assert.equal(req.headers['mcp-protocol-version'], '2025-03-26');
 }
 
 function testRejectsUnsupportedHeader() {
