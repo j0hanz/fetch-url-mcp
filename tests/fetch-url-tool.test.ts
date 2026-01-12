@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import { after, describe, it } from 'node:test';
 
-import { shutdownTransformWorkerPool } from '../dist/services/transform-worker-pool.js';
-import { fetchUrlToolHandler } from '../dist/tools/handlers/fetch-url.tool.js';
+import { fetchUrlToolHandler } from '../dist/tools.js';
+import { shutdownTransformWorkerPool } from '../dist/transform.js';
 
 after(async () => {
   await shutdownTransformWorkerPool();

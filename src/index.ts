@@ -1,10 +1,9 @@
 #!/usr/bin/env node
 import { parseArgs } from 'node:util';
 
-import { logError } from './services/logger.js';
-
-import { startHttpServer } from './http/server.js';
-import { startStdioServer } from './server.js';
+import { startHttpServer } from './http.js';
+import { startStdioServer } from './mcp.js';
+import { logError } from './observability.js';
 
 const { values } = parseArgs({
   options: {

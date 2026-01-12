@@ -1,11 +1,8 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import {
-  getRequestId,
-  runWithRequestContext,
-} from '../dist/services/context.js';
-import { withRequestContextIfMissing } from '../dist/tools/index.js';
+import { getRequestId, runWithRequestContext } from '../dist/observability.js';
+import { withRequestContextIfMissing } from '../dist/tools.js';
 
 describe('withRequestContextIfMissing', () => {
   it('establishes a request context when none exists', async () => {

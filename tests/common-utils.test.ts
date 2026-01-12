@@ -5,7 +5,7 @@ import {
   createContentMetadataBlock,
   determineContentExtractionSource,
   isExtractionSufficient,
-} from '../dist/tools/utils/content-transform.js';
+} from '../dist/transform.js';
 
 const retainedText = {
   longText: 'a'.repeat(200),

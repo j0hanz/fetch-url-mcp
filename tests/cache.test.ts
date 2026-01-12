@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import * as cache from '../dist/services/cache.js';
+import * as cache from '../dist/cache.js';
 
 let keyCounter = 0;
 

@@ -1,15 +1,12 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 
-import { config } from './config/index.js';
-
-import { destroyAgents } from './services/fetcher.js';
-import { logError, logInfo } from './services/logger.js';
-import { shutdownTransformWorkerPool } from './services/transform-worker-pool.js';
-
-import { registerTools } from './tools/index.js';
-
-import { registerCachedContentResource } from './resources/cached-content.js';
+import { registerCachedContentResource } from './cache.js';
+import { config } from './config.js';
+import { destroyAgents } from './fetch.js';
+import { logError, logInfo } from './observability.js';
+import { registerTools } from './tools.js';
+import { shutdownTransformWorkerPool } from './transform.js';
 
 function createServerInfo(): { name: string; version: string } {
   return {

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { generateSafeFilename } from '../dist/utils/filename-generator.js';
+import { generateSafeFilename } from '../dist/cache.js';
 
 type FilenameCase = {
   url: string;

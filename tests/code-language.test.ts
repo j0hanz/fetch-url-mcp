@@ -4,7 +4,7 @@ import { describe, it } from 'node:test';
 import {
   detectLanguageFromCode,
   resolveLanguageFromAttributes,
-} from '../dist/utils/code-language.js';
+} from '../dist/transform.js';
 
 describe('detectLanguageFromCode', () => {
   it('detects JavaScript snippets', () => {

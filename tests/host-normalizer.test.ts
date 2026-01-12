@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { normalizeHost } from '../dist/utils/host-normalizer.js';
+import { normalizeHost } from '../dist/http.js';
 
 describe('normalizeHost', () => {
   it('lowercases and strips ports', () => {

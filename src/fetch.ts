@@ -1,27 +1,420 @@
 import { randomUUID } from 'node:crypto';
 import diagnosticsChannel from 'node:diagnostics_channel';
 import dns from 'node:dns';
+import { BlockList, isIP } from 'node:net';
 import os from 'node:os';
 import { performance } from 'node:perf_hooks';
 
 import type { Dispatcher } from 'undici';
 import { Agent } from 'undici';
 
-import { config } from '../config/index.js';
-import type { FetchOptions } from '../config/types/runtime.js';
-
-import { FetchError } from '../errors/app-error.js';
-
-import { createErrorWithCode, isSystemError } from '../utils/error-details.js';
-import { isRecord } from '../utils/guards.js';
-import { redactUrl } from '../utils/url-redactor.js';
+import { config } from './config.js';
+import { createErrorWithCode, FetchError, isSystemError } from './errors.js';
 import {
-  isBlockedIp,
-  validateAndNormalizeUrl,
-} from '../utils/url-validator.js';
+  getOperationId,
+  getRequestId,
+  logDebug,
+  logError,
+  logWarn,
+  redactUrl,
+} from './observability.js';
 
-import { getOperationId, getRequestId } from './context.js';
-import { logDebug, logError, logWarn } from './logger.js';
+export interface FetchOptions {
+  signal?: AbortSignal;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
+type IpSegment = number | string;
+
+function buildIpv4(parts: readonly [number, number, number, number]): string {
+  return parts.join('.');
+}
+
+function buildIpv6(parts: readonly IpSegment[]): string {
+  return parts.map(String).join(':');
+}
+
+const BLOCK_LIST = new BlockList();
+
+const IPV6_ZERO = buildIpv6([0, 0, 0, 0, 0, 0, 0, 0]);
+const IPV6_LOOPBACK = buildIpv6([0, 0, 0, 0, 0, 0, 0, 1]);
+const IPV6_64_FF9B = buildIpv6(['64', 'ff9b', 0, 0, 0, 0, 0, 0]);
+const IPV6_64_FF9B_1 = buildIpv6(['64', 'ff9b', 1, 0, 0, 0, 0, 0]);
+const IPV6_2001 = buildIpv6(['2001', 0, 0, 0, 0, 0, 0, 0]);
+const IPV6_2002 = buildIpv6(['2002', 0, 0, 0, 0, 0, 0, 0]);
+const IPV6_FC00 = buildIpv6(['fc00', 0, 0, 0, 0, 0, 0, 0]);
+const IPV6_FE80 = buildIpv6(['fe80', 0, 0, 0, 0, 0, 0, 0]);
+const IPV6_FF00 = buildIpv6(['ff00', 0, 0, 0, 0, 0, 0, 0]);
+
+const BLOCKED_IPV4_SUBNETS: readonly {
+  subnet: string;
+  prefix: number;
+}[] = [
+  { subnet: buildIpv4([0, 0, 0, 0]), prefix: 8 },
+  { subnet: buildIpv4([10, 0, 0, 0]), prefix: 8 },
+  { subnet: buildIpv4([100, 64, 0, 0]), prefix: 10 },
+  { subnet: buildIpv4([127, 0, 0, 0]), prefix: 8 },
+  { subnet: buildIpv4([169, 254, 0, 0]), prefix: 16 },
+  { subnet: buildIpv4([172, 16, 0, 0]), prefix: 12 },
+  { subnet: buildIpv4([192, 168, 0, 0]), prefix: 16 },
+  { subnet: buildIpv4([224, 0, 0, 0]), prefix: 4 },
+  { subnet: buildIpv4([240, 0, 0, 0]), prefix: 4 },
+];
+const BLOCKED_IPV6_SUBNETS: readonly {
+  subnet: string;
+  prefix: number;
+}[] = [
+  { subnet: IPV6_ZERO, prefix: 128 },
+  { subnet: IPV6_LOOPBACK, prefix: 128 },
+  { subnet: IPV6_64_FF9B, prefix: 96 },
+  { subnet: IPV6_64_FF9B_1, prefix: 48 },
+  { subnet: IPV6_2001, prefix: 32 },
+  { subnet: IPV6_2002, prefix: 16 },
+  { subnet: IPV6_FC00, prefix: 7 },
+  { subnet: IPV6_FE80, prefix: 10 },
+  { subnet: IPV6_FF00, prefix: 8 },
+];
+
+for (const entry of BLOCKED_IPV4_SUBNETS) {
+  BLOCK_LIST.addSubnet(entry.subnet, entry.prefix, 'ipv4');
+}
+for (const entry of BLOCKED_IPV6_SUBNETS) {
+  BLOCK_LIST.addSubnet(entry.subnet, entry.prefix, 'ipv6');
+}
+
+function matchesBlockedIpPatterns(resolvedIp: string): boolean {
+  for (const pattern of config.security.blockedIpPatterns) {
+    if (pattern.test(resolvedIp)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+export function isBlockedIp(ip: string): boolean {
+  if (config.security.blockedHosts.has(ip)) {
+    return true;
+  }
+  const ipType = resolveIpType(ip);
+  if (!ipType) return false;
+  const normalizedIp = ip.toLowerCase();
+  if (isBlockedByList(normalizedIp, ipType)) return true;
+  return matchesBlockedIpPatterns(normalizedIp);
+}
+
+function resolveIpType(ip: string): 4 | 6 | null {
+  const ipType = isIP(ip);
+  return ipType === 4 || ipType === 6 ? ipType : null;
+}
+
+function isBlockedByList(ip: string, ipType: 4 | 6): boolean {
+  if (ipType === 4) {
+    return BLOCK_LIST.check(ip, 'ipv4');
+  }
+  return BLOCK_LIST.check(ip, 'ipv6');
+}
+
+export function normalizeUrl(urlString: string): {
+  normalizedUrl: string;
+  hostname: string;
+} {
+  const trimmedUrl = requireTrimmedUrl(urlString);
+  assertUrlLength(trimmedUrl);
+
+  const url = parseUrl(trimmedUrl);
+  assertHttpProtocol(url);
+  assertNoCredentials(url);
+
+  const hostname = normalizeHostname(url);
+  assertHostnameAllowed(hostname);
+
+  // Canonicalize hostname to avoid trailing-dot variants and keep url.href consistent.
+  url.hostname = hostname;
+
+  return { normalizedUrl: url.href, hostname };
+}
+
+export function validateAndNormalizeUrl(urlString: string): string {
+  return normalizeUrl(urlString).normalizedUrl;
+}
+
+const VALIDATION_ERROR_CODE = 'VALIDATION_ERROR';
+
+function createValidationError(message: string): Error {
+  return createErrorWithCode(message, VALIDATION_ERROR_CODE);
+}
+
+function requireTrimmedUrl(urlString: string): string {
+  if (!urlString || typeof urlString !== 'string') {
+    throw createValidationError('URL is required');
+  }
+
+  const trimmedUrl = urlString.trim();
+  if (!trimmedUrl) {
+    throw createValidationError('URL cannot be empty');
+  }
+
+  return trimmedUrl;
+}
+
+function assertUrlLength(url: string): void {
+  if (url.length <= config.constants.maxUrlLength) return;
+  throw createValidationError(
+    `URL exceeds maximum length of ${config.constants.maxUrlLength} characters`
+  );
+}
+
+function parseUrl(urlString: string): URL {
+  if (!URL.canParse(urlString)) {
+    throw createValidationError('Invalid URL format');
+  }
+  return new URL(urlString);
+}
+
+function assertHttpProtocol(url: URL): void {
+  if (url.protocol === 'http:' || url.protocol === 'https:') return;
+  throw createValidationError(
+    `Invalid protocol: ${url.protocol}. Only http: and https: are allowed`
+  );
+}
+
+function assertNoCredentials(url: URL): void {
+  if (!url.username && !url.password) return;
+  throw createValidationError('URLs with embedded credentials are not allowed');
+}
+
+function normalizeHostname(url: URL): string {
+  let hostname = url.hostname.toLowerCase();
+  while (hostname.endsWith('.')) {
+    hostname = hostname.slice(0, -1);
+  }
+  if (!hostname) {
+    throw createValidationError('URL must have a valid hostname');
+  }
+  return hostname;
+}
+
+const BLOCKED_HOST_SUFFIXES: readonly string[] = ['.local', '.internal'];
+
+function assertHostnameAllowed(hostname: string): void {
+  assertNotBlockedHost(hostname);
+  assertNotBlockedIp(hostname);
+  assertNotBlockedHostnameSuffix(hostname);
+}
+
+function assertNotBlockedHost(hostname: string): void {
+  if (!config.security.blockedHosts.has(hostname)) return;
+  throw createValidationError(
+    `Blocked host: ${hostname}. Internal hosts are not allowed`
+  );
+}
+
+function assertNotBlockedIp(hostname: string): void {
+  if (!isBlockedIp(hostname)) return;
+  throw createValidationError(
+    `Blocked IP range: ${hostname}. Private IPs are not allowed`
+  );
+}
+
+function assertNotBlockedHostnameSuffix(hostname: string): void {
+  if (!matchesBlockedSuffix(hostname)) return;
+  throw createValidationError(
+    `Blocked hostname pattern: ${hostname}. Internal domain suffixes are not allowed`
+  );
+}
+
+function matchesBlockedSuffix(hostname: string): boolean {
+  return BLOCKED_HOST_SUFFIXES.some((suffix) => hostname.endsWith(suffix));
+}
+
+export interface TransformResult {
+  readonly url: string;
+  readonly transformed: boolean;
+  readonly platform?: string;
+}
+
+interface TransformRule {
+  readonly name: string;
+  readonly pattern: RegExp;
+  readonly transform: (match: RegExpExecArray) => string;
+}
+
+const GITHUB_BLOB_RULE: TransformRule = {
+  name: 'github',
+  pattern:
+    /^https?:\/\/(?:www\.)?github\.com\/([^/]+)\/([^/]+)\/blob\/([^/]+)\/(.+)$/i,
+  transform: (match) => {
+    const owner = match[1] ?? '';
+    const repo = match[2] ?? '';
+    const branch = match[3] ?? '';
+    const path = match[4] ?? '';
+    return `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/${path}`;
+  },
+};
+
+const GITHUB_GIST_RULE: TransformRule = {
+  name: 'github-gist',
+  pattern:
+    /^https?:\/\/gist\.github\.com\/([^/]+)\/([a-f0-9]+)(?:#file-(.+)|\/raw\/([^/]+))?$/i,
+  transform: (match) => {
+    const user = match[1] ?? '';
+    const gistId = match[2] ?? '';
+    const hashFile = match[3];
+    const rawFile = match[4];
+    const filename = rawFile ?? hashFile?.replace(/-/g, '.');
+    const filePath = filename ? `/${filename}` : '';
+    return `https://gist.githubusercontent.com/${user}/${gistId}/raw${filePath}`;
+  },
+};
+
+const GITLAB_BLOB_RULE: TransformRule = {
+  name: 'gitlab',
+  pattern:
+    /^(https?:\/\/(?:[^/]+\.)?gitlab\.com\/[^/]+\/[^/]+)\/-\/blob\/([^/]+)\/(.+)$/i,
+  transform: (match) => {
+    const baseUrl = match[1] ?? '';
+    const branch = match[2] ?? '';
+    const path = match[3] ?? '';
+    return `${baseUrl}/-/raw/${branch}/${path}`;
+  },
+};
+
+const BITBUCKET_SRC_RULE: TransformRule = {
+  name: 'bitbucket',
+  pattern:
+    /^(https?:\/\/(?:www\.)?bitbucket\.org\/[^/]+\/[^/]+)\/src\/([^/]+)\/(.+)$/i,
+  transform: (match) => {
+    const baseUrl = match[1] ?? '';
+    const branch = match[2] ?? '';
+    const path = match[3] ?? '';
+    return `${baseUrl}/raw/${branch}/${path}`;
+  },
+};
+
+const TRANSFORM_RULES: readonly TransformRule[] = [
+  GITHUB_BLOB_RULE,
+  GITHUB_GIST_RULE,
+  GITLAB_BLOB_RULE,
+  BITBUCKET_SRC_RULE,
+];
+
+function isRawUrl(url: string): boolean {
+  const lowerUrl = url.toLowerCase();
+  return (
+    lowerUrl.includes('raw.githubusercontent.com') ||
+    lowerUrl.includes('gist.githubusercontent.com') ||
+    lowerUrl.includes('/-/raw/') ||
+    /bitbucket\.org\/[^/]+\/[^/]+\/raw\//.test(lowerUrl)
+  );
+}
+
+function getUrlWithoutParams(url: string): {
+  base: string;
+  hash: string;
+} {
+  const hashIndex = url.indexOf('#');
+  const queryIndex = url.indexOf('?');
+  let endIndex = url.length;
+  if (queryIndex !== -1) {
+    if (hashIndex !== -1) {
+      endIndex = Math.min(queryIndex, hashIndex);
+    } else {
+      endIndex = queryIndex;
+    }
+  } else if (hashIndex !== -1) {
+    endIndex = hashIndex;
+  }
+
+  const hash = hashIndex !== -1 ? url.slice(hashIndex) : '';
+
+  return {
+    base: url.slice(0, endIndex),
+    hash,
+  };
+}
+
+function resolveUrlToMatch(
+  rule: TransformRule,
+  base: string,
+  hash: string
+): string {
+  if (rule.name !== 'github-gist') return base;
+  if (!hash.startsWith('#file-')) return base;
+  return base + hash;
+}
+
+function applyTransformRules(
+  base: string,
+  hash: string
+): { url: string; platform: string } | null {
+  for (const rule of TRANSFORM_RULES) {
+    const urlToMatch = resolveUrlToMatch(rule, base, hash);
+
+    const match = rule.pattern.exec(urlToMatch);
+    if (match) {
+      return { url: rule.transform(match), platform: rule.name };
+    }
+  }
+
+  return null;
+}
+
+export function transformToRawUrl(url: string): TransformResult {
+  if (!url) return { url, transformed: false };
+  if (isRawUrl(url)) {
+    return { url, transformed: false };
+  }
+
+  const { base, hash } = getUrlWithoutParams(url);
+  const result = applyTransformRules(base, hash);
+  if (!result) return { url, transformed: false };
+
+  logDebug('URL transformed to raw content URL', {
+    platform: result.platform,
+    original: url.substring(0, 100),
+    transformed: result.url.substring(0, 100),
+  });
+  return {
+    url: result.url,
+    transformed: true,
+    platform: result.platform,
+  };
+}
+
+const RAW_TEXT_EXTENSIONS = new Set([
+  '.md',
+  '.markdown',
+  '.txt',
+  '.json',
+  '.yaml',
+  '.yml',
+  '.toml',
+  '.xml',
+  '.csv',
+  '.rst',
+  '.adoc',
+  '.org',
+]);
+
+export function isRawTextContentUrl(url: string): boolean {
+  if (!url) return false;
+  if (isRawUrl(url)) return true;
+
+  const { base } = getUrlWithoutParams(url);
+  const lowerBase = base.toLowerCase();
+
+  return hasKnownRawTextExtension(lowerBase);
+}
+
+function hasKnownRawTextExtension(urlBaseLower: string): boolean {
+  for (const ext of RAW_TEXT_EXTENSIONS) {
+    if (urlBaseLower.endsWith(ext)) return true;
+  }
+  return false;
+}
 
 const DNS_LOOKUP_TIMEOUT_MS = 5000;
 

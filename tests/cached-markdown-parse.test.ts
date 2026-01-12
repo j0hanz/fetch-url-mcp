@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { parseCachedMarkdownResult } from '../dist/tools/handlers/fetch-url.tool.js';
+import { parseCachedMarkdownResult } from '../dist/tools.js';
 
 describe('parseCachedMarkdownResult', () => {
   it('accepts cached payload with markdown field', () => {

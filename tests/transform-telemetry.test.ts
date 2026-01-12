@@ -6,7 +6,7 @@ import {
   endTransformStage,
   startTransformStage,
   type TransformStageEvent,
-} from '../dist/services/telemetry.js';
+} from '../dist/transform.js';
 
 describe('transform telemetry', () => {
   it('redacts query and fragment from the URL', () => {

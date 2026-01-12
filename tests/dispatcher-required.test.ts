@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { fetchNormalizedUrl } from '../dist/services/fetcher.js';
-import { dispatcher as expectedDispatcher } from '../dist/services/fetcher.js';
+import { fetchNormalizedUrl } from '../dist/fetch.js';
+import { dispatcher as expectedDispatcher } from '../dist/fetch.js';
 
 test('fetch pipeline always passes the undici dispatcher into fetch()', async () => {
   const originalFetch: typeof fetch = fetch;

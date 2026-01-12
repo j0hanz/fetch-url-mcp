@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { resolveTransportForPost } from '../dist/http/mcp-sessions.js';
-import { createSessionStore } from '../dist/http/mcp-sessions.js';
+import { resolveTransportForPost } from '../dist/http.js';
+import { createSessionStore } from '../dist/http.js';
 
 describe('mcp-session routing', () => {
   it('returns 404 for POST with unknown mcp-session-id', async () => {

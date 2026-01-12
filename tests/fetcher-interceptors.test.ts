@@ -2,12 +2,12 @@ import assert from 'node:assert/strict';
 import diagnosticsChannel from 'node:diagnostics_channel';
 import { afterEach, describe, it } from 'node:test';
 
-import { runWithRequestContext } from '../dist/services/context.js';
 import {
   recordFetchError,
   recordFetchResponse,
   startFetchTelemetry,
-} from '../dist/services/fetcher.js';
+} from '../dist/fetch.js';
+import { runWithRequestContext } from '../dist/observability.js';
 
 function createCapture() {
   const channel = diagnosticsChannel.channel('superfetch.fetch');

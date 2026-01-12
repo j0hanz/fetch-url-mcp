@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { ensureMcpProtocolVersionHeader } from '../dist/http/mcp-routes.js';
+import { ensureMcpProtocolVersionHeader } from '../dist/http.js';
 
 function createResponse() {
   const res = {

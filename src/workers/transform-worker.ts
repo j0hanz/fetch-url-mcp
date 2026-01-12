@@ -1,11 +1,7 @@
 import { parentPort } from 'node:worker_threads';
 
-import { FetchError } from '../errors/app-error.js';
-
-import { getErrorMessage } from '../utils/error-details.js';
-import { isRecord } from '../utils/guards.js';
-
-import { transformHtmlToMarkdownInProcess } from '../tools/utils/content-transform-core.js';
+import { FetchError, getErrorMessage } from '../errors.js';
+import { transformHtmlToMarkdownInProcess } from '../transform.js';
 
 interface TransformMessage {
   type: 'transform';
@@ -39,6 +35,10 @@ interface WorkerErrorMessage {
 }
 
 const controllers = new Map<string, AbortController>();
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
 
 function post(message: WorkerResultMessage | WorkerErrorMessage): void {
   parentPort?.postMessage(message);

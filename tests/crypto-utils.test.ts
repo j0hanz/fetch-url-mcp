@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { describe, it } from 'node:test';
 
-import { sha256Hex, timingSafeEqualUtf8 } from '../dist/utils/crypto.js';
+import { sha256Hex, timingSafeEqualUtf8 } from '../dist/crypto.js';
 
 describe('timingSafeEqualUtf8', () => {
   it('returns true for identical strings', () => {

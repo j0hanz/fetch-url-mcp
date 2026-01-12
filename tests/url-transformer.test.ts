@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { transformToRawUrl } from '../dist/utils/url-transformer.js';
+import { transformToRawUrl } from '../dist/fetch.js';
 
 type TransformCase = {
   url: string;

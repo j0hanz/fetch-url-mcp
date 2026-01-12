@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { beforeEach, describe, it } from 'node:test';
 
-import { performSharedFetch } from '../dist/tools/handlers/fetch-single.shared.js';
+import { performSharedFetch } from '../dist/tools.js';
 
 let executeFetchPipelineCalls: Array<unknown> = [];
 

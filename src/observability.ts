@@ -1,7 +1,35 @@
-import { config } from '../config/index.js';
-import type { LogLevel, LogMetadata } from '../config/types/runtime.js';
+import { AsyncLocalStorage } from 'node:async_hooks';
 
-import { getOperationId, getRequestId, getSessionId } from './context.js';
+import { config, type LogLevel } from './config.js';
+
+export type LogMetadata = Record<string, unknown>;
+
+interface RequestContext {
+  readonly requestId: string;
+  readonly sessionId?: string;
+  readonly operationId?: string;
+}
+
+const requestContext = new AsyncLocalStorage<RequestContext>();
+
+export function runWithRequestContext<T>(
+  context: RequestContext,
+  fn: () => T
+): T {
+  return requestContext.run(context, fn);
+}
+
+export function getRequestId(): string | undefined {
+  return requestContext.getStore()?.requestId;
+}
+
+export function getSessionId(): string | undefined {
+  return requestContext.getStore()?.sessionId;
+}
+
+export function getOperationId(): string | undefined {
+  return requestContext.getStore()?.operationId;
+}
 
 function formatMetadata(meta?: LogMetadata): string {
   const requestId = getRequestId();
@@ -63,4 +91,17 @@ export function logError(message: string, error?: Error | LogMetadata): void {
       : (error ?? {});
 
   process.stderr.write(`${formatLogEntry('error', message, errorMeta)}\n`);
+}
+
+export function redactUrl(rawUrl: string): string {
+  try {
+    const url = new URL(rawUrl);
+    url.username = '';
+    url.password = '';
+    url.hash = '';
+    url.search = '';
+    return url.toString();
+  } catch {
+    return rawUrl;
+  }
 }

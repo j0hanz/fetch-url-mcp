@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import * as cache from '../dist/services/cache.js';
-import { registerDownloadRoutes } from '../dist/http/download-routes.js';
+import * as cache from '../dist/cache.js';
+import { registerDownloadRoutes } from '../dist/cache.js';
 
 type ResponseState = {
   headers: Record<string, string>;

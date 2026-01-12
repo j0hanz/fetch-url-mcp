@@ -437,7 +437,7 @@ HTTP mode uses the MCP Streamable HTTP transport. The workflow is:
 2. The server returns `mcp-session-id` in the response headers.
 3. Use that header for subsequent `POST /mcp`, `GET /mcp`, and `DELETE /mcp` requests.
 
-If the `mcp-protocol-version` header is missing, the server defaults it to `2025-03-26`. Supported versions are `2025-03-26` and `2025-11-25`.
+If the `mcp-protocol-version` header is missing, the server defaults it to `2025-11-25`. Supported versions are `2025-11-25`.
 
 `GET /mcp` and `DELETE /mcp` require `mcp-session-id`. `POST /mcp` without an `initialize` request will return 400.
 

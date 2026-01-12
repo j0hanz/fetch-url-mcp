@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { FetchError } from '../dist/errors/app-error.js';
-import { fetchNormalizedUrl } from '../dist/services/fetcher.js';
+import { FetchError } from '../dist/errors.js';
+import { fetchNormalizedUrl } from '../dist/fetch.js';
 
 function withMockedFetch(
   mock: typeof fetch,

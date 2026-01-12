@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
 import { after, describe, it } from 'node:test';
 
-import { FetchError } from '../dist/errors/app-error.js';
-import { shutdownTransformWorkerPool } from '../dist/services/transform-worker-pool.js';
-import { transformHtmlToMarkdown } from '../dist/tools/utils/content-transform.js';
+import { FetchError } from '../dist/errors.js';
+import { shutdownTransformWorkerPool } from '../dist/transform.js';
+import { transformHtmlToMarkdown } from '../dist/transform.js';
 
 after(async () => {
   await shutdownTransformWorkerPool();
