@@ -18,13 +18,10 @@ import {
   logWarn,
   redactUrl,
 } from './observability.js';
+import { isRecord } from './utils.js';
 
 export interface FetchOptions {
   signal?: AbortSignal;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null;
 }
 
 type IpSegment = number | string;
@@ -1298,14 +1295,14 @@ export async function readResponseText(
   return readStreamWithLimit(response.body, url, maxBytes, signal);
 }
 
-const DEFAULT_HEADERS: Record<string, string> = {
+const DEFAULT_HEADERS = {
   'User-Agent': config.fetcher.userAgent,
   Accept:
     'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
   'Accept-Language': 'en-US,en;q=0.5',
   'Accept-Encoding': 'gzip, deflate, br',
   Connection: 'keep-alive',
-};
+} as const satisfies Record<string, string>;
 
 function buildHeaders(): Record<string, string> {
   return { ...DEFAULT_HEADERS };

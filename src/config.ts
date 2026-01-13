@@ -351,7 +351,7 @@ export const config = {
       /^::ffff:172\.(1[6-9]|2\d|3[01])\./,
       /^::ffff:192\.168\./,
       /^::ffff:169\.254\./,
-    ],
+    ] as const,
     allowedHosts: parseAllowedHosts(process.env.ALLOWED_HOSTS),
     apiKey: process.env.API_KEY,
     allowRemote,

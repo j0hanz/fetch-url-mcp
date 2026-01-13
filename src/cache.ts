@@ -15,10 +15,7 @@ import { config } from './config.js';
 import { sha256Hex } from './crypto.js';
 import { getErrorMessage } from './errors.js';
 import { logDebug, logWarn } from './observability.js';
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null;
-}
+import { isRecord } from './utils.js';
 
 export interface CacheEntry {
   url: string;

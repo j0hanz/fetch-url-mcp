@@ -23,6 +23,7 @@ import {
   type MarkdownTransformResult,
   transformHtmlToMarkdown,
 } from './transform.js';
+import { isRecord } from './utils.js';
 
 export interface FetchUrlInput {
   url: string;
@@ -130,10 +131,6 @@ const fetchUrlOutputSchema = z.strictObject({
 export const FETCH_URL_TOOL_NAME = 'fetch-url';
 export const FETCH_URL_TOOL_DESCRIPTION =
   'Fetches a webpage and converts it to clean Markdown format';
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null;
-}
 
 function serializeStructuredContent(
   structuredContent: Record<string, unknown>,

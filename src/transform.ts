@@ -26,6 +26,7 @@ import {
   logWarn,
   redactUrl,
 } from './observability.js';
+import { isRecord } from './utils.js';
 
 export interface MetadataBlock {
   type: 'metadata';
@@ -65,10 +66,6 @@ export interface MarkdownTransformResult {
 export interface TransformOptions {
   includeMetadata: boolean;
   signal?: AbortSignal;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null;
 }
 
 function getAbortReason(signal: AbortSignal): unknown {

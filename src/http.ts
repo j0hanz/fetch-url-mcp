@@ -40,6 +40,7 @@ import {
   runWithRequestContext,
 } from './observability.js';
 import { shutdownTransformWorkerPool } from './transform.js';
+import { isRecord } from './utils.js';
 
 interface RateLimitEntry {
   count: number;
@@ -863,10 +864,6 @@ export function createCorsMiddleware(): (
 
     next();
   };
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null;
 }
 
 function parseScopes(value: unknown): string[] {
