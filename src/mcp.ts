@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 
@@ -28,7 +30,15 @@ function createServerCapabilities(): {
 }
 
 function createServerInstructions(serverVersion: string): string {
-  return `superFetch MCP server |${serverVersion}| A high-performance web content fetching and processing server.`;
+  try {
+    const raw = readFileSync(new URL('./instructions.md', import.meta.url), {
+      encoding: 'utf8',
+    });
+    const resolved = raw.replaceAll('{{SERVER_VERSION}}', serverVersion);
+    return resolved.trim();
+  } catch {
+    return `superFetch MCP server |${serverVersion}| A high-performance web content fetching and processing server.`;
+  }
 }
 
 export function createMcpServer(): McpServer {

@@ -34,7 +34,7 @@
     "superfetch"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.build.json && node -e \"require('fs').chmodSync('dist/index.js', '755')\"",
+    "build": "tsc -p tsconfig.build.json && node -e \"require('fs').copyFileSync('src/instructions.md','dist/instructions.md')\" && node -e \"require('fs').chmodSync('dist/index.js', '755')\"",
     "prepare": "npm run build",
     "dev": "tsx watch src/index.ts",
     "start": "node dist/index.js",
