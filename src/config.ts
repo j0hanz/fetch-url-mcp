@@ -2,6 +2,8 @@ import packageJson from '../package.json' with { type: 'json' };
 
 export type LogLevel = 'debug' | 'info' | 'warn' | 'error';
 
+export type TransformMetadataFormat = 'markdown' | 'frontmatter';
+
 function buildIpv4(parts: readonly [number, number, number, number]): string {
   return parts.join('.');
 }
@@ -118,6 +120,14 @@ function parseLogLevel(envValue: string | undefined): LogLevel {
   const level = envValue?.toLowerCase();
   if (!level) return 'info';
   return isLogLevel(level) ? level : 'info';
+}
+
+function parseTransformMetadataFormat(
+  envValue: string | undefined
+): TransformMetadataFormat {
+  const normalized = envValue?.trim().toLowerCase();
+  if (normalized === 'frontmatter') return 'frontmatter';
+  return 'markdown';
 }
 
 const SIZE_LIMITS = {
@@ -314,6 +324,9 @@ export const config = {
   },
   transform: {
     timeoutMs: TIMEOUT.DEFAULT_TRANSFORM_TIMEOUT_MS,
+    metadataFormat: parseTransformMetadataFormat(
+      process.env.TRANSFORM_METADATA_FORMAT
+    ),
   },
   cache: {
     enabled: parseBoolean(process.env.CACHE_ENABLED, true),

@@ -9,6 +9,7 @@ describe('htmlToMarkdown noise filtering', () => {
       <html>
         <body>
           <p>Keep me</p>
+          <div style="display:none"><p>HIDDENSTYLE</p></div>
           <nav><p>NAVTEXT</p></nav>
           <footer><p>FOOTER</p></footer>
           <div hidden><p>HIDDEN</p></div>
@@ -32,6 +33,25 @@ describe('htmlToMarkdown noise filtering', () => {
     assert.ok(!markdown.includes('PROMO'));
     assert.ok(!markdown.includes('FIXED'));
     assert.ok(!markdown.includes('ZISO'));
+    assert.ok(!markdown.includes('HIDDENSTYLE'));
+  });
+
+  it('removes boilerplate site headers but keeps article headers', () => {
+    const html = `
+      <html>
+        <body>
+          <header class="site-header"><p>SITEHEADER</p></header>
+          <header class="article-header"><h1>Article Title</h1></header>
+          <p>Body text</p>
+        </body>
+      </html>
+    `;
+
+    const markdown = htmlToMarkdown(html);
+
+    assert.ok(!markdown.includes('SITEHEADER'));
+    assert.ok(markdown.includes('Article Title'));
+    assert.ok(markdown.includes('Body text'));
   });
 
   it('does not leak <head> content when HTML has no noise markers', () => {
@@ -50,17 +70,19 @@ describe('htmlToMarkdown noise filtering', () => {
   });
 });
 
-describe('htmlToMarkdown frontmatter', () => {
-  it('quotes frontmatter values that require YAML escaping', () => {
+describe('htmlToMarkdown metadata footer', () => {
+  it('appends metadata as a footer after content', () => {
     const html = '<p>Hello</p>';
     const markdown = htmlToMarkdown(html, {
       title: 'hello:world',
       url: 'https://example.com/path?x=1',
     });
 
-    assert.ok(markdown.startsWith('---'));
-    assert.ok(markdown.includes('title: "hello:world"'));
-    assert.ok(markdown.includes('source: "https://example.com/path?x=1"'));
+    // Content comes first, metadata footer at the end
+    assert.ok(markdown.startsWith('Hello'));
+    assert.ok(markdown.includes('---'));
+    assert.ok(markdown.includes('**Title:** hello:world'));
+    assert.ok(markdown.includes('**Source:** https://example.com/path?x=1'));
   });
 });
 
@@ -87,5 +109,35 @@ describe('htmlToMarkdown code blocks', () => {
 
     assert.ok(markdown.includes('```javascript'));
     assert.ok(markdown.includes('const x = 1;'));
+  });
+});
+
+describe('htmlToMarkdown image alt text', () => {
+  it('derives alt text from filename when alt is missing', () => {
+    const html = '<img src="https://example.com/images/my-diagram.png" />';
+    const markdown = htmlToMarkdown(html);
+
+    assert.ok(
+      markdown.includes(
+        '![my diagram](https://example.com/images/my-diagram.png)'
+      )
+    );
+  });
+
+  it('preserves existing alt text when present', () => {
+    const html =
+      '<img alt="Custom Alt" src="https://example.com/images/photo.jpg" />';
+    const markdown = htmlToMarkdown(html);
+
+    assert.ok(
+      markdown.includes('![Custom Alt](https://example.com/images/photo.jpg)')
+    );
+  });
+
+  it('handles images with no filename gracefully', () => {
+    const html = '<img src="https://example.com/" />';
+    const markdown = htmlToMarkdown(html);
+
+    assert.ok(markdown.includes('![](https://example.com/)'));
   });
 });

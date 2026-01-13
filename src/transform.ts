@@ -12,7 +12,7 @@ import {
 } from 'node-html-markdown';
 import { z } from 'zod';
 
-import { Readability } from '@mozilla/readability';
+import { isProbablyReaderable, Readability } from '@mozilla/readability';
 
 import { config } from './config.js';
 import { FetchError, getErrorMessage } from './errors.js';
@@ -98,7 +98,6 @@ function getDocumentElementOuterHtml(document: unknown): string | undefined {
     ? outerHTML
     : undefined;
 }
-const FRONTMATTER_DELIMITER = '---';
 
 const CODE_BLOCK = {
   fence: '```',
@@ -351,8 +350,21 @@ function parseReadabilityArticle(
   document: Document
 ): ReturnType<Readability['parse']> | null {
   try {
-    // Type assertion is safe here due to isReadabilityCompatible check
-    const reader = new Readability(document);
+    // Readability mutates the document; operate on a clone.
+    const documentClone = document.cloneNode(true) as Document;
+
+    // Avoid the more expensive parse() when the page is unlikely to be readable,
+    // but don't penalize small documents where the heuristic is often too strict.
+    const rawText =
+      documentClone.body.textContent ||
+      documentClone.documentElement.textContent;
+    const textLength = rawText.replace(/\s+/g, ' ').trim().length;
+    if (textLength >= 400 && !isProbablyReaderable(documentClone)) {
+      return null;
+    }
+
+    // Guard against pathological DOM sizes.
+    const reader = new Readability(documentClone, { maxElemsToParse: 20_000 });
     return reader.parse();
   } catch (error) {
     logError('Failed to extract article with Readability', asError(error));
@@ -799,70 +811,6 @@ export function resolveLanguageFromAttributes(
   return classMatch ?? resolveLanguageFromDataAttribute(dataLang);
 }
 
-const YAML_SPECIAL_CHARS = /[:[\]{}"\r\t'|>&*!?,#]|\n/;
-const YAML_NUMERIC = /^[\d.]+$/;
-const YAML_RESERVED_WORDS = /^(true|false|null|yes|no|on|off)$/i;
-
-const ESCAPE_PATTERNS = {
-  backslash: /\\/g,
-  quote: /"/g,
-  newline: /\n/g,
-  tab: /\t/g,
-};
-
-const YAML_QUOTE_CHECKS: readonly ((input: string) => boolean)[] = [
-  (input) => YAML_SPECIAL_CHARS.test(input),
-  (input) => input.startsWith(' ') || input.endsWith(' '),
-  (input) => input === '',
-  (input) => YAML_NUMERIC.test(input),
-  (input) => YAML_RESERVED_WORDS.test(input),
-];
-
-function needsYamlQuotes(value: string): boolean {
-  return YAML_QUOTE_CHECKS.some((check) => check(value));
-}
-
-function escapeYamlValue(value: string): string {
-  if (!needsYamlQuotes(value)) {
-    return value;
-  }
-
-  const escaped = value
-    .replace(ESCAPE_PATTERNS.backslash, '\\\\')
-    .replace(ESCAPE_PATTERNS.quote, '\\"')
-    .replace(ESCAPE_PATTERNS.newline, '\\n')
-    .replace(ESCAPE_PATTERNS.tab, '\\t');
-
-  return `"${escaped}"`;
-}
-
-function appendFrontmatterField(
-  lines: string[],
-  key: string,
-  value: string | undefined
-): void {
-  if (!value) return;
-  lines.push(`${key}: ${escapeYamlValue(value)}`);
-}
-
-function joinLines(lines: readonly string[]): string {
-  return lines.join('\n');
-}
-
-function buildFrontmatter(metadata?: MetadataBlock): string {
-  if (!metadata) return '';
-  const lines: string[] = [FRONTMATTER_DELIMITER];
-
-  appendFrontmatterField(lines, 'title', metadata.title);
-  appendFrontmatterField(lines, 'source', metadata.url);
-  appendFrontmatterField(lines, 'author', metadata.author);
-  appendFrontmatterField(lines, 'description', metadata.description);
-  appendFrontmatterField(lines, 'fetchedAt', metadata.fetchedAt);
-
-  lines.push(FRONTMATTER_DELIMITER);
-  return joinLines(lines);
-}
-
 function isElement(node: unknown): node is HTMLElement {
   return (
     isRecord(node) &&
@@ -876,16 +824,15 @@ const STRUCTURAL_TAGS = new Set([
   'style',
   'noscript',
   'iframe',
-  'nav',
-  'footer',
-  'aside',
-  'header',
   'form',
   'button',
   'input',
   'select',
   'textarea',
 ]);
+
+const ALWAYS_NOISE_TAGS = new Set(['nav', 'footer', 'aside']);
+
 const NAVIGATION_ROLES = new Set([
   'navigation',
   'banner',
@@ -894,9 +841,40 @@ const NAVIGATION_ROLES = new Set([
   'tree',
   'menubar',
   'menu',
+  'dialog',
+  'alertdialog',
 ]);
-const PROMO_PATTERN =
-  /banner|promo|announcement|cta|callout|advert|newsletter|subscribe|cookie|consent|popup|modal|overlay|toast/;
+
+const PROMO_TOKENS = new Set([
+  'banner',
+  'promo',
+  'announcement',
+  'cta',
+  'callout',
+  'advert',
+  'ad',
+  'ads',
+  'sponsor',
+  'newsletter',
+  'subscribe',
+  'cookie',
+  'consent',
+  'popup',
+  'modal',
+  'overlay',
+  'toast',
+  'share',
+  'social',
+  'related',
+  'recommend',
+  'comment',
+  'breadcrumb',
+  'pagination',
+  'pager',
+]);
+
+const HEADER_NOISE_PATTERN =
+  /\b(site-header|masthead|topbar|navbar|nav(?:bar)?|menu|header-nav)\b/i;
 const FIXED_PATTERN = /\b(fixed|sticky)\b/;
 const HIGH_Z_PATTERN = /\bz-(?:4\d|50)\b/;
 const ISOLATE_PATTERN = /\bisolate\b/;
@@ -972,9 +950,12 @@ function isStructuralNoiseTag(tagName: string): boolean {
 }
 
 function isElementHidden(element: HTMLElement): boolean {
+  const style = element.getAttribute('style') ?? '';
   return (
     element.getAttribute('hidden') !== null ||
-    element.getAttribute('aria-hidden') === 'true'
+    element.getAttribute('aria-hidden') === 'true' ||
+    /\bdisplay\s*:\s*none\b/i.test(style) ||
+    /\bvisibility\s*:\s*hidden\b/i.test(style)
   );
 }
 
@@ -982,9 +963,18 @@ function hasNoiseRole(role: string | null): boolean {
   return role !== null && NAVIGATION_ROLES.has(role);
 }
 
+function tokenizeIdentifierLikeText(value: string): string[] {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim()
+    .split(' ')
+    .filter(Boolean);
+}
+
 function matchesPromoIdOrClass(className: string, id: string): boolean {
-  const combined = `${className} ${id}`.toLowerCase();
-  return PROMO_PATTERN.test(combined);
+  const tokens = tokenizeIdentifierLikeText(`${className} ${id}`);
+  return tokens.some((token) => PROMO_TOKENS.has(token));
 }
 
 function matchesHighZIsolate(className: string): boolean {
@@ -1013,10 +1003,22 @@ function readElementMetadata(element: HTMLElement): ElementMetadata {
   };
 }
 
+function isBoilerplateHeader({
+  className,
+  id,
+  role,
+}: ElementMetadata): boolean {
+  if (hasNoiseRole(role)) return true;
+  const combined = `${className} ${id}`.toLowerCase();
+  return HEADER_NOISE_PATTERN.test(combined);
+}
+
 function isNoiseElement(node: HTMLElement): boolean {
   const metadata = readElementMetadata(node);
   return (
     isStructuralNoiseTag(metadata.tagName) ||
+    ALWAYS_NOISE_TAGS.has(metadata.tagName) ||
+    (metadata.tagName === 'header' && isBoilerplateHeader(metadata)) ||
     metadata.isHidden ||
     hasNoiseRole(metadata.role) ||
     matchesFixedOrHighZIsolate(metadata.className) ||
@@ -1041,14 +1043,10 @@ function removeNoiseFromHtml(html: string): string {
   const shouldParse = isFullDocumentHtml(html) || mayContainNoise(html);
   if (!shouldParse) return html;
 
-  const shouldRemove = mayContainNoise(html);
-
   try {
     const { document } = parseHTML(html);
 
-    if (shouldRemove) {
-      stripNoiseNodes(document);
-    }
+    stripNoiseNodes(document);
 
     const bodyInnerHtml = getBodyInnerHtml(document);
     if (bodyInnerHtml) return bodyInnerHtml;
@@ -1073,6 +1071,35 @@ function buildInlineCode(content: string): string {
   return `${delimiter}${padding}${content}${padding}${delimiter}`;
 }
 
+/**
+ * Derive alt text from an image URL by extracting and humanizing the filename.
+ * Used as a fallback when the image has no alt attribute.
+ */
+function deriveAltFromImageUrl(src: string): string {
+  if (!src) return '';
+
+  try {
+    // Handle both absolute and relative URLs.
+    const pathname = src.startsWith('http')
+      ? new URL(src).pathname
+      : (src.split('?')[0] ?? '');
+
+    // Extract filename from path.
+    const segments = pathname.split('/');
+    const filename = segments.pop() ?? '';
+    if (!filename) return '';
+
+    // Remove file extension.
+    const dotIndex = filename.lastIndexOf('.');
+    const name = dotIndex > 0 ? filename.slice(0, dotIndex) : filename;
+
+    // Humanize: replace separators with spaces.
+    return name.replace(/[_-]+/g, ' ').trim();
+  } catch {
+    return '';
+  }
+}
+
 function isCodeBlock(
   parent: unknown
 ): parent is { tagName?: string; childNodes?: unknown[] } {
@@ -1094,7 +1121,7 @@ function hasCodeBlockTranslators(
   return isRecord(value) && isRecord(value.codeBlockTranslators);
 }
 
-function createCodeTranslator(): TranslatorConfigObject {
+function createCustomTranslators(): TranslatorConfigObject {
   return {
     code: (ctx: unknown) => {
       if (!isRecord(ctx)) {
@@ -1146,6 +1173,26 @@ function createCodeTranslator(): TranslatorConfigObject {
         },
       };
     },
+    img: (ctx: unknown) => {
+      if (!isRecord(ctx)) {
+        return { content: '' };
+      }
+
+      const { node } = ctx;
+      const getAttribute = hasGetAttribute(node)
+        ? node.getAttribute.bind(node)
+        : undefined;
+
+      const src = getAttribute?.('src') ?? '';
+      const existingAlt = getAttribute?.('alt') ?? '';
+
+      // Use existing alt text if present, otherwise derive from filename.
+      const alt = existingAlt.trim() || deriveAltFromImageUrl(src);
+
+      return {
+        content: `![${alt}](${src})`,
+      };
+    },
   };
 }
 
@@ -1159,7 +1206,7 @@ function createMarkdownInstance(): NodeHtmlMarkdown {
       emDelimiter: '_',
       bulletMarker: '-',
     },
-    createCodeTranslator()
+    createCustomTranslators()
   );
 }
 
@@ -1174,8 +1221,7 @@ export function htmlToMarkdown(
   options?: { url?: string; signal?: AbortSignal }
 ): string {
   const url = options?.url ?? metadata?.url ?? '';
-  const frontmatter = buildFrontmatter(metadata);
-  if (!html) return frontmatter;
+  if (!html) return buildMetadataFooter(metadata, url);
 
   try {
     throwIfAborted(options?.signal, url, 'markdown:begin');
@@ -1187,17 +1233,76 @@ export function htmlToMarkdown(
     throwIfAborted(options?.signal, url, 'markdown:cleaned');
 
     const translateStage = startTransformStage(url, 'markdown:translate');
-    const content = getMarkdownConverter().translate(cleanedHtml).trim();
+    let content = getMarkdownConverter().translate(cleanedHtml).trim();
     endTransformStage(translateStage);
 
     throwIfAborted(options?.signal, url, 'markdown:translated');
-    return frontmatter ? `${frontmatter}\n${content}` : content;
+
+    // Post-process the markdown to clean up common conversion artifacts.
+    content = cleanupMarkdownArtifacts(content);
+
+    // Metadata is placed as a footer to avoid duplicating titles when the
+    // article content already contains an H1 heading at the top.
+    const footer = buildMetadataFooter(metadata, url);
+    return footer ? `${content}\n\n${footer}` : content;
   } catch (error) {
     if (error instanceof FetchError) {
       throw error;
     }
-    return frontmatter;
+    return buildMetadataFooter(metadata, url);
   }
+}
+
+/**
+ * Clean up common markdown conversion artifacts:
+ * - Empty headings (e.g., "## " with no text)
+ * - Anchor-only links like [ ](#section-id) used for navigation
+ * - Concatenated links without spacing
+ * - Boilerplate phrases like "Was this page helpful?"
+ */
+function cleanupMarkdownArtifacts(content: string): string {
+  let result = content;
+
+  // Remove empty Markdown headings like "## " produced by placeholder nodes.
+  result = result.replace(/^#{1,6}[ \t\u00A0]*$\r?\n?/gm, '');
+
+  // Remove anchor-only links like [\u200B](#section-id) or [ ](#anchor).
+  // These are navigation remnants with zero-width or whitespace text.
+  // Match: [ or whitespace or zero-width space ](#...)
+  const zeroWidthAnchorLink = /\[(?:\s|\u200B)*\]\(#[^)]*\)\s*/g;
+  result = result.replace(zeroWidthAnchorLink, '');
+
+  // Add line breaks between concatenated links: ](url)[text] -> ](url)\n\n[text]
+  result = result.replace(/\]\(([^)]+)\)\[/g, ']($1)\n\n[');
+
+  // Remove common boilerplate phrases.
+  result = result.replace(/^Was this page helpful\??\s*$/gim, '');
+
+  // Collapse multiple blank lines into at most two.
+  result = result.replace(/\n{3,}/g, '\n\n');
+
+  return result.trim();
+}
+
+function buildMetadataFooter(
+  metadata?: MetadataBlock,
+  fallbackUrl?: string
+): string {
+  if (!metadata) return '';
+  const lines: string[] = [];
+
+  // Horizontal rule as a clear footer separator.
+  lines.push('---');
+
+  if (metadata.title) lines.push(`**Title:** ${metadata.title}`);
+  if (metadata.description)
+    lines.push(`**Description:** ${metadata.description}`);
+  if (metadata.author) lines.push(`**Author:** ${metadata.author}`);
+  if (metadata.url) lines.push(`**Source:** ${metadata.url}`);
+  else if (fallbackUrl) lines.push(`**Source:** ${fallbackUrl}`);
+  if (metadata.fetchedAt) lines.push(`**Fetched:** ${metadata.fetchedAt}`);
+
+  return lines.join('\n');
 }
 
 const HEADING_PATTERN = /^#{1,6}\s/m;
@@ -1229,6 +1334,8 @@ function looksLikeMarkdown(content: string): boolean {
 function detectLineEnding(content: string): '\n' | '\r\n' {
   return content.includes('\r\n') ? '\r\n' : '\n';
 }
+
+const FRONTMATTER_DELIMITER = '---';
 
 function findFrontmatterLines(content: string): {
   lineEnding: '\n' | '\r\n';
@@ -1270,9 +1377,35 @@ function isTitleKey(key: string): boolean {
   return key === 'title' || key === 'name';
 }
 
+function extractTitleFromHeading(content: string): string | undefined {
+  const lineEnding = detectLineEnding(content);
+  const lines = content.split(lineEnding);
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+
+    let index = 0;
+    while (index < trimmed.length && trimmed[index] === '#') {
+      index += 1;
+    }
+
+    if (index === 0 || index > 6) return undefined;
+    const nextChar = trimmed[index];
+    if (nextChar !== ' ' && nextChar !== '\t') return undefined;
+
+    const heading = trimmed.slice(index).trim();
+    return heading.length > 0 ? heading : undefined;
+  }
+
+  return undefined;
+}
+
 function extractTitleFromRawMarkdown(content: string): string | undefined {
   const frontmatter = findFrontmatterLines(content);
-  if (!frontmatter) return undefined;
+  if (!frontmatter) {
+    return extractTitleFromHeading(content);
+  }
 
   const { lines, endIndex } = frontmatter;
   const entry = lines
@@ -1284,8 +1417,54 @@ function extractTitleFromRawMarkdown(content: string): string | undefined {
   return value || undefined;
 }
 
+function hasMarkdownSourceLine(content: string): boolean {
+  const lineEnding = detectLineEnding(content);
+  const lines = content.split(lineEnding);
+  // Only scan a small prefix to avoid wasting time on huge docs.
+  const limit = Math.min(lines.length, 50);
+  for (let index = 0; index < limit; index += 1) {
+    const line = lines[index];
+    if (!line) continue;
+    if (line.trimStart().toLowerCase().startsWith('source:')) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function addSourceToMarkdownMarkdownFormat(
+  content: string,
+  url: string
+): string {
+  if (hasMarkdownSourceLine(content)) return content;
+  const lineEnding = detectLineEnding(content);
+  const lines = content.split(lineEnding);
+
+  const firstNonEmptyIndex = lines.findIndex((line) => line.trim().length > 0);
+  if (firstNonEmptyIndex !== -1) {
+    const firstLine = lines[firstNonEmptyIndex];
+    if (firstLine && /^#{1,6}\s+/.test(firstLine.trim())) {
+      const insertAt = firstNonEmptyIndex + 1;
+      const updated = [
+        ...lines.slice(0, insertAt),
+        '',
+        `Source: ${url}`,
+        '',
+        ...lines.slice(insertAt),
+      ];
+      return updated.join(lineEnding);
+    }
+  }
+
+  return [`Source: ${url}`, '', content].join(lineEnding);
+}
+
 function addSourceToMarkdown(content: string, url: string): string {
   const frontmatter = findFrontmatterLines(content);
+  if (config.transform.metadataFormat === 'markdown' && !frontmatter) {
+    return addSourceToMarkdownMarkdownFormat(content, url);
+  }
+
   if (!frontmatter) {
     return `---\nsource: "${url}"\n---\n\n${content}`;
   }

@@ -61,9 +61,7 @@ describe('transformHtmlToMarkdown raw content detection', () => {
       assert: (result) => {
         assert.ok(result.markdown.includes('<div>one</div>'));
         assert.ok(result.markdown.includes('# Heading'));
-        assert.ok(
-          result.markdown.includes('source: "https://example.com/raw"')
-        );
+        assert.ok(result.markdown.includes('Source: https://example.com/raw'));
       },
     });
   });
