@@ -82,27 +82,161 @@ const CACHE_HASH = {
   VARY_HASH_LENGTH: 12,
 };
 
-function stableStringify(value: unknown): string {
-  if (!isRecord(value)) {
-    if (value === null || value === undefined) {
-      return '';
+const CACHE_VARY_LIMITS = {
+  MAX_STRING_LENGTH: 4096,
+  MAX_KEYS: 64,
+  MAX_ARRAY_LENGTH: 64,
+  MAX_DEPTH: 6,
+  MAX_NODES: 512,
+};
+
+interface StableStringifyState {
+  depth: number;
+  nodes: number;
+  readonly stack: WeakSet<object>;
+}
+
+function bumpStableStringifyNodeCount(state: StableStringifyState): boolean {
+  state.nodes += 1;
+  return state.nodes <= CACHE_VARY_LIMITS.MAX_NODES;
+}
+
+function stableStringifyPrimitive(value: unknown): string {
+  if (value === null || value === undefined) {
+    return '';
+  }
+  const json = JSON.stringify(value);
+  return typeof json === 'string' ? json : '';
+}
+
+function stableStringifyArray(
+  value: unknown[],
+  state: StableStringifyState
+): string | null {
+  if (value.length > CACHE_VARY_LIMITS.MAX_ARRAY_LENGTH) {
+    return null;
+  }
+
+  const parts: string[] = ['['];
+  let length = 1;
+
+  for (let index = 0; index < value.length; index += 1) {
+    if (index > 0) {
+      parts.push(',');
+      length += 1;
+      if (length > CACHE_VARY_LIMITS.MAX_STRING_LENGTH) return null;
     }
-    return JSON.stringify(value);
+
+    const entry = stableStringifyInner(value[index], state);
+    if (entry === null) return null;
+
+    parts.push(entry);
+    length += entry.length;
+    if (length > CACHE_VARY_LIMITS.MAX_STRING_LENGTH) return null;
   }
 
-  if (Array.isArray(value)) {
-    return `[${value.map((item) => stableStringify(item)).join(',')}]`;
+  parts.push(']');
+  length += 1;
+
+  return length > CACHE_VARY_LIMITS.MAX_STRING_LENGTH ? null : parts.join('');
+}
+
+function stableStringifyRecord(
+  value: Record<string, unknown>,
+  state: StableStringifyState
+): string | null {
+  const keys = Object.keys(value);
+  if (keys.length > CACHE_VARY_LIMITS.MAX_KEYS) {
+    return null;
   }
 
-  const entries = Object.entries(value)
-    .filter(([, entryValue]) => entryValue !== undefined)
-    .sort(([a], [b]) => a.localeCompare(b))
-    .map(
-      ([key, entryValue]) =>
-        `${JSON.stringify(key)}:${stableStringify(entryValue)}`
-    );
+  keys.sort((a, b) => a.localeCompare(b));
 
-  return `{${entries.join(',')}}`;
+  const parts: string[] = ['{'];
+  let length = 1;
+  let isFirst = true;
+
+  for (const key of keys) {
+    const entryValue = value[key];
+    if (entryValue === undefined) continue;
+
+    const encodedValue = stableStringifyInner(entryValue, state);
+    if (encodedValue === null) return null;
+
+    const entry = `${JSON.stringify(key)}:${encodedValue}`;
+
+    if (!isFirst) {
+      parts.push(',');
+      length += 1;
+      if (length > CACHE_VARY_LIMITS.MAX_STRING_LENGTH) return null;
+    }
+
+    parts.push(entry);
+    length += entry.length;
+    if (length > CACHE_VARY_LIMITS.MAX_STRING_LENGTH) return null;
+
+    isFirst = false;
+  }
+
+  parts.push('}');
+  length += 1;
+
+  return length > CACHE_VARY_LIMITS.MAX_STRING_LENGTH ? null : parts.join('');
+}
+
+function stableStringifyObject(
+  value: object,
+  state: StableStringifyState
+): string | null {
+  if (state.stack.has(value)) {
+    return null;
+  }
+
+  if (state.depth >= CACHE_VARY_LIMITS.MAX_DEPTH) {
+    return null;
+  }
+
+  state.stack.add(value);
+  state.depth += 1;
+  try {
+    if (Array.isArray(value)) {
+      return stableStringifyArray(value, state);
+    }
+
+    return isRecord(value) ? stableStringifyRecord(value, state) : null;
+  } finally {
+    state.depth -= 1;
+    state.stack.delete(value);
+  }
+}
+
+function stableStringifyInner(
+  value: unknown,
+  state: StableStringifyState
+): string | null {
+  if (!bumpStableStringifyNodeCount(state)) {
+    return null;
+  }
+
+  if (value === null || value === undefined) {
+    return '';
+  }
+
+  if (typeof value !== 'object') {
+    return stableStringifyPrimitive(value);
+  }
+
+  return stableStringifyObject(value, state);
+}
+
+function stableStringify(value: unknown): string | null {
+  const state: StableStringifyState = {
+    depth: 0,
+    nodes: 0,
+    stack: new WeakSet(),
+  };
+
+  return stableStringifyInner(value, state);
 }
 
 function createHashFragment(input: string, length: number): string {
@@ -121,9 +255,16 @@ function buildCacheKey(
 
 function getVaryHash(
   vary?: Record<string, unknown> | string
-): string | undefined {
+): string | undefined | null {
   if (!vary) return undefined;
-  const varyString = typeof vary === 'string' ? vary : stableStringify(vary);
+  let varyString: string | null;
+  if (typeof vary === 'string') {
+    varyString =
+      vary.length > CACHE_VARY_LIMITS.MAX_STRING_LENGTH ? null : vary;
+  } else {
+    varyString = stableStringify(vary);
+  }
+  if (varyString === null) return null;
   if (!varyString) return undefined;
   return createHashFragment(varyString, CACHE_HASH.VARY_HASH_LENGTH);
 }
@@ -137,6 +278,7 @@ export function createCacheKey(
 
   const urlHash = createHashFragment(url, CACHE_HASH.URL_HASH_LENGTH);
   const varyHash = getVaryHash(vary);
+  if (varyHash === null) return null;
   return buildCacheKey(namespace, urlHash, varyHash);
 }
 

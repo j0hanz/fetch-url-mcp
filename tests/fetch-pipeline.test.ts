@@ -101,6 +101,55 @@ describe('executeFetchPipeline', () => {
     );
   });
 
+  it('bypasses cache when cacheVary exceeds safety limits', async () => {
+    const url = buildTestUrl();
+    const normalizedUrl = normalizeUrl(url).normalizedUrl;
+    const cacheNamespace = 'pipeline-test-large-vary';
+    const cacheVary = 'x'.repeat(10_000);
+
+    assert.equal(
+      createCacheKey(cacheNamespace, normalizedUrl, cacheVary),
+      null
+    );
+
+    let transformCalls = 0;
+
+    await withMockedFetch(
+      async () => {
+        return new Response('<p>fresh</p>', { status: 200 });
+      },
+      async () => {
+        const first = await executeFetchPipeline<CachedPayload>({
+          url,
+          cacheNamespace,
+          cacheVary,
+          transform: async (html) => {
+            transformCalls += 1;
+            return createCachedPayload(`fresh:${html}`);
+          },
+        });
+
+        const second = await executeFetchPipeline<CachedPayload>({
+          url,
+          cacheNamespace,
+          cacheVary,
+          transform: async (html) => {
+            transformCalls += 1;
+            return createCachedPayload(`fresh:${html}`);
+          },
+        });
+
+        assert.equal(first.fromCache, false);
+        assert.equal(second.fromCache, false);
+        assert.equal(first.cacheKey, null);
+        assert.equal(second.cacheKey, null);
+        assert.equal(first.url, normalizedUrl);
+        assert.equal(second.url, normalizedUrl);
+        assert.equal(transformCalls, 2);
+      }
+    );
+  });
+
   it('returns transformed raw URL when source is a GitHub blob', async () => {
     const url = 'https://github.com/octocat/Hello-World/blob/main/README.md';
     const expectedRaw =

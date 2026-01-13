@@ -69,6 +69,37 @@ export interface TransformOptions {
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
 }
+
+function getAbortReason(signal: AbortSignal): unknown {
+  if (!isRecord(signal)) return undefined;
+  return 'reason' in signal ? signal.reason : undefined;
+}
+
+function getBodyInnerHtml(document: unknown): string | undefined {
+  if (!isRecord(document)) return undefined;
+  const { body } = document;
+  if (!isRecord(body)) return undefined;
+  const { innerHTML } = body;
+  return typeof innerHTML === 'string' && innerHTML.length > 0
+    ? innerHTML
+    : undefined;
+}
+
+function getDocumentToString(document: unknown): (() => string) | undefined {
+  if (!isRecord(document)) return undefined;
+  if (typeof document.toString !== 'function') return undefined;
+  return document.toString.bind(document);
+}
+
+function getDocumentElementOuterHtml(document: unknown): string | undefined {
+  if (!isRecord(document)) return undefined;
+  const { documentElement } = document;
+  if (!isRecord(documentElement)) return undefined;
+  const { outerHTML } = documentElement;
+  return typeof outerHTML === 'string' && outerHTML.length > 0
+    ? outerHTML
+    : undefined;
+}
 const FRONTMATTER_DELIMITER = '---';
 
 const CODE_BLOCK = {
@@ -157,7 +188,7 @@ function throwIfAborted(
   const { aborted } = signal;
   if (!aborted) return;
 
-  const { reason } = signal as unknown as { reason?: unknown };
+  const reason = getAbortReason(signal);
   if (isTimeoutReason(reason)) {
     throw new FetchError('Request timeout', url, 504, {
       reason: 'timeout',
@@ -995,6 +1026,19 @@ function isNoiseElement(node: HTMLElement): boolean {
   );
 }
 
+function stripNoiseNodes(document: Document): void {
+  const nodes = document.querySelectorAll('*');
+
+  for (let index = nodes.length - 1; index >= 0; index -= 1) {
+    const node =
+      typeof nodes.item === 'function' ? nodes.item(index) : nodes[index];
+    if (!node) continue;
+    if (isElement(node) && isNoiseElement(node)) {
+      node.remove();
+    }
+  }
+}
+
 function removeNoiseFromHtml(html: string): string {
   const shouldParse = isFullDocumentHtml(html) || mayContainNoise(html);
   if (!shouldParse) return html;
@@ -1005,31 +1049,17 @@ function removeNoiseFromHtml(html: string): string {
     const { document } = parseHTML(html);
 
     if (shouldRemove) {
-      const nodes = Array.from(document.querySelectorAll('*'));
-
-      for (let index = nodes.length - 1; index >= 0; index -= 1) {
-        const node = nodes[index];
-        if (!node) continue;
-        if (isElement(node) && isNoiseElement(node)) {
-          node.remove();
-        }
-      }
+      stripNoiseNodes(document);
     }
 
-    const { body } = document as unknown as { body?: { innerHTML?: string } };
-    if (body?.innerHTML) return body.innerHTML;
+    const bodyInnerHtml = getBodyInnerHtml(document);
+    if (bodyInnerHtml) return bodyInnerHtml;
 
-    if (
-      typeof (document as unknown as { toString?: () => string }).toString ===
-      'function'
-    ) {
-      return (document as unknown as { toString: () => string }).toString();
-    }
+    const docToString = getDocumentToString(document);
+    if (docToString) return docToString();
 
-    const { documentElement } = document as unknown as {
-      documentElement?: { outerHTML?: string };
-    };
-    if (documentElement?.outerHTML) return documentElement.outerHTML;
+    const documentElementOuterHtml = getDocumentElementOuterHtml(document);
+    if (documentElementOuterHtml) return documentElementOuterHtml;
 
     return html;
   } catch {
