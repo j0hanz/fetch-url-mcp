@@ -758,6 +758,7 @@ const STRUCTURAL_TAGS = new Set([
   'input',
   'select',
   'textarea',
+  'svg',
 ]);
 
 const ALWAYS_NOISE_TAGS = new Set(['nav', 'footer', 'aside']);
@@ -772,6 +773,7 @@ const NAVIGATION_ROLES = new Set([
   'menu',
   'dialog',
   'alertdialog',
+  'search',
 ]);
 
 const PROMO_TOKENS = new Set([
@@ -800,6 +802,7 @@ const PROMO_TOKENS = new Set([
   'breadcrumb',
   'pagination',
   'pager',
+  'taglist',
 ]);
 
 const HEADER_NOISE_PATTERN =
