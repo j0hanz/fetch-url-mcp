@@ -1,77 +1,56 @@
 # AGENTS.md
 
-## Project Overview
+> **Purpose:** Context and strict guidelines for AI agents working in this repository.
 
-- **What this repo is**: An MCP (Model Context Protocol) server/CLI that fetches a URL, extracts readable content (Mozilla Readability), and returns AI-friendly Markdown.
-- **Primary language/runtime**: TypeScript (ESM) on Node.js.
-- **Package**: `@j0hanz/superfetch` (bin: `superfetch`, entry: `dist/index.js`).
-- **Runtime modes**:
-  - **stdio** (recommended for local MCP clients): `--stdio`
-  - **HTTP** (default): starts an HTTP server
+## 1. Project Context
 
-## Repo Map / Structure
+- **Domain:** MCP server/CLI that fetches URLs, extracts readable content, and returns clean Markdown.
+- **Tech Stack:**
+  - **Language:** TypeScript 5.9 (Node.js ESM, Node >=20.18.1)
+  - **Framework:** MCP SDK server + Express HTTP runtime
+  - **Key Libraries:** @modelcontextprotocol/sdk, @mozilla/readability, node-html-markdown
+- **Architecture:** Single-package MCP server with stdio and HTTP entrypoints.
 
-- `src/`: TypeScript source
-  - `src/index.ts`: CLI entrypoint (`--stdio` vs HTTP)
-  - `src/mcp.ts`: stdio MCP server wiring (tools + resources)
-  - `src/http.ts`: HTTP server runtime
-  - `src/fetch.ts`: URL fetching + redirect handling + SSRF/DNS/IP protections
-  - `src/transform.ts`: HTML → Markdown transform pipeline (includes worker pool)
-  - `src/cache.ts`: cache + `superfetch://cache/...` MCP resources
-  - `src/config.ts`: environment-driven configuration
-- `tests/`: Node.js test suite
-- `dist/`: build output (`tsc` output)
-- `docs/`: static assets (e.g., `docs/logo.png`)
-- `.github/workflows/`: release + publish automation
+## 2. Repository Map (High-Level Only)
 
-## Setup & Environment
+- src/: Runtime source (CLI entry, HTTP server, MCP server, fetch/transform pipeline)
+- tests/: Node test runner suite (uses built artifacts)
+- docs/: Static assets
+- .github/workflows/: Release and publish automation
+  > _Note: Ignore dist, node_modules, .venv, and **pycache**._
 
-- **Node.js**: `>=20.18.1` (from `package.json` `engines.node`).
-- **Package manager**: npm (repo includes `package-lock.json`; CI uses `npm ci`).
-- Install deps (clean): `npm ci`
-- Install deps (dev): `npm install`
+## 3. Operational Commands
 
-## Development Workflow
+- **Environment:** Node.js >=20.18.1, npm
+- **Install:** npm ci
+- **Dev Server:** npm run dev
+- **Test:** npm test (Prefer running only relevant tests)
+- **Build:** npm run build
 
-- Dev/watch (runs from TS source): `npm run dev`
-- Build (outputs to `dist/`): `npm run build`
-- Run from build output:
-  - HTTP mode (default): `npm start`
-  - stdio mode: `node dist/index.js --stdio`
+## 4. Coding Standards (Style & Patterns)
 
-## Testing
+- **Naming:** camelCase for vars/functions, PascalCase for types
+- **Structure:** Keep URL validation/fetching in fetch pipeline; keep entrypoints thin
+- **Typing:** Strict TypeScript (noUncheckedIndexedAccess, exactOptionalPropertyTypes)
+- **Preferred Patterns:**
+  - Guard clauses/early returns for validation errors
+  - Type-only imports with import { type X } and .js local import extensions
 
-- All tests: `npm test`
-- Coverage: `npm run test:coverage`
-- Notes:
-  - Tests run via Node’s built-in test runner (`node --test --experimental-transform-types`).
-  - `npm test` runs a build first.
+## 5. Agent Behavioral Rules (The "Do Nots")
 
-## Code Style & Conventions
+- **Prohibited:** Do not use default exports; use named exports only.
+- **Prohibited:** Do not use any; keep types explicit.
+- **Prohibited:** Do not write non-protocol output to stdout in stdio mode.
+- **Prohibited:** Do not edit lockfiles manually.
+- **Handling Secrets:** Never output .env values or hardcode secrets.
+- **File Creation:** Always verify folder existence before creating files.
 
-- Language: TypeScript (ESM; `"type": "module"`)
-- Type-check: `npm run type-check`
-  - Diagnostics: `npm run type-check:diagnostics`
-  - Trace: `npm run type-check:trace`
-- Lint:
-  - Check: `npm run lint`
-  - Fix: `npm run lint:fix`
-- Format:
-  - Apply Prettier: `npm run format`
-- Conventions enforced by config:
-  - NodeNext module resolution; **local imports use `.js` extensions**.
-  - ESLint is configured for strict type-aware rules and prefers `import { type X }` for type-only imports.
+## 6. Testing Strategy
 
-## Build / Release
+- **Framework:** Node.js test runner (node:test)
+- **Approach:** Tests run against dist/ build output; mock fetch for network isolation
 
-- Build command: `npm run build` (TypeScript compile via `tsc -p tsconfig.build.json`).
-- Output directory: `dist/`.
-- CI automation:
-  - Tag push `v*.*.*` triggers release workflow (build, lint, type-check, publish, GitHub release).
-  - GitHub Release “published” triggers publish workflow (build, lint, type-check, publish via npm Trusted Publishing).
+## 7. Evolution & Maintenance
 
-## Security & Safety
-
-- This server fetches external URLs; review `README.md` and `CONFIGURATION.md` before enabling remote access.
-- HTTP mode requires authentication (see configuration docs). Avoid hardcoding tokens in the repo.
-- stdio mode: avoid writing non-protocol output to stdout; use stderr for logs.
+- **Update Rule:** If a convention changes or a new pattern is established, the agent MUST suggest an update to this file in the PR.
+- **Feedback Loop:** If a build command fails twice, the correct fix MUST be recorded in the "Common Pitfalls" section.
