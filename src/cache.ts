@@ -15,7 +15,7 @@ import { config } from './config.js';
 import { sha256Hex } from './crypto.js';
 import { getErrorMessage } from './errors.js';
 import { logDebug, logWarn } from './observability.js';
-import { isRecord } from './utils.js';
+import { isRecord } from './type-guards.js';
 
 export interface CacheEntry {
   url: string;

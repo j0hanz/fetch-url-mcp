@@ -42,7 +42,7 @@ import {
   runWithRequestContext,
 } from './observability.js';
 import { shutdownTransformWorkerPool } from './transform.js';
-import { isRecord } from './utils.js';
+import { isRecord } from './type-guards.js';
 
 interface RateLimitEntry {
   count: number;

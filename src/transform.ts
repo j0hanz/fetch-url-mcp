@@ -27,7 +27,7 @@ import {
   logWarn,
   redactUrl,
 } from './observability.js';
-import { isRecord } from './utils.js';
+import { isRecord } from './type-guards.js';
 
 export interface MetadataBlock {
   type: 'metadata';

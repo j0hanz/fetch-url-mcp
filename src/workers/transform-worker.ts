@@ -2,7 +2,7 @@ import { parentPort } from 'node:worker_threads';
 
 import { FetchError, getErrorMessage } from '../errors.js';
 import { transformHtmlToMarkdownInProcess } from '../transform.js';
-import { isRecord } from '../utils.js';
+import { isRecord } from '../type-guards.js';
 
 interface TransformMessage {
   type: 'transform';

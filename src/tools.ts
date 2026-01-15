@@ -24,7 +24,7 @@ import {
   type MarkdownTransformResult,
   transformHtmlToMarkdown,
 } from './transform.js';
-import { isRecord } from './utils.js';
+import { isRecord } from './type-guards.js';
 
 export interface FetchUrlInput {
   url: string;
