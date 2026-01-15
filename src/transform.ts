@@ -1306,6 +1306,7 @@ function translateHtmlToMarkdown(
   throwIfAborted(signal, url, 'markdown:translated');
 
   let finalMarkdown = cleanupMarkdownArtifacts(content);
+  finalMarkdown = promoteOrphanHeadings(finalMarkdown);
   finalMarkdown = normalizeBlockSpacing(finalMarkdown);
   finalMarkdown = normalizeTableWhitespace(finalMarkdown);
   finalMarkdown = normalizeLineEndings(finalMarkdown);
@@ -1343,15 +1344,41 @@ export function htmlToMarkdown(
 function cleanupMarkdownArtifacts(content: string): string {
   let result = content;
 
+  const fixOrphanHeadings = (text: string): string => {
+    return text.replace(
+      /^(.*?)(#{1,6})\s*(?:\r?\n){2}([A-Z][^\r\n]+?)(?:\r?\n)/gm,
+      (match, prefix: unknown, hashes: unknown, heading: unknown) => {
+        if (
+          typeof prefix !== 'string' ||
+          typeof hashes !== 'string' ||
+          typeof heading !== 'string'
+        ) {
+          return match;
+        }
+        if (heading.length > 150) {
+          return match;
+        }
+        const trimmedPrefix = prefix.trim();
+        if (trimmedPrefix === '') {
+          return `${hashes} ${heading}\n\n`;
+        }
+        return `${trimmedPrefix}\n\n${hashes} ${heading}\n\n`;
+      }
+    );
+  };
+
+  result = fixOrphanHeadings(result);
   result = result.replace(/^#{1,6}[ \t\u00A0]*$\r?\n?/gm, '');
 
   const zeroWidthAnchorLink = /\[(?:\s|\u200B)*\]\(#[^)]*\)\s*/g;
+
   result = result.replace(zeroWidthAnchorLink, '');
-
   result = result.replace(/\]\(([^)]+)\)\[/g, ']($1)\n\n[');
-
   result = result.replace(/^Was this page helpful\??\s*$/gim, '');
-
+  result = result.replace(/(`[^`]+`)\s*\\-\s*/g, '$1 - ');
+  result = result.replace(/\\([[]])/g, '$1');
+  result = result.replace(/([^\n])\n([-*+] )/g, '$1\n\n$2');
+  result = result.replace(/(\S)\n(\d+\. )/g, '$1\n\n$2');
   result = result.replace(/\n{3,}/g, '\n\n');
 
   return result.trim();
@@ -1361,6 +1388,80 @@ function normalizeBlockSpacing(markdown: string): string {
   return markdown
     .replace(/(\n#{1,6} .+)\n(?!\n)/g, '$1\n\n')
     .replace(/\n{3,}/g, '\n\n');
+}
+
+const HEADING_KEYWORDS = new Set([
+  'overview',
+  'introduction',
+  'summary',
+  'conclusion',
+  'prerequisites',
+  'requirements',
+  'installation',
+  'configuration',
+  'usage',
+  'features',
+  'limitations',
+  'troubleshooting',
+  'faq',
+  'resources',
+  'references',
+  'changelog',
+  'license',
+  'acknowledgments',
+  'appendix',
+]);
+
+function isLikelyHeadingLine(line: string): boolean {
+  const trimmed = line.trim();
+  if (!trimmed || trimmed.length > 80) return false;
+  if (/^#{1,6}\s/.test(trimmed)) return false;
+  if (/^[-*+•]\s/.test(trimmed) || /^\d+\.\s/.test(trimmed)) return false;
+  if (/[.!?]$/.test(trimmed)) return false;
+  if (/^\[.*\]\(.*\)$/.test(trimmed)) return false;
+  if (/^(?:example|note|tip|warning|important|caution):\s+\S/i.test(trimmed)) {
+    return true;
+  }
+  const words = trimmed.split(/\s+/);
+  if (words.length >= 2 && words.length <= 6) {
+    const isTitleCase = words.every(
+      (w) =>
+        /^[A-Z][a-z]*$/.test(w) || /^(?:and|or|the|of|in|for|to|a)$/i.test(w)
+    );
+    if (isTitleCase) return true;
+  }
+  if (words.length === 1) {
+    const lower = trimmed.toLowerCase();
+    if (HEADING_KEYWORDS.has(lower) && /^[A-Z]/.test(trimmed)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+function promoteOrphanHeadings(markdown: string): string {
+  const lines = markdown.split('\n');
+  const result: string[] = [];
+
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i] ?? '';
+    const prevLine = i > 0 ? lines[i - 1] : '';
+    const nextLine = i < lines.length - 1 ? lines[i + 1] : '';
+    const isStandalone = prevLine?.trim() === '' && nextLine?.trim() === '';
+    const isPrecededByBlank = prevLine?.trim() === '';
+
+    if ((isStandalone || isPrecededByBlank) && isLikelyHeadingLine(line)) {
+      const trimmed = line.trim();
+      const isExample = /^example:\s/i.test(trimmed);
+      const prefix = isExample ? '### ' : '## ';
+      result.push(prefix + trimmed);
+    } else {
+      result.push(line);
+    }
+  }
+
+  return result.join('\n');
 }
 
 function normalizeTableWhitespace(markdown: string): string {
@@ -1377,12 +1478,10 @@ function normalizeLineEndings(markdown: string): string {
 function formatFetchedDate(isoString: string): string {
   try {
     const date = new Date(isoString);
-    const options: Intl.DateTimeFormatOptions = {
-      year: 'numeric',
-      month: 'short',
-      day: 'numeric',
-    };
-    return date.toLocaleDateString('en-US', options);
+    const day = String(date.getDate()).padStart(2, '0');
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const year = date.getFullYear();
+    return `${day}-${month}-${year}`;
   } catch {
     return isoString;
   }
@@ -1398,11 +1497,18 @@ function buildMetadataFooter(
   if (metadata.title) lines.push(`> *${metadata.title}*`);
   if (metadata.description) lines.push(`> *${metadata.description}*`);
   if (metadata.author) lines.push(`> *${metadata.author}*`);
-  if (metadata.url) lines.push(`> *<${metadata.url}>*`);
-  else if (fallbackUrl) lines.push(`> *<${fallbackUrl}>*`);
-  if (metadata.fetchedAt) {
-    const formattedDate = formatFetchedDate(metadata.fetchedAt);
-    lines.push(`> *${formattedDate}*`);
+
+  const url = metadata.url || fallbackUrl;
+  if (url || metadata.fetchedAt) {
+    const parts: string[] = [];
+    if (url) parts.push(`[Original Source](${url})`);
+    if (metadata.fetchedAt) {
+      const formattedDate = formatFetchedDate(metadata.fetchedAt);
+      parts.push(`_${formattedDate}_`);
+    }
+    if (parts.length > 0) {
+      lines.push(`> ${parts.join(' | ')}`);
+    }
   }
 
   return lines.join('\n');
@@ -1676,6 +1782,32 @@ function tryTransformRawContent({
 
 const MIN_CONTENT_RATIO = 0.3;
 const MIN_HTML_LENGTH_FOR_GATE = 100;
+const MIN_HEADING_RETENTION_RATIO = 0.7;
+
+function countHeadings(html: string): number {
+  if (!html) return 0;
+  // Match opening heading tags <h1> through <h6>
+  const headingPattern = /<h[1-6](?:\s[^>]*)?>([^<]*)<\/h[1-6]>/gi;
+  const matches = html.match(headingPattern);
+  return matches ? matches.length : 0;
+}
+
+function isHeadingStructurePreserved(
+  article: ExtractedArticle | null,
+  originalHtml: string
+): boolean {
+  if (!article) return false;
+
+  const originalHeadingCount = countHeadings(originalHtml);
+  const articleHeadingCount = countHeadings(article.content);
+
+  // If original has no headings, structure is trivially preserved
+  if (originalHeadingCount === 0) return true;
+
+  // If article lost >50% of headings, structure is broken
+  const retentionRatio = articleHeadingCount / originalHeadingCount;
+  return retentionRatio >= MIN_HEADING_RETENTION_RATIO;
+}
 
 function stripHtmlTags(html: string): string {
   const parts: string[] = [];
@@ -1828,16 +1960,29 @@ function shouldUseArticleContent(
   const shouldExtractFromArticle = determineContentExtractionSource(article);
   if (!shouldExtractFromArticle) return false;
 
-  if (isExtractionSufficient(article, html)) {
-    return true;
+  // Check content sufficiency (length-based quality gate)
+  if (!isExtractionSufficient(article, html)) {
+    logQualityGateFallback({
+      url,
+      articleLength: article.textContent.length,
+    });
+    return false;
   }
 
-  logQualityGateFallback({
-    url,
-    articleLength: article.textContent.length,
-  });
+  // Check heading structure preservation
+  if (!isHeadingStructurePreserved(article, html)) {
+    logDebug(
+      'Quality gate: Readability broke heading structure, using full HTML',
+      {
+        url: url.substring(0, 80),
+        originalHeadings: countHeadings(html),
+        articleHeadings: countHeadings(article.content),
+      }
+    );
+    return false;
+  }
 
-  return false;
+  return true;
 }
 
 function resolveContentSource({

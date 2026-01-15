@@ -81,7 +81,9 @@ describe('htmlToMarkdown metadata footer', () => {
     // Content comes first, metadata footer at the end
     assert.ok(markdown.startsWith('Hello'));
     assert.ok(markdown.includes('> *hello:world*'));
-    assert.ok(markdown.includes('> *<https://example.com/path?x=1>*'));
+    assert.ok(
+      markdown.includes('> [Original Source](https://example.com/path?x=1)')
+    );
   });
 });
 
