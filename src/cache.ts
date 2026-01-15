@@ -593,6 +593,41 @@ function appendServerOnClose(server: McpServer, handler: () => void): void {
   };
 }
 
+function attachInitializedGate(server: McpServer): () => boolean {
+  let initialized = false;
+  const previousInitialized = server.server.oninitialized;
+  server.server.oninitialized = () => {
+    initialized = true;
+    previousInitialized?.();
+  };
+  return () => initialized;
+}
+
+function getClientResourceCapabilities(server: McpServer): {
+  listChanged: boolean;
+  subscribe: boolean;
+} {
+  const caps = server.server.getClientCapabilities();
+  if (!caps || !isRecord(caps)) {
+    return { listChanged: true, subscribe: true };
+  }
+
+  const { resources } = caps as { resources?: unknown };
+  if (!isRecord(resources)) {
+    return { listChanged: true, subscribe: true };
+  }
+
+  const { listChanged, subscribe } = resources as {
+    listChanged?: boolean;
+    subscribe?: boolean;
+  };
+
+  return {
+    listChanged: listChanged === true,
+    subscribe: subscribe === true,
+  };
+}
+
 function registerResourceSubscriptionHandlers(server: McpServer): Set<string> {
   const subscriptions = new Set<string>();
 
@@ -629,9 +664,10 @@ function notifyResourceUpdate(
 }
 
 export function registerCachedContentResource(server: McpServer): void {
+  const isInitialized = attachInitializedGate(server);
   const subscriptions = registerResourceSubscriptionHandlers(server);
   registerCacheContentResource(server);
-  registerCacheUpdateSubscription(server, subscriptions);
+  registerCacheUpdateSubscription(server, subscriptions, isInitialized);
 }
 
 function buildCachedContentResponse(
@@ -664,14 +700,21 @@ function registerCacheContentResource(server: McpServer): void {
 
 function registerCacheUpdateSubscription(
   server: McpServer,
-  subscriptions: Set<string>
+  subscriptions: Set<string>,
+  isInitialized: () => boolean
 ): void {
   const unsubscribe = onCacheUpdate(({ cacheKey }) => {
-    const resourceUri = toResourceUri(cacheKey);
-    if (!resourceUri) return;
+    if (!server.isConnected() || !isInitialized()) return;
+    const { listChanged, subscribe } = getClientResourceCapabilities(server);
 
-    notifyResourceUpdate(server, resourceUri, subscriptions);
-    if (server.isConnected()) {
+    if (subscribe) {
+      const resourceUri = toResourceUri(cacheKey);
+      if (resourceUri) {
+        notifyResourceUpdate(server, resourceUri, subscriptions);
+      }
+    }
+
+    if (listChanged) {
       server.sendResourceListChanged();
     }
   });

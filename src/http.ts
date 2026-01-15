@@ -23,6 +23,7 @@ import {
   mcpAuthMetadataRouter,
 } from '@modelcontextprotocol/sdk/server/auth/router.js';
 import type { AuthInfo } from '@modelcontextprotocol/sdk/server/auth/types.js';
+import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import type { Transport } from '@modelcontextprotocol/sdk/shared/transport.js';
 import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
@@ -59,6 +60,7 @@ interface SessionEntry {
   readonly transport: StreamableHTTPServerTransport;
   createdAt: number;
   lastSeen: number;
+  protocolInitialized: boolean;
 }
 
 interface McpRequestParams {
@@ -1616,6 +1618,27 @@ function respondBadRequest(res: Response, id: string | number | null): void {
   );
 }
 
+function respondSessionNotInitialized(
+  res: Response,
+  requestId?: JsonRpcId
+): void {
+  sendJsonRpcErrorOrNoContent(
+    res,
+    -32000,
+    'Bad Request: Session not initialized',
+    400,
+    requestId
+  );
+}
+
+function isAllowedBeforeInitialized(method: string): boolean {
+  return (
+    method === 'initialize' ||
+    method === 'notifications/initialized' ||
+    method === 'ping'
+  );
+}
+
 function createTimeoutController(): {
   clear: () => void;
   set: (timeout: NodeJS.Timeout | null) => void;
@@ -1789,7 +1812,7 @@ async function connectTransportOrThrow({
   transport: StreamableHTTPServerTransport;
   clearInitTimeout: () => void;
   releaseSlot: () => void;
-}): Promise<void> {
+}): Promise<McpServer> {
   const mcpServer = createMcpServer();
   const transportAdapter = createTransportAdapter(transport);
   const oncloseBeforeConnect = transport.onclose;
@@ -1815,6 +1838,8 @@ async function connectTransportOrThrow({
     );
     throw error;
   }
+
+  return mcpServer;
 }
 
 function evictExpiredSessionsWithClose(store: SessionStore): number {
@@ -1871,10 +1896,18 @@ function resolveExistingSessionTransport(
   store: SessionStore,
   sessionId: string,
   res: Response,
-  requestId: JsonRpcId
+  requestId: JsonRpcId,
+  method: string
 ): StreamableHTTPServerTransport | null {
   const existingSession = store.get(sessionId);
   if (existingSession) {
+    if (
+      !existingSession.protocolInitialized &&
+      !isAllowedBeforeInitialized(method)
+    ) {
+      respondSessionNotInitialized(res, requestId);
+      return null;
+    }
     store.touch(sessionId);
     return existingSession.transport;
   }
@@ -1891,9 +1924,25 @@ function createSessionContext(): SessionCreationContext {
   return { tracker, timeoutController, transport };
 }
 
+function attachSessionInitializedHandler(
+  server: McpServer,
+  store: SessionStore,
+  sessionId: string
+): void {
+  const previousInitialized = server.server.oninitialized;
+  server.server.oninitialized = () => {
+    const entry = store.get(sessionId);
+    if (entry) {
+      entry.protocolInitialized = true;
+    }
+    previousInitialized?.();
+  };
+}
+
 function finalizeSessionIfValid({
   store,
   transport,
+  mcpServer,
   tracker,
   clearInitTimeout,
   res,
@@ -1901,6 +1950,7 @@ function finalizeSessionIfValid({
 }: {
   store: SessionStore;
   transport: StreamableHTTPServerTransport;
+  mcpServer: McpServer;
   tracker: SlotTracker;
   clearInitTimeout: () => void;
   res: Response;
@@ -1918,6 +1968,7 @@ function finalizeSessionIfValid({
     store,
     transport,
     sessionId,
+    mcpServer,
     tracker,
     clearInitTimeout,
   });
@@ -1928,12 +1979,14 @@ function finalizeSession({
   store,
   transport,
   sessionId,
+  mcpServer,
   tracker,
   clearInitTimeout,
 }: {
   store: SessionStore;
   transport: StreamableHTTPServerTransport;
   sessionId: string;
+  mcpServer: McpServer;
   tracker: SlotTracker;
   clearInitTimeout: () => void;
 }): void {
@@ -1945,7 +1998,9 @@ function finalizeSession({
     transport,
     createdAt: now,
     lastSeen: now,
+    protocolInitialized: false,
   });
+  attachSessionInitializedHandler(mcpServer, store, sessionId);
   const previousOnClose = transport.onclose;
   transport.onclose = composeCloseHandlers(previousOnClose, () => {
     store.remove(sessionId);
@@ -1972,7 +2027,7 @@ async function createAndConnectTransport({
 
   const { tracker, timeoutController, transport } = createSessionContext();
 
-  await connectTransportOrThrow({
+  const mcpServer = await connectTransportOrThrow({
     transport,
     clearInitTimeout: timeoutController.clear,
     releaseSlot: tracker.releaseSlot,
@@ -1982,6 +2037,7 @@ async function createAndConnectTransport({
     !finalizeSessionIfValid({
       store: options.sessionStore,
       transport,
+      mcpServer,
       tracker,
       clearInitTimeout: timeoutController.clear,
       res,
@@ -2011,7 +2067,8 @@ export async function resolveTransportForPost({
       options.sessionStore,
       sessionId,
       res,
-      requestId
+      requestId,
+      body.method
     );
   }
   if (!isInitializeRequest(body)) {
