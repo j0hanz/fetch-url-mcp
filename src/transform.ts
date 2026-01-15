@@ -131,7 +131,7 @@ function publishTransformEvent(event: TransformStageEvent): void {
   try {
     transformChannel.publish(event);
   } catch {
-    // Avoid crashing the publisher if a subscriber throws.
+    /* empty */
   }
 }
 
@@ -579,6 +579,14 @@ function extractLanguageFromClassName(className: string): string | undefined {
       return token.slice('highlight-'.length);
     }
   }
+
+  if (tokens.includes('hljs')) {
+    const langClass = tokens.find(
+      (t) => t !== 'hljs' && !t.startsWith('hljs-')
+    );
+    if (langClass) return langClass;
+  }
+
   return undefined;
 }
 
@@ -1096,29 +1104,21 @@ function buildInlineCode(content: string): string {
   return `${delimiter}${padding}${content}${padding}${delimiter}`;
 }
 
-/**
- * Derive alt text from an image URL by extracting and humanizing the filename.
- * Used as a fallback when the image has no alt attribute.
- */
 function deriveAltFromImageUrl(src: string): string {
   if (!src) return '';
 
   try {
-    // Handle both absolute and relative URLs.
     const pathname = src.startsWith('http')
       ? new URL(src).pathname
       : (src.split('?')[0] ?? '');
 
-    // Extract filename from path.
     const segments = pathname.split('/');
     const filename = segments.pop() ?? '';
     if (!filename) return '';
 
-    // Remove file extension.
     const dotIndex = filename.lastIndexOf('.');
     const name = dotIndex > 0 ? filename.slice(0, dotIndex) : filename;
 
-    // Humanize: replace separators with spaces.
     return name.replace(/[_-]+/g, ' ').trim();
   } catch {
     return '';
@@ -1212,7 +1212,6 @@ function buildImageTranslator(ctx: unknown): TranslatorConfig {
   const src = getAttribute?.('src') ?? '';
   const existingAlt = getAttribute?.('alt') ?? '';
 
-  // Use existing alt text if present, otherwise derive from filename.
   const alt = existingAlt.trim() || deriveAltFromImageUrl(src);
 
   return {
@@ -1224,6 +1223,47 @@ function createCustomTranslators(): TranslatorConfigObject {
   return {
     code: (ctx: unknown) => buildCodeTranslator(ctx),
     img: (ctx: unknown) => buildImageTranslator(ctx),
+    dl: (ctx: unknown) => {
+      if (!isRecord(ctx) || !isRecord(ctx.node)) {
+        return { content: '' };
+      }
+      const node = ctx.node as { childNodes?: unknown[] };
+      const childNodes = Array.isArray(node.childNodes) ? node.childNodes : [];
+
+      const items = childNodes
+        .map((child: unknown) => {
+          if (!isRecord(child)) return '';
+
+          const nodeName =
+            typeof child.nodeName === 'string'
+              ? child.nodeName.toUpperCase()
+              : '';
+          const textContent =
+            typeof child.textContent === 'string'
+              ? child.textContent.trim()
+              : '';
+
+          if (nodeName === 'DT') return `**${textContent}**`;
+          if (nodeName === 'DD') return `: ${textContent}`;
+          return '';
+        })
+        .filter(Boolean)
+        .join('\n');
+
+      return { content: items ? `\n${items}\n\n` : '' };
+    },
+    kbd: () => ({
+      postprocess: ({ content }: { content: string }) => `\`${content}\``,
+    }),
+    mark: () => ({
+      postprocess: ({ content }: { content: string }) => `==${content}==`,
+    }),
+    sub: () => ({
+      postprocess: ({ content }: { content: string }) => `~${content}~`,
+    }),
+    sup: () => ({
+      postprocess: ({ content }: { content: string }) => `^${content}^`,
+    }),
   };
 }
 
@@ -1265,8 +1305,10 @@ function translateHtmlToMarkdown(
 
   throwIfAborted(signal, url, 'markdown:translated');
 
-  // Post-process the markdown to clean up common conversion artifacts.
-  return cleanupMarkdownArtifacts(content);
+  let finalMarkdown = cleanupMarkdownArtifacts(content);
+  finalMarkdown = normalizeBlockSpacing(finalMarkdown);
+  finalMarkdown = normalizeTableWhitespace(finalMarkdown);
+  return finalMarkdown;
 }
 
 function appendMetadataFooter(
@@ -1274,8 +1316,6 @@ function appendMetadataFooter(
   metadata: MetadataBlock | undefined,
   url: string
 ): string {
-  // Metadata is placed as a footer to avoid duplicating titles when the
-  // article content already contains an H1 heading at the top.
   const footer = buildMetadataFooter(metadata, url);
   return footer ? `${content}\n\n${footer}` : content;
 }
@@ -1299,35 +1339,48 @@ export function htmlToMarkdown(
   }
 }
 
-/**
- * Clean up common markdown conversion artifacts:
- * - Empty headings (e.g., "## " with no text)
- * - Anchor-only links like [ ](#section-id) used for navigation
- * - Concatenated links without spacing
- * - Boilerplate phrases like "Was this page helpful?"
- */
 function cleanupMarkdownArtifacts(content: string): string {
   let result = content;
 
-  // Remove empty Markdown headings like "## " produced by placeholder nodes.
   result = result.replace(/^#{1,6}[ \t\u00A0]*$\r?\n?/gm, '');
 
-  // Remove anchor-only links like [\u200B](#section-id) or [ ](#anchor).
-  // These are navigation remnants with zero-width or whitespace text.
-  // Match: [ or whitespace or zero-width space ](#...)
   const zeroWidthAnchorLink = /\[(?:\s|\u200B)*\]\(#[^)]*\)\s*/g;
   result = result.replace(zeroWidthAnchorLink, '');
 
-  // Add line breaks between concatenated links: ](url)[text] -> ](url)\n\n[text]
   result = result.replace(/\]\(([^)]+)\)\[/g, ']($1)\n\n[');
 
-  // Remove common boilerplate phrases.
   result = result.replace(/^Was this page helpful\??\s*$/gim, '');
 
-  // Collapse multiple blank lines into at most two.
   result = result.replace(/\n{3,}/g, '\n\n');
 
   return result.trim();
+}
+
+function normalizeBlockSpacing(markdown: string): string {
+  return markdown
+    .replace(/(\n#{1,6} .+)\n(?!\n)/g, '$1\n\n')
+    .replace(/\n{3,}/g, '\n\n');
+}
+
+function normalizeTableWhitespace(markdown: string): string {
+  return markdown.replace(/\|([^|\n]+)\|/g, (_match, content: unknown) => {
+    const trimmed = typeof content === 'string' ? content.trim() : '';
+    return `| ${trimmed} |`;
+  });
+}
+
+function formatFetchedDate(isoString: string): string {
+  try {
+    const date = new Date(isoString);
+    const options: Intl.DateTimeFormatOptions = {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric',
+    };
+    return date.toLocaleDateString('en-US', options);
+  } catch {
+    return isoString;
+  }
 }
 
 function buildMetadataFooter(
@@ -1337,16 +1390,15 @@ function buildMetadataFooter(
   if (!metadata) return '';
   const lines: string[] = [];
 
-  // Horizontal rule as a clear footer separator.
-  lines.push('---');
-
-  if (metadata.title) lines.push(`**Title:** ${metadata.title}`);
-  if (metadata.description)
-    lines.push(`**Description:** ${metadata.description}`);
-  if (metadata.author) lines.push(`**Author:** ${metadata.author}`);
-  if (metadata.url) lines.push(`**Source:** ${metadata.url}`);
-  else if (fallbackUrl) lines.push(`**Source:** ${fallbackUrl}`);
-  if (metadata.fetchedAt) lines.push(`**Fetched:** ${metadata.fetchedAt}`);
+  if (metadata.title) lines.push(`> *${metadata.title}*`);
+  if (metadata.description) lines.push(`> *${metadata.description}*`);
+  if (metadata.author) lines.push(`> *${metadata.author}*`);
+  if (metadata.url) lines.push(`> *<${metadata.url}>*`);
+  else if (fallbackUrl) lines.push(`> *<${fallbackUrl}>*`);
+  if (metadata.fetchedAt) {
+    const formattedDate = formatFetchedDate(metadata.fetchedAt);
+    lines.push(`> *${formattedDate}*`);
+  }
 
   return lines.join('\n');
 }
@@ -1466,7 +1518,7 @@ function extractTitleFromRawMarkdown(content: string): string | undefined {
 function hasMarkdownSourceLine(content: string): boolean {
   const lineEnding = detectLineEnding(content);
   const lines = content.split(lineEnding);
-  // Only scan a small prefix to avoid wasting time on huge docs.
+
   const limit = Math.min(lines.length, 50);
   for (let index = 0; index < limit; index += 1) {
     const line = lines[index];
@@ -2041,7 +2093,7 @@ class WorkerPool implements TransformWorkerPool {
     try {
       signal.removeEventListener('abort', listener);
     } catch {
-      // ignore
+      /* empty */
     }
   }
 
@@ -2068,7 +2120,7 @@ class WorkerPool implements TransformWorkerPool {
     try {
       slot.worker.postMessage({ type: 'cancel', id });
     } catch {
-      // ignore
+      /* empty */
     }
   }
 
@@ -2164,7 +2216,6 @@ class WorkerPool implements TransformWorkerPool {
       new URL('./workers/transform-worker.js', import.meta.url)
     );
 
-    // Workers must not keep the process alive by themselves.
     worker.unref();
 
     const slot = this.createWorkerSlot(worker);
@@ -2484,7 +2535,6 @@ function resolveWorkerFallback(
     throw error;
   }
 
-  // Stability-first: if worker infrastructure fails, fall back to in-process.
   throwIfAborted(options.signal, url, 'transform:worker-fallback');
   return transformHtmlToMarkdownInProcess(html, url, options);
 }
