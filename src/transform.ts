@@ -1308,6 +1308,7 @@ function translateHtmlToMarkdown(
   let finalMarkdown = cleanupMarkdownArtifacts(content);
   finalMarkdown = normalizeBlockSpacing(finalMarkdown);
   finalMarkdown = normalizeTableWhitespace(finalMarkdown);
+  finalMarkdown = normalizeLineEndings(finalMarkdown);
   return finalMarkdown;
 }
 
@@ -1367,6 +1368,10 @@ function normalizeTableWhitespace(markdown: string): string {
     const trimmed = typeof content === 'string' ? content.trim() : '';
     return `| ${trimmed} |`;
   });
+}
+
+function normalizeLineEndings(markdown: string): string {
+  return markdown.replace(/\r\n/g, '\n');
 }
 
 function formatFetchedDate(isoString: string): string {
