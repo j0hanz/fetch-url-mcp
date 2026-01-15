@@ -1,6 +1,9 @@
 import { readFileSync } from 'node:fs';
 
-import { McpServer, ResourceTemplate } from '@modelcontextprotocol/sdk/server/mcp.js';
+import {
+  McpServer,
+  ResourceTemplate,
+} from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 
 import { registerCachedContentResource } from './cache.js';
@@ -20,12 +23,10 @@ function createServerInfo(): { name: string; version: string } {
 function createServerCapabilities(): {
   tools: { listChanged: false };
   resources: { listChanged: true; subscribe: true };
-  logging: Record<string, never>;
 } {
   return {
     tools: { listChanged: false },
     resources: { listChanged: true, subscribe: true },
-    logging: {},
   };
 }
 

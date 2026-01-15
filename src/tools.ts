@@ -7,7 +7,7 @@ import type { ToolAnnotations } from '@modelcontextprotocol/sdk/types.js';
 
 import * as cache from './cache.js';
 import { config } from './config.js';
-import { FetchError, isSystemError } from './errors.js';
+import { FetchError, getErrorMessage, isSystemError } from './errors.js';
 import {
   fetchNormalizedUrl,
   normalizeUrl,
@@ -100,12 +100,35 @@ export interface PipelineResult<T> {
   cacheKey?: string | null;
 }
 
+export type ProgressToken = string | number;
+
+export interface RequestMeta {
+  progressToken?: ProgressToken | undefined;
+  [key: string]: unknown;
+}
+
+export interface ProgressNotificationParams {
+  progressToken: ProgressToken;
+  progress: number;
+  total?: number;
+  message?: string;
+  _meta?: Record<string, unknown>;
+}
+
+export interface ProgressNotification {
+  method: 'notifications/progress';
+  params: ProgressNotificationParams;
+}
+
 export interface ToolHandlerExtra {
   signal?: AbortSignal;
   requestId?: string | number;
+  _meta?: RequestMeta;
+  sendNotification?: (notification: ProgressNotification) => Promise<void>;
 }
 
 const TRUNCATION_MARKER = '...[truncated]';
+const FETCH_PROGRESS_TOTAL = 4;
 
 const fetchUrlInputSchema = z.strictObject({
   url: z.url({ protocol: /^https?$/i }).describe('The URL to fetch'),
@@ -132,6 +155,39 @@ const fetchUrlOutputSchema = z.strictObject({
 export const FETCH_URL_TOOL_NAME = 'fetch-url';
 export const FETCH_URL_TOOL_DESCRIPTION =
   'Fetches a webpage and converts it to clean Markdown format';
+
+interface ProgressReporter {
+  report: (progress: number, message: string) => Promise<void>;
+}
+
+function createProgressReporter(extra?: ToolHandlerExtra): ProgressReporter {
+  const token = extra?._meta?.progressToken ?? null;
+  const sendNotification = extra?.sendNotification;
+
+  if (token === null || !sendNotification) {
+    return { report: async () => {} };
+  }
+
+  return {
+    report: async (progress: number, message: string): Promise<void> => {
+      try {
+        await sendNotification({
+          method: 'notifications/progress',
+          params: {
+            progressToken: token,
+            progress,
+            total: FETCH_PROGRESS_TOTAL,
+            message,
+          },
+        });
+      } catch (error) {
+        logWarn('Failed to send progress notification', {
+          error: getErrorMessage(error),
+        });
+      }
+    },
+  };
+}
 
 function serializeStructuredContent(
   structuredContent: Record<string, unknown>,
@@ -686,7 +742,8 @@ function logFetchStart(url: string): void {
 
 async function fetchPipeline(
   url: string,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  progress?: ProgressReporter
 ): Promise<{
   pipeline: PipelineResult<MarkdownPipelineResult>;
   inlineResult: InlineResult;
@@ -694,8 +751,12 @@ async function fetchPipeline(
   return performSharedFetch<MarkdownPipelineResult>({
     url,
     ...(signal === undefined ? {} : { signal }),
-    transform: (html, normalizedUrl) =>
-      buildMarkdownTransform()(html, normalizedUrl, signal),
+    transform: async (html, normalizedUrl) => {
+      if (progress) {
+        await progress.report(3, 'Transforming content');
+      }
+      return buildMarkdownTransform()(html, normalizedUrl, signal);
+    },
     serialize: serializeMarkdownResult,
     deserialize: deserializeMarkdownResult,
   });
@@ -732,13 +793,28 @@ async function executeFetch(
     return createToolErrorResponse('URL is required', '');
   }
 
+  const progress = createProgressReporter(extra);
+  await progress.report(1, 'Validating URL');
+
   logFetchStart(url);
 
-  const { pipeline, inlineResult } = await fetchPipeline(url, extra?.signal);
+  await progress.report(2, 'Fetching content');
+
+  const { pipeline, inlineResult } = await fetchPipeline(
+    url,
+    extra?.signal,
+    progress
+  );
+
+  if (pipeline.fromCache) {
+    await progress.report(3, 'Using cached content');
+  }
 
   if (inlineResult.error) {
     return createToolErrorResponse(inlineResult.error, url);
   }
+
+  await progress.report(4, 'Finalizing response');
 
   return buildResponse(pipeline, inlineResult, url);
 }

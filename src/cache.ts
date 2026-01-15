@@ -652,7 +652,7 @@ function registerCacheContentResource(server: McpServer): void {
       title: 'Cached Content',
       description:
         'Access previously fetched web content from cache. Namespace: markdown. UrlHash: SHA-256 hash of the URL.',
-      mimeType: 'text/plain',
+      mimeType: 'text/markdown',
     },
     (uri, params) => {
       const { namespace, urlHash } = resolveCacheParams(params);

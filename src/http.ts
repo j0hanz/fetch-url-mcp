@@ -1415,6 +1415,20 @@ function sendJsonRpcError(
   });
 }
 
+function sendJsonRpcErrorOrNoContent(
+  res: Response,
+  code: number,
+  message: string,
+  status: number,
+  id?: JsonRpcId
+): void {
+  if (id === null) {
+    res.sendStatus(204);
+    return;
+  }
+  sendJsonRpcError(res, code, message, status, id ?? null);
+}
+
 function getSessionId(req: Request): string | undefined {
   const header = req.headers['mcp-session-id'];
   return Array.isArray(header) ? header[0] : header;
@@ -1562,11 +1576,13 @@ export function ensureSessionCapacity({
   maxSessions,
   res,
   evictOldest,
+  requestId,
 }: {
   store: SessionStore;
   maxSessions: number;
   res: Response;
   evictOldest: (store: SessionStore) => boolean;
+  requestId?: JsonRpcId;
 }): boolean {
   if (!isServerAtCapacity(store, maxSessions)) {
     return true;
@@ -1576,22 +1592,22 @@ export function ensureSessionCapacity({
     return !isServerAtCapacity(store, maxSessions);
   }
 
-  respondServerBusy(res);
+  respondServerBusy(res, requestId);
   return false;
 }
 
-function respondServerBusy(res: Response): void {
-  sendJsonRpcError(
+function respondServerBusy(res: Response, requestId?: JsonRpcId): void {
+  sendJsonRpcErrorOrNoContent(
     res,
     -32000,
     'Server busy: maximum sessions reached',
     503,
-    null
+    requestId
   );
 }
 
 function respondBadRequest(res: Response, id: string | number | null): void {
-  sendJsonRpcError(
+  sendJsonRpcErrorOrNoContent(
     res,
     -32000,
     'Bad Request: Missing session ID or not an initialize request',
@@ -1827,18 +1843,21 @@ function evictOldestSessionWithClose(store: SessionStore): boolean {
 function reserveSessionIfPossible({
   options,
   res,
+  requestId,
 }: {
   options: McpSessionOptions;
   res: Response;
+  requestId?: JsonRpcId;
 }): boolean {
-  if (
-    !ensureSessionCapacity({
-      store: options.sessionStore,
-      maxSessions: options.maxSessions,
-      res,
-      evictOldest: evictOldestSessionWithClose,
-    })
-  ) {
+  const capacityArgs = {
+    store: options.sessionStore,
+    maxSessions: options.maxSessions,
+    res,
+    evictOldest: evictOldestSessionWithClose,
+    ...(requestId !== undefined ? { requestId } : {}),
+  };
+
+  if (!ensureSessionCapacity(capacityArgs)) {
     return false;
   }
   if (!reserveSessionSlot(options.sessionStore, options.maxSessions)) {
@@ -1861,7 +1880,7 @@ function resolveExistingSessionTransport(
   }
 
   // Client supplied a session id but it doesn't exist; Streamable HTTP: invalid session IDs => 404.
-  sendJsonRpcError(res, -32600, 'Session not found', 404, requestId);
+  sendJsonRpcErrorOrNoContent(res, -32600, 'Session not found', 404, requestId);
   return null;
 }
 
@@ -1878,18 +1897,20 @@ function finalizeSessionIfValid({
   tracker,
   clearInitTimeout,
   res,
+  requestId,
 }: {
   store: SessionStore;
   transport: StreamableHTTPServerTransport;
   tracker: SlotTracker;
   clearInitTimeout: () => void;
   res: Response;
+  requestId?: JsonRpcId;
 }): boolean {
   const { sessionId } = transport;
   if (typeof sessionId !== 'string') {
     clearInitTimeout();
     tracker.releaseSlot();
-    respondBadRequest(res, null);
+    respondBadRequest(res, requestId ?? null);
     return false;
   }
 
@@ -1936,11 +1957,18 @@ function finalizeSession({
 async function createAndConnectTransport({
   options,
   res,
+  requestId,
 }: {
   options: McpSessionOptions;
   res: Response;
+  requestId?: JsonRpcId;
 }): Promise<StreamableHTTPServerTransport | null> {
-  if (!reserveSessionIfPossible({ options, res })) return null;
+  const reserveArgs = {
+    options,
+    res,
+    ...(requestId !== undefined ? { requestId } : {}),
+  };
+  if (!reserveSessionIfPossible(reserveArgs)) return null;
 
   const { tracker, timeoutController, transport } = createSessionContext();
 
@@ -1957,6 +1985,7 @@ async function createAndConnectTransport({
       tracker,
       clearInitTimeout: timeoutController.clear,
       res,
+      ...(requestId !== undefined ? { requestId } : {}),
     })
   ) {
     return null;
@@ -1990,7 +2019,7 @@ export async function resolveTransportForPost({
     return null;
   }
   evictExpiredSessionsWithClose(options.sessionStore);
-  return createAndConnectTransport({ options, res });
+  return createAndConnectTransport({ options, res, requestId });
 }
 
 function startSessionCleanupLoop(
