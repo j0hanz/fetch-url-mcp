@@ -222,110 +222,43 @@ function truncateHtml(html: string): string {
   return html.substring(0, maxSize);
 }
 
-type MetaSource = 'og' | 'twitter' | 'standard';
-type MetaField = keyof ExtractedMetadata;
-
-interface MetaCollectorState {
-  title: Partial<Record<MetaSource, string>>;
-  description: Partial<Record<MetaSource, string>>;
-  author: Partial<Record<MetaSource, string>>;
-}
-
-function createMetaCollectorState(): MetaCollectorState {
-  return {
-    title: {},
-    description: {},
-    author: {},
-  };
-}
-
-function resolveMetaField(
-  state: MetaCollectorState,
-  field: MetaField
-): string | undefined {
-  const sources = state[field];
-  return sources.og ?? sources.twitter ?? sources.standard;
-}
-
-type ParsedMetaKey = 'title' | 'description' | 'author';
-
-function parseOpenGraphKey(
-  property: string | null
-): Exclude<ParsedMetaKey, 'author'> | null {
-  if (!property?.startsWith('og:')) return null;
-  const key = property.replace('og:', '');
-  return key === 'title' || key === 'description' ? key : null;
-}
-
-function parseTwitterKey(
-  name: string | null
-): Exclude<ParsedMetaKey, 'author'> | null {
-  if (!name?.startsWith('twitter:')) return null;
-  const key = name.replace('twitter:', '');
-  return key === 'title' || key === 'description' ? key : null;
-}
-
-function parseStandardKey(name: string | null): ParsedMetaKey | null {
-  if (name === 'description') return 'description';
-  if (name === 'author') return 'author';
-  return null;
-}
-
-function collectMetaTag(state: MetaCollectorState, tag: HTMLMetaElement): void {
-  const content = tag.getAttribute('content')?.trim();
-  if (!content) return;
-
-  const ogKey = parseOpenGraphKey(tag.getAttribute('property'));
-  if (ogKey) {
-    state[ogKey].og = content;
-    return;
-  }
-
-  const name = tag.getAttribute('name');
-  const twitterKey = parseTwitterKey(name);
-  if (twitterKey) {
-    state[twitterKey].twitter = content;
-    return;
-  }
-
-  const standardKey = parseStandardKey(name);
-  if (standardKey) {
-    state[standardKey].standard = content;
-  }
-}
-
-function scanMetaTags(document: Document, state: MetaCollectorState): void {
-  const metaTags = document.querySelectorAll('meta');
-  for (const tag of metaTags) {
-    collectMetaTag(state, tag);
-  }
-}
-
-function ensureTitleFallback(
-  document: Document,
-  state: MetaCollectorState
-): void {
-  if (state.title.standard) return;
-  const titleEl = document.querySelector('title');
-  if (titleEl?.textContent) {
-    state.title.standard = titleEl.textContent.trim();
-  }
-}
-
 function extractMetadata(document: Document): ExtractedMetadata {
-  const state = createMetaCollectorState();
+  const title: {
+    og?: string;
+    twitter?: string;
+    standard?: string | undefined;
+  } = {};
+  const description: { og?: string; twitter?: string; standard?: string } = {};
+  let author: string | undefined;
 
-  scanMetaTags(document, state);
-  ensureTitleFallback(document, state);
+  for (const tag of document.querySelectorAll('meta')) {
+    const content = tag.getAttribute('content')?.trim();
+    if (!content) continue;
+
+    const property = tag.getAttribute('property');
+    const name = tag.getAttribute('name');
+
+    if (property === 'og:title') title.og = content;
+    else if (property === 'og:description') description.og = content;
+    else if (name === 'twitter:title') title.twitter = content;
+    else if (name === 'twitter:description') description.twitter = content;
+    else if (name === 'description') description.standard = content;
+    else if (name === 'author') author = content;
+  }
+
+  const titleEl = document.querySelector('title');
+  if (!title.standard && titleEl?.textContent) {
+    title.standard = titleEl.textContent.trim();
+  }
+
+  const resolvedTitle = title.og ?? title.twitter ?? title.standard;
+  const resolvedDesc =
+    description.og ?? description.twitter ?? description.standard;
 
   const metadata: ExtractedMetadata = {};
-  const title = resolveMetaField(state, 'title');
-  const description = resolveMetaField(state, 'description');
-  const author = resolveMetaField(state, 'author');
-
-  if (title !== undefined) metadata.title = title;
-  if (description !== undefined) metadata.description = description;
-  if (author !== undefined) metadata.author = author;
+  if (resolvedTitle) metadata.title = resolvedTitle;
+  if (resolvedDesc) metadata.description = resolvedDesc;
+  if (author) metadata.author = author;
 
   return metadata;
 }
@@ -351,12 +284,7 @@ function extractArticle(document: unknown): ExtractedArticle | null {
     logWarn('Document not compatible with Readability');
     return null;
   }
-  return mapParsedArticle(parseReadabilityArticle(document));
-}
 
-function parseReadabilityArticle(
-  document: Document
-): ReturnType<Readability['parse']> | null {
   try {
     const documentClone = document.cloneNode(true) as Document;
     const rawText =
@@ -367,54 +295,24 @@ function parseReadabilityArticle(
       return null;
     }
     const reader = new Readability(documentClone, { maxElemsToParse: 20_000 });
-    return reader.parse();
+    const parsed = reader.parse();
+    if (!parsed) return null;
+
+    return {
+      content: parsed.content ?? '',
+      textContent: parsed.textContent ?? '',
+      ...(parsed.title != null && { title: parsed.title }),
+      ...(parsed.byline != null && { byline: parsed.byline }),
+      ...(parsed.excerpt != null && { excerpt: parsed.excerpt }),
+      ...(parsed.siteName != null && { siteName: parsed.siteName }),
+    };
   } catch (error: unknown) {
-    logError('Failed to extract article with Readability', asError(error));
+    logError(
+      'Failed to extract article with Readability',
+      error instanceof Error ? error : undefined
+    );
     return null;
   }
-}
-
-function asError(error: unknown): Error | undefined {
-  if (error instanceof Error) {
-    return error;
-  }
-  return undefined;
-}
-
-function mapParsedArticle(
-  parsed: ReturnType<Readability['parse']> | null
-): ExtractedArticle | null {
-  return parsed ? mapReadabilityResult(parsed) : null;
-}
-
-function mapReadabilityResult(
-  parsed: NonNullable<ReturnType<Readability['parse']>>
-): ExtractedArticle {
-  return {
-    content: parsed.content ?? '',
-    textContent: parsed.textContent ?? '',
-    ...buildOptionalArticleFields(parsed),
-  };
-}
-
-function buildOptionalArticleFields(
-  parsed: NonNullable<ReturnType<Readability['parse']>>
-): Partial<ExtractedArticle> {
-  const optional: Partial<ExtractedArticle> = {};
-  addOptionalField(optional, 'title', parsed.title);
-  addOptionalField(optional, 'byline', parsed.byline);
-  addOptionalField(optional, 'excerpt', parsed.excerpt);
-  addOptionalField(optional, 'siteName', parsed.siteName);
-  return optional;
-}
-
-function addOptionalField<Key extends keyof ExtractedArticle>(
-  target: Partial<ExtractedArticle>,
-  key: Key,
-  value: ExtractedArticle[Key] | null | undefined
-): void {
-  if (value == null) return;
-  target[key] = value;
 }
 
 export function extractContent(
@@ -424,16 +322,11 @@ export function extractContent(
     extractArticle: true,
   }
 ): ExtractionResult {
-  const emptyResult = createEmptyExtractionResult();
   if (!isValidInput(html, url)) {
-    return emptyResult;
+    return { article: null, metadata: {} };
   }
 
   return tryExtractContent(html, url, options);
-}
-
-function createEmptyExtractionResult(): ExtractionResult {
-  return { article: null, metadata: {} };
 }
 
 function extractArticleWithStage(
@@ -460,7 +353,7 @@ function handleExtractionFailure(
     'Failed to extract content',
     error instanceof Error ? error : undefined
   );
-  return createEmptyExtractionResult();
+  return { article: null, metadata: {} };
 }
 
 function extractContentStages(
@@ -512,13 +405,9 @@ function isValidInput(html: string, url: string): boolean {
 }
 
 function validateRequiredString(value: unknown, message: string): boolean {
-  if (isNonEmptyString(value)) return true;
+  if (typeof value === 'string' && value.length > 0) return true;
   logWarn(message);
   return false;
-}
-
-function isNonEmptyString(value: unknown): value is string {
-  return typeof value === 'string' && value.length > 0;
 }
 
 function resolveArticleExtraction(
@@ -612,7 +501,137 @@ function isWordChar(char: string | undefined): boolean {
   );
 }
 
-const BASH_PACKAGE_MANAGERS = [
+interface LanguagePattern {
+  keywords?: readonly string[];
+  wordBoundary?: readonly string[];
+  regex?: RegExp;
+  startsWith?: readonly string[];
+  custom?: (code: string, lower: string) => boolean;
+}
+
+const LANGUAGE_PATTERNS: readonly {
+  language: string;
+  pattern: LanguagePattern;
+}[] = [
+  {
+    language: 'jsx',
+    pattern: {
+      keywords: ['classname=', 'jsx:', "from 'react'", 'from "react"'],
+      custom: (code) => containsJsxTag(code),
+    },
+  },
+  {
+    language: 'typescript',
+    pattern: {
+      wordBoundary: ['interface', 'type'],
+      custom: (_, lower) =>
+        [
+          ': string',
+          ':string',
+          ': number',
+          ':number',
+          ': boolean',
+          ':boolean',
+          ': void',
+          ':void',
+          ': any',
+          ':any',
+          ': unknown',
+          ':unknown',
+          ': never',
+          ':never',
+        ].some((hint) => lower.includes(hint)),
+    },
+  },
+  {
+    language: 'rust',
+    pattern: {
+      regex: /\b(?:fn|impl|struct|enum)\b/,
+      keywords: ['let mut'],
+      custom: (_, lower) => lower.includes('use ') && lower.includes('::'),
+    },
+  },
+  {
+    language: 'javascript',
+    pattern: {
+      regex: /\b(?:const|let|var|function|class|async|await|export|import)\b/,
+    },
+  },
+  {
+    language: 'python',
+    pattern: {
+      regex: /\b(?:def|class|import|from)\b/,
+      keywords: ['print(', '__name__'],
+    },
+  },
+  {
+    language: 'bash',
+    pattern: {
+      custom: (code) => detectBashIndicators(code),
+    },
+  },
+  {
+    language: 'css',
+    pattern: {
+      regex: /@media|@import|@keyframes/,
+      custom: (code) => detectCssStructure(code),
+    },
+  },
+  {
+    language: 'html',
+    pattern: {
+      keywords: [
+        '<!doctype',
+        '<html',
+        '<head',
+        '<body',
+        '<div',
+        '<span',
+        '<p',
+        '<a',
+        '<script',
+        '<style',
+      ],
+    },
+  },
+  {
+    language: 'json',
+    pattern: {
+      startsWith: ['{', '['],
+    },
+  },
+  {
+    language: 'yaml',
+    pattern: {
+      custom: (code) => detectYamlStructure(code),
+    },
+  },
+  {
+    language: 'sql',
+    pattern: {
+      wordBoundary: [
+        'select',
+        'insert',
+        'update',
+        'delete',
+        'create',
+        'alter',
+        'drop',
+      ],
+    },
+  },
+  {
+    language: 'go',
+    pattern: {
+      wordBoundary: ['package', 'func'],
+      keywords: ['import "'],
+    },
+  },
+];
+
+// Bash detection constants
+const BASH_COMMANDS = ['sudo', 'chmod', 'mkdir', 'cd', 'ls', 'cat', 'echo'];
+const BASH_PKG_MANAGERS = [
   'npm',
   'yarn',
   'pnpm',
@@ -623,215 +642,92 @@ const BASH_PACKAGE_MANAGERS = [
   'cargo',
   'go',
 ];
-
 const BASH_VERBS = ['install', 'add', 'run', 'build', 'start'];
-const BASH_COMMANDS = ['sudo', 'chmod', 'mkdir', 'cd', 'ls', 'cat', 'echo'];
 
-function detectBash(code: string): boolean {
-  const lines = splitLines(code);
-  for (const line of lines) {
-    const trimmed = line.trimStart();
-    if (!trimmed) continue;
-    if (isBashIndicator(trimmed)) return true;
+function isShellPrefix(line: string): boolean {
+  return (
+    line.startsWith('#!') || line.startsWith('$ ') || line.startsWith('# ')
+  );
+}
+
+function matchesBashCommand(line: string): boolean {
+  return BASH_COMMANDS.some(
+    (cmd) => line === cmd || line.startsWith(`${cmd} `)
+  );
+}
+
+function matchesPackageManagerVerb(line: string): boolean {
+  for (const mgr of BASH_PKG_MANAGERS) {
+    if (!line.startsWith(`${mgr} `)) continue;
+    const rest = line.slice(mgr.length + 1);
+    if (BASH_VERBS.some((v) => rest === v || rest.startsWith(`${v} `))) {
+      return true;
+    }
   }
   return false;
 }
 
-function startsWithCommand(line: string, commands: readonly string[]): boolean {
-  return commands.some(
-    (command) => line === command || line.startsWith(`${command} `)
-  );
-}
-
-function isBashIndicator(line: string): boolean {
-  return (
-    isShebang(line) ||
-    isPromptLine(line) ||
-    startsWithCommand(line, BASH_COMMANDS) ||
-    startsWithPackageManagerCommand(line)
-  );
-}
-
-function isShebang(line: string): boolean {
-  return line.startsWith('#!');
-}
-
-function isPromptLine(line: string): boolean {
-  return line.startsWith('$ ') || line.startsWith('# ');
-}
-
-function startsWithPackageManagerCommand(line: string): boolean {
-  return BASH_PACKAGE_MANAGERS.some((manager) => {
-    if (!line.startsWith(`${manager} `)) return false;
-    const rest = line.slice(manager.length + 1);
-    return BASH_VERBS.some(
-      (verb) => rest === verb || rest.startsWith(`${verb} `)
-    );
-  });
-}
-
-interface CodeDetector {
-  language: string;
-  detect: (code: string) => boolean;
-}
-
-const TYPE_HINTS = [
-  'string',
-  'number',
-  'boolean',
-  'void',
-  'any',
-  'unknown',
-  'never',
-];
-
-const HTML_TAGS = [
-  '<!doctype',
-  '<html',
-  '<head',
-  '<body',
-  '<div',
-  '<span',
-  '<p',
-  '<a',
-  '<script',
-  '<style',
-];
-const SQL_KEYWORDS = [
-  'select',
-  'insert',
-  'update',
-  'delete',
-  'create',
-  'alter',
-  'drop',
-];
-const JS_WORD_REGEX =
-  /\b(?:const|let|var|function|class|async|await|export|import)\b/;
-const PYTHON_WORD_REGEX = /\b(?:def|class|import|from)\b/;
-const RUST_WORD_REGEX = /\b(?:fn|impl|struct|enum)\b/;
-const CSS_DIRECTIVE_REGEX = /@media|@import|@keyframes/;
-
-const CODE_DETECTORS: readonly CodeDetector[] = [
-  { language: 'jsx', detect: detectJsx },
-  { language: 'typescript', detect: detectTypescript },
-  { language: 'rust', detect: detectRust },
-  { language: 'javascript', detect: detectJavascript },
-  { language: 'python', detect: detectPython },
-  { language: 'bash', detect: detectBash },
-  { language: 'css', detect: detectCss },
-  { language: 'html', detect: detectHtml },
-  { language: 'json', detect: detectJson },
-  { language: 'yaml', detect: detectYaml },
-  { language: 'sql', detect: detectSql },
-  { language: 'go', detect: detectGo },
-];
-
-function detectJsx(code: string): boolean {
-  const lower = code.toLowerCase();
-  if (lower.includes('classname=')) return true;
-  if (lower.includes('jsx:')) return true;
-  if (lower.includes("from 'react'") || lower.includes('from "react"')) {
-    return true;
-  }
-  return containsJsxTag(code);
-}
-
-function detectTypescript(code: string): boolean {
-  const lower = code.toLowerCase();
-  if (containsWord(lower, 'interface')) return true;
-  if (containsWord(lower, 'type')) return true;
-  return TYPE_HINTS.some(
-    (hint) => lower.includes(`: ${hint}`) || lower.includes(`:${hint}`)
-  );
-}
-
-function detectRust(code: string): boolean {
-  const lower = code.toLowerCase();
-  return (
-    RUST_WORD_REGEX.test(lower) ||
-    lower.includes('let mut') ||
-    (lower.includes('use ') && lower.includes('::'))
-  );
-}
-
-function detectJavascript(code: string): boolean {
-  const lower = code.toLowerCase();
-  return JS_WORD_REGEX.test(lower);
-}
-
-function detectPython(code: string): boolean {
-  const lower = code.toLowerCase();
-  return (
-    PYTHON_WORD_REGEX.test(lower) ||
-    lower.includes('print(') ||
-    lower.includes('__name__')
-  );
-}
-
-function detectCss(code: string): boolean {
-  const lower = code.toLowerCase();
-  if (CSS_DIRECTIVE_REGEX.test(lower)) return true;
-
-  const lines = splitLines(code);
-  for (const line of lines) {
+function detectBashIndicators(code: string): boolean {
+  for (const line of splitLines(code)) {
     const trimmed = line.trimStart();
     if (!trimmed) continue;
-    if (isCssSelectorLine(trimmed) || isCssPropertyLine(trimmed)) return true;
+    if (
+      isShellPrefix(trimmed) ||
+      matchesBashCommand(trimmed) ||
+      matchesPackageManagerVerb(trimmed)
+    ) {
+      return true;
+    }
   }
   return false;
 }
 
-function detectHtml(code: string): boolean {
-  const lower = code.toLowerCase();
-  return HTML_TAGS.some((tag) => lower.includes(tag));
+function detectCssStructure(code: string): boolean {
+  for (const line of splitLines(code)) {
+    const trimmed = line.trimStart();
+    if (!trimmed) continue;
+    const isSelector =
+      (trimmed.startsWith('.') || trimmed.startsWith('#')) &&
+      trimmed.includes('{');
+    const isProperty = trimmed.includes(':') && trimmed.includes(';');
+    if (isSelector || isProperty) return true;
+  }
+  return false;
 }
 
-function detectJson(code: string): boolean {
-  const trimmed = code.trimStart();
-  if (!trimmed) return false;
-  return trimmed.startsWith('{') || trimmed.startsWith('[');
-}
-
-function detectYaml(code: string): boolean {
-  const lines = splitLines(code);
-  for (const line of lines) {
+function detectYamlStructure(code: string): boolean {
+  for (const line of splitLines(code)) {
     const trimmed = line.trim();
     if (!trimmed) continue;
-    const colonIndex = trimmed.indexOf(':');
-    if (colonIndex <= 0) continue;
-    const after = trimmed[colonIndex + 1];
+    const colonIdx = trimmed.indexOf(':');
+    if (colonIdx <= 0) continue;
+    const after = trimmed[colonIdx + 1];
     if (after === ' ' || after === '\t') return true;
   }
   return false;
 }
 
-function detectSql(code: string): boolean {
-  const lower = code.toLowerCase();
-  return SQL_KEYWORDS.some((keyword) => containsWord(lower, keyword));
-}
-
-function detectGo(code: string): boolean {
-  const lower = code.toLowerCase();
-  return (
-    containsWord(lower, 'package') ||
-    containsWord(lower, 'func') ||
-    lower.includes('import "')
-  );
-}
-
-function isCssSelectorLine(line: string): boolean {
-  if (!line.startsWith('.') && !line.startsWith('#')) return false;
-  return line.includes('{');
-}
-
-function isCssPropertyLine(line: string): boolean {
-  return line.includes(':') && line.includes(';');
+function matchesLanguagePattern(
+  code: string,
+  lower: string,
+  pattern: LanguagePattern
+): boolean {
+  if (pattern.keywords?.some((kw) => lower.includes(kw))) return true;
+  if (pattern.wordBoundary?.some((w) => containsWord(lower, w))) return true;
+  if (pattern.regex?.test(lower)) return true;
+  if (pattern.startsWith) {
+    const trimmed = code.trimStart();
+    if (pattern.startsWith.some((prefix) => trimmed.startsWith(prefix)))
+      return true;
+  }
+  if (pattern.custom?.(code, lower)) return true;
+  return false;
 }
 
 export function detectLanguageFromCode(code: string): string | undefined {
-  for (const { language, detect } of CODE_DETECTORS) {
-    if (detect(code)) return language;
+  const lower = code.toLowerCase();
+  for (const { language, pattern } of LANGUAGE_PATTERNS) {
+    if (matchesLanguagePattern(code, lower, pattern)) return language;
   }
   return undefined;
 }
@@ -1010,12 +906,11 @@ function matchesPromoIdOrClass(className: string, id: string): boolean {
   return tokens.some((token) => PROMO_TOKENS.has(token));
 }
 
-function matchesHighZIsolate(className: string): boolean {
-  return HIGH_Z_PATTERN.test(className) && ISOLATE_PATTERN.test(className);
-}
-
 function matchesFixedOrHighZIsolate(className: string): boolean {
-  return FIXED_PATTERN.test(className) || matchesHighZIsolate(className);
+  return (
+    FIXED_PATTERN.test(className) ||
+    (HIGH_Z_PATTERN.test(className) && ISOLATE_PATTERN.test(className))
+  );
 }
 
 interface ElementMetadata {
@@ -1305,12 +1200,8 @@ function translateHtmlToMarkdown(
 
   throwIfAborted(signal, url, 'markdown:translated');
 
-  let finalMarkdown = cleanupMarkdownArtifacts(content);
-  finalMarkdown = promoteOrphanHeadings(finalMarkdown);
-  finalMarkdown = normalizeBlockSpacing(finalMarkdown);
-  finalMarkdown = normalizeTableWhitespace(finalMarkdown);
-  finalMarkdown = normalizeLineEndings(finalMarkdown);
-  return finalMarkdown;
+  const cleaned = cleanupMarkdownArtifacts(content);
+  return promoteOrphanHeadings(cleaned);
 }
 
 function appendMetadataFooter(
@@ -1373,6 +1264,46 @@ function cleanupMarkdownArtifacts(content: string): string {
   const zeroWidthAnchorLink = /\[(?:\s|\u200B)*\]\(#[^)]*\)\s*/g;
 
   result = result.replace(zeroWidthAnchorLink, '');
+  result = result.replace(
+    /^\[Skip to (?:main )?content\]\(#[^)]*\)\s*$/gim,
+    ''
+  );
+  result = result.replace(
+    /^\[Skip to (?:main )?navigation\]\(#[^)]*\)\s*$/gim,
+    ''
+  );
+  result = result.replace(/^\[Skip link\]\(#[^)]*\)\s*$/gim, '');
+  result = result.replace(/(^#{1,6}\s+\w+)```/gm, '$1\n\n```');
+  result = result.replace(/(^#{1,6}\s+\w*[A-Z])([A-Z][a-z])/gm, '$1\n\n$2');
+  result = result.replace(/(^#{1,6}\s[^\n]*)\n([^\n])/gm, '$1\n\n$2');
+  const tocLinkLine = /^- \[[^\]]+\]\(#[^)]+\)\s*$/;
+  const lines = result.split('\n');
+  const filtered: string[] = [];
+  let skipTocBlock = false;
+
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i] ?? '';
+    const prevLine = i > 0 ? (lines[i - 1] ?? '') : '';
+    const nextLine = i < lines.length - 1 ? (lines[i + 1] ?? '') : '';
+    if (tocLinkLine.test(line)) {
+      const prevIsToc = tocLinkLine.test(prevLine) || prevLine.trim() === '';
+      const nextIsToc = tocLinkLine.test(nextLine) || nextLine.trim() === '';
+
+      if (prevIsToc || nextIsToc) {
+        skipTocBlock = true;
+        continue;
+      }
+    } else if (line.trim() === '' && skipTocBlock) {
+      skipTocBlock = false;
+      continue;
+    } else {
+      skipTocBlock = false;
+    }
+    filtered.push(line);
+  }
+
+  result = filtered.join('\n');
+
   result = result.replace(/\]\(([^)]+)\)\[/g, ']($1)\n\n[');
   result = result.replace(/^Was this page helpful\??\s*$/gim, '');
   result = result.replace(/(`[^`]+`)\s*\\-\s*/g, '$1 - ');
@@ -1382,12 +1313,6 @@ function cleanupMarkdownArtifacts(content: string): string {
   result = result.replace(/\n{3,}/g, '\n\n');
 
   return result.trim();
-}
-
-function normalizeBlockSpacing(markdown: string): string {
-  return markdown
-    .replace(/(\n#{1,6} .+)\n(?!\n)/g, '$1\n\n')
-    .replace(/\n{3,}/g, '\n\n');
 }
 
 const HEADING_KEYWORDS = new Set([
@@ -1464,17 +1389,6 @@ function promoteOrphanHeadings(markdown: string): string {
   return result.join('\n');
 }
 
-function normalizeTableWhitespace(markdown: string): string {
-  return markdown.replace(/\|([^|\n]+)\|/g, (_match, content: unknown) => {
-    const trimmed = typeof content === 'string' ? content.trim() : '';
-    return `| ${trimmed} |`;
-  });
-}
-
-function normalizeLineEndings(markdown: string): string {
-  return markdown.replace(/\r\n/g, '\n');
-}
-
 function formatFetchedDate(isoString: string): string {
   try {
     const date = new Date(isoString);
@@ -1492,23 +1406,28 @@ function buildMetadataFooter(
   fallbackUrl?: string
 ): string {
   if (!metadata) return '';
-  const lines: string[] = [];
-
-  if (metadata.title) lines.push(`> *${metadata.title}*`);
-  if (metadata.description) lines.push(`> *${metadata.description}*`);
-  if (metadata.author) lines.push(`> *${metadata.author}*`);
+  const lines: string[] = ['---', ''];
 
   const url = metadata.url || fallbackUrl;
-  if (url || metadata.fetchedAt) {
-    const parts: string[] = [];
-    if (url) parts.push(`[Original Source](${url})`);
-    if (metadata.fetchedAt) {
-      const formattedDate = formatFetchedDate(metadata.fetchedAt);
-      parts.push(`_${formattedDate}_`);
-    }
-    if (parts.length > 0) {
-      lines.push(`> ${parts.join(' | ')}`);
-    }
+  const parts: string[] = [];
+
+  if (metadata.title) parts.push(`_${metadata.title}_`);
+
+  if (metadata.author) parts.push(`_${metadata.author}_`);
+
+  if (url) parts.push(`[_Original Source_](${url})`);
+
+  if (metadata.fetchedAt) {
+    const formattedDate = formatFetchedDate(metadata.fetchedAt);
+    parts.push(`_${formattedDate}_`);
+  }
+
+  if (parts.length > 0) {
+    lines.push(` ${parts.join(' | ')}`);
+  }
+
+  if (metadata.description) {
+    lines.push(` <sub>${metadata.description}</sub>`);
   }
 
   return lines.join('\n');
@@ -1809,29 +1728,19 @@ function isHeadingStructurePreserved(
   return retentionRatio >= MIN_HEADING_RETENTION_RATIO;
 }
 
-function stripHtmlTags(html: string): string {
+function stripHtmlTagsForLength(html: string): string {
   const parts: string[] = [];
   let inTag = false;
-
   for (const char of html) {
     if (char === '<') {
       inTag = true;
-      continue;
-    }
-    if (char === '>') {
+    } else if (char === '>') {
       inTag = false;
-      continue;
-    }
-    if (!inTag) {
+    } else if (!inTag) {
       parts.push(char);
     }
   }
-
   return parts.join('');
-}
-
-function estimateTextLength(html: string): number {
-  return stripHtmlTags(html).replace(/\s+/g, ' ').trim().length;
 }
 
 export function isExtractionSufficient(
@@ -1841,7 +1750,9 @@ export function isExtractionSufficient(
   if (!article) return false;
 
   const articleLength = article.textContent.length;
-  const originalLength = estimateTextLength(originalHtml);
+  const originalLength = stripHtmlTagsForLength(originalHtml)
+    .replace(/\s+/g, ' ')
+    .trim().length;
 
   if (originalLength < MIN_HTML_LENGTH_FOR_GATE) return true;
 
@@ -1851,28 +1762,7 @@ export function isExtractionSufficient(
 export function determineContentExtractionSource(
   article: ExtractedArticle | null
 ): article is ExtractedArticle {
-  return !!article;
-}
-
-function applyArticleMetadata(
-  metadata: MetadataBlock,
-  article: ExtractedArticle
-): void {
-  if (article.title !== undefined) metadata.title = article.title;
-  if (article.byline !== undefined) metadata.author = article.byline;
-}
-
-function applyExtractedMetadata(
-  metadata: MetadataBlock,
-  extractedMeta: ExtractedMetadata
-): void {
-  if (extractedMeta.title !== undefined) metadata.title = extractedMeta.title;
-  if (extractedMeta.description !== undefined) {
-    metadata.description = extractedMeta.description;
-  }
-  if (extractedMeta.author !== undefined) {
-    metadata.author = extractedMeta.author;
-  }
+  return article !== null;
 }
 
 export function createContentMetadataBlock(
@@ -1883,19 +1773,25 @@ export function createContentMetadataBlock(
   includeMetadata: boolean
 ): MetadataBlock | undefined {
   if (!includeMetadata) return undefined;
-  const now = new Date().toISOString();
+
   const metadata: MetadataBlock = {
     type: 'metadata',
     url,
-    fetchedAt: now,
+    fetchedAt: new Date().toISOString(),
   };
 
   if (shouldExtractFromArticle && article) {
-    applyArticleMetadata(metadata, article);
-    return metadata;
+    if (article.title !== undefined) metadata.title = article.title;
+    if (article.byline !== undefined) metadata.author = article.byline;
+  } else {
+    if (extractedMeta.title !== undefined) metadata.title = extractedMeta.title;
+    if (extractedMeta.description !== undefined) {
+      metadata.description = extractedMeta.description;
+    }
+    if (extractedMeta.author !== undefined) {
+      metadata.author = extractedMeta.author;
+    }
   }
-
-  applyExtractedMetadata(metadata, extractedMeta);
 
   return metadata;
 }
@@ -1957,9 +1853,6 @@ function shouldUseArticleContent(
   html: string,
   url: string
 ): boolean {
-  const shouldExtractFromArticle = determineContentExtractionSource(article);
-  if (!shouldExtractFromArticle) return false;
-
   // Check content sufficiency (length-based quality gate)
   if (!isExtractionSufficient(article, html)) {
     logQualityGateFallback({
