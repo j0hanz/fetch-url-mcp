@@ -1,0 +1,101 @@
+[
+  {
+    "id": "e242535d-7870-4c54-89ff-d2add31addf8",
+    "description": "Migration #1A: Create scripts/build-tasks.mjs with native fs/promises functions (clean, copyAssets, makeExecutable, validateInstructions)",
+    "completed": true,
+    "priority": "high",
+    "category": "work",
+    "createdAt": "2026-01-15T14:59:17.698Z",
+    "updatedAt": "2026-01-15T15:00:37.547Z",
+    "completedAt": "2026-01-15T15:00:37.547Z"
+  },
+  {
+    "id": "32453181-ac01-4ce2-90f5-cf70b2e9ad36",
+    "description": "Migration #1B: Create individual script entrypoints (clean.mjs, copy-assets.mjs, validate-instructions.mjs, make-executable.mjs)",
+    "completed": true,
+    "priority": "high",
+    "category": "work",
+    "createdAt": "2026-01-15T14:59:17.698Z",
+    "updatedAt": "2026-01-15T15:00:53.971Z",
+    "completedAt": "2026-01-15T15:00:53.971Z"
+  },
+  {
+    "id": "071f50e1-fa8e-4cbe-a954-aed05a818052",
+    "description": "Migration #1C: Update package.json scripts to use new .mjs files instead of inline require('fs') calls",
+    "completed": true,
+    "priority": "high",
+    "category": "work",
+    "createdAt": "2026-01-15T14:59:17.698Z",
+    "updatedAt": "2026-01-15T15:01:26.526Z",
+    "completedAt": "2026-01-15T15:01:26.526Z"
+  },
+  {
+    "id": "e8baf3e6-f7d4-43b3-8dc5-e87f2a31343b",
+    "description": "Migration #1D: Test build script end-to-end (npm run clean && npm run build)",
+    "completed": true,
+    "priority": "high",
+    "category": "testing",
+    "createdAt": "2026-01-15T14:59:17.698Z",
+    "updatedAt": "2026-01-15T15:02:15.108Z",
+    "completedAt": "2026-01-15T15:02:15.108Z"
+  },
+  {
+    "id": "17607666-48cb-41d3-ab33-236b93db3372",
+    "description": "Migration #2A: Update package.json dev script to use 'node --watch-path=./src --experimental-transform-types src/index.ts'",
+    "completed": true,
+    "priority": "high",
+    "category": "work",
+    "createdAt": "2026-01-15T14:59:17.698Z",
+    "updatedAt": "2026-01-15T15:02:29.044Z",
+    "completedAt": "2026-01-15T15:02:29.044Z"
+  },
+  {
+    "id": "6bd568e6-c362-4ed7-9b33-9e1bef6483c9",
+    "description": "Migration #2B: Uninstall tsx dev dependency (npm uninstall tsx)",
+    "completed": true,
+    "priority": "high",
+    "category": "work",
+    "createdAt": "2026-01-15T14:59:17.698Z",
+    "updatedAt": "2026-01-15T15:02:37.804Z",
+    "completedAt": "2026-01-15T15:02:37.804Z"
+  },
+  {
+    "id": "23fc56bc-3f26-4cf0-81d7-b9244189cd57",
+    "description": "Migration #2C: Test dev mode with native watch (npm run dev, make a change, verify restart)",
+    "completed": true,
+    "priority": "high",
+    "category": "testing",
+    "createdAt": "2026-01-15T14:59:17.698Z",
+    "updatedAt": "2026-01-15T15:04:57.564Z",
+    "completedAt": "2026-01-15T15:04:57.564Z"
+  },
+  {
+    "id": "004818cd-5946-4e20-a527-50f3b34e846e",
+    "description": "Verification: Run full test suite (npm test) after all migrations",
+    "completed": true,
+    "priority": "high",
+    "category": "testing",
+    "createdAt": "2026-01-15T14:59:17.698Z",
+    "updatedAt": "2026-01-15T15:05:22.595Z",
+    "completedAt": "2026-01-15T15:05:22.595Z"
+  },
+  {
+    "id": "99afd760-3ac0-4585-ae70-9a4f78af6b2d",
+    "description": "Verification: Run type-check and lint (npm run type-check && npm run lint)",
+    "completed": true,
+    "priority": "high",
+    "category": "testing",
+    "createdAt": "2026-01-15T14:59:17.698Z",
+    "updatedAt": "2026-01-15T15:05:22.557Z",
+    "completedAt": "2026-01-15T15:05:22.557Z"
+  },
+  {
+    "id": "fc0b90a0-9ee9-4de0-8505-2f59f7ec32a9",
+    "description": "Documentation: Update README or CHANGELOG with migration notes if needed",
+    "completed": false,
+    "priority": "medium",
+    "category": "docs",
+    "createdAt": "2026-01-15T14:59:17.698Z",
+    "updatedAt": "2026-01-15T14:59:17.698Z"
+  }
+]

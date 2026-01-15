@@ -34,12 +34,13 @@
     "superfetch"
   ],
   "scripts": {
-    "clean": "node -e \"require('fs').rmSync('dist', {recursive:true, force:true}); require('fs').rmSync('.tsbuildinfo', {recursive:true, force:true}); ['tsconfig.tsbuildinfo', 'tsconfig.build.tsbuildinfo', 'tsconfig.test.tsbuildinfo'].forEach(f => require('fs').rmSync(f, {force:true}))\"",
-    "validate:instructions": "node -e \"require('fs').accessSync('src/instructions.md')\"",
-    "build": "npm run clean && tsc -p tsconfig.json && npm run validate:instructions && npm run copy:assets && node -e \"require('fs').chmodSync('dist/index.js', '755')\"",
-    "copy:assets": "node -e \"require('fs').mkdirSync('dist', { recursive: true }); require('fs').copyFileSync('src/instructions.md', 'dist/instructions.md')\"",
+    "clean": "node scripts/clean.mjs",
+    "validate:instructions": "node scripts/validate-instructions.mjs",
+    "build": "npm run clean && tsc -p tsconfig.json && npm run validate:instructions && npm run copy:assets && node scripts/make-executable.mjs",
+    "copy:assets": "node scripts/copy-assets.mjs",
     "prepare": "npm run build",
-    "dev": "tsx watch src/index.ts",
+    "dev": "tsc --watch --preserveWatchOutput",
+    "dev:run": "node --watch dist/index.js",
     "start": "node dist/index.js",
     "format": "prettier --write .",
     "type-check": "tsc --noEmit",
@@ -76,7 +77,6 @@
     "eslint-plugin-unused-imports": "^4.3.0",
     "knip": "^5.81.0",
     "prettier": "^3.8.0",
-    "tsx": "^4.21.0",
     "typescript": "^5.9.3",
     "typescript-eslint": "^8.53.0"
   },
