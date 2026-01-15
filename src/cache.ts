@@ -550,6 +550,26 @@ function isValidHash(hash: string): boolean {
   return HASH_PATTERN.test(hash) && hash.length >= 8 && hash.length <= 64;
 }
 
+function isValidCacheResourceUri(uri: string): boolean {
+  if (!uri) return false;
+  let parsed: URL;
+  try {
+    parsed = new URL(uri);
+  } catch {
+    return false;
+  }
+
+  if (parsed.protocol !== 'superfetch:') return false;
+  if (parsed.hostname !== 'cache') return false;
+
+  const parts = parsed.pathname.split('/').filter(Boolean);
+  if (parts.length !== 2) return false;
+  const [namespace, urlHash] = parts;
+  if (!namespace || !urlHash) return false;
+
+  return isValidNamespace(namespace) && isValidHash(urlHash);
+}
+
 function resolveStringParam(value: unknown): string | null {
   return typeof value === 'string' ? value : null;
 }
@@ -632,12 +652,20 @@ function registerResourceSubscriptionHandlers(server: McpServer): Set<string> {
   const subscriptions = new Set<string>();
 
   server.server.setRequestHandler(SubscribeRequestSchema, (request) => {
-    subscriptions.add(request.params.uri);
+    const { uri } = request.params;
+    if (!isValidCacheResourceUri(uri)) {
+      throw new McpError(ErrorCode.InvalidParams, 'Invalid resource URI');
+    }
+    subscriptions.add(uri);
     return {};
   });
 
   server.server.setRequestHandler(UnsubscribeRequestSchema, (request) => {
-    subscriptions.delete(request.params.uri);
+    const { uri } = request.params;
+    if (!isValidCacheResourceUri(uri)) {
+      throw new McpError(ErrorCode.InvalidParams, 'Invalid resource URI');
+    }
+    subscriptions.delete(uri);
     return {};
   });
 
@@ -769,14 +797,6 @@ interface DownloadPayload {
   fileName: string;
 }
 
-function validateNamespace(namespace: string): boolean {
-  return namespace === 'markdown';
-}
-
-function validateHash(hash: string): boolean {
-  return HASH_PATTERN.test(hash) && hash.length >= 8 && hash.length <= 64;
-}
-
 function isSingleParam(value: string | string[] | undefined): value is string {
   return typeof value === 'string';
 }
@@ -786,8 +806,8 @@ function parseDownloadParams(req: Request): DownloadParams | null {
 
   if (!isSingleParam(namespace) || !isSingleParam(hash)) return null;
   if (!namespace || !hash) return null;
-  if (!validateNamespace(namespace)) return null;
-  if (!validateHash(hash)) return null;
+  if (!isValidNamespace(namespace)) return null;
+  if (!isValidHash(hash)) return null;
 
   return { namespace, hash };
 }

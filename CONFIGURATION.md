@@ -35,18 +35,19 @@ SuperFetch runs with no configuration by default. Just run with `--stdio`:
 
 ### Core Server Settings
 
-| Variable                    | Default              | Description                                                                       |
-| --------------------------- | -------------------- | --------------------------------------------------------------------------------- |
-| `HOST`                      | `127.0.0.1`          | HTTP server bind address                                                          |
-| `PORT`                      | `3000`               | HTTP server port (1024-65535)                                                     |
-| `USER_AGENT`                | `superFetch-MCP/2.0` | User-Agent header for outgoing requests                                           |
-| `CACHE_ENABLED`             | `true`               | Enable response caching                                                           |
-| `CACHE_TTL`                 | `3600`               | Cache lifetime in seconds (60-86400)                                              |
-| `LOG_LEVEL`                 | `info`               | Logging level. Only `debug` enables verbose logs; other values behave like `info` |
-| `ALLOW_REMOTE`              | `false`              | Allow binding to non-loopback hosts (OAuth required)                              |
-| `ALLOWED_HOSTS`             | (empty)              | Additional allowed Host/Origin values (comma/space separated)                     |
-| `TRANSFORM_TIMEOUT_MS`      | `30000`              | Worker transform timeout in milliseconds (5000-120000)                            |
-| `TRANSFORM_METADATA_FORMAT` | `markdown`           | Metadata preamble format: `markdown` (title-first) or `frontmatter` (YAML)        |
+| Variable                    | Default              | Description                                                                                           |
+| --------------------------- | -------------------- | ----------------------------------------------------------------------------------------------------- |
+| `HOST`                      | `127.0.0.1`          | HTTP server bind address                                                                              |
+| `PORT`                      | `3000`               | HTTP server port (1024-65535)                                                                         |
+| `USER_AGENT`                | `superFetch-MCP/2.0` | User-Agent header for outgoing requests                                                               |
+| `CACHE_ENABLED`             | `true`               | Enable response caching                                                                               |
+| `CACHE_TTL`                 | `3600`               | Cache lifetime in seconds (60-86400)                                                                  |
+| `LOG_LEVEL`                 | `info`               | Logging level. Only `debug` enables verbose logs; other values behave like `info`                     |
+| `ALLOW_REMOTE`              | `false`              | Allow binding to non-loopback hosts (OAuth required)                                                  |
+| `ALLOWED_HOSTS`             | (empty)              | Additional allowed Host/Origin values (comma/space separated)                                         |
+| `TRANSFORM_TIMEOUT_MS`      | `30000`              | Worker transform timeout in milliseconds (5000-120000)                                                |
+| `TOOL_TIMEOUT_MS`           | `50000`              | Overall tool timeout in milliseconds (1000-300000). Defaults to 15000 + `TRANSFORM_TIMEOUT_MS` + 5000 |
+| `TRANSFORM_METADATA_FORMAT` | `markdown`           | Metadata preamble format: `markdown` (title-first) or `frontmatter` (YAML)                            |
 
 ### HTTP Server Tuning (HTTP Mode, Advanced)
 

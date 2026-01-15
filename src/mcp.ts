@@ -21,11 +21,11 @@ function createServerInfo(): { name: string; version: string } {
 }
 
 function createServerCapabilities(): {
-  tools: { listChanged: false };
+  tools: { listChanged: true };
   resources: { listChanged: true; subscribe: true };
 } {
   return {
-    tools: { listChanged: false },
+    tools: { listChanged: true },
     resources: { listChanged: true, subscribe: true },
   };
 }
@@ -42,7 +42,10 @@ function createServerInstructions(serverVersion: string): string {
   }
 }
 
-function registerInstructionsResource(server: McpServer): void {
+function registerInstructionsResource(
+  server: McpServer,
+  instructions: string
+): void {
   server.registerResource(
     'instructions',
     new ResourceTemplate('internal://instructions', { list: undefined }),
@@ -56,7 +59,7 @@ function registerInstructionsResource(server: McpServer): void {
         {
           uri: uri.href,
           mimeType: 'text/markdown',
-          text: createServerInstructions(config.server.version),
+          text: instructions,
         },
       ],
     })
@@ -64,14 +67,15 @@ function registerInstructionsResource(server: McpServer): void {
 }
 
 export function createMcpServer(): McpServer {
+  const instructions = createServerInstructions(config.server.version);
   const server = new McpServer(createServerInfo(), {
     capabilities: createServerCapabilities(),
-    instructions: createServerInstructions(config.server.version),
+    instructions,
   });
 
   registerTools(server);
   registerCachedContentResource(server);
-  registerInstructionsResource(server);
+  registerInstructionsResource(server, instructions);
 
   return server;
 }

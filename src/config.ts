@@ -145,6 +145,11 @@ const TIMEOUT = {
   ),
 };
 
+const DEFAULT_TOOL_TIMEOUT_MS =
+  TIMEOUT.DEFAULT_FETCH_TIMEOUT_MS +
+  TIMEOUT.DEFAULT_TRANSFORM_TIMEOUT_MS +
+  5000;
+
 interface AuthConfig {
   mode: 'oauth' | 'static';
   issuerUrl: URL | undefined;
@@ -329,6 +334,14 @@ export const config = {
     timeoutMs: TIMEOUT.DEFAULT_TRANSFORM_TIMEOUT_MS,
     metadataFormat: parseTransformMetadataFormat(
       process.env.TRANSFORM_METADATA_FORMAT
+    ),
+  },
+  tools: {
+    timeoutMs: parseInteger(
+      process.env.TOOL_TIMEOUT_MS,
+      DEFAULT_TOOL_TIMEOUT_MS,
+      1000,
+      300000
     ),
   },
   cache: {

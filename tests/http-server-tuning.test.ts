@@ -3,6 +3,8 @@ import { spawnSync } from 'node:child_process';
 import { describe, it } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
+const RESULT_MARKER = '__RESULT__';
+
 function runIsolatedNode(
   script: string,
   env: Record<string, string | undefined>
@@ -27,13 +29,19 @@ function runIsolatedNode(
   };
 }
 
+function parseMarkedJson<T>(output: string): T {
+  const markerIndex = output.lastIndexOf(RESULT_MARKER);
+  assert.ok(markerIndex >= 0, `Missing result marker. stderr: ${output}`);
+  return JSON.parse(output.slice(markerIndex + RESULT_MARKER.length)) as T;
+}
+
 describe('http server tuning helpers', () => {
   it('applyHttpServerTuning does nothing by default', async () => {
     const script = `
       import { applyHttpServerTuning } from './dist/http.js';
       const server = { headersTimeout: 123, requestTimeout: 456, keepAliveTimeout: 789 };
       applyHttpServerTuning(server);
-      console.log(JSON.stringify(server));
+      console.error('${RESULT_MARKER}' + JSON.stringify(server));
     `;
 
     const result = runIsolatedNode(script, {
@@ -43,11 +51,11 @@ describe('http server tuning helpers', () => {
     });
 
     assert.equal(result.status, 0, result.stderr);
-    const server = JSON.parse(result.stdout) as {
+    const server = parseMarkedJson<{
       headersTimeout: number;
       requestTimeout: number;
       keepAliveTimeout: number;
-    };
+    }>(result.stderr);
     assert.equal(server.headersTimeout, 123);
     assert.equal(server.requestTimeout, 456);
     assert.equal(server.keepAliveTimeout, 789);
@@ -58,7 +66,7 @@ describe('http server tuning helpers', () => {
       import { applyHttpServerTuning } from './dist/http.js';
       const server = {};
       applyHttpServerTuning(server);
-      console.log(JSON.stringify(server));
+      console.error('${RESULT_MARKER}' + JSON.stringify(server));
     `;
 
     const result = runIsolatedNode(script, {
@@ -68,11 +76,11 @@ describe('http server tuning helpers', () => {
     });
 
     assert.equal(result.status, 0, result.stderr);
-    const server = JSON.parse(result.stdout) as {
+    const server = parseMarkedJson<{
       headersTimeout?: number;
       requestTimeout?: number;
       keepAliveTimeout?: number;
-    };
+    }>(result.stderr);
     assert.equal(server.headersTimeout, 5000);
     assert.equal(server.requestTimeout, 6000);
     assert.equal(server.keepAliveTimeout, 7000);
@@ -88,7 +96,7 @@ describe('http server tuning helpers', () => {
         closeAllConnections: () => { allCalls += 1; },
       };
       drainConnectionsOnShutdown(server);
-      console.log(JSON.stringify({ idleCalls, allCalls }));
+      console.error('${RESULT_MARKER}' + JSON.stringify({ idleCalls, allCalls }));
     `;
 
     const result = runIsolatedNode(script, {
@@ -97,10 +105,10 @@ describe('http server tuning helpers', () => {
     });
 
     assert.equal(result.status, 0, result.stderr);
-    const payload = JSON.parse(result.stdout) as {
+    const payload = parseMarkedJson<{
       idleCalls: number;
       allCalls: number;
-    };
+    }>(result.stderr);
     assert.equal(payload.idleCalls, 0);
     assert.equal(payload.allCalls, 0);
   });
@@ -113,7 +121,7 @@ describe('http server tuning helpers', () => {
         closeIdleConnections: () => { idleCalls += 1; },
       };
       drainConnectionsOnShutdown(server);
-      console.log(JSON.stringify({ idleCalls }));
+      console.error('${RESULT_MARKER}' + JSON.stringify({ idleCalls }));
     `;
 
     const result = runIsolatedNode(script, {
@@ -122,7 +130,7 @@ describe('http server tuning helpers', () => {
     });
 
     assert.equal(result.status, 0, result.stderr);
-    const payload = JSON.parse(result.stdout) as { idleCalls: number };
+    const payload = parseMarkedJson<{ idleCalls: number }>(result.stderr);
     assert.equal(payload.idleCalls, 1);
   });
 
@@ -134,7 +142,7 @@ describe('http server tuning helpers', () => {
         closeAllConnections: () => { allCalls += 1; },
       };
       drainConnectionsOnShutdown(server);
-      console.log(JSON.stringify({ allCalls }));
+      console.error('${RESULT_MARKER}' + JSON.stringify({ allCalls }));
     `;
 
     const result = runIsolatedNode(script, {
@@ -143,7 +151,7 @@ describe('http server tuning helpers', () => {
     });
 
     assert.equal(result.status, 0, result.stderr);
-    const payload = JSON.parse(result.stdout) as { allCalls: number };
+    const payload = parseMarkedJson<{ allCalls: number }>(result.stderr);
     assert.equal(payload.allCalls, 1);
   });
 
@@ -153,7 +161,7 @@ describe('http server tuning helpers', () => {
 
       const server = await startHttpServer({ registerSignalHandlers: false });
       await server.stop();
-      console.log('__RESULT__' + JSON.stringify({ host: server.host, port: server.port, url: server.url }));
+      console.error('${RESULT_MARKER}' + JSON.stringify({ host: server.host, port: server.port, url: server.url }));
     `;
 
     const result = runIsolatedNode(script, {
@@ -164,18 +172,11 @@ describe('http server tuning helpers', () => {
     });
 
     assert.equal(result.status, 0, result.stderr);
-    const markerIndex = result.stdout.lastIndexOf('__RESULT__');
-    assert.ok(
-      markerIndex >= 0,
-      `Missing result marker. stdout: ${result.stdout}`
-    );
-    const payload = JSON.parse(
-      result.stdout.slice(markerIndex + '__RESULT__'.length)
-    ) as {
+    const payload = parseMarkedJson<{
       host: string;
       port: number;
       url: string;
-    };
+    }>(result.stderr);
 
     assert.equal(payload.host, '127.0.0.1');
     assert.equal(typeof payload.port, 'number');

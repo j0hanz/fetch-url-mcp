@@ -65,33 +65,29 @@ function shouldLog(level: LogLevel): boolean {
   return true;
 }
 
+function writeLog(level: LogLevel, message: string, meta?: LogMetadata): void {
+  if (!shouldLog(level)) return;
+  process.stderr.write(`${formatLogEntry(level, message, meta)}\n`);
+}
+
 export function logInfo(message: string, meta?: LogMetadata): void {
-  if (shouldLog('info')) {
-    process.stderr.write(`${formatLogEntry('info', message, meta)}\n`);
-  }
+  writeLog('info', message, meta);
 }
 
 export function logDebug(message: string, meta?: LogMetadata): void {
-  if (shouldLog('debug')) {
-    process.stderr.write(`${formatLogEntry('debug', message, meta)}\n`);
-  }
+  writeLog('debug', message, meta);
 }
 
 export function logWarn(message: string, meta?: LogMetadata): void {
-  if (shouldLog('warn')) {
-    process.stderr.write(`${formatLogEntry('warn', message, meta)}\n`);
-  }
+  writeLog('warn', message, meta);
 }
 
 export function logError(message: string, error?: Error | LogMetadata): void {
-  if (!shouldLog('error')) return;
-
   const errorMeta: LogMetadata =
     error instanceof Error
       ? { error: error.message, stack: error.stack }
       : (error ?? {});
-
-  process.stderr.write(`${formatLogEntry('error', message, errorMeta)}\n`);
+  writeLog('error', message, errorMeta);
 }
 
 export function redactUrl(rawUrl: string): string {

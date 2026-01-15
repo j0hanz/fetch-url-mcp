@@ -769,6 +769,13 @@ function createHttpError(
   return new FetchError(`HTTP ${status}: ${statusText}`, url, status);
 }
 
+function createSizeLimitError(url: string, maxBytes: number): FetchError {
+  return new FetchError(
+    `Response exceeds maximum size of ${maxBytes} bytes`,
+    url
+  );
+}
+
 function createNetworkError(url: string, message?: string): FetchError {
   const details = message ? { message } : undefined;
   return new FetchError(
@@ -1208,10 +1215,7 @@ function assertContentLengthWithinLimit(
 
   cancelResponseBody(response);
 
-  throw new FetchError(
-    `Response exceeds maximum size of ${maxBytes} bytes`,
-    url
-  );
+  throw createSizeLimitError(url, maxBytes);
 }
 
 interface StreamReadState {
@@ -1236,10 +1240,7 @@ function appendChunk(
 ): void {
   state.total += chunk.byteLength;
   if (state.total > maxBytes) {
-    throw new FetchError(
-      `Response exceeds maximum size of ${maxBytes} bytes`,
-      url
-    );
+    throw createSizeLimitError(url, maxBytes);
   }
 
   const decoded = state.decoder.decode(chunk, { stream: true });
@@ -1341,10 +1342,7 @@ export async function readResponseText(
     const text = await response.text();
     const size = Buffer.byteLength(text);
     if (size > maxBytes) {
-      throw new FetchError(
-        `Response exceeds maximum size of ${maxBytes} bytes`,
-        url
-      );
+      throw createSizeLimitError(url, maxBytes);
     }
     return { text, size };
   }

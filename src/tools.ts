@@ -677,25 +677,17 @@ export function parseCachedMarkdownResult(
   };
 }
 
-function deserializeMarkdownResult(
-  cached: string
-): MarkdownPipelineResult | undefined {
-  return parseCachedMarkdownResult(cached);
-}
-
-function buildMarkdownTransform() {
-  return async (
-    html: string,
-    url: string,
-    signal?: AbortSignal
-  ): Promise<MarkdownPipelineResult> => {
-    const result = await transformHtmlToMarkdown(html, url, {
-      includeMetadata: true,
-      ...(signal === undefined ? {} : { signal }),
-    });
-    return { ...result, content: result.markdown };
-  };
-}
+const markdownTransform = async (
+  html: string,
+  url: string,
+  signal?: AbortSignal
+): Promise<MarkdownPipelineResult> => {
+  const result = await transformHtmlToMarkdown(html, url, {
+    includeMetadata: true,
+    ...(signal === undefined ? {} : { signal }),
+  });
+  return { ...result, content: result.markdown };
+};
 
 function serializeMarkdownResult(result: MarkdownPipelineResult): string {
   return JSON.stringify({
@@ -736,10 +728,6 @@ function buildFetchUrlContentBlocks(
   );
 }
 
-function logFetchStart(url: string): void {
-  logDebug('Fetching URL', { url });
-}
-
 async function fetchPipeline(
   url: string,
   signal?: AbortSignal,
@@ -755,10 +743,10 @@ async function fetchPipeline(
       if (progress) {
         await progress.report(3, 'Transforming content');
       }
-      return buildMarkdownTransform()(html, normalizedUrl, signal);
+      return markdownTransform(html, normalizedUrl, signal);
     },
     serialize: serializeMarkdownResult,
-    deserialize: deserializeMarkdownResult,
+    deserialize: parseCachedMarkdownResult,
   });
 }
 
@@ -793,18 +781,23 @@ async function executeFetch(
     return createToolErrorResponse('URL is required', '');
   }
 
+  const { signal: extraSignal } = extra ?? {};
+  const { timeoutMs } = config.tools;
+  const signal =
+    timeoutMs > 0
+      ? AbortSignal.any([
+          ...(extraSignal ? [extraSignal] : []),
+          AbortSignal.timeout(timeoutMs),
+        ])
+      : extraSignal;
   const progress = createProgressReporter(extra);
   await progress.report(1, 'Validating URL');
 
-  logFetchStart(url);
+  logDebug('Fetching URL', { url });
 
   await progress.report(2, 'Fetching content');
 
-  const { pipeline, inlineResult } = await fetchPipeline(
-    url,
-    extra?.signal,
-    progress
-  );
+  const { pipeline, inlineResult } = await fetchPipeline(url, signal, progress);
 
   if (pipeline.fromCache) {
     await progress.report(3, 'Using cached content');

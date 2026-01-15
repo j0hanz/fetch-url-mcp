@@ -26,29 +26,25 @@ function attemptShutdown(signal: string): void {
   void shutdownHandlerRef.current(signal);
 }
 
-process.on('uncaughtException', (error) => {
-  logError('Uncaught exception', error);
-  process.stderr.write(`Uncaught exception: ${error.message}\n`);
+function handleFatalError(label: string, error: Error, signal: string): void {
+  logError(label, error);
+  process.stderr.write(`${label}: ${error.message}\n`);
 
   if (shouldAttemptShutdown()) {
-    attemptShutdown('UNCAUGHT_EXCEPTION');
+    attemptShutdown(signal);
     return;
   }
 
   process.exit(1);
+}
+
+process.on('uncaughtException', (error) => {
+  handleFatalError('Uncaught exception', error, 'UNCAUGHT_EXCEPTION');
 });
 
 process.on('unhandledRejection', (reason) => {
   const error = reason instanceof Error ? reason : new Error(String(reason));
-  logError('Unhandled rejection', error);
-  process.stderr.write(`Unhandled rejection: ${error.message}\n`);
-
-  if (shouldAttemptShutdown()) {
-    attemptShutdown('UNHANDLED_REJECTION');
-    return;
-  }
-
-  process.exit(1);
+  handleFatalError('Unhandled rejection', error, 'UNHANDLED_REJECTION');
 });
 
 try {

@@ -85,6 +85,13 @@ interface RateLimitMiddlewareResult {
   store: Map<string, RateLimitEntry>;
 }
 
+function formatHostForUrl(hostname: string): string {
+  if (hostname.includes(':') && !hostname.startsWith('[')) {
+    return `[${hostname}]`;
+  }
+  return hostname;
+}
+
 function getRateLimitKey(req: Request): string {
   return req.ip ?? req.socket.remoteAddress ?? 'unknown';
 }
@@ -166,10 +173,6 @@ function evictStaleEntries(
       store.delete(key);
     }
   }
-}
-
-function isSessionAbortError(error: unknown): boolean {
-  return error instanceof Error && error.name === 'AbortError';
 }
 
 function handleCleanupError(error: unknown): void {
@@ -389,13 +392,6 @@ function registerSignalHandlers(
 }
 
 function startListening(app: Express): ReturnType<Express['listen']> {
-  const formatHostForUrl = (hostname: string): string => {
-    if (hostname.includes(':') && !hostname.startsWith('[')) {
-      return `[${hostname}]`;
-    }
-    return hostname;
-  };
-
   const server = app.listen(config.server.port, config.server.host, () => {
     const address = server.address();
     const resolvedPort =
@@ -562,9 +558,7 @@ function resolveServerAddress(server: ReturnType<Express['listen']>): {
   const resolvedPort =
     typeof address === 'object' && address ? address.port : config.server.port;
   const { host } = config.server;
-  const formattedHost =
-    host.includes(':') && !host.startsWith('[') ? `[${host}]` : host;
-  const url = `http://${formattedHost}:${resolvedPort}`;
+  const url = `http://${formatHostForUrl(host)}:${resolvedPort}`;
   return { host, port: resolvedPort, url };
 }
 
@@ -1631,6 +1625,10 @@ function respondSessionNotInitialized(
   );
 }
 
+function isNotificationMethod(method: string): boolean {
+  return method.startsWith('notifications/');
+}
+
 function isAllowedBeforeInitialized(method: string): boolean {
   return (
     method === 'initialize' ||
@@ -2123,7 +2121,7 @@ function handleSessionEvictions(store: SessionStore, now: number): void {
 }
 
 function handleSessionCleanupError(error: unknown): void {
-  if (isSessionAbortError(error)) {
+  if (isAbortError(error)) {
     return;
   }
   logWarn('Session cleanup loop failed', {
@@ -2185,6 +2183,21 @@ function validatePostPayload(
   }
 
   return payload;
+}
+
+function ensureRequestHasId(body: McpRequestBody, res: Response): boolean {
+  if (body.id !== undefined || isNotificationMethod(body.method)) {
+    return true;
+  }
+
+  sendJsonRpcError(
+    res,
+    -32600,
+    `Invalid Request: ${body.method} requires id`,
+    400,
+    null
+  );
+  return false;
 }
 
 function logPostRequest(
@@ -2298,6 +2311,21 @@ export function ensureMcpProtocolVersionHeader(
   return true;
 }
 
+function closeSessionIfPresent(req: Request, options: McpSessionOptions): void {
+  const sessionId = getSessionId(req);
+  if (!sessionId) return;
+  const session = options.sessionStore.get(sessionId);
+  if (!session) return;
+
+  logWarn('Closing session due to protocol version mismatch', { sessionId });
+  void session.transport.close().catch((error: unknown) => {
+    logWarn('Failed to close session after protocol version mismatch', {
+      sessionId,
+      error: getErrorMessage(error),
+    });
+  });
+}
+
 function getAcceptHeader(req: Request): string {
   const value = req.headers.accept;
   if (typeof value === 'string') return value;
@@ -2357,11 +2385,15 @@ async function handlePost(
   options: McpSessionOptions
 ): Promise<void> {
   ensurePostAcceptHeader(req);
-  if (!ensureMcpProtocolVersionHeader(req, res)) return;
+  if (!ensureMcpProtocolVersionHeader(req, res)) {
+    closeSessionIfPresent(req, options);
+    return;
+  }
 
   const sessionId = getSessionId(req);
   const payload = validatePostPayload(req.body, res);
   if (!payload) return;
+  if (!ensureRequestHasId(payload, res)) return;
 
   logPostRequest(payload, sessionId, options);
 
@@ -2381,7 +2413,10 @@ async function handleGet(
   res: Response,
   options: McpSessionOptions
 ): Promise<void> {
-  if (!ensureMcpProtocolVersionHeader(req, res)) return;
+  if (!ensureMcpProtocolVersionHeader(req, res)) {
+    closeSessionIfPresent(req, options);
+    return;
+  }
   if (!acceptsEventStream(req)) {
     res.status(406).json({
       error: 'Not Acceptable',
@@ -2401,7 +2436,10 @@ async function handleDelete(
   res: Response,
   options: McpSessionOptions
 ): Promise<void> {
-  if (!ensureMcpProtocolVersionHeader(req, res)) return;
+  if (!ensureMcpProtocolVersionHeader(req, res)) {
+    closeSessionIfPresent(req, options);
+    return;
+  }
 
   const transport = resolveSessionTransport(getSessionId(req), options, res);
   if (!transport) return;
