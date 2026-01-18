@@ -58,6 +58,10 @@ export interface ExtractionResult {
   metadata: ExtractedMetadata;
 }
 
+interface ExtractionContext extends ExtractionResult {
+  document?: Document;
+}
+
 export interface MarkdownTransformResult {
   markdown: string;
   title: string | undefined;
@@ -288,7 +292,7 @@ function extractArticle(document: unknown): ExtractedArticle | null {
   try {
     const documentClone = document.cloneNode(true) as Document;
     const rawText =
-      documentClone.body.textContent ||
+      documentClone.querySelector('body')?.textContent ??
       documentClone.documentElement.textContent;
     const textLength = rawText.replace(/\s+/g, ' ').trim().length;
     if (textLength >= 400 && !isProbablyReaderable(documentClone)) {
@@ -322,6 +326,15 @@ export function extractContent(
     extractArticle: true,
   }
 ): ExtractionResult {
+  const result = extractContentWithDocument(html, url, options);
+  return { article: result.article, metadata: result.metadata };
+}
+
+function extractContentWithDocument(
+  html: string,
+  url: string,
+  options: { extractArticle?: boolean; signal?: AbortSignal }
+): ExtractionContext {
   if (!isValidInput(html, url)) {
     return { article: null, metadata: {} };
   }
@@ -344,7 +357,7 @@ function handleExtractionFailure(
   error: unknown,
   url: string,
   signal: AbortSignal | undefined
-): ExtractionResult {
+): ExtractionContext {
   if (error instanceof FetchError) {
     throw error;
   }
@@ -360,10 +373,11 @@ function extractContentStages(
   html: string,
   url: string,
   options: { extractArticle?: boolean; signal?: AbortSignal }
-): ExtractionResult {
+): ExtractionContext {
   throwIfAborted(options.signal, url, 'extract:begin');
+  const truncatedHtml = truncateHtml(html);
   const { document } = runTransformStage(url, 'extract:parse', () =>
-    parseHTML(truncateHtml(html))
+    parseHTML(truncatedHtml)
   );
   throwIfAborted(options.signal, url, 'extract:parsed');
   applyBaseUri(document, url);
@@ -380,6 +394,7 @@ function extractContentStages(
   return {
     article,
     metadata,
+    ...(truncatedHtml.length === html.length ? { document } : {}),
   };
 }
 
@@ -387,7 +402,7 @@ function tryExtractContent(
   html: string,
   url: string,
   options: { extractArticle?: boolean; signal?: AbortSignal }
-): ExtractionResult {
+): ExtractionContext {
   try {
     return extractContentStages(html, url, options);
   } catch (error: unknown) {
@@ -994,26 +1009,37 @@ function stripNoiseNodes(document: Document): void {
   removeNoiseNodes(potentialNoiseNodes);
 
   // Second pass: check remaining elements for noise patterns (promo, fixed positioning, etc.)
-  const allElements = document.querySelectorAll('*');
+  const candidateSelectors = [
+    ...STRUCTURAL_TAGS,
+    ...ALWAYS_NOISE_TAGS,
+    'header',
+    'canvas',
+    '[class]',
+    '[id]',
+    '[role]',
+    '[style]',
+  ].join(',');
+  const allElements = document.querySelectorAll(candidateSelectors);
   removeNoiseNodes(allElements);
 }
 
-function removeNoiseFromHtml(html: string): string {
+function removeNoiseFromHtml(html: string, document?: Document): string {
   const shouldParse = isFullDocumentHtml(html) || mayContainNoise(html);
   if (!shouldParse) return html;
 
   try {
-    const { document } = parseHTML(html);
+    const resolvedDocument = document ?? parseHTML(html).document;
 
-    stripNoiseNodes(document);
+    stripNoiseNodes(resolvedDocument);
 
-    const bodyInnerHtml = getBodyInnerHtml(document);
+    const bodyInnerHtml = getBodyInnerHtml(resolvedDocument);
     if (bodyInnerHtml) return bodyInnerHtml;
 
-    const docToString = getDocumentToString(document);
+    const docToString = getDocumentToString(resolvedDocument);
     if (docToString) return docToString();
 
-    const documentElementOuterHtml = getDocumentElementOuterHtml(document);
+    const documentElementOuterHtml =
+      getDocumentElementOuterHtml(resolvedDocument);
     if (documentElementOuterHtml) return documentElementOuterHtml;
 
     return html;
@@ -1222,12 +1248,13 @@ function getMarkdownConverter(): NodeHtmlMarkdown {
 function translateHtmlToMarkdown(
   html: string,
   url: string,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  document?: Document
 ): string {
   throwIfAborted(signal, url, 'markdown:begin');
 
   const cleanedHtml = runTransformStage(url, 'markdown:noise', () =>
-    removeNoiseFromHtml(html)
+    removeNoiseFromHtml(html, document)
   );
 
   throwIfAborted(signal, url, 'markdown:cleaned');
@@ -1254,13 +1281,18 @@ function appendMetadataFooter(
 export function htmlToMarkdown(
   html: string,
   metadata?: MetadataBlock,
-  options?: { url?: string; signal?: AbortSignal }
+  options?: { url?: string; signal?: AbortSignal; document?: Document }
 ): string {
   const url = options?.url ?? metadata?.url ?? '';
   if (!html) return buildMetadataFooter(metadata, url);
 
   try {
-    const content = translateHtmlToMarkdown(html, url, options?.signal);
+    const content = translateHtmlToMarkdown(
+      html,
+      url,
+      options?.signal,
+      options?.document
+    );
     return appendMetadataFooter(content, metadata, url);
   } catch (error: unknown) {
     if (error instanceof FetchError) {
@@ -1839,6 +1871,7 @@ interface ContentSource {
   readonly sourceHtml: string;
   readonly title: string | undefined;
   readonly metadata: ReturnType<typeof createContentMetadataBlock>;
+  readonly document?: Document;
 }
 
 function buildContentSource({
@@ -1848,6 +1881,7 @@ function buildContentSource({
   extractedMeta,
   includeMetadata,
   useArticleContent,
+  document,
 }: {
   html: string;
   url: string;
@@ -1855,6 +1889,7 @@ function buildContentSource({
   extractedMeta: ExtractedMetadata;
   includeMetadata: boolean;
   useArticleContent: boolean;
+  document?: Document;
 }): ContentSource {
   const metadata = createContentMetadataBlock(
     url,
@@ -1864,11 +1899,15 @@ function buildContentSource({
     includeMetadata
   );
 
-  return {
+  const source: ContentSource = {
     sourceHtml: useArticleContent && article ? article.content : html,
     title: useArticleContent && article ? article.title : extractedMeta.title,
     metadata,
   };
+  if (!useArticleContent && document) {
+    return { ...source, document };
+  }
+  return source;
 }
 
 function logQualityGateFallback({
@@ -1928,7 +1967,11 @@ function resolveContentSource({
   includeMetadata: boolean;
   signal?: AbortSignal;
 }): ContentSource {
-  const { article, metadata: extractedMeta } = extractContent(html, url, {
+  const {
+    article,
+    metadata: extractedMeta,
+    document,
+  } = extractContentWithDocument(html, url, {
     extractArticle: true,
     ...(signal ? { signal } : {}),
   });
@@ -1944,6 +1987,7 @@ function resolveContentSource({
     extractedMeta,
     includeMetadata,
     useArticleContent,
+    ...(document ? { document } : {}),
   });
 }
 
@@ -1986,6 +2030,7 @@ function buildMarkdownFromContext(
     htmlToMarkdown(context.sourceHtml, context.metadata, {
       url,
       ...(signal ? { signal } : {}),
+      ...(context.document ? { document: context.document } : {}),
     })
   );
   return {

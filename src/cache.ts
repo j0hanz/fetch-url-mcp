@@ -216,7 +216,7 @@ function stableStringifyInner(
   }
 
   if (value === null || value === undefined) {
-    return '';
+    return 'null';
   }
 
   if (typeof value !== 'object') {
