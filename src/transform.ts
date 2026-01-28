@@ -194,107 +194,118 @@ function truncateHtml(html: string): string {
   return html.substring(0, maxSize);
 }
 
+interface MetaContext {
+  title: { og?: string; twitter?: string; standard?: string };
+  description: { og?: string; twitter?: string; standard?: string };
+  author?: string;
+  image?: string;
+  publishedAt?: string;
+  modifiedAt?: string;
+}
+
+const META_PROPERTY_HANDLERS = new Map<
+  string,
+  (ctx: MetaContext, content: string) => void
+>([
+  [
+    'og:title',
+    (ctx, c) => {
+      ctx.title.og = c;
+    },
+  ],
+  [
+    'og:description',
+    (ctx, c) => {
+      ctx.description.og = c;
+    },
+  ],
+  [
+    'og:image',
+    (ctx, c) => {
+      ctx.image = c;
+    },
+  ],
+  [
+    'article:published_time',
+    (ctx, c) => {
+      ctx.publishedAt = c;
+    },
+  ],
+  [
+    'article:modified_time',
+    (ctx, c) => {
+      ctx.modifiedAt = c;
+    },
+  ],
+]);
+
+const META_NAME_HANDLERS = new Map<
+  string,
+  (ctx: MetaContext, content: string) => void
+>([
+  [
+    'twitter:title',
+    (ctx, c) => {
+      ctx.title.twitter = c;
+    },
+  ],
+  [
+    'twitter:description',
+    (ctx, c) => {
+      ctx.description.twitter = c;
+    },
+  ],
+  [
+    'description',
+    (ctx, c) => {
+      ctx.description.standard = c;
+    },
+  ],
+  [
+    'author',
+    (ctx, c) => {
+      ctx.author = c;
+    },
+  ],
+]);
+
 function extractMetadata(document: Document): ExtractedMetadata {
-  const title: {
-    og?: string;
-    twitter?: string;
-    standard?: string | undefined;
-  } = {};
-  const description: { og?: string; twitter?: string; standard?: string } = {};
-  let author: string | undefined;
-  let image: string | undefined;
-  let publishedAt: string | undefined;
-  let modifiedAt: string | undefined;
-
-  // Property-based handlers (og:*, article:*)
-  const propertyHandlers = new Map<string, (content: string) => void>([
-    [
-      'og:title',
-      (c) => {
-        title.og = c;
-      },
-    ],
-    [
-      'og:description',
-      (c) => {
-        description.og = c;
-      },
-    ],
-    [
-      'og:image',
-      (c) => {
-        image = c;
-      },
-    ],
-    [
-      'article:published_time',
-      (c) => {
-        publishedAt = c;
-      },
-    ],
-    [
-      'article:modified_time',
-      (c) => {
-        modifiedAt = c;
-      },
-    ],
-  ]);
-
-  // Name-based handlers (twitter:*, standard meta)
-  const nameHandlers = new Map<string, (content: string) => void>([
-    [
-      'twitter:title',
-      (c) => {
-        title.twitter = c;
-      },
-    ],
-    [
-      'twitter:description',
-      (c) => {
-        description.twitter = c;
-      },
-    ],
-    [
-      'description',
-      (c) => {
-        description.standard = c;
-      },
-    ],
-    [
-      'author',
-      (c) => {
-        author = c;
-      },
-    ],
-  ]);
+  const ctx: MetaContext = {
+    title: {},
+    description: {},
+  };
 
   for (const tag of document.querySelectorAll('meta')) {
     const content = tag.getAttribute('content')?.trim();
     if (!content) continue;
 
     const property = tag.getAttribute('property');
-    const name = tag.getAttribute('name');
+    if (property) {
+      META_PROPERTY_HANDLERS.get(property)?.(ctx, content);
+    }
 
-    if (property) propertyHandlers.get(property)?.(content);
-    if (name) nameHandlers.get(name)?.(content);
+    const name = tag.getAttribute('name');
+    if (name) {
+      META_NAME_HANDLERS.get(name)?.(ctx, content);
+    }
   }
 
   const titleEl = document.querySelector('title');
-  if (!title.standard && titleEl?.textContent) {
-    title.standard = titleEl.textContent.trim();
+  if (!ctx.title.standard && titleEl?.textContent) {
+    ctx.title.standard = titleEl.textContent.trim();
   }
 
-  const resolvedTitle = title.og ?? title.twitter ?? title.standard;
+  const resolvedTitle = ctx.title.og ?? ctx.title.twitter ?? ctx.title.standard;
   const resolvedDesc =
-    description.og ?? description.twitter ?? description.standard;
+    ctx.description.og ?? ctx.description.twitter ?? ctx.description.standard;
 
   const metadata: ExtractedMetadata = {};
   if (resolvedTitle) metadata.title = resolvedTitle;
   if (resolvedDesc) metadata.description = resolvedDesc;
-  if (author) metadata.author = author;
-  if (image) metadata.image = image;
-  if (publishedAt) metadata.publishedAt = publishedAt;
-  if (modifiedAt) metadata.modifiedAt = modifiedAt;
+  if (ctx.author) metadata.author = ctx.author;
+  if (ctx.image) metadata.image = ctx.image;
+  if (ctx.publishedAt) metadata.publishedAt = ctx.publishedAt;
+  if (ctx.modifiedAt) metadata.modifiedAt = ctx.modifiedAt;
 
   return metadata;
 }

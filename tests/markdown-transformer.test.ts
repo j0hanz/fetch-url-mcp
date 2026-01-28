@@ -36,6 +36,40 @@ describe('htmlToMarkdown noise filtering', () => {
     assert.ok(!markdown.includes('HIDDENSTYLE'));
   });
 
+  it('preserves <aside> content including role="complementary"', () => {
+    const html = `
+      <html>
+        <body>
+          <p>Main content</p>
+          <aside><p>ASIDE_DEFAULT</p></aside>
+          <aside role="complementary"><p>ASIDE_COMPLEMENTARY</p></aside>
+        </body>
+      </html>
+    `;
+
+    const markdown = htmlToMarkdown(html);
+
+    assert.ok(markdown.includes('Main content'));
+    assert.match(markdown, /ASIDE\\?_DEFAULT/);
+    assert.match(markdown, /ASIDE\\?_COMPLEMENTARY/);
+  });
+
+  it('preserves callout content (not treated as promo noise)', () => {
+    const html = `
+      <html>
+        <body>
+          <p>Main content</p>
+          <div class="callout"><p>CALLOUT</p></div>
+        </body>
+      </html>
+    `;
+
+    const markdown = htmlToMarkdown(html);
+
+    assert.ok(markdown.includes('Main content'));
+    assert.ok(markdown.includes('CALLOUT'));
+  });
+
   it('removes boilerplate site headers but keeps article headers', () => {
     const html = `
       <html>
@@ -74,8 +108,10 @@ describe('htmlToMarkdown metadata footer', () => {
   it('appends metadata as a footer after content', () => {
     const html = '<p>Hello</p>';
     const markdown = htmlToMarkdown(html, {
+      type: 'metadata',
       title: 'hello:world',
       url: 'https://example.com/path?x=1',
+      fetchedAt: '2026-01-28T00:00:00.000Z',
     });
 
     // Content comes first, metadata footer at the end
