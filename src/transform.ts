@@ -144,9 +144,12 @@ export function endTransformStage(
 
 function runTransformStage<T>(url: string, stage: string, fn: () => T): T {
   const context = startTransformStage(url, stage);
-  const result = fn();
-  endTransformStage(context);
-  return result;
+  try {
+    return fn();
+  } finally {
+    // Emit duration even if the stage throws; callers decide how to handle the error.
+    endTransformStage(context);
+  }
 }
 
 function isTimeoutReason(reason: unknown): boolean {
@@ -486,8 +489,14 @@ function buildInlineCode(content: string): string {
       }
     }
   }
+
+  // Use a fence longer than any run of backticks in the content.
   const delimiter = `\`${longest}`;
-  const padding = delimiter.length > 1 ? ' ' : '';
+
+  // Only pad when needed to avoid altering code spans unnecessarily.
+  // CommonMark recommends padding when the code starts/ends with a backtick.
+  const padding = content.startsWith('`') || content.endsWith('`') ? ' ' : '';
+
   return `${delimiter}${padding}${content}${padding}${delimiter}`;
 }
 
@@ -776,6 +785,12 @@ export function htmlToMarkdown(
     if (error instanceof FetchError) {
       throw error;
     }
+
+    logError(
+      'Failed to convert HTML to markdown',
+      error instanceof Error ? error : undefined
+    );
+
     return buildMetadataFooter(metadata, url);
   }
 }
@@ -1179,24 +1194,6 @@ function getVisibleTextLength(htmlOrDocument: string | Document): number {
   return text.replace(/\s+/g, ' ').trim().length;
 }
 
-function isHeadingStructurePreserved(
-  article: ExtractedArticle | null,
-  originalHtmlOrDocument: string | Document
-): boolean {
-  if (!article) return false;
-
-  // Use DOM-based counting for accurate results with nested elements
-  const originalHeadingCount = countHeadingsDom(originalHtmlOrDocument);
-  const articleHeadingCount = countHeadingsDom(article.content);
-
-  // If original has no headings, structure is trivially preserved
-  if (originalHeadingCount === 0) return true;
-
-  // If article lost >30% of headings, structure is broken
-  const retentionRatio = articleHeadingCount / originalHeadingCount;
-  return retentionRatio >= MIN_HEADING_RETENTION_RATIO;
-}
-
 export function isExtractionSufficient(
   article: ExtractedArticle | null,
   originalHtmlOrDocument: string | Document
@@ -1404,35 +1401,42 @@ function shouldUseArticleContent(
   originalHtmlOrDocument: string | Document,
   url: string
 ): boolean {
-  // Check content sufficiency (length-based quality gate)
-  if (!isExtractionSufficient(article, originalHtmlOrDocument)) {
-    logQualityGateFallback({
-      url,
-      articleLength: article.textContent.length,
-    });
-    return false;
+  const articleLength = article.textContent.length;
+  const originalLength = getVisibleTextLength(originalHtmlOrDocument);
+
+  // If the document is tiny, don't gate too aggressively.
+  if (originalLength >= MIN_HTML_LENGTH_FOR_GATE) {
+    const ratio = articleLength / originalLength;
+    if (ratio < MIN_CONTENT_RATIO) {
+      logQualityGateFallback({ url, articleLength });
+      return false;
+    }
   }
 
-  // Check heading structure preservation
-  if (!isHeadingStructurePreserved(article, originalHtmlOrDocument)) {
-    logDebug(
-      'Quality gate: Readability broke heading structure, using full HTML',
-      {
-        url: url.substring(0, 80),
-        originalHeadings: countHeadingsDom(originalHtmlOrDocument),
-        articleHeadings: countHeadingsDom(article.content),
-      }
-    );
-    return false;
+  // Heading structure retention (compute counts once to avoid repeated DOM queries/parses).
+  const originalHeadings = countHeadingsDom(originalHtmlOrDocument);
+  if (originalHeadings > 0) {
+    const articleHeadings = countHeadingsDom(article.content);
+    const retentionRatio = articleHeadings / originalHeadings;
+
+    if (retentionRatio < MIN_HEADING_RETENTION_RATIO) {
+      logDebug(
+        'Quality gate: Readability broke heading structure, using full HTML',
+        {
+          url: url.substring(0, 80),
+          originalHeadings,
+          articleHeadings,
+        }
+      );
+      return false;
+    }
   }
 
-  // Check for truncated/fragmented sentences (layout extraction issue)
+  // Layout extraction issue: truncated/fragmented lines.
   if (hasTruncatedSentences(article.textContent)) {
     logDebug(
       'Quality gate: Extracted text has many truncated sentences, using full HTML',
-      {
-        url: url.substring(0, 80),
-      }
+      { url: url.substring(0, 80) }
     );
     return false;
   }

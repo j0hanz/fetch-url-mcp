@@ -1,298 +1,249 @@
 /**
  * Markdown cleanup utilities for post-processing converted content.
- * Provides fence-aware pattern matching and cleanup operations.
+ *
+ * Goals:
+ * - Never mutate fenced code blocks (``` / ~~~) content.
+ * - Keep rules localized and readable.
+ * - Avoid multi-pass regexes that accidentally hit code blocks.
  */
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Fence Detection Helpers
+// Fence state helpers
 // ─────────────────────────────────────────────────────────────────────────────
 
-/**
- * Check if a line starts a code fence (``` or ~~~).
- */
 function isFenceStart(line: string): boolean {
   const trimmed = line.trimStart();
   return trimmed.startsWith('```') || trimmed.startsWith('~~~');
 }
 
-/**
- * Check if a line ends a code fence matching the given fence marker.
- */
-function isFenceEnd(line: string, fenceMarker: string): boolean {
-  const trimmed = line.trimStart();
-  return (
-    trimmed.startsWith(fenceMarker) &&
-    trimmed.slice(fenceMarker.length).trim() === ''
-  );
-}
-
-/**
- * Extract the fence marker (``` or ~~~) from a fence start line.
- */
 function extractFenceMarker(line: string): string {
   const trimmed = line.trimStart();
-  // Match consecutive ` or ~ characters
   const match = /^(`{3,}|~{3,})/.exec(trimmed);
   return match?.[1] ?? '```';
 }
 
+function isFenceEnd(line: string, marker: string): boolean {
+  const trimmed = line.trimStart();
+  return (
+    trimmed.startsWith(marker) && trimmed.slice(marker.length).trim() === ''
+  );
+}
+
+interface FenceState {
+  inFence: boolean;
+  marker: string;
+}
+
+function initialFenceState(): FenceState {
+  return { inFence: false, marker: '' };
+}
+
+function advanceFenceState(line: string, state: FenceState): void {
+  if (!state.inFence && isFenceStart(line)) {
+    state.inFence = true;
+    state.marker = extractFenceMarker(line);
+    return;
+  }
+  if (state.inFence && isFenceEnd(line, state.marker)) {
+    state.inFence = false;
+    state.marker = '';
+  }
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
-// Fence-Aware Content Processing
+// Segment utilities
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Split markdown into segments, marking which are inside fenced code blocks.
- * Returns array of { content: string, inFence: boolean } segments.
+ * Split markdown into segments where each segment is either fully inside
+ * a fenced block (including the fence lines), or fully outside.
  */
 function splitByFences(
   content: string
 ): { content: string; inFence: boolean }[] {
   const lines = content.split('\n');
   const segments: { content: string; inFence: boolean }[] = [];
-  let currentLines: string[] = [];
-  let inFence = false;
-  let fenceMarker = '';
+  const state = initialFenceState();
+
+  let current: string[] = [];
+  let currentIsFence = false;
 
   for (const line of lines) {
-    if (!inFence && isFenceStart(line)) {
-      // Push any accumulated non-fence content
-      if (currentLines.length > 0) {
-        segments.push({ content: currentLines.join('\n'), inFence: false });
-        currentLines = [];
+    // Transition into fence: flush outside segment first.
+    if (!state.inFence && isFenceStart(line)) {
+      if (current.length > 0) {
+        segments.push({ content: current.join('\n'), inFence: currentIsFence });
+        current = [];
       }
-      // Start fence
-      inFence = true;
-      fenceMarker = extractFenceMarker(line);
-      currentLines.push(line);
-    } else if (inFence && isFenceEnd(line, fenceMarker)) {
-      // End fence
-      currentLines.push(line);
-      segments.push({ content: currentLines.join('\n'), inFence: true });
-      currentLines = [];
-      inFence = false;
-      fenceMarker = '';
-    } else {
-      currentLines.push(line);
+      currentIsFence = true;
+      current.push(line);
+      advanceFenceState(line, state);
+      continue;
+    }
+
+    current.push(line);
+    const wasInFence = state.inFence;
+    advanceFenceState(line, state);
+
+    // Transition out of fence: flush fence segment.
+    if (wasInFence && !state.inFence) {
+      segments.push({ content: current.join('\n'), inFence: true });
+      current = [];
+      currentIsFence = false;
     }
   }
 
-  // Push remaining content
-  if (currentLines.length > 0) {
-    segments.push({ content: currentLines.join('\n'), inFence });
+  if (current.length > 0) {
+    segments.push({ content: current.join('\n'), inFence: currentIsFence });
   }
 
   return segments;
 }
 
 /**
- * Apply cleanup patterns only to non-fenced content.
+ * Apply a transformation function only to non-fenced content.
  */
-function applyPatternOutsideFences(
+function mapOutsideFences(
   content: string,
-  pattern: RegExp,
-  replacement: string | ((...args: string[]) => string)
+  transform: (outside: string) => string
 ): string {
   const segments = splitByFences(content);
   return segments
-    .map((seg) => {
-      if (seg.inFence) return seg.content;
-      if (typeof replacement === 'string') {
-        return seg.content.replace(pattern, replacement);
-      }
-      return seg.content.replace(pattern, replacement);
-    })
+    .map((seg) => (seg.inFence ? seg.content : transform(seg.content)))
     .join('\n');
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Line Filtering with Fence Awareness
+// Cleanup rules (OUTSIDE fences only)
 // ─────────────────────────────────────────────────────────────────────────────
 
-/**
- * Track state when filtering lines with fence and TOC awareness.
- */
-interface LineFilterState {
-  inFence: boolean;
-  fenceMarker: string;
-  skipTocBlock: boolean;
+function removeEmptyHeadings(text: string): string {
+  return text.replace(/^#{1,6}[ \t\u00A0]*$\r?\n?/gm, '');
+}
+
+function fixOrphanHeadings(text: string): string {
+  // Pattern: hashes on their own line, blank line, then a "heading-like" line.
+  return text.replace(
+    /^(.*?)(#{1,6})\s*(?:\r?\n){2}([A-Z][^\r\n]+?)(?:\r?\n)/gm,
+    (_match: string, prefix: string, hashes: string, heading: string) => {
+      if (heading.length > 150) return _match;
+
+      const trimmedPrefix = prefix.trim();
+      if (trimmedPrefix === '') {
+        return `${hashes} ${heading}\n\n`;
+      }
+      return `${trimmedPrefix}\n\n${hashes} ${heading}\n\n`;
+    }
+  );
+}
+
+function removeSkipLinksAndEmptyAnchors(text: string): string {
+  const zeroWidthAnchorLink = /\[(?:\s|\u200B)*\]\(#[^)]*\)\s*/g;
+  return text
+    .replace(zeroWidthAnchorLink, '')
+    .replace(/^\[Skip to (?:main )?content\]\(#[^)]*\)\s*$/gim, '')
+    .replace(/^\[Skip to (?:main )?navigation\]\(#[^)]*\)\s*$/gim, '')
+    .replace(/^\[Skip link\]\(#[^)]*\)\s*$/gim, '');
+}
+
+function ensureBlankLineAfterHeadings(text: string): string {
+  // Heading followed immediately by a fence marker
+  text = text.replace(/(^#{1,6}\s+\w+)```/gm, '$1\n\n```');
+
+  // Heuristic: Some converters jam words together after a heading
+  text = text.replace(/(^#{1,6}\s+\w*[A-Z])([A-Z][a-z])/gm, '$1\n\n$2');
+
+  // Any heading line should be followed by a blank line before body
+  return text.replace(/(^#{1,6}\s[^\n]*)\n([^\n])/gm, '$1\n\n$2');
 }
 
 /**
- * Process a line for fence state changes.
- * Returns true if line was handled (pushed to filtered), false otherwise.
+ * Remove markdown TOC blocks of the form:
+ * - [Title](#anchor)
+ * outside fenced code blocks.
  */
-function handleFenceTransition(
-  line: string,
-  state: LineFilterState,
-  filtered: string[]
-): boolean {
-  if (!state.inFence && isFenceStart(line)) {
-    state.inFence = true;
-    state.fenceMarker = extractFenceMarker(line);
-    filtered.push(line);
-    return true;
-  }
-  if (state.inFence && isFenceEnd(line, state.fenceMarker)) {
-    state.inFence = false;
-    state.fenceMarker = '';
-    filtered.push(line);
-    return true;
-  }
-  if (state.inFence) {
-    filtered.push(line);
-    return true;
-  }
-  return false;
-}
+function removeTocBlocks(text: string): string {
+  const tocLine = /^- \[[^\]]+\]\(#[^)]+\)\s*$/;
+  const lines = text.split('\n');
+  const out: string[] = [];
 
-/**
- * Check if a line is part of a TOC block and should be skipped.
- */
-function shouldSkipTocLine(
-  line: string,
-  prevLine: string,
-  nextLine: string,
-  tocPattern: RegExp
-): boolean {
-  if (!tocPattern.test(line)) return false;
-  const prevIsToc = tocPattern.test(prevLine) || prevLine.trim() === '';
-  const nextIsToc = tocPattern.test(nextLine) || nextLine.trim() === '';
-  return prevIsToc || nextIsToc;
-}
-
-/**
- * Filter lines with fence and TOC awareness.
- */
-function filterLinesWithFenceAwareness(
-  lines: string[],
-  tocPattern: RegExp
-): string[] {
-  const filtered: string[] = [];
-  const state: LineFilterState = {
-    inFence: false,
-    fenceMarker: '',
-    skipTocBlock: false,
-  };
-
+  let skipping = false;
   for (let i = 0; i < lines.length; i += 1) {
     const line = lines[i] ?? '';
+    const prev = i > 0 ? (lines[i - 1] ?? '') : '';
+    const next = i < lines.length - 1 ? (lines[i + 1] ?? '') : '';
 
-    // Handle fence transitions
-    if (handleFenceTransition(line, state, filtered)) {
+    if (tocLine.test(line)) {
+      const prevIsToc = tocLine.test(prev) || prev.trim() === '';
+      const nextIsToc = tocLine.test(next) || next.trim() === '';
+      if (prevIsToc || nextIsToc) {
+        skipping = true;
+        continue;
+      }
+    }
+
+    if (skipping) {
+      if (line.trim() === '') {
+        skipping = false;
+      }
       continue;
     }
 
-    const prevLine = i > 0 ? (lines[i - 1] ?? '') : '';
-    const nextLine = i < lines.length - 1 ? (lines[i + 1] ?? '') : '';
-
-    // TOC block handling
-    if (shouldSkipTocLine(line, prevLine, nextLine, tocPattern)) {
-      state.skipTocBlock = true;
-      continue;
-    }
-    if (line.trim() === '' && state.skipTocBlock) {
-      state.skipTocBlock = false;
-      continue;
-    }
-    state.skipTocBlock = false;
-    filtered.push(line);
+    out.push(line);
   }
 
-  return filtered;
+  return out.join('\n');
+}
+
+function tidyLinksAndEscapes(text: string): string {
+  return text
+    .replace(/\]\(([^)]+)\)\[/g, ']($1)\n\n[')
+    .replace(/^Was this page helpful\??\s*$/gim, '')
+    .replace(/(`[^`]+`)\s*\\-\s*/g, '$1 - ')
+    .replace(/\\([[]])/g, '$1');
+}
+
+function normalizeListsAndSpacing(text: string): string {
+  // Ensure blank line before list starts (bullet/ordered)
+  text = text.replace(/([^\n])\n([-*+] )/g, '$1\n\n$2');
+  text = text.replace(/(\S)\n(\d+\. )/g, '$1\n\n$2');
+
+  // Collapse excessive blank lines
+  return text.replace(/\n{3,}/g, '\n\n');
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Main Cleanup Function
+// Public API
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
  * Clean up common markdown artifacts and formatting issues.
- * Applies fixes for orphan headings, skip links, TOC blocks, and spacing.
+ * IMPORTANT: All rules are applied ONLY outside fenced code blocks.
  */
 export function cleanupMarkdownArtifacts(content: string): string {
-  let result = content;
+  if (!content) return '';
 
-  const fixOrphanHeadings = (text: string): string => {
-    // Only apply to non-fenced content
-    return applyPatternOutsideFences(
-      text,
-      /^(.*?)(#{1,6})\s*(?:\r?\n){2}([A-Z][^\r\n]+?)(?:\r?\n)/gm,
-      (_match: string, prefix: string, hashes: string, heading: string) => {
-        if (heading.length > 150) {
-          return _match;
-        }
-        const trimmedPrefix = prefix.trim();
-        if (trimmedPrefix === '') {
-          return `${hashes} ${heading}\n\n`;
-        }
-        return `${trimmedPrefix}\n\n${hashes} ${heading}\n\n`;
-      }
-    );
-  };
+  const cleaned = mapOutsideFences(content, (outside) => {
+    let text = outside;
 
-  result = fixOrphanHeadings(result);
-  // Empty headings - apply only outside fences
-  result = applyPatternOutsideFences(
-    result,
-    /^#{1,6}[ \t\u00A0]*$\r?\n?/gm,
-    ''
-  );
+    text = fixOrphanHeadings(text);
+    text = removeEmptyHeadings(text);
+    text = removeSkipLinksAndEmptyAnchors(text);
+    text = ensureBlankLineAfterHeadings(text);
+    text = removeTocBlocks(text);
+    text = tidyLinksAndEscapes(text);
+    text = normalizeListsAndSpacing(text);
 
-  const zeroWidthAnchorLink = /\[(?:\s|\u200B)*\]\(#[^)]*\)\s*/g;
+    return text;
+  });
 
-  result = result.replace(zeroWidthAnchorLink, '');
-  result = result.replace(
-    /^\[Skip to (?:main )?content\]\(#[^)]*\)\s*$/gim,
-    ''
-  );
-  result = result.replace(
-    /^\[Skip to (?:main )?navigation\]\(#[^)]*\)\s*$/gim,
-    ''
-  );
-  result = result.replace(/^\[Skip link\]\(#[^)]*\)\s*$/gim, '');
-  // Heading followed by fence - safe outside fences
-  result = applyPatternOutsideFences(
-    result,
-    /(^#{1,6}\s+\w+)```/gm,
-    '$1\n\n```'
-  );
-  result = applyPatternOutsideFences(
-    result,
-    /(^#{1,6}\s+\w*[A-Z])([A-Z][a-z])/gm,
-    '$1\n\n$2'
-  );
-  result = applyPatternOutsideFences(
-    result,
-    /(^#{1,6}\s[^\n]*)\n([^\n])/gm,
-    '$1\n\n$2'
-  );
-
-  // TOC filtering - fence-aware line processing
-  const tocLinkLine = /^- \[[^\]]+\]\(#[^)]+\)\s*$/;
-  const lines = result.split('\n');
-  const filtered = filterLinesWithFenceAwareness(lines, tocLinkLine);
-
-  result = filtered.join('\n');
-
-  result = result.replace(/\]\(([^)]+)\)\[/g, ']($1)\n\n[');
-  result = result.replace(/^Was this page helpful\??\s*$/gim, '');
-  result = result.replace(/(`[^`]+`)\s*\\-\s*/g, '$1 - ');
-  result = result.replace(/\\([[]])/g, '$1');
-  // List formatting - safe to apply globally as patterns don't match fence content
-  result = result.replace(/([^\n])\n([-*+] )/g, '$1\n\n$2');
-  result = result.replace(/(\S)\n(\d+\. )/g, '$1\n\n$2');
-  result = result.replace(/\n{3,}/g, '\n\n');
-
-  return result.trim();
+  return cleaned.trim();
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Heading Promotion
+// Heading Promotion (fence-aware)
 // ─────────────────────────────────────────────────────────────────────────────
 
-/**
- * Common heading keywords that suggest a line should be a heading.
- */
 const HEADING_KEYWORDS = new Set([
   'overview',
   'introduction',
@@ -315,9 +266,6 @@ const HEADING_KEYWORDS = new Set([
   'appendix',
 ]);
 
-/**
- * Check if a line looks like it should be a heading (title case, keyword, etc.)
- */
 function isLikelyHeadingLine(line: string): boolean {
   const trimmed = line.trim();
   if (!trimmed || trimmed.length > 80) return false;
@@ -325,9 +273,11 @@ function isLikelyHeadingLine(line: string): boolean {
   if (/^[-*+•]\s/.test(trimmed) || /^\d+\.\s/.test(trimmed)) return false;
   if (/[.!?]$/.test(trimmed)) return false;
   if (/^\[.*\]\(.*\)$/.test(trimmed)) return false;
+
   if (/^(?:example|note|tip|warning|important|caution):\s+\S/i.test(trimmed)) {
     return true;
   }
+
   const words = trimmed.split(/\s+/);
   if (words.length >= 2 && words.length <= 6) {
     const isTitleCase = words.every(
@@ -336,38 +286,57 @@ function isLikelyHeadingLine(line: string): boolean {
     );
     if (isTitleCase) return true;
   }
+
   if (words.length === 1) {
     const lower = trimmed.toLowerCase();
-    if (HEADING_KEYWORDS.has(lower) && /^[A-Z]/.test(trimmed)) {
-      return true;
-    }
+    if (HEADING_KEYWORDS.has(lower) && /^[A-Z]/.test(trimmed)) return true;
   }
 
   return false;
 }
 
+function shouldPromoteToHeading(line: string, prevLine: string): boolean {
+  const isPrecededByBlank = prevLine.trim() === '';
+  if (!isPrecededByBlank) return false;
+  return isLikelyHeadingLine(line);
+}
+
+function formatAsHeading(line: string): string {
+  const trimmed = line.trim();
+  const isExample = /^example:\s/i.test(trimmed);
+  const prefix = isExample ? '### ' : '## ';
+  return prefix + trimmed;
+}
+
+function processNonFencedLine(line: string, prevLine: string): string {
+  if (shouldPromoteToHeading(line, prevLine)) {
+    return formatAsHeading(line);
+  }
+  return line;
+}
+
 /**
  * Promote standalone lines that look like headings to proper markdown headings.
+ * Fence-aware: never modifies content inside fenced code blocks.
  */
 export function promoteOrphanHeadings(markdown: string): string {
+  if (!markdown) return '';
+
   const lines = markdown.split('\n');
   const result: string[] = [];
+  const state = initialFenceState();
 
   for (let i = 0; i < lines.length; i += 1) {
     const line = lines[i] ?? '';
-    const prevLine = i > 0 ? lines[i - 1] : '';
-    const nextLine = i < lines.length - 1 ? lines[i + 1] : '';
-    const isStandalone = prevLine?.trim() === '' && nextLine?.trim() === '';
-    const isPrecededByBlank = prevLine?.trim() === '';
+    const prevLine = i > 0 ? (lines[i - 1] ?? '') : '';
 
-    if ((isStandalone || isPrecededByBlank) && isLikelyHeadingLine(line)) {
-      const trimmed = line.trim();
-      const isExample = /^example:\s/i.test(trimmed);
-      const prefix = isExample ? '### ' : '## ';
-      result.push(prefix + trimmed);
-    } else {
+    if (state.inFence || isFenceStart(line)) {
       result.push(line);
+      advanceFenceState(line, state);
+      continue;
     }
+
+    result.push(processNonFencedLine(line, prevLine));
   }
 
   return result.join('\n');

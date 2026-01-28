@@ -108,13 +108,20 @@ const BASE_PROMO_TOKENS = [
 
 /**
  * Get promo tokens merged with any user-configured extra tokens.
+ * Memoized because it is used in hot paths when scanning many nodes.
  */
+let promoTokensCache: Set<string> | null = null;
+
 function getPromoTokens(): Set<string> {
+  if (promoTokensCache) return promoTokensCache;
+
   const tokens = new Set<string>(BASE_PROMO_TOKENS);
   for (const token of config.noiseRemoval.extraTokens) {
     const normalized = token.toLowerCase().trim();
     if (normalized) tokens.add(normalized);
   }
+
+  promoTokensCache = tokens;
   return tokens;
 }
 
@@ -132,7 +139,6 @@ const NOISE_MARKERS = [
   '<iframe',
   '<nav',
   '<footer',
-  '<aside',
   '<header',
   '<form',
   '<button',
@@ -185,8 +191,14 @@ const NOISE_MARKERS = [
 // Noise Detection Functions
 // ─────────────────────────────────────────────────────────────────────────────
 
+const NOISE_SCAN_LIMIT = 50_000;
+
 function mayContainNoise(html: string): boolean {
-  const haystack = html.toLowerCase();
+  // Fast path: only scan a bounded prefix; parsing is the expensive step anyway.
+  // Most noise markers appear near the top of the document (nav, scripts, meta, etc.).
+  const sample =
+    html.length > NOISE_SCAN_LIMIT ? html.slice(0, NOISE_SCAN_LIMIT) : html;
+  const haystack = sample.toLowerCase();
   return NOISE_MARKERS.some((marker) => haystack.includes(marker));
 }
 
@@ -354,7 +366,8 @@ const SKIP_URL_PREFIXES = [
  * inline data (data, blob), or javascript: which we skip to avoid XSS.
  */
 function shouldSkipUrlResolution(url: string): boolean {
-  return SKIP_URL_PREFIXES.some((prefix) => url.startsWith(prefix));
+  const normalized = url.trim().toLowerCase();
+  return SKIP_URL_PREFIXES.some((prefix) => normalized.startsWith(prefix));
 }
 
 /**
