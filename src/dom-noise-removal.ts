@@ -78,6 +78,21 @@ const NAVIGATION_ROLES = new Set([
   'search',
 ]);
 
+const INTERACTIVE_CONTENT_ROLES = new Set([
+  'tabpanel',
+  'tab',
+  'tablist',
+  'dialog',
+  'alertdialog',
+  'menu',
+  'menuitem',
+  'option',
+  'listbox',
+  'combobox',
+  'tooltip',
+  'alert',
+]);
+
 const BASE_PROMO_TOKENS = [
   'banner',
   'promo',
@@ -209,6 +224,26 @@ function isStructuralNoiseTag(tagName: string): boolean {
   return STRUCTURAL_TAGS.has(tagName);
 }
 
+function isInteractiveComponent(element: HTMLElement): boolean {
+  const role = element.getAttribute('role');
+  if (role && INTERACTIVE_CONTENT_ROLES.has(role)) return true;
+
+  // Check for common UI framework data attributes that indicate managed visibility
+  const dataState = element.getAttribute('data-state');
+  if (dataState === 'inactive' || dataState === 'closed') return true;
+
+  const dataOrientation = element.getAttribute('data-orientation');
+  if (dataOrientation === 'horizontal' || dataOrientation === 'vertical') {
+    return true;
+  }
+
+  // Check for accordion/collapse patterns
+  if (element.getAttribute('data-accordion-item') !== null) return true;
+  if (element.getAttribute('data-radix-collection-item') !== null) return true;
+
+  return false;
+}
+
 function isElementHidden(element: HTMLElement): boolean {
   const style = element.getAttribute('style') ?? '';
   return (
@@ -277,11 +312,17 @@ function isNoiseElement(node: HTMLElement): boolean {
   const metadata = readElementMetadata(node);
   const isComplementaryAside =
     metadata.tagName === 'aside' && metadata.role === 'complementary';
+
+  const shouldCheckHidden = metadata.isHidden && !isInteractiveComponent(node);
+
+  const isInteractiveStructural =
+    isStructuralNoiseTag(metadata.tagName) && isInteractiveComponent(node);
+
   return (
-    isStructuralNoiseTag(metadata.tagName) ||
+    (isStructuralNoiseTag(metadata.tagName) && !isInteractiveStructural) ||
     ALWAYS_NOISE_TAGS.has(metadata.tagName) ||
     (metadata.tagName === 'header' && isBoilerplateHeader(metadata)) ||
-    metadata.isHidden ||
+    shouldCheckHidden ||
     (!isComplementaryAside && hasNoiseRole(metadata.role)) ||
     matchesFixedOrHighZIsolate(metadata.className) ||
     matchesPromoIdOrClass(metadata.className, metadata.id)

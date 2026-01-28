@@ -7,7 +7,6 @@ import { Worker } from 'node:worker_threads';
 import { parseHTML } from 'linkedom';
 import {
   NodeHtmlMarkdown,
-  type TranslatorCollection,
   type TranslatorConfig,
   type TranslatorConfigObject,
 } from 'node-html-markdown';
@@ -338,6 +337,16 @@ function extractArticle(document: unknown): ExtractedArticle | null {
     const rawText =
       doc.querySelector('body')?.textContent ?? doc.documentElement.textContent;
     const textLength = rawText.replace(/\s+/g, ' ').trim().length;
+
+    if (textLength < 100) {
+      logWarn(
+        'Very minimal server-rendered content detected (< 100 chars). ' +
+          'This might be a client-side rendered (SPA) application. ' +
+          'Content extraction may be incomplete.',
+        { textLength }
+      );
+    }
+
     if (textLength >= 400 && !isProbablyReaderable(doc)) {
       return null;
     }
@@ -551,12 +560,6 @@ function hasGetAttribute(
   return isObject(value) && typeof value.getAttribute === 'function';
 }
 
-function hasCodeBlockTranslators(
-  value: unknown
-): value is { codeBlockTranslators: TranslatorCollection } {
-  return isObject(value) && isObject(value.codeBlockTranslators);
-}
-
 function buildInlineCodeTranslator(): TranslatorConfig {
   return {
     spaceIfRepeatingChar: true,
@@ -574,42 +577,17 @@ function resolveAttributeLanguage(node: unknown): string | undefined {
   return resolveLanguageFromAttributes(className, dataLanguage);
 }
 
-function resolveCodeBlockTranslators(
-  visitor: unknown
-): TranslatorCollection | null {
-  const childTranslators = isObject(visitor) ? visitor.instance : null;
-  return hasCodeBlockTranslators(childTranslators)
-    ? childTranslators.codeBlockTranslators
-    : null;
-}
-
-function buildCodeBlockTranslator(
-  attributeLanguage: string | undefined,
-  codeBlockTranslators: TranslatorCollection | null
-): TranslatorConfig {
-  return {
-    noEscape: true,
-    preserveWhitespace: true,
-    ...(codeBlockTranslators
-      ? { childTranslators: codeBlockTranslators }
-      : null),
-    postprocess: ({ content }: { content: string }) => {
-      const language =
-        attributeLanguage ?? detectLanguageFromCode(content) ?? '';
-      return CODE_BLOCK.format(content, language);
-    },
-  };
-}
-
 function buildCodeTranslator(ctx: unknown): TranslatorConfig {
   if (!isObject(ctx)) return buildInlineCodeTranslator();
 
-  const { node, parent, visitor } = ctx;
+  const { parent } = ctx;
+
   if (!isCodeBlock(parent)) return buildInlineCodeTranslator();
 
-  const attributeLanguage = resolveAttributeLanguage(node);
-  const codeBlockTranslators = resolveCodeBlockTranslators(visitor);
-  return buildCodeBlockTranslator(attributeLanguage, codeBlockTranslators);
+  return {
+    noEscape: true,
+    preserveWhitespace: true,
+  };
 }
 
 function buildImageTranslator(ctx: unknown): TranslatorConfig {
@@ -630,51 +608,50 @@ function buildImageTranslator(ctx: unknown): TranslatorConfig {
   };
 }
 
-/**
- * Check if a <pre> element has a direct <code> child.
- * If so, let the code translator handle it.
- */
-function preHasCodeChild(node: unknown): boolean {
-  if (!isObject(node)) return false;
+function findLanguageFromCodeChild(node: unknown): string | undefined {
+  if (!isObject(node)) return undefined;
+
   const { childNodes } = node;
-  if (!Array.isArray(childNodes)) return false;
+  if (!Array.isArray(childNodes)) return undefined;
 
   for (const child of childNodes) {
     if (!isObject(child)) continue;
-    const nodeName =
-      typeof child.nodeName === 'string' ? child.nodeName.toUpperCase() : '';
-    if (nodeName === 'CODE') return true;
+    const tagName =
+      typeof child.rawTagName === 'string'
+        ? child.rawTagName.toUpperCase()
+        : '';
+
+    if (tagName === 'CODE') {
+      return resolveAttributeLanguage(child);
+    }
   }
-  return false;
+
+  return undefined;
 }
 
-/**
- * Build translator for <pre> elements without <code> children.
- * Wraps content in fenced code block with language detection.
- */
+function createCodeBlockPostprocessor(
+  language: string | undefined
+): (params: { content: string }) => string {
+  return ({ content }: { content: string }) => {
+    const trimmed = content.trim();
+    if (!trimmed) return '';
+    const resolvedLanguage = language ?? detectLanguageFromCode(trimmed) ?? '';
+    return CODE_BLOCK.format(trimmed, resolvedLanguage);
+  };
+}
+
 function buildPreTranslator(ctx: unknown): TranslatorConfig {
   if (!isObject(ctx)) return {};
 
   const { node } = ctx;
 
-  // If <pre> has <code> child, let default handling work
-  if (preHasCodeChild(node)) {
-    return {};
-  }
-
-  // For bare <pre>, wrap in code fence
-  const attributeLanguage = resolveAttributeLanguage(node);
+  const attributeLanguage =
+    resolveAttributeLanguage(node) ?? findLanguageFromCodeChild(node);
 
   return {
     noEscape: true,
     preserveWhitespace: true,
-    postprocess: ({ content }: { content: string }) => {
-      const trimmed = content.trim();
-      if (!trimmed) return '';
-      const language =
-        attributeLanguage ?? detectLanguageFromCode(trimmed) ?? '';
-      return CODE_BLOCK.format(trimmed, language);
-    },
+    postprocess: createCodeBlockPostprocessor(attributeLanguage),
   };
 }
 
@@ -1134,6 +1111,7 @@ function tryTransformRawContent({
 const MIN_CONTENT_RATIO = 0.3;
 const MIN_HTML_LENGTH_FOR_GATE = 100;
 const MIN_HEADING_RETENTION_RATIO = 0.7;
+const MIN_CODE_BLOCK_RETENTION_RATIO = 0.5;
 
 /**
  * Count headings using DOM querySelectorAll.
@@ -1151,6 +1129,20 @@ function countHeadingsDom(htmlOrDocument: string | Document): number {
   }
 
   return htmlOrDocument.querySelectorAll('h1,h2,h3,h4,h5,h6').length;
+}
+
+function countCodeBlocksDom(htmlOrDocument: string | Document): number {
+  if (typeof htmlOrDocument === 'string') {
+    // Wrap fragments in document structure for proper parsing
+    const htmlToParse = needsDocumentWrapper(htmlOrDocument)
+      ? wrapHtmlFragment(htmlOrDocument)
+      : htmlOrDocument;
+
+    const { document: doc } = parseHTML(htmlToParse);
+    return doc.querySelectorAll('pre').length;
+  }
+
+  return htmlOrDocument.querySelectorAll('pre').length;
 }
 
 /**
@@ -1464,6 +1456,32 @@ function shouldUseArticleContent(
     }
   }
 
+  const originalCodeBlocks = countCodeBlocksDom(originalHtmlOrDocument);
+  if (originalCodeBlocks > 0) {
+    const articleCodeBlocks = countCodeBlocksDom(article.content);
+    const codeRetentionRatio = articleCodeBlocks / originalCodeBlocks;
+
+    // Always log code block counts for debugging
+    logDebug('Code block retention check', {
+      url: url.substring(0, 80),
+      originalCodeBlocks,
+      articleCodeBlocks,
+      codeRetentionRatio,
+    });
+
+    if (codeRetentionRatio < MIN_CODE_BLOCK_RETENTION_RATIO) {
+      logDebug(
+        'Quality gate: Readability removed code blocks, using full HTML',
+        {
+          url: url.substring(0, 80),
+          originalCodeBlocks,
+          articleCodeBlocks,
+        }
+      );
+      return false;
+    }
+  }
+
   // Layout extraction issue: truncated/fragmented lines.
   if (hasTruncatedSentences(article.textContent)) {
     logDebug(
@@ -1491,14 +1509,12 @@ function resolveContentSource({
     article,
     metadata: extractedMeta,
     document,
-    truncated,
   } = extractContentWithDocument(html, url, {
     extractArticle: true,
     ...(signal ? { signal } : {}),
   });
 
-  // When extraction used truncated HTML, parse full HTML for quality gates
-  const originalDocument = truncated ? parseHTML(html).document : document;
+  const originalDocument = parseHTML(html).document;
 
   const useArticleContent = article
     ? shouldUseArticleContent(article, originalDocument, url)
