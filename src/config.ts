@@ -44,14 +44,26 @@ function isLogLevel(value: string): value is LogLevel {
   return ALLOWED_LOG_LEVELS.has(value);
 }
 
-function isBelowMin(value: number, min: number | undefined): boolean {
-  if (min === undefined) return false;
-  return value < min;
+function isOutsideRange(
+  value: number,
+  min: number | undefined,
+  max: number | undefined
+): boolean {
+  return (
+    (min !== undefined && value < min) || (max !== undefined && value > max)
+  );
 }
 
-function isAboveMax(value: number, max: number | undefined): boolean {
-  if (max === undefined) return false;
-  return value > max;
+function parseIntegerValue(
+  envValue: string | undefined,
+  min?: number,
+  max?: number
+): number | null {
+  if (!envValue) return null;
+  const parsed = parseInt(envValue, 10);
+  if (Number.isNaN(parsed)) return null;
+  if (isOutsideRange(parsed, min, max)) return null;
+  return parsed;
 }
 
 function parseInteger(
@@ -60,12 +72,7 @@ function parseInteger(
   min?: number,
   max?: number
 ): number {
-  if (!envValue) return defaultValue;
-  const parsed = parseInt(envValue, 10);
-  if (Number.isNaN(parsed)) return defaultValue;
-  if (isBelowMin(parsed, min)) return defaultValue;
-  if (isAboveMax(parsed, max)) return defaultValue;
-  return parsed;
+  return parseIntegerValue(envValue, min, max) ?? defaultValue;
 }
 
 function parseOptionalInteger(
@@ -73,12 +80,7 @@ function parseOptionalInteger(
   min?: number,
   max?: number
 ): number | undefined {
-  if (!envValue) return undefined;
-  const parsed = parseInt(envValue, 10);
-  if (Number.isNaN(parsed)) return undefined;
-  if (isBelowMin(parsed, min)) return undefined;
-  if (isAboveMax(parsed, max)) return undefined;
-  return parsed;
+  return parseIntegerValue(envValue, min, max) ?? undefined;
 }
 
 function parseBoolean(

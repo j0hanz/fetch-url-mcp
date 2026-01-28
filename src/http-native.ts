@@ -660,13 +660,7 @@ async function dispatchRequest(
       return;
     }
 
-    try {
-      const authInfo = await authenticate(req);
-      req.auth = authInfo;
-    } catch (err) {
-      res
-        .status(401)
-        .json({ error: err instanceof Error ? err.message : 'Unauthorized' });
+    if (!(await authenticateRequest(req, res))) {
       return;
     }
 
@@ -689,6 +683,21 @@ async function dispatchRequest(
     if (!res.writableEnded) {
       res.status(500).json({ error: 'Internal Server Error' });
     }
+  }
+}
+
+async function authenticateRequest(
+  req: ShimRequest,
+  res: ShimResponse
+): Promise<boolean> {
+  try {
+    req.auth = await authenticate(req);
+    return true;
+  } catch (err) {
+    res
+      .status(401)
+      .json({ error: err instanceof Error ? err.message : 'Unauthorized' });
+    return false;
   }
 }
 

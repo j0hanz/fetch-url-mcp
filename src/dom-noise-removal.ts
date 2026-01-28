@@ -509,7 +509,11 @@ export function removeNoiseFromHtml(
     }
 
     const bodyInnerHtml = getBodyInnerHtml(resolvedDocument);
-    if (bodyInnerHtml) return bodyInnerHtml;
+    // Only use body innerHTML if it has substantial content
+    // On some sites (e.g., Framer), noise removal empties body but leaves content in documentElement
+    if (bodyInnerHtml && bodyInnerHtml.trim().length > 100) {
+      return bodyInnerHtml;
+    }
 
     const docToString = getDocumentToString(resolvedDocument);
     if (docToString) return docToString();

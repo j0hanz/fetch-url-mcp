@@ -83,12 +83,9 @@ for (const entry of BLOCKED_IPV6_SUBNETS) {
 }
 
 function matchesBlockedIpPatterns(resolvedIp: string): boolean {
-  for (const pattern of config.security.blockedIpPatterns) {
-    if (pattern.test(resolvedIp)) {
-      return true;
-    }
-  }
-  return false;
+  return config.security.blockedIpPatterns.some((pattern) =>
+    pattern.test(resolvedIp)
+  );
 }
 
 export function isBlockedIp(ip: string): boolean {
@@ -316,16 +313,10 @@ function getUrlWithoutParams(url: string): {
 } {
   const hashIndex = url.indexOf('#');
   const queryIndex = url.indexOf('?');
-  let endIndex = url.length;
-  if (queryIndex !== -1) {
-    if (hashIndex !== -1) {
-      endIndex = Math.min(queryIndex, hashIndex);
-    } else {
-      endIndex = queryIndex;
-    }
-  } else if (hashIndex !== -1) {
-    endIndex = hashIndex;
-  }
+  const endIndex = Math.min(
+    queryIndex === -1 ? url.length : queryIndex,
+    hashIndex === -1 ? url.length : hashIndex
+  );
 
   const hash = hashIndex !== -1 ? url.slice(hashIndex) : '';
 

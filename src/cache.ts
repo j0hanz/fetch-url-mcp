@@ -138,10 +138,14 @@ export function parseCacheKey(cacheKey: string): CacheKeyParts | null {
   return { namespace, urlHash };
 }
 
+function buildCacheResourceUri(namespace: string, urlHash: string): string {
+  return `superfetch://cache/${namespace}/${urlHash}`;
+}
+
 export function toResourceUri(cacheKey: string): string | null {
   const parts = parseCacheKey(cacheKey);
   if (!parts) return null;
-  return `superfetch://cache/${parts.namespace}/${parts.urlHash}`;
+  return buildCacheResourceUri(parts.namespace, parts.urlHash);
 }
 
 const contentCache = new LRUCache<string, CacheEntry>({
@@ -278,6 +282,11 @@ function logCacheError(
 
 const CACHE_NAMESPACE = 'markdown';
 const HASH_PATTERN = /^[a-f0-9.]+$/i;
+const INVALID_CACHE_PARAMS_MESSAGE = 'Invalid cache resource parameters';
+
+function throwInvalidCacheParams(): never {
+  throw new McpError(ErrorCode.InvalidParams, INVALID_CACHE_PARAMS_MESSAGE);
+}
 
 function resolveCacheParams(params: unknown): {
   namespace: string;
@@ -288,10 +297,7 @@ function resolveCacheParams(params: unknown): {
   const urlHash = requireParamString(parsed, 'urlHash');
 
   if (!isValidNamespace(namespace) || !isValidHash(urlHash)) {
-    throw new McpError(
-      ErrorCode.InvalidParams,
-      'Invalid cache resource parameters'
-    );
+    throwInvalidCacheParams();
   }
 
   return { namespace, urlHash };
@@ -299,10 +305,7 @@ function resolveCacheParams(params: unknown): {
 
 function requireRecordParams(value: unknown): Record<string, unknown> {
   if (!isRecord(value)) {
-    throw new McpError(
-      ErrorCode.InvalidParams,
-      'Invalid cache resource parameters'
-    );
+    throwInvalidCacheParams();
   }
   return value;
 }
@@ -365,7 +368,7 @@ function buildResourceEntry(
 } {
   return {
     name: `${namespace}:${urlHash}`,
-    uri: `superfetch://cache/${namespace}/${urlHash}`,
+    uri: buildCacheResourceUri(namespace, urlHash),
     description: `Cached content entry for ${namespace}`,
     mimeType: 'text/markdown',
   };

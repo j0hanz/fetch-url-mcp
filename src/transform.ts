@@ -747,13 +747,16 @@ function translateHtmlToMarkdown(
   html: string,
   url: string,
   signal?: AbortSignal,
-  document?: Document
+  document?: Document,
+  skipNoiseRemoval?: boolean
 ): string {
   throwIfAborted(signal, url, 'markdown:begin');
 
-  const cleanedHtml = runTransformStage(url, 'markdown:noise', () =>
-    removeNoiseFromHtml(html, document, url)
-  );
+  const cleanedHtml = skipNoiseRemoval
+    ? html
+    : runTransformStage(url, 'markdown:noise', () =>
+        removeNoiseFromHtml(html, document, url)
+      );
 
   throwIfAborted(signal, url, 'markdown:cleaned');
 
@@ -779,7 +782,12 @@ function appendMetadataFooter(
 export function htmlToMarkdown(
   html: string,
   metadata?: MetadataBlock,
-  options?: { url?: string; signal?: AbortSignal; document?: Document }
+  options?: {
+    url?: string;
+    signal?: AbortSignal;
+    document?: Document;
+    skipNoiseRemoval?: boolean;
+  }
 ): string {
   const url = options?.url ?? metadata?.url ?? '';
   if (!html) return buildMetadataFooter(metadata, url);
@@ -789,7 +797,8 @@ export function htmlToMarkdown(
       html,
       url,
       options?.signal,
-      options?.document
+      options?.document,
+      options?.skipNoiseRemoval
     );
     return appendMetadataFooter(content, metadata, url);
   } catch (error: unknown) {
@@ -1286,6 +1295,7 @@ interface ContentSource {
   readonly title: string | undefined;
   readonly metadata: ReturnType<typeof createContentMetadataBlock>;
   readonly document?: Document;
+  readonly skipNoiseRemoval?: boolean;
 }
 
 /**
@@ -1367,7 +1377,13 @@ function buildContentSource({
 
   // Try content root fallback before using full HTML
   if (document) {
-    const contentRoot = findContentRoot(document);
+    // Apply noise removal to HTML first (without passing document) to get cleaned HTML,
+    // then parse and find content root. This prevents the aggressive DOM stripping that
+    // happens when noise removal is given the original parsed document.
+    const cleanedHtml = removeNoiseFromHtml(html, undefined, url);
+    const { document: cleanedDoc } = parseHTML(cleanedHtml);
+
+    const contentRoot = findContentRoot(cleanedDoc);
     if (contentRoot) {
       logDebug('Using content root fallback instead of full HTML', {
         url: url.substring(0, 80),
@@ -1377,7 +1393,8 @@ function buildContentSource({
         sourceHtml: contentRoot,
         title: extractedMeta.title,
         metadata,
-        document,
+        // Skip noise removal - this HTML is already from a cleaned document
+        skipNoiseRemoval: true,
       };
     }
   }
@@ -1533,6 +1550,7 @@ function buildMarkdownFromContext(
       url,
       ...(signal ? { signal } : {}),
       ...(context.document ? { document: context.document } : {}),
+      ...(context.skipNoiseRemoval ? { skipNoiseRemoval: true } : {}),
     })
   );
   return {
@@ -1688,6 +1706,13 @@ class WorkerPool implements TransformWorkerPool {
   private readonly queueMax: number;
   private closed = false;
 
+  private createAbortError(url: string, stage: string): FetchError {
+    return new FetchError('Request was canceled', url, 499, {
+      reason: 'aborted',
+      stage,
+    });
+  }
+
   private ensureOpen(): void {
     if (this.closed) {
       throw new Error('Transform worker pool closed');
@@ -1700,10 +1725,7 @@ class WorkerPool implements TransformWorkerPool {
     stage: string
   ): void {
     if (!signal?.aborted) return;
-    throw new FetchError('Request was canceled', url, 499, {
-      reason: 'aborted',
-      stage,
-    });
+    throw this.createAbortError(url, stage);
   }
 
   private ensureQueueCapacity(url: string): void {
@@ -1776,13 +1798,7 @@ class WorkerPool implements TransformWorkerPool {
   ): void {
     const slot = this.workers[workerIndex];
     this.cancelWorkerTask(slot, id);
-    this.failTask(
-      id,
-      new FetchError('Request was canceled', url, 499, {
-        reason: 'aborted',
-        stage: 'transform:signal-abort',
-      })
-    );
+    this.failTask(id, this.createAbortError(url, 'transform:signal-abort'));
     if (slot) {
       this.restartWorker(workerIndex, slot);
     }
@@ -1796,12 +1812,7 @@ class WorkerPool implements TransformWorkerPool {
     const queuedIndex = this.queue.findIndex((task) => task.id === id);
     if (queuedIndex === -1) return;
     this.queue.splice(queuedIndex, 1);
-    reject(
-      new FetchError('Request was canceled', url, 499, {
-        reason: 'aborted',
-        stage: 'transform:queued-abort',
-      })
-    );
+    reject(this.createAbortError(url, 'transform:queued-abort'));
   }
 
   private createWorkerSlot(worker: Worker): WorkerSlot {
@@ -2029,12 +2040,7 @@ class WorkerPool implements TransformWorkerPool {
   private rejectIfAborted(task: PendingTask): boolean {
     if (!task.signal?.aborted) return false;
     this.clearAbortListener(task.signal, task.abortListener);
-    task.reject(
-      new FetchError('Request was canceled', task.url, 499, {
-        reason: 'aborted',
-        stage: 'transform:dispatch',
-      })
-    );
+    task.reject(this.createAbortError(task.url, 'transform:dispatch'));
     return true;
   }
 
