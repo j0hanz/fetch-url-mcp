@@ -44,6 +44,7 @@
 - Do not edit `package-lock.json` manually.
 - Do not bypass the build step when running tests; tests run against `dist/` artifacts.
 - Do not commit secrets.
+- Do not disable or bypass existing ESLint/TypeScript rules without explicit approval.
 
 ## 6) Testing Strategy (Verified)
 
