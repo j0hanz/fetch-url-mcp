@@ -101,16 +101,14 @@ describe('executeFetchPipeline', () => {
     );
   });
 
-  it('bypasses cache when cacheVary exceeds safety limits', async () => {
+  it('caches even when cacheVary is large', async () => {
     const url = buildTestUrl();
     const normalizedUrl = normalizeUrl(url).normalizedUrl;
     const cacheNamespace = 'pipeline-test-large-vary';
     const cacheVary = 'x'.repeat(10_000);
 
-    assert.equal(
-      createCacheKey(cacheNamespace, normalizedUrl, cacheVary),
-      null
-    );
+    const cacheKey = createCacheKey(cacheNamespace, normalizedUrl, cacheVary);
+    assert.ok(cacheKey);
 
     let transformCalls = 0;
 
@@ -123,6 +121,8 @@ describe('executeFetchPipeline', () => {
           url,
           cacheNamespace,
           cacheVary,
+          deserialize: deserializePayload,
+          serialize: serializePayload,
           transform: async (html) => {
             transformCalls += 1;
             return createCachedPayload(`fresh:${html}`);
@@ -133,6 +133,8 @@ describe('executeFetchPipeline', () => {
           url,
           cacheNamespace,
           cacheVary,
+          deserialize: deserializePayload,
+          serialize: serializePayload,
           transform: async (html) => {
             transformCalls += 1;
             return createCachedPayload(`fresh:${html}`);
@@ -140,12 +142,12 @@ describe('executeFetchPipeline', () => {
         });
 
         assert.equal(first.fromCache, false);
-        assert.equal(second.fromCache, false);
-        assert.equal(first.cacheKey, null);
-        assert.equal(second.cacheKey, null);
+        assert.equal(second.fromCache, true);
+        assert.equal(first.cacheKey, cacheKey);
+        assert.equal(second.cacheKey, cacheKey);
         assert.equal(first.url, normalizedUrl);
         assert.equal(second.url, normalizedUrl);
-        assert.equal(transformCalls, 2);
+        assert.equal(transformCalls, 1);
       }
     );
   });

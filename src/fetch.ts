@@ -298,13 +298,15 @@ const TRANSFORM_RULES: readonly TransformRule[] = [
   BITBUCKET_SRC_RULE,
 ];
 
+const BITBUCKET_RAW_RE = /bitbucket\.org\/[^/]+\/[^/]+\/raw\//;
+
 function isRawUrl(url: string): boolean {
   const lowerUrl = url.toLowerCase();
   return (
     lowerUrl.includes('raw.githubusercontent.com') ||
     lowerUrl.includes('gist.githubusercontent.com') ||
     lowerUrl.includes('/-/raw/') ||
-    /bitbucket\.org\/[^/]+\/[^/]+\/raw\//.test(lowerUrl)
+    BITBUCKET_RAW_RE.test(lowerUrl)
   );
 }
 

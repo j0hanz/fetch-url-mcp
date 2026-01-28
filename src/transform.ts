@@ -290,15 +290,14 @@ function extractArticle(document: unknown): ExtractedArticle | null {
   }
 
   try {
-    const documentClone = document.cloneNode(true) as Document;
+    const doc = document;
     const rawText =
-      documentClone.querySelector('body')?.textContent ??
-      documentClone.documentElement.textContent;
+      doc.querySelector('body')?.textContent ?? doc.documentElement.textContent;
     const textLength = rawText.replace(/\s+/g, ' ').trim().length;
-    if (textLength >= 400 && !isProbablyReaderable(documentClone)) {
+    if (textLength >= 400 && !isProbablyReaderable(doc)) {
       return null;
     }
-    const reader = new Readability(documentClone, { maxElemsToParse: 20_000 });
+    const reader = new Readability(doc, { maxElemsToParse: 20_000 });
     const parsed = reader.parse();
     if (!parsed) return null;
 

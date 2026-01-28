@@ -1,6 +1,6 @@
-import { setInterval as setIntervalPromise } from 'node:timers/promises';
-
 import type { Express, Request, Response } from 'express';
+import stringify from 'fast-json-stable-stringify';
+import { LRUCache } from 'lru-cache';
 
 import { ResourceTemplate } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
@@ -79,161 +79,12 @@ const CACHE_HASH = {
   VARY_HASH_LENGTH: 12,
 };
 
-const CACHE_VARY_LIMITS = {
-  MAX_STRING_LENGTH: 4096,
-  MAX_KEYS: 64,
-  MAX_ARRAY_LENGTH: 64,
-  MAX_DEPTH: 6,
-  MAX_NODES: 512,
-};
-
-interface StableStringifyState {
-  depth: number;
-  nodes: number;
-  readonly stack: WeakSet<object>;
-}
-
-function bumpStableStringifyNodeCount(state: StableStringifyState): boolean {
-  state.nodes += 1;
-  return state.nodes <= CACHE_VARY_LIMITS.MAX_NODES;
-}
-
-function stableStringifyPrimitive(value: unknown): string {
-  if (value === null || value === undefined) {
-    return '';
-  }
-  const json = JSON.stringify(value);
-  return typeof json === 'string' ? json : '';
-}
-
-function stableStringifyArray(
-  value: unknown[],
-  state: StableStringifyState
-): string | null {
-  if (value.length > CACHE_VARY_LIMITS.MAX_ARRAY_LENGTH) {
-    return null;
-  }
-
-  const parts: string[] = ['['];
-  let length = 1;
-
-  for (let index = 0; index < value.length; index += 1) {
-    if (index > 0) {
-      parts.push(',');
-      length += 1;
-      if (length > CACHE_VARY_LIMITS.MAX_STRING_LENGTH) return null;
-    }
-
-    const entry = stableStringifyInner(value[index], state);
-    if (entry === null) return null;
-
-    parts.push(entry);
-    length += entry.length;
-    if (length > CACHE_VARY_LIMITS.MAX_STRING_LENGTH) return null;
-  }
-
-  parts.push(']');
-  length += 1;
-
-  return length > CACHE_VARY_LIMITS.MAX_STRING_LENGTH ? null : parts.join('');
-}
-
-function stableStringifyRecord(
-  value: Record<string, unknown>,
-  state: StableStringifyState
-): string | null {
-  const keys = Object.keys(value);
-  if (keys.length > CACHE_VARY_LIMITS.MAX_KEYS) {
-    return null;
-  }
-
-  keys.sort((a, b) => a.localeCompare(b));
-
-  const parts: string[] = ['{'];
-  let length = 1;
-  let isFirst = true;
-
-  for (const key of keys) {
-    const entryValue = value[key];
-    if (entryValue === undefined) continue;
-
-    const encodedValue = stableStringifyInner(entryValue, state);
-    if (encodedValue === null) return null;
-
-    const entry = `${JSON.stringify(key)}:${encodedValue}`;
-
-    if (!isFirst) {
-      parts.push(',');
-      length += 1;
-      if (length > CACHE_VARY_LIMITS.MAX_STRING_LENGTH) return null;
-    }
-
-    parts.push(entry);
-    length += entry.length;
-    if (length > CACHE_VARY_LIMITS.MAX_STRING_LENGTH) return null;
-
-    isFirst = false;
-  }
-
-  parts.push('}');
-  length += 1;
-
-  return length > CACHE_VARY_LIMITS.MAX_STRING_LENGTH ? null : parts.join('');
-}
-
-function stableStringifyObject(
-  value: object,
-  state: StableStringifyState
-): string | null {
-  if (state.stack.has(value)) {
-    return null;
-  }
-
-  if (state.depth >= CACHE_VARY_LIMITS.MAX_DEPTH) {
-    return null;
-  }
-
-  state.stack.add(value);
-  state.depth += 1;
-  try {
-    if (Array.isArray(value)) {
-      return stableStringifyArray(value, state);
-    }
-
-    return isRecord(value) ? stableStringifyRecord(value, state) : null;
-  } finally {
-    state.depth -= 1;
-    state.stack.delete(value);
-  }
-}
-
-function stableStringifyInner(
-  value: unknown,
-  state: StableStringifyState
-): string | null {
-  if (!bumpStableStringifyNodeCount(state)) {
-    return null;
-  }
-
-  if (value === null || value === undefined) {
-    return 'null';
-  }
-
-  if (typeof value !== 'object') {
-    return stableStringifyPrimitive(value);
-  }
-
-  return stableStringifyObject(value, state);
-}
-
 function stableStringify(value: unknown): string | null {
-  const state: StableStringifyState = {
-    depth: 0,
-    nodes: 0,
-    stack: new WeakSet(),
-  };
-
-  return stableStringifyInner(value, state);
+  try {
+    return stringify(value);
+  } catch {
+    return null;
+  }
 }
 
 function createHashFragment(input: string, length: number): string {
@@ -256,8 +107,7 @@ function getVaryHash(
   if (!vary) return undefined;
   let varyString: string | null;
   if (typeof vary === 'string') {
-    varyString =
-      vary.length > CACHE_VARY_LIMITS.MAX_STRING_LENGTH ? null : vary;
+    varyString = vary;
   } else {
     varyString = stableStringify(vary);
   }
@@ -293,13 +143,11 @@ export function toResourceUri(cacheKey: string): string | null {
   return `superfetch://cache/${parts.namespace}/${parts.urlHash}`;
 }
 
-interface CacheItem {
-  entry: CacheEntry;
-  expiresAt: number;
-}
-const contentCache = new Map<string, CacheItem>();
-let cleanupController: AbortController | null = null;
-let nextExpiryAt: number | null = null;
+const contentCache = new LRUCache<string, CacheEntry>({
+  max: config.cache.maxKeys,
+  ttl: config.cache.ttl * 1000,
+  updateAgeOnGet: false,
+});
 
 interface CacheUpdateEvent {
   cacheKey: string;
@@ -328,46 +176,6 @@ function notifyCacheUpdate(cacheKey: string): void {
   }
 }
 
-function startCleanupLoop(): void {
-  if (cleanupController) return;
-  cleanupController = new AbortController();
-  void runCleanupLoop(cleanupController.signal).catch((error: unknown) => {
-    if (error instanceof Error && error.name !== 'AbortError') {
-      logWarn('Cache cleanup loop failed', { error: getErrorMessage(error) });
-    }
-  });
-}
-
-async function runCleanupLoop(signal: AbortSignal): Promise<void> {
-  const intervalMs = Math.floor(config.cache.ttl * 1000);
-  for await (const getNow of setIntervalPromise(intervalMs, Date.now, {
-    signal,
-    ref: false,
-  })) {
-    enforceCacheLimits(getNow());
-  }
-}
-
-function enforceCacheLimits(now: number): void {
-  if (nextExpiryAt !== null && now < nextExpiryAt) {
-    trimCacheToMaxKeys();
-    return;
-  }
-
-  let nextExpiry: number | null = null;
-  for (const [key, item] of contentCache.entries()) {
-    if (now > item.expiresAt) {
-      contentCache.delete(key);
-      continue;
-    }
-    if (nextExpiry === null || item.expiresAt < nextExpiry) {
-      nextExpiry = item.expiresAt;
-    }
-  }
-  nextExpiryAt = nextExpiry;
-  trimCacheToMaxKeys();
-}
-
 interface CacheEntryMetadata {
   url: string;
   title?: string;
@@ -376,7 +184,7 @@ interface CacheEntryMetadata {
 export function get(cacheKey: string | null): CacheEntry | undefined {
   if (!isCacheReadable(cacheKey)) return undefined;
   return runCacheOperation(cacheKey, 'Cache get error', () =>
-    readCacheEntry(cacheKey)
+    contentCache.get(cacheKey)
   );
 }
 
@@ -404,27 +212,6 @@ function runCacheOperation<T>(
   }
 }
 
-function readCacheEntry(cacheKey: string): CacheEntry | undefined {
-  const now = Date.now();
-  return readCacheItem(cacheKey, now)?.entry;
-}
-
-function isExpired(item: CacheItem, now: number): boolean {
-  return now > item.expiresAt;
-}
-
-function readCacheItem(cacheKey: string, now: number): CacheItem | undefined {
-  const item = contentCache.get(cacheKey);
-  if (!item) return undefined;
-
-  if (isExpired(item, now)) {
-    contentCache.delete(cacheKey);
-    return undefined;
-  }
-
-  return item;
-}
-
 export function set(
   cacheKey: string | null,
   content: string,
@@ -432,7 +219,6 @@ export function set(
 ): void {
   if (!isCacheWritable(cacheKey, content)) return;
   runCacheOperation(cacheKey, 'Cache set error', () => {
-    startCleanupLoop();
     const now = Date.now();
     const expiresAtMs = now + config.cache.ttl * 1000;
     const entry = buildCacheEntry({
@@ -441,7 +227,7 @@ export function set(
       fetchedAtMs: now,
       expiresAtMs,
     });
-    persistCacheEntry(cacheKey, entry, expiresAtMs);
+    persistCacheEntry(cacheKey, entry);
   });
 }
 
@@ -473,36 +259,9 @@ function buildCacheEntry({
   };
 }
 
-function persistCacheEntry(
-  cacheKey: string,
-  entry: CacheEntry,
-  expiresAtMs: number
-): void {
-  contentCache.set(cacheKey, { entry, expiresAt: expiresAtMs });
-  if (nextExpiryAt === null || expiresAtMs < nextExpiryAt) {
-    nextExpiryAt = expiresAtMs;
-  }
-  trimCacheToMaxKeys();
+function persistCacheEntry(cacheKey: string, entry: CacheEntry): void {
+  contentCache.set(cacheKey, entry);
   notifyCacheUpdate(cacheKey);
-}
-
-function trimCacheToMaxKeys(): void {
-  if (contentCache.size <= config.cache.maxKeys) return;
-  removeOldestEntries(contentCache.size - config.cache.maxKeys);
-}
-
-function removeOldestEntries(count: number): void {
-  const iterator = contentCache.keys();
-  for (let removed = 0; removed < count; removed += 1) {
-    const next = iterator.next();
-    if (next.done) break;
-    const removedKey = next.value;
-    const removedItem = contentCache.get(removedKey);
-    contentCache.delete(removedKey);
-    if (nextExpiryAt !== null && removedItem?.expiresAt === nextExpiryAt) {
-      nextExpiryAt = null;
-    }
-  }
 }
 
 function logCacheError(

@@ -1,8 +1,9 @@
 import { parentPort } from 'node:worker_threads';
 
+import { z } from 'zod';
+
 import { FetchError, getErrorMessage } from '../errors.js';
 import { transformHtmlToMarkdownInProcess } from '../transform.js';
-import { isRecord } from '../type-guards.js';
 
 interface TransformMessage {
   type: 'transform';
@@ -100,28 +101,35 @@ if (!parentPort) {
   throw new Error('transform-worker started without parentPort');
 }
 
+const TransformMessageSchema = z.object({
+  type: z.literal('transform'),
+  id: z.string(),
+  html: z.string(),
+  url: z.string(),
+  includeMetadata: z.boolean(),
+});
+
+const CancelMessageSchema = z.object({
+  type: z.literal('cancel'),
+  id: z.string(),
+});
+
+const IncomingMessageSchema = z.discriminatedUnion('type', [
+  TransformMessageSchema,
+  CancelMessageSchema,
+]);
+
 parentPort.on('message', (raw: unknown) => {
-  if (!isRecord(raw)) return;
+  const result = IncomingMessageSchema.safeParse(raw);
+  if (!result.success) return;
 
-  const { type } = raw;
+  const message = result.data;
 
-  if (type === 'cancel') {
-    if (typeof raw.id !== 'string') return;
-    handleCancel({ type: 'cancel', id: raw.id });
+  if (message.type === 'cancel') {
+    handleCancel(message);
     return;
   }
 
-  if (type === 'transform') {
-    if (typeof raw.id !== 'string') return;
-    if (typeof raw.html !== 'string') return;
-    if (typeof raw.url !== 'string') return;
-    if (typeof raw.includeMetadata !== 'boolean') return;
-    handleTransform({
-      type: 'transform',
-      id: raw.id,
-      html: raw.html,
-      url: raw.url,
-      includeMetadata: raw.includeMetadata,
-    });
-  }
+  // message is discriminated union, so type is narrowed to 'transform'
+  handleTransform(message);
 });
