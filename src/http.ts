@@ -39,6 +39,7 @@ import {
   logError,
   logInfo,
   logWarn,
+  redactHeaders,
   runWithRequestContext,
 } from './observability.js';
 import { shutdownTransformWorkerPool } from './transform.js';
@@ -2197,13 +2198,15 @@ function ensureRequestHasId(body: McpRequestBody, res: Response): boolean {
 function logPostRequest(
   body: McpRequestBody,
   sessionId: string | undefined,
-  options: McpSessionOptions
+  options: McpSessionOptions,
+  req: Request
 ): void {
   logInfo('[MCP POST]', {
     method: body.method,
     id: body.id,
     isInitialize: body.method === 'initialize',
     sessionCount: options.sessionStore.size(),
+    headers: redactHeaders(req.headers),
   });
 }
 
@@ -2389,7 +2392,7 @@ async function handlePost(
   if (!payload) return;
   if (!ensureRequestHasId(payload, res)) return;
 
-  logPostRequest(payload, sessionId, options);
+  logPostRequest(payload, sessionId, options, req);
 
   const transport = await resolveTransportForPost({
     res,

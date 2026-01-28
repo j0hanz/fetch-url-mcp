@@ -102,3 +102,17 @@ export function redactUrl(rawUrl: string): string {
     return rawUrl;
   }
 }
+
+export function redactHeaders(
+  headers: Record<string, unknown>
+): Record<string, unknown> {
+  const redacted = { ...headers };
+  const sensitiveKeys = ['authorization', 'cookie', 'set-cookie', 'x-api-key'];
+
+  for (const key of Object.keys(redacted)) {
+    if (sensitiveKeys.includes(key.toLowerCase())) {
+      redacted[key] = '[REDACTED]';
+    }
+  }
+  return redacted;
+}
