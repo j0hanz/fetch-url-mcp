@@ -46,7 +46,7 @@ import type {
   TransformStageContext,
   TransformStageEvent,
 } from './transform-types.js';
-import { isRecord } from './type-guards.js';
+import { isObject } from './type-guards.js';
 
 // Re-export language detection for backward compatibility
 export {
@@ -76,11 +76,12 @@ export type {
 } from './transform-types.js';
 
 interface ExtractionContext extends ExtractionResult {
-  document?: Document;
+  document: Document;
+  truncated?: boolean;
 }
 
 function getAbortReason(signal: AbortSignal): unknown {
-  if (!isRecord(signal)) return undefined;
+  if (!isObject(signal)) return undefined;
   return 'reason' in signal ? signal.reason : undefined;
 }
 
@@ -311,7 +312,7 @@ function extractMetadata(document: Document): ExtractedMetadata {
 }
 
 function isReadabilityCompatible(doc: unknown): doc is Document {
-  if (!isRecord(doc)) return false;
+  if (!isObject(doc)) return false;
   return hasDocumentElement(doc) && hasQuerySelectors(doc);
 }
 
@@ -378,7 +379,8 @@ function extractContentWithDocument(
   options: { extractArticle?: boolean; signal?: AbortSignal }
 ): ExtractionContext {
   if (!isValidInput(html, url)) {
-    return { article: null, metadata: {} };
+    const { document } = parseHTML('<html></html>');
+    return { article: null, metadata: {}, document };
   }
 
   return tryExtractContent(html, url, options);
@@ -408,7 +410,8 @@ function handleExtractionFailure(
     'Failed to extract content',
     error instanceof Error ? error : undefined
   );
-  return { article: null, metadata: {} };
+  const { document } = parseHTML('<html></html>');
+  return { article: null, metadata: {}, document };
 }
 
 function extractContentStages(
@@ -436,7 +439,8 @@ function extractContentStages(
   return {
     article,
     metadata,
-    ...(truncatedHtml.length === html.length ? { document } : {}),
+    document,
+    ...(truncatedHtml.length !== html.length ? { truncated: true } : {}),
   };
 }
 
@@ -535,7 +539,7 @@ function deriveAltFromImageUrl(src: string): string {
 function isCodeBlock(
   parent: unknown
 ): parent is { tagName?: string; childNodes?: unknown[] } {
-  if (!isRecord(parent)) return false;
+  if (!isObject(parent)) return false;
   const tagName =
     typeof parent.tagName === 'string' ? parent.tagName.toUpperCase() : '';
   return ['PRE', 'WRAPPED-PRE'].includes(tagName);
@@ -544,13 +548,13 @@ function isCodeBlock(
 function hasGetAttribute(
   value: unknown
 ): value is { getAttribute: (name: string) => string | null } {
-  return isRecord(value) && typeof value.getAttribute === 'function';
+  return isObject(value) && typeof value.getAttribute === 'function';
 }
 
 function hasCodeBlockTranslators(
   value: unknown
 ): value is { codeBlockTranslators: TranslatorCollection } {
-  return isRecord(value) && isRecord(value.codeBlockTranslators);
+  return isObject(value) && isObject(value.codeBlockTranslators);
 }
 
 function buildInlineCodeTranslator(): TranslatorConfig {
@@ -573,7 +577,7 @@ function resolveAttributeLanguage(node: unknown): string | undefined {
 function resolveCodeBlockTranslators(
   visitor: unknown
 ): TranslatorCollection | null {
-  const childTranslators = isRecord(visitor) ? visitor.instance : null;
+  const childTranslators = isObject(visitor) ? visitor.instance : null;
   return hasCodeBlockTranslators(childTranslators)
     ? childTranslators.codeBlockTranslators
     : null;
@@ -598,7 +602,7 @@ function buildCodeBlockTranslator(
 }
 
 function buildCodeTranslator(ctx: unknown): TranslatorConfig {
-  if (!isRecord(ctx)) return buildInlineCodeTranslator();
+  if (!isObject(ctx)) return buildInlineCodeTranslator();
 
   const { node, parent, visitor } = ctx;
   if (!isCodeBlock(parent)) return buildInlineCodeTranslator();
@@ -609,7 +613,7 @@ function buildCodeTranslator(ctx: unknown): TranslatorConfig {
 }
 
 function buildImageTranslator(ctx: unknown): TranslatorConfig {
-  if (!isRecord(ctx)) return { content: '' };
+  if (!isObject(ctx)) return { content: '' };
 
   const { node } = ctx;
   const getAttribute = hasGetAttribute(node)
@@ -631,12 +635,12 @@ function buildImageTranslator(ctx: unknown): TranslatorConfig {
  * If so, let the code translator handle it.
  */
 function preHasCodeChild(node: unknown): boolean {
-  if (!isRecord(node)) return false;
+  if (!isObject(node)) return false;
   const { childNodes } = node;
   if (!Array.isArray(childNodes)) return false;
 
   for (const child of childNodes) {
-    if (!isRecord(child)) continue;
+    if (!isObject(child)) continue;
     const nodeName =
       typeof child.nodeName === 'string' ? child.nodeName.toUpperCase() : '';
     if (nodeName === 'CODE') return true;
@@ -649,7 +653,7 @@ function preHasCodeChild(node: unknown): boolean {
  * Wraps content in fenced code block with language detection.
  */
 function buildPreTranslator(ctx: unknown): TranslatorConfig {
-  if (!isRecord(ctx)) return {};
+  if (!isObject(ctx)) return {};
 
   const { node } = ctx;
 
@@ -679,7 +683,7 @@ function createCustomTranslators(): TranslatorConfigObject {
     code: (ctx: unknown) => buildCodeTranslator(ctx),
     img: (ctx: unknown) => buildImageTranslator(ctx),
     dl: (ctx: unknown) => {
-      if (!isRecord(ctx) || !isRecord(ctx.node)) {
+      if (!isObject(ctx) || !isObject(ctx.node)) {
         return { content: '' };
       }
       const node = ctx.node as { childNodes?: unknown[] };
@@ -687,7 +691,7 @@ function createCustomTranslators(): TranslatorConfigObject {
 
       const items = childNodes
         .map((child: unknown) => {
-          if (!isRecord(child)) return '';
+          if (!isObject(child)) return '';
 
           const nodeName =
             typeof child.nodeName === 'string'
@@ -1487,13 +1491,14 @@ function resolveContentSource({
     article,
     metadata: extractedMeta,
     document,
+    truncated,
   } = extractContentWithDocument(html, url, {
     extractArticle: true,
     ...(signal ? { signal } : {}),
   });
 
-  // Parse original HTML for quality gate checks if extraction didn't provide document
-  const originalDocument = document ?? parseHTML(html).document;
+  // When extraction used truncated HTML, parse full HTML for quality gates
+  const originalDocument = truncated ? parseHTML(html).document : document;
 
   const useArticleContent = article
     ? shouldUseArticleContent(article, originalDocument, url)
@@ -1506,7 +1511,7 @@ function resolveContentSource({
     extractedMeta,
     includeMetadata,
     useArticleContent,
-    ...(document ? { document } : {}),
+    document,
   });
 }
 

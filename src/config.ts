@@ -396,6 +396,12 @@ export const config = {
       /^::ffff:192\.168\./,
       /^::ffff:169\.254\./,
     ] as const,
+    // Combined regex patterns for fast IP blocking (used in fetch.ts)
+    // Split into two patterns to reduce complexity while maintaining performance
+    blockedIpPattern:
+      /^(?:10\.|172\.(?:1[6-9]|2\d|3[01])\.|192\.168\.|127\.|0\.|169\.254\.|100\.64\.|fc00:|fd00:|fe80:)/i,
+    blockedIpv4MappedPattern:
+      /^::ffff:(?:127\.|10\.|172\.(?:1[6-9]|2\d|3[01])\.|192\.168\.|169\.254\.)/i,
     allowedHosts: parseAllowedHosts(process.env.ALLOWED_HOSTS),
     apiKey: process.env.API_KEY,
     allowRemote,

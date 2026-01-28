@@ -18,7 +18,7 @@ import {
   logWarn,
   redactUrl,
 } from './observability.js';
-import { isRecord } from './type-guards.js';
+import { isObject } from './type-guards.js';
 
 export interface FetchOptions {
   signal?: AbortSignal;
@@ -33,8 +33,6 @@ function buildIpv4(parts: readonly [number, number, number, number]): string {
 function buildIpv6(parts: readonly IpSegment[]): string {
   return parts.map(String).join(':');
 }
-
-const BLOCK_LIST = new BlockList();
 
 const IPV6_ZERO = buildIpv6([0, 0, 0, 0, 0, 0, 0, 0]);
 const IPV6_LOOPBACK = buildIpv6([0, 0, 0, 0, 0, 0, 0, 1]);
@@ -75,16 +73,25 @@ const BLOCKED_IPV6_SUBNETS: readonly {
   { subnet: IPV6_FF00, prefix: 8 },
 ];
 
-for (const entry of BLOCKED_IPV4_SUBNETS) {
-  BLOCK_LIST.addSubnet(entry.subnet, entry.prefix, 'ipv4');
-}
-for (const entry of BLOCKED_IPV6_SUBNETS) {
-  BLOCK_LIST.addSubnet(entry.subnet, entry.prefix, 'ipv6');
+let cachedBlockList: BlockList | undefined;
+
+function getBlockList(): BlockList {
+  if (!cachedBlockList) {
+    cachedBlockList = new BlockList();
+    for (const entry of BLOCKED_IPV4_SUBNETS) {
+      cachedBlockList.addSubnet(entry.subnet, entry.prefix, 'ipv4');
+    }
+    for (const entry of BLOCKED_IPV6_SUBNETS) {
+      cachedBlockList.addSubnet(entry.subnet, entry.prefix, 'ipv6');
+    }
+  }
+  return cachedBlockList;
 }
 
 function matchesBlockedIpPatterns(resolvedIp: string): boolean {
-  return config.security.blockedIpPatterns.some((pattern) =>
-    pattern.test(resolvedIp)
+  return (
+    config.security.blockedIpPattern.test(resolvedIp) ||
+    config.security.blockedIpv4MappedPattern.test(resolvedIp)
   );
 }
 
@@ -105,10 +112,11 @@ function resolveIpType(ip: string): 4 | 6 | null {
 }
 
 function isBlockedByList(ip: string, ipType: 4 | 6): boolean {
+  const blockList = getBlockList();
   if (ipType === 4) {
-    return BLOCK_LIST.check(ip, 'ipv4');
+    return blockList.check(ip, 'ipv4');
   }
-  return BLOCK_LIST.check(ip, 'ipv6');
+  return blockList.check(ip, 'ipv6');
 }
 
 export function normalizeUrl(urlString: string): {
@@ -621,7 +629,7 @@ function resolveResultOrder(
 }
 
 function getLegacyVerbatim(options: dns.LookupOptions): boolean | undefined {
-  if (isRecord(options)) {
+  if (isObject(options)) {
     const { verbatim } = options;
     return typeof verbatim === 'boolean' ? verbatim : undefined;
   }
@@ -802,7 +810,7 @@ function getRequestUrl(record: Record<string, unknown>): string | null {
 
 function resolveErrorUrl(error: unknown, fallback: string): string {
   if (error instanceof FetchError) return error.url;
-  if (!isRecord(error)) return fallback;
+  if (!isObject(error)) return fallback;
   const requestUrl = getRequestUrl(error);
   if (requestUrl) return requestUrl;
   return fallback;
@@ -1126,7 +1134,7 @@ function getRedirectLocation(response: Response, currentUrl: string): string {
 }
 
 function annotateRedirectError(error: unknown, url: string): void {
-  if (!isRecord(error)) return;
+  if (!isObject(error)) return;
   error.requestUrl = url;
 }
 

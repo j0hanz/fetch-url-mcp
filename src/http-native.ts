@@ -36,7 +36,7 @@ import {
 } from './http-utils.js';
 import { createMcpServer } from './mcp.js';
 import { logError, logInfo, logWarn } from './observability.js';
-import { isRecord } from './type-guards.js';
+import { isObject } from './type-guards.js';
 
 // --- Shim Types ---
 
@@ -363,7 +363,7 @@ async function verifyWithIntrospection(token: string): Promise<AuthInfo> {
     req,
     config.auth.introspectionTimeoutMs
   );
-  if (!isRecord(payload) || payload.active !== true)
+  if (!isObject(payload) || payload.active !== true)
     throw new InvalidTokenError('Token is inactive');
   return buildIntrospectionAuthInfo(token, payload);
 }

@@ -16,7 +16,7 @@ import { sha256Hex } from './crypto.js';
 import { getErrorMessage } from './errors.js';
 import { stableStringify as stableJsonStringify } from './json.js';
 import { logDebug, logWarn } from './observability.js';
-import { isRecord } from './type-guards.js';
+import { isObject } from './type-guards.js';
 
 export interface CacheEntry {
   url: string;
@@ -63,7 +63,7 @@ function hasOptionalStringProperty(
 }
 
 function isCachedPayload(value: unknown): value is CachedPayload {
-  if (!isRecord(value)) return false;
+  if (!isObject(value)) return false;
   if (!hasOptionalStringProperty(value, 'content')) return false;
   if (!hasOptionalStringProperty(value, 'markdown')) return false;
   if (!hasOptionalStringProperty(value, 'title')) return false;
@@ -304,7 +304,7 @@ function resolveCacheParams(params: unknown): {
 }
 
 function requireRecordParams(value: unknown): Record<string, unknown> {
-  if (!isRecord(value)) {
+  if (!isObject(value)) {
     throwInvalidCacheParams();
   }
   return value;
@@ -411,12 +411,12 @@ function getClientResourceCapabilities(server: McpServer): {
   subscribe: boolean;
 } {
   const caps = server.server.getClientCapabilities();
-  if (!caps || !isRecord(caps)) {
+  if (!caps || !isObject(caps)) {
     return { listChanged: false, subscribe: false };
   }
 
   const { resources } = caps as { resources?: unknown };
-  if (!isRecord(resources)) {
+  if (!isObject(resources)) {
     return { listChanged: false, subscribe: false };
   }
 

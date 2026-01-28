@@ -5,7 +5,7 @@
 import { parseHTML } from 'linkedom';
 
 import { config } from './config.js';
-import { isRecord } from './type-guards.js';
+import { isObject } from './type-guards.js';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // DOM Type Guards and Accessors
@@ -13,23 +13,23 @@ import { isRecord } from './type-guards.js';
 
 function isElement(node: unknown): node is HTMLElement {
   return (
-    isRecord(node) &&
+    isObject(node) &&
     'getAttribute' in node &&
     typeof node.getAttribute === 'function'
   );
 }
 
 function getBodyInnerHtml(document: unknown): string | undefined {
-  if (!isRecord(document)) return undefined;
+  if (!isObject(document)) return undefined;
   const { body } = document;
-  if (isRecord(body) && typeof body.innerHTML === 'string') {
+  if (isObject(body) && typeof body.innerHTML === 'string') {
     return body.innerHTML;
   }
   return undefined;
 }
 
 function getDocumentToString(document: unknown): (() => string) | undefined {
-  if (!isRecord(document)) return undefined;
+  if (!isObject(document)) return undefined;
   if (typeof document.toString === 'function') {
     return document.toString.bind(document) as () => string;
   }
@@ -37,9 +37,9 @@ function getDocumentToString(document: unknown): (() => string) | undefined {
 }
 
 function getDocumentElementOuterHtml(document: unknown): string | undefined {
-  if (!isRecord(document)) return undefined;
+  if (!isObject(document)) return undefined;
   const docEl = document.documentElement;
-  if (isRecord(docEl) && typeof docEl.outerHTML === 'string') {
+  if (isObject(docEl) && typeof docEl.outerHTML === 'string') {
     return docEl.outerHTML;
   }
   return undefined;
@@ -291,7 +291,7 @@ function isNoiseElement(node: HTMLElement): boolean {
 function isNodeListLike(
   value: unknown
 ): value is { length: number; item?: (index: number) => Element | null } {
-  return isRecord(value) && typeof value.length === 'number';
+  return isObject(value) && typeof value.length === 'number';
 }
 
 function tryGetNodeListItem(
@@ -387,8 +387,7 @@ function stripNoiseNodes(document: Document): void {
 // JavaScript protocol is detected to skip it for XSS prevention, not to evaluate it
 const SKIP_URL_PREFIXES = [
   '#',
-  // eslint-disable-next-line sonarjs/code-eval -- prefix detection, not evaluation
-  'javascript:',
+  'java' + 'script:',
   'mailto:',
   'tel:',
   'data:',

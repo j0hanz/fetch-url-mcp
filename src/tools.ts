@@ -24,7 +24,7 @@ import {
   type MarkdownTransformResult,
   transformHtmlToMarkdown,
 } from './transform.js';
-import { isRecord } from './type-guards.js';
+import { isObject } from './type-guards.js';
 
 export interface FetchUrlInput {
   url: string;
@@ -496,7 +496,7 @@ function persistCache<T>({
 }
 
 function extractTitle(value: unknown): string | undefined {
-  if (!isRecord(value)) return undefined;
+  if (!isObject(value)) return undefined;
   const { title } = value;
   return typeof title === 'string' ? title : undefined;
 }
@@ -633,7 +633,7 @@ type ToolContentBlocks = ReturnType<typeof buildToolContentBlocks>;
 function parseJsonRecord(input: string): Record<string, unknown> | undefined {
   try {
     const parsed: unknown = JSON.parse(input);
-    return isRecord(parsed) ? parsed : undefined;
+    return isObject(parsed) ? parsed : undefined;
   } catch {
     return undefined;
   }
@@ -865,7 +865,7 @@ export function withRequestContextIfMissing<TParams, TResult, TExtra = unknown>(
 }
 
 function resolveRequestIdFromExtra(extra: unknown): string | undefined {
-  if (!isRecord(extra)) return undefined;
+  if (!isObject(extra)) return undefined;
   const { requestId } = extra;
   if (typeof requestId === 'string') return requestId;
   if (typeof requestId === 'number') return String(requestId);
