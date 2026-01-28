@@ -76,8 +76,8 @@ export interface CacheKeyParts {
 }
 
 const CACHE_HASH = {
-  URL_HASH_LENGTH: 16,
-  VARY_HASH_LENGTH: 12,
+  URL_HASH_LENGTH: 32,
+  VARY_HASH_LENGTH: 16,
 };
 
 function stableStringify(value: unknown): string | null {

@@ -416,6 +416,7 @@ function hasKnownRawTextExtension(urlBaseLower: string): boolean {
 }
 
 const DNS_LOOKUP_TIMEOUT_MS = 5000;
+const SLOW_REQUEST_THRESHOLD_MS = 5000;
 
 function normalizeLookupResults(
   addresses: string | dns.LookupAddress[],
@@ -934,7 +935,7 @@ function logSlowRequest(
   durationLabel: string,
   contextFields: Partial<FetchContextFields>
 ): void {
-  if (duration <= 5000) return;
+  if (duration <= SLOW_REQUEST_THRESHOLD_MS) return;
   logWarn('Slow HTTP request detected', {
     requestId: context.requestId,
     url: context.url,
