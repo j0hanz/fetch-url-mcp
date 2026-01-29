@@ -1722,10 +1722,7 @@ interface TransformWorkerPool {
 let pool: WorkerPool | null = null;
 
 function resolveDefaultWorkerCount(): number {
-  const parallelism =
-    typeof os.availableParallelism === 'function'
-      ? os.availableParallelism()
-      : os.cpus().length;
+  const parallelism = os.availableParallelism();
   return Math.min(16, Math.max(1, parallelism - 1));
 }
 
@@ -1743,7 +1740,8 @@ export async function shutdownTransformWorkerPool(): Promise<void> {
 }
 
 class WorkerPool implements TransformWorkerPool {
-  private readonly workers: WorkerSlot[] = [];
+  private readonly workers: (WorkerSlot | undefined)[] = [];
+  private readonly capacity: number;
   private readonly queue: PendingTask[] = [];
   private readonly inflight = new Map<string, InflightTask>();
   private readonly timeoutMs: number;
@@ -1887,12 +1885,9 @@ class WorkerPool implements TransformWorkerPool {
 
   constructor(size: number, timeoutMs: number) {
     const safeSize = Math.max(1, size);
+    this.capacity = safeSize;
     this.timeoutMs = timeoutMs;
-    this.queueMax = safeSize * 2;
-
-    for (let index = 0; index < safeSize; index += 1) {
-      this.workers.push(this.spawnWorker(index));
-    }
+    this.queueMax = safeSize * 4;
   }
 
   private spawnWorker(workerIndex: number): WorkerSlot {
@@ -2046,21 +2041,32 @@ class WorkerPool implements TransformWorkerPool {
   private drainQueue(): void {
     if (this.queue.length === 0) return;
 
+    // First pass: try to find an idle existing worker
     for (
       let workerIndex = 0;
       workerIndex < this.workers.length;
       workerIndex += 1
     ) {
       const slot = this.workers[workerIndex];
-      if (!slot || slot.busy) continue;
-
-      const task = this.queue.shift();
-      if (!task) return;
-
-      this.dispatch(workerIndex, slot, task);
-
-      if (this.queue.length === 0) return;
+      if (slot && !slot.busy) {
+        this.dispatchQueueTask(workerIndex, slot);
+        if (this.queue.length === 0) return;
+      }
     }
+
+    // Second pass: spawn new workers if we have capacity
+    while (this.workers.length < this.capacity && this.queue.length > 0) {
+      const workerIndex = this.workers.length;
+      const slot = this.spawnWorker(workerIndex);
+      this.workers.push(slot);
+      this.dispatchQueueTask(workerIndex, slot);
+    }
+  }
+
+  private dispatchQueueTask(workerIndex: number, slot: WorkerSlot): void {
+    const task = this.queue.shift();
+    if (!task) return;
+    this.dispatch(workerIndex, slot, task);
   }
 
   private dispatch(
@@ -2166,7 +2172,9 @@ class WorkerPool implements TransformWorkerPool {
     if (this.closed) return;
     this.closed = true;
 
-    const terminations = this.workers.map((slot) => slot.worker.terminate());
+    const terminations = this.workers
+      .map((slot) => slot?.worker.terminate())
+      .filter((p): p is Promise<number> => p !== undefined);
     this.workers.length = 0;
 
     for (const [id, inflight] of this.inflight.entries()) {
