@@ -3,56 +3,36 @@ import { parentPort } from 'node:worker_threads';
 import { z } from 'zod';
 
 import { FetchError, getErrorMessage } from '../errors.js';
+import type {
+  TransformWorkerCancelMessage,
+  TransformWorkerErrorMessage,
+  TransformWorkerOutgoingMessage,
+  TransformWorkerTransformMessage,
+} from '../transform-types.js';
 import { transformHtmlToMarkdownInProcess } from '../transform.js';
-
-interface TransformMessage {
-  type: 'transform';
-  id: string;
-  html: string;
-  url: string;
-  includeMetadata: boolean;
-}
-
-interface CancelMessage {
-  type: 'cancel';
-  id: string;
-}
-
-interface WorkerResultMessage {
-  type: 'result';
-  id: string;
-  result: { markdown: string; title?: string; truncated: boolean };
-}
-
-interface WorkerErrorMessage {
-  type: 'error';
-  id: string;
-  error: {
-    name: string;
-    message: string;
-    url: string;
-    statusCode?: number;
-    details?: Record<string, unknown>;
-  };
-}
 
 const controllers = new Map<string, AbortController>();
 
-function post(message: WorkerResultMessage | WorkerErrorMessage): void {
+function post(message: TransformWorkerOutgoingMessage): void {
   parentPort?.postMessage(message);
 }
 
-function postError(id: string, error: WorkerErrorMessage['error']): void {
+function postError(
+  id: string,
+  error: TransformWorkerErrorMessage['error']
+): void {
   post({ type: 'error', id, error });
 }
 
-function validateTransformMessage(message: TransformMessage): string | null {
+function validateTransformMessage(
+  message: TransformWorkerTransformMessage
+): string | null {
   if (!message.id.trim()) return 'Missing transform message id';
   if (!message.url.trim()) return 'Missing transform URL';
   return null;
 }
 
-function handleTransform(message: TransformMessage): void {
+function handleTransform(message: TransformWorkerTransformMessage): void {
   const validationError = validateTransformMessage(message);
   if (validationError) {
     postError(message.id, {
@@ -103,7 +83,7 @@ function handleTransform(message: TransformMessage): void {
   }
 }
 
-function handleCancel(message: CancelMessage): void {
+function handleCancel(message: TransformWorkerCancelMessage): void {
   const controller = controllers.get(message.id);
   if (!controller) return;
   controller.abort(new Error('Canceled'));

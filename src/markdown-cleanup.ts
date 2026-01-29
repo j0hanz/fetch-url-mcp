@@ -1,11 +1,5 @@
-/**
- * Markdown cleanup utilities for post-processing converted content.
- *
- * Goals:
- * - Never mutate fenced code blocks (``` / ~~~) content.
- * - Keep rules localized and readable.
- * - Avoid multi-pass regexes that accidentally hit code blocks.
- */
+import { config } from './config.js';
+import type { MetadataBlock } from './transform-types.js';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Fence state helpers
@@ -239,6 +233,272 @@ export function cleanupMarkdownArtifacts(content: string): string {
     })
     .join('\n')
     .trim();
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Raw markdown handling + metadata footer
+// ─────────────────────────────────────────────────────────────────────────────
+
+const HEADING_PATTERN = /^#{1,6}\s/m;
+const LIST_PATTERN = /^(?:[-*+])\s/m;
+const HTML_DOCUMENT_PATTERN = /^(<!doctype|<html)/i;
+
+function containsMarkdownHeading(content: string): boolean {
+  return HEADING_PATTERN.test(content);
+}
+
+function containsMarkdownList(content: string): boolean {
+  return LIST_PATTERN.test(content);
+}
+
+function containsFencedCodeBlock(content: string): boolean {
+  const first = content.indexOf('```');
+  if (first === -1) return false;
+  return content.includes('```', first + 3);
+}
+
+function looksLikeMarkdown(content: string): boolean {
+  return (
+    containsMarkdownHeading(content) ||
+    containsMarkdownList(content) ||
+    containsFencedCodeBlock(content)
+  );
+}
+
+function detectLineEnding(content: string): '\n' | '\r\n' {
+  return content.includes('\r\n') ? '\r\n' : '\n';
+}
+
+const FRONTMATTER_DELIMITER = '---';
+
+function findFrontmatterLines(content: string): {
+  lineEnding: '\n' | '\r\n';
+  lines: string[];
+  endIndex: number;
+} | null {
+  const lineEnding = detectLineEnding(content);
+  const lines = content.split(lineEnding);
+  if (lines[0] !== FRONTMATTER_DELIMITER) return null;
+  const endIndex = lines.indexOf(FRONTMATTER_DELIMITER, 1);
+  if (endIndex === -1) return null;
+  return { lineEnding, lines, endIndex };
+}
+
+function stripOptionalQuotes(value: string): string {
+  const trimmed = value.trim();
+  if (trimmed.length < 2) return trimmed;
+  const first = trimmed[0];
+  const last = trimmed[trimmed.length - 1];
+  if ((first === '"' && last === '"') || (first === "'" && last === "'")) {
+    return trimmed.slice(1, -1).trim();
+  }
+  return trimmed;
+}
+
+function parseFrontmatterEntry(
+  line: string
+): { key: string; value: string } | null {
+  const trimmed = line.trim();
+  if (!trimmed) return null;
+  const separatorIndex = trimmed.indexOf(':');
+  if (separatorIndex <= 0) return null;
+  const key = trimmed.slice(0, separatorIndex).trim().toLowerCase();
+  const value = trimmed.slice(separatorIndex + 1);
+  return { key, value };
+}
+
+function isTitleKey(key: string): boolean {
+  return key === 'title' || key === 'name';
+}
+
+function extractTitleFromHeading(content: string): string | undefined {
+  const lineEnding = detectLineEnding(content);
+  const lines = content.split(lineEnding);
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+
+    let index = 0;
+    while (index < trimmed.length && trimmed[index] === '#') {
+      index += 1;
+    }
+
+    if (index === 0 || index > 6) return undefined;
+    const nextChar = trimmed[index];
+    if (nextChar !== ' ' && nextChar !== '\t') return undefined;
+
+    const heading = trimmed.slice(index).trim();
+    return heading.length > 0 ? heading : undefined;
+  }
+
+  return undefined;
+}
+
+export function extractTitleFromRawMarkdown(
+  content: string
+): string | undefined {
+  const frontmatter = findFrontmatterLines(content);
+  if (!frontmatter) {
+    return extractTitleFromHeading(content);
+  }
+
+  const { lines, endIndex } = frontmatter;
+  const entry = lines
+    .slice(1, endIndex)
+    .map((line) => parseFrontmatterEntry(line))
+    .find((parsed) => parsed !== null && isTitleKey(parsed.key));
+  if (!entry) return undefined;
+  const value = stripOptionalQuotes(entry.value);
+  return value || undefined;
+}
+
+function hasMarkdownSourceLine(content: string): boolean {
+  const lineEnding = detectLineEnding(content);
+  const lines = content.split(lineEnding);
+
+  const limit = Math.min(lines.length, 50);
+  for (let index = 0; index < limit; index += 1) {
+    const line = lines[index];
+    if (!line) continue;
+    if (line.trimStart().toLowerCase().startsWith('source:')) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function addSourceToMarkdownMarkdownFormat(
+  content: string,
+  url: string
+): string {
+  if (hasMarkdownSourceLine(content)) return content;
+  const lineEnding = detectLineEnding(content);
+  const lines = content.split(lineEnding);
+
+  const firstNonEmptyIndex = lines.findIndex((line) => line.trim().length > 0);
+  if (firstNonEmptyIndex !== -1) {
+    const firstLine = lines[firstNonEmptyIndex];
+    if (firstLine && /^#{1,6}\s+/.test(firstLine.trim())) {
+      const insertAt = firstNonEmptyIndex + 1;
+      const updated = [
+        ...lines.slice(0, insertAt),
+        '',
+        `Source: ${url}`,
+        '',
+        ...lines.slice(insertAt),
+      ];
+      return updated.join(lineEnding);
+    }
+  }
+
+  return [`Source: ${url}`, '', content].join(lineEnding);
+}
+
+export function addSourceToMarkdown(content: string, url: string): string {
+  const frontmatter = findFrontmatterLines(content);
+  if (config.transform.metadataFormat === 'markdown' && !frontmatter) {
+    return addSourceToMarkdownMarkdownFormat(content, url);
+  }
+
+  if (!frontmatter) {
+    return `---\nsource: "${url}"\n---\n\n${content}`;
+  }
+
+  const { lineEnding, lines, endIndex } = frontmatter;
+  const bodyLines = lines.slice(1, endIndex);
+  const hasSource = bodyLines.some((line) =>
+    line.trimStart().toLowerCase().startsWith('source:')
+  );
+  if (hasSource) return content;
+
+  const updatedLines = [
+    lines[0],
+    ...bodyLines,
+    `source: "${url}"`,
+    ...lines.slice(endIndex),
+  ];
+
+  return updatedLines.join(lineEnding);
+}
+
+function hasFrontmatter(trimmed: string): boolean {
+  return trimmed.startsWith('---\n') || trimmed.startsWith('---\r\n');
+}
+
+function looksLikeHtmlDocument(trimmed: string): boolean {
+  return HTML_DOCUMENT_PATTERN.test(trimmed);
+}
+
+function countCommonHtmlTags(content: string): number {
+  const matches =
+    content.match(/<(html|head|body|div|span|script|style|meta|link)\b/gi) ??
+    [];
+  return matches.length;
+}
+
+export function isRawTextContent(content: string): boolean {
+  const trimmed = content.trim();
+  const isHtmlDocument = looksLikeHtmlDocument(trimmed);
+  const hasMarkdownFrontmatter = hasFrontmatter(trimmed);
+  const hasTooManyHtmlTags = countCommonHtmlTags(content) > 2;
+  const isMarkdown = looksLikeMarkdown(content);
+
+  return (
+    !isHtmlDocument &&
+    (hasMarkdownFrontmatter || (!hasTooManyHtmlTags && isMarkdown))
+  );
+}
+
+export function isLikelyHtmlContent(content: string): boolean {
+  const trimmed = content.trim();
+  if (!trimmed) return false;
+  if (looksLikeHtmlDocument(trimmed)) return true;
+  return countCommonHtmlTags(content) > 2;
+}
+
+function formatFetchedDate(isoString: string): string {
+  try {
+    const date = new Date(isoString);
+    const day = String(date.getDate()).padStart(2, '0');
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const year = date.getFullYear();
+    return `${day}-${month}-${year}`;
+  } catch {
+    return isoString;
+  }
+}
+
+export function buildMetadataFooter(
+  metadata?: MetadataBlock,
+  fallbackUrl?: string
+): string {
+  if (!metadata) return '';
+  const lines: string[] = ['---', ''];
+
+  const url = metadata.url || fallbackUrl;
+  const parts: string[] = [];
+
+  if (metadata.title) parts.push(`_${metadata.title}_`);
+
+  if (metadata.author) parts.push(`_${metadata.author}_`);
+
+  if (url) parts.push(`[_Original Source_](${url})`);
+
+  if (metadata.fetchedAt) {
+    const formattedDate = formatFetchedDate(metadata.fetchedAt);
+    parts.push(`_${formattedDate}_`);
+  }
+
+  if (parts.length > 0) {
+    lines.push(` ${parts.join(' | ')}`);
+  }
+
+  if (metadata.description) {
+    lines.push(` <sub>${metadata.description}</sub>`);
+  }
+
+  return lines.join('\n');
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

@@ -86,3 +86,45 @@ export interface TransformStageContext {
   readonly startTime: number;
   readonly url: string;
 }
+
+/**
+ * Worker message types for transform workers.
+ */
+export interface TransformWorkerTransformMessage {
+  type: 'transform';
+  id: string;
+  html: string;
+  url: string;
+  includeMetadata: boolean;
+}
+
+export interface TransformWorkerCancelMessage {
+  type: 'cancel';
+  id: string;
+}
+
+export interface TransformWorkerResultMessage {
+  type: 'result';
+  id: string;
+  result: { markdown: string; title?: string; truncated: boolean };
+}
+
+export interface TransformWorkerErrorMessage {
+  type: 'error';
+  id: string;
+  error: {
+    name: string;
+    message: string;
+    url: string;
+    statusCode?: number;
+    details?: Record<string, unknown>;
+  };
+}
+
+export type TransformWorkerIncomingMessage =
+  | TransformWorkerTransformMessage
+  | TransformWorkerCancelMessage;
+
+export type TransformWorkerOutgoingMessage =
+  | TransformWorkerResultMessage
+  | TransformWorkerErrorMessage;
