@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 import * as cache from '../dist/cache.js';
+import { config } from '../dist/config.js';
 
 let keyCounter = 0;
 
@@ -405,14 +406,49 @@ function registerCacheExpirationTest(): void {
 
   it('returns undefined for expired cache key on get', () => {
     const cacheKey = createCacheKey('expired');
+    const originalNow = Date.now;
+    const baseTime = originalNow();
 
-    // Mock scenario: entry exists but is expired (can't easily test without time manipulation)
-    // This tests the null check path when get() is called with non-existent key
-    const result = cache.get(cacheKey);
+    Date.now = () => baseTime;
+    try {
+      cache.set(cacheKey, 'expiring', { url: 'https://example.com/expired' });
+      const entry = cache.get(cacheKey);
+      assert.ok(entry, 'Entry should exist before expiry');
+
+      const expiresAtMs = new Date(entry.expiresAt).getTime();
+      Date.now = () => expiresAtMs + 1;
+
+      const result = cache.get(cacheKey);
+      assert.equal(result, undefined, 'Should return undefined after expiry');
+    } finally {
+      Date.now = originalNow;
+    }
+  });
+}
+
+function registerCacheEvictionOrderTest(): void {
+  it('evicts least recently used entry when maxKeys exceeded', () => {
+    const maxKeys = config.cache.maxKeys;
+    const keys = Array.from({ length: maxKeys + 1 }, (_, index) =>
+      createCacheKey(`lru-${index}`)
+    );
+
+    keys.forEach((key, index) => {
+      cache.set(key, `content-${index}`, {
+        url: `https://example.com/lru-${index}`,
+      });
+    });
+
+    const allKeys = cache.keys();
     assert.equal(
-      result,
-      undefined,
-      'Should return undefined for non-existent key'
+      allKeys.includes(keys[0]),
+      false,
+      'Oldest key should be evicted'
+    );
+    assert.equal(
+      allKeys.includes(keys[keys.length - 1]),
+      true,
+      'Newest key should be present'
     );
   });
 }
@@ -701,6 +737,7 @@ describe('cache', () => {
   registerResourceUriConversionTest();
   registerFilenameGenerationTest();
   registerCacheExpirationTest();
+  registerCacheEvictionOrderTest();
   registerCacheUpdateNotificationTest();
   registerCacheLimitsTest();
   registerErrorHandlingTest();

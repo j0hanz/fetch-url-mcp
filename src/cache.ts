@@ -1,7 +1,5 @@
 import type { ServerResponse } from 'node:http';
 
-import { LRUCache } from 'lru-cache';
-
 import { ResourceTemplate } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import {
@@ -148,10 +146,69 @@ export function toResourceUri(cacheKey: string): string | null {
   return buildCacheResourceUri(parts.namespace, parts.urlHash);
 }
 
-const contentCache = new LRUCache<string, CacheEntry>({
+// Cache behavior contract (native implementation):
+// - Max entries: config.cache.maxKeys
+// - TTL in ms: config.cache.ttl * 1000
+// - Access does NOT extend TTL
+class NativeLruCache<K, V> {
+  private readonly max: number;
+  private readonly ttlMs: number;
+  private readonly entries = new Map<K, { value: V; expiresAtMs: number }>();
+
+  constructor({ max, ttlMs }: { max: number; ttlMs: number }) {
+    this.max = max;
+    this.ttlMs = ttlMs;
+  }
+
+  get(key: K): V | undefined {
+    const entry = this.entries.get(key);
+    if (!entry) return undefined;
+    if (this.isExpired(entry, Date.now())) {
+      this.entries.delete(key);
+      return undefined;
+    }
+    // Refresh LRU order without extending TTL.
+    this.entries.delete(key);
+    this.entries.set(key, entry);
+    return entry.value;
+  }
+
+  set(key: K, value: V): void {
+    if (this.max <= 0 || this.ttlMs <= 0) return;
+    this.entries.delete(key);
+    this.entries.set(key, {
+      value,
+      expiresAtMs: Date.now() + this.ttlMs,
+    });
+    this.purgeExpired(Date.now());
+    while (this.entries.size > this.max) {
+      const oldestKey = this.entries.keys().next().value;
+      if (oldestKey === undefined) break;
+      this.entries.delete(oldestKey);
+    }
+  }
+
+  keys(): readonly K[] {
+    this.purgeExpired(Date.now());
+    return [...this.entries.keys()];
+  }
+
+  private purgeExpired(now: number): void {
+    for (const [key, entry] of this.entries) {
+      if (this.isExpired(entry, now)) {
+        this.entries.delete(key);
+      }
+    }
+  }
+
+  private isExpired(entry: { expiresAtMs: number }, now: number): boolean {
+    return entry.expiresAtMs <= now;
+  }
+}
+
+const contentCache = new NativeLruCache<string, CacheEntry>({
   max: config.cache.maxKeys,
-  ttl: config.cache.ttl * 1000,
-  updateAgeOnGet: false,
+  ttlMs: config.cache.ttl * 1000,
 });
 
 interface CacheUpdateEvent {

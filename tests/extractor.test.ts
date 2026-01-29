@@ -110,6 +110,32 @@ describe('extractContent', () => {
     assert.ok(result.article.textContent.includes('Hello world'));
   });
 
+  it('extracts nested article text from DOM structure', () => {
+    const html = `
+      <html>
+        <head>
+          <title>Nested Article</title>
+        </head>
+        <body>
+          <main>
+            <article>
+              <section>
+                <p>Nested content</p>
+              </section>
+            </article>
+          </main>
+        </body>
+      </html>
+    `;
+
+    const result = extractContent(html, 'https://example.com/nested', {
+      extractArticle: true,
+    });
+
+    assert.ok(result.article);
+    assert.ok(result.article.textContent.includes('Nested content'));
+  });
+
   it('returns empty result for invalid input', () => {
     const result = extractContent('', '', { extractArticle: false });
     assert.equal(result.article, null);
