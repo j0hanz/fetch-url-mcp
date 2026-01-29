@@ -212,6 +212,16 @@ function normalizeListsAndSpacing(text: string): string {
   return text.replace(/\n{3,}/g, '\n\n');
 }
 
+const CLEANUP_STEPS: readonly ((text: string) => string)[] = [
+  fixOrphanHeadings,
+  removeEmptyHeadings,
+  removeSkipLinksAndEmptyAnchors,
+  ensureBlankLineAfterHeadings,
+  removeTocBlocks,
+  tidyLinksAndEscapes,
+  normalizeListsAndSpacing,
+];
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Public API
 // ─────────────────────────────────────────────────────────────────────────────
@@ -224,17 +234,7 @@ export function cleanupMarkdownArtifacts(content: string): string {
   if (!content) return '';
 
   const cleaned = mapOutsideFences(content, (outside) => {
-    let text = outside;
-
-    text = fixOrphanHeadings(text);
-    text = removeEmptyHeadings(text);
-    text = removeSkipLinksAndEmptyAnchors(text);
-    text = ensureBlankLineAfterHeadings(text);
-    text = removeTocBlocks(text);
-    text = tidyLinksAndEscapes(text);
-    text = normalizeListsAndSpacing(text);
-
-    return text;
+    return CLEANUP_STEPS.reduce((text, step) => step(text), outside);
   });
 
   return cleaned.trim();

@@ -771,6 +771,14 @@ function createHttpError(
   return new FetchError(`HTTP ${status}: ${statusText}`, url, status);
 }
 
+function createTooManyRedirectsError(url: string): FetchError {
+  return new FetchError('Too many redirects', url);
+}
+
+function createMissingRedirectLocationError(url: string): FetchError {
+  return new FetchError('Redirect response missing Location header', url);
+}
+
 function createSizeLimitError(url: string, maxBytes: number): FetchError {
   return new FetchError(
     `Response exceeds maximum size of ${maxBytes} bytes`,
@@ -816,6 +824,25 @@ function resolveErrorUrl(error: unknown, fallback: string): string {
   return fallback;
 }
 
+function resolveAbortFetchError(
+  error: unknown,
+  url: string,
+  timeoutMs: number
+): FetchError | null {
+  if (!isAbortError(error)) return null;
+  if (isTimeoutError(error)) {
+    return createTimeoutError(url, timeoutMs);
+  }
+  return createCanceledError(url);
+}
+
+function resolveUnexpectedFetchError(error: unknown, url: string): FetchError {
+  if (error instanceof Error) {
+    return createNetworkError(url, error.message);
+  }
+  return createUnknownError(url, 'Unexpected error');
+}
+
 function mapFetchError(
   error: unknown,
   fallbackUrl: string,
@@ -824,19 +851,9 @@ function mapFetchError(
   if (error instanceof FetchError) return error;
 
   const url = resolveErrorUrl(error, fallbackUrl);
-
-  if (isAbortError(error)) {
-    if (isTimeoutError(error)) {
-      return createTimeoutError(url, timeoutMs);
-    }
-    return createCanceledError(url);
-  }
-
-  if (error instanceof Error) {
-    return createNetworkError(url, error.message);
-  }
-
-  return createUnknownError(url, 'Unexpected error');
+  const abortError = resolveAbortFetchError(error, url, timeoutMs);
+  if (abortError) return abortError;
+  return resolveUnexpectedFetchError(error, url);
 }
 
 type FetchChannelEvent =
@@ -1122,7 +1139,7 @@ function assertRedirectWithinLimit(
 ): void {
   if (redirectCount < redirectLimit) return;
   cancelResponseBody(response);
-  throw new FetchError('Too many redirects', currentUrl);
+  throw createTooManyRedirectsError(currentUrl);
 }
 
 function getRedirectLocation(response: Response, currentUrl: string): string {
@@ -1130,7 +1147,7 @@ function getRedirectLocation(response: Response, currentUrl: string): string {
   if (location) return location;
 
   cancelResponseBody(response);
-  throw new FetchError('Redirect response missing Location header', currentUrl);
+  throw createMissingRedirectLocationError(currentUrl);
 }
 
 function annotateRedirectError(error: unknown, url: string): void {
@@ -1154,6 +1171,18 @@ function resolveRedirectTarget(baseUrl: string, location: string): string {
   return validateAndNormalizeUrl(resolved.href);
 }
 
+async function withRedirectErrorContext<T>(
+  url: string,
+  fn: () => Promise<T>
+): Promise<T> {
+  try {
+    return await fn();
+  } catch (error: unknown) {
+    annotateRedirectError(error, url);
+    throw error;
+  }
+}
+
 export async function fetchWithRedirects(
   url: string,
   init: RequestInit,
@@ -1167,11 +1196,9 @@ export async function fetchWithRedirects(
     redirectCount <= redirectLimit;
     redirectCount += 1
   ) {
-    const { response, nextUrl } = await performFetchCycleSafely(
+    const { response, nextUrl } = await withRedirectErrorContext(
       currentUrl,
-      init,
-      redirectLimit,
-      redirectCount
+      () => performFetchCycle(currentUrl, init, redirectLimit, redirectCount)
     );
 
     if (!nextUrl) {
@@ -1181,26 +1208,7 @@ export async function fetchWithRedirects(
     currentUrl = nextUrl;
   }
 
-  throw new FetchError('Too many redirects', currentUrl);
-}
-
-async function performFetchCycleSafely(
-  currentUrl: string,
-  init: RequestInit,
-  redirectLimit: number,
-  redirectCount: number
-): Promise<FetchCycleResult> {
-  try {
-    return await performFetchCycle(
-      currentUrl,
-      init,
-      redirectLimit,
-      redirectCount
-    );
-  } catch (error: unknown) {
-    annotateRedirectError(error, currentUrl);
-    throw error;
-  }
+  throw createTooManyRedirectsError(currentUrl);
 }
 
 function assertContentLengthWithinLimit(
@@ -1332,6 +1340,19 @@ async function readStreamWithLimit(
   return { text: state.parts.join(''), size: state.total };
 }
 
+async function readResponseTextFallback(
+  response: Response,
+  url: string,
+  maxBytes: number
+): Promise<{ text: string; size: number }> {
+  const text = await response.text();
+  const size = Buffer.byteLength(text);
+  if (size > maxBytes) {
+    throw createSizeLimitError(url, maxBytes);
+  }
+  return { text, size };
+}
+
 export async function readResponseText(
   response: Response,
   url: string,
@@ -1341,12 +1362,7 @@ export async function readResponseText(
   assertContentLengthWithinLimit(response, url, maxBytes);
 
   if (!response.body) {
-    const text = await response.text();
-    const size = Buffer.byteLength(text);
-    if (size > maxBytes) {
-      throw createSizeLimitError(url, maxBytes);
-    }
-    return { text, size };
+    return readResponseTextFallback(response, url, maxBytes);
   }
 
   return readStreamWithLimit(response.body, url, maxBytes, signal);

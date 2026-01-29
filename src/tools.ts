@@ -254,37 +254,31 @@ function buildEmbeddedResource(
   };
 }
 
-function resolveContentToEmbed(
-  inlineResult: InlineResult,
-  fullContent: string | undefined,
-  useInlineInHttpMode: boolean
-): string | undefined {
-  if (useInlineInHttpMode) {
-    return inlineResult.content;
+function appendResourceBlocks({
+  blocks,
+  inlineResult,
+  resourceName,
+  url,
+  title,
+  fullContent,
+}: {
+  blocks: ToolContentBlockUnion[];
+  inlineResult: InlineResult;
+  resourceName: string;
+  url: string | undefined;
+  title: string | undefined;
+  fullContent: string | undefined;
+}): void {
+  const contentToEmbed = config.runtime.httpMode
+    ? inlineResult.content
+    : (fullContent ?? inlineResult.content);
+  if (contentToEmbed && url) {
+    const embeddedResource = buildEmbeddedResource(contentToEmbed, url, title);
+    if (embeddedResource) {
+      blocks.push(embeddedResource);
+    }
   }
-  return fullContent ?? inlineResult.content;
-}
 
-function maybeAppendEmbeddedResource(
-  blocks: ToolContentBlockUnion[],
-  contentToEmbed: string | undefined,
-  url: string | undefined,
-  title: string | undefined
-): void {
-  if (!contentToEmbed) return;
-  if (!url) return;
-
-  const embeddedResource = buildEmbeddedResource(contentToEmbed, url, title);
-  if (embeddedResource) {
-    blocks.push(embeddedResource);
-  }
-}
-
-function maybeAppendResourceLink(
-  blocks: ToolContentBlockUnion[],
-  inlineResult: InlineResult,
-  resourceName: string
-): void {
   const resourceLink = buildResourceLink(inlineResult, resourceName);
   if (resourceLink) {
     blocks.push(resourceLink);
@@ -312,13 +306,14 @@ function buildToolContentBlocks(
 ): ToolContentBlockUnion[] {
   const blocks: ToolContentBlockUnion[] = [buildTextBlock(structuredContent)];
 
-  const contentToEmbed = resolveContentToEmbed(
+  appendResourceBlocks({
+    blocks,
     inlineResult,
+    resourceName,
+    url,
+    title,
     fullContent,
-    config.runtime.httpMode
-  );
-  maybeAppendEmbeddedResource(blocks, contentToEmbed, url, title);
-  maybeAppendResourceLink(blocks, inlineResult, resourceName);
+  });
 
   return blocks;
 }
@@ -525,19 +520,6 @@ function logRawUrlTransformation(resolvedUrl: {
   });
 }
 
-function applyOptionalPipelineSerialization<T extends { content: string }>(
-  pipelineOptions: FetchPipelineOptions<T>,
-  options: SharedFetchOptions<T>
-): void {
-  if (options.serialize !== undefined) {
-    pipelineOptions.serialize = options.serialize;
-  }
-
-  if (options.deserialize !== undefined) {
-    pipelineOptions.deserialize = options.deserialize;
-  }
-}
-
 interface SharedFetchOptions<T extends { content: string }> {
   readonly url: string;
   readonly signal?: AbortSignal;
@@ -564,9 +546,9 @@ export async function performSharedFetch<T extends { content: string }>(
     cacheNamespace: 'markdown',
     ...(options.signal === undefined ? {} : { signal: options.signal }),
     transform: options.transform,
+    ...(options.serialize ? { serialize: options.serialize } : {}),
+    ...(options.deserialize ? { deserialize: options.deserialize } : {}),
   };
-
-  applyOptionalPipelineSerialization(pipelineOptions, options);
 
   const pipeline = await executePipeline<T>(pipelineOptions);
 

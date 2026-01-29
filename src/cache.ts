@@ -580,20 +580,17 @@ interface DownloadPayload {
   fileName: string;
 }
 
-function isSingleParam(value: unknown): value is string {
-  return typeof value === 'string';
-}
-
 function parseDownloadParams(
   namespace: unknown,
   hash: unknown
 ): DownloadParams | null {
-  if (!isSingleParam(namespace) || !isSingleParam(hash)) return null;
-  if (!namespace || !hash) return null;
-  if (!isValidNamespace(namespace)) return null;
-  if (!isValidHash(hash)) return null;
+  const resolvedNamespace = resolveStringParam(namespace);
+  const resolvedHash = resolveStringParam(hash);
+  if (!resolvedNamespace || !resolvedHash) return null;
+  if (!isValidNamespace(resolvedNamespace)) return null;
+  if (!isValidHash(resolvedHash)) return null;
 
-  return { namespace, hash };
+  return { namespace: resolvedNamespace, hash: resolvedHash };
 }
 
 function buildCacheKeyFromParams(params: DownloadParams): string {

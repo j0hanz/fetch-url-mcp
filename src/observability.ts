@@ -31,7 +31,7 @@ export function getOperationId(): string | undefined {
   return requestContext.getStore()?.operationId;
 }
 
-function formatMetadata(meta?: LogMetadata): string {
+function buildContextMetadata(): LogMetadata {
   const requestId = getRequestId();
   const sessionId = getSessionId();
   const operationId = getOperationId();
@@ -42,7 +42,11 @@ function formatMetadata(meta?: LogMetadata): string {
     contextMeta.sessionId = sessionId;
   if (operationId) contextMeta.operationId = operationId;
 
-  const merged = { ...contextMeta, ...meta };
+  return contextMeta;
+}
+
+function formatMetadata(meta?: LogMetadata): string {
+  const merged = { ...buildContextMetadata(), ...meta };
   return Object.keys(merged).length > 0 ? ` ${JSON.stringify(merged)}` : '';
 }
 

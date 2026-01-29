@@ -65,6 +65,39 @@ const STRUCTURAL_TAGS = new Set([
 
 const ALWAYS_NOISE_TAGS = new Set(['nav', 'footer']);
 
+const BASE_NOISE_SELECTORS = [
+  'nav',
+  'footer',
+  'header[class*="site"]',
+  'header[class*="nav"]',
+  'header[class*="menu"]',
+  '[role="banner"]',
+  '[role="navigation"]',
+  '[role="dialog"]',
+  '[style*="display: none"]',
+  '[style*="display:none"]',
+  '[hidden]',
+  '[aria-hidden="true"]',
+];
+
+const BASE_NOISE_SELECTOR = BASE_NOISE_SELECTORS.join(',');
+const CANDIDATE_NOISE_SELECTOR = [
+  ...STRUCTURAL_TAGS,
+  ...ALWAYS_NOISE_TAGS,
+  'aside',
+  'header',
+  '[class]',
+  '[id]',
+  '[role]',
+  '[style]',
+].join(',');
+
+function buildNoiseSelector(extraSelectors: readonly string[]): string {
+  const extra = extraSelectors.filter((selector) => selector.trim().length > 0);
+  if (extra.length === 0) return BASE_NOISE_SELECTOR;
+  return `${BASE_NOISE_SELECTOR},${extra.join(',')}`;
+}
+
 const NAVIGATION_ROLES = new Set([
   'navigation',
   'banner',
@@ -379,44 +412,15 @@ function removeNoiseNodes(
 function stripNoiseNodes(document: Document): void {
   // Pass 1: Trusted selectors (Common noise)
   // We trust these selectors match actual noise, so we skip the expensive isNoiseElement check
-  const baseSelectors = [
-    'nav',
-    'footer',
-    'header[class*="site"]',
-    'header[class*="nav"]',
-    'header[class*="menu"]',
-    '[role="banner"]',
-    '[role="navigation"]',
-    '[role="dialog"]',
-    '[style*="display: none"]',
-    '[style*="display:none"]',
-    '[hidden]',
-    '[aria-hidden="true"]',
-  ];
-
   // Add user-configured extra selectors
-  const extraSelectors = config.noiseRemoval.extraSelectors.filter(
-    (s) => s.trim().length > 0
+  const targetSelectors = buildNoiseSelector(
+    config.noiseRemoval.extraSelectors
   );
-  const targetSelectors = [...baseSelectors, ...extraSelectors].join(',');
-
-  if (targetSelectors) {
-    const potentialNoiseNodes = document.querySelectorAll(targetSelectors);
-    removeNoiseNodes(potentialNoiseNodes, false);
-  }
+  const potentialNoiseNodes = document.querySelectorAll(targetSelectors);
+  removeNoiseNodes(potentialNoiseNodes, false);
 
   // Second pass: check remaining elements for noise patterns (promo, fixed positioning, etc.)
-  const candidateSelectors = [
-    ...STRUCTURAL_TAGS,
-    ...ALWAYS_NOISE_TAGS,
-    'aside',
-    'header',
-    '[class]',
-    '[id]',
-    '[role]',
-    '[style]',
-  ].join(',');
-  const allElements = document.querySelectorAll(candidateSelectors);
+  const allElements = document.querySelectorAll(CANDIDATE_NOISE_SELECTOR);
   removeNoiseNodes(allElements, true);
 }
 

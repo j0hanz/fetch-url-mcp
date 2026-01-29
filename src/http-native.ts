@@ -254,30 +254,35 @@ function resolveOriginHost(origin: string): string | null {
   }
 }
 
+function rejectHostRequest(
+  res: ShimResponse,
+  status: number,
+  message: string
+): boolean {
+  res.status(status).json({ error: message });
+  return false;
+}
+
 function validateHostAndOrigin(
   req: IncomingMessage,
   res: ShimResponse
 ): boolean {
   const host = resolveHostHeader(req);
   if (!host) {
-    res.status(400).json({ error: 'Missing or invalid Host header' });
-    return false;
+    return rejectHostRequest(res, 400, 'Missing or invalid Host header');
   }
   if (!ALLOWED_HOSTS.has(host)) {
-    res.status(403).json({ error: 'Host not allowed' });
-    return false;
+    return rejectHostRequest(res, 403, 'Host not allowed');
   }
 
   const originHeader = getHeaderValue(req, 'origin');
   if (originHeader) {
     const originHost = resolveOriginHost(originHeader);
     if (!originHost) {
-      res.status(403).json({ error: 'Invalid Origin header' });
-      return false;
+      return rejectHostRequest(res, 403, 'Invalid Origin header');
     }
     if (!ALLOWED_HOSTS.has(originHost)) {
-      res.status(403).json({ error: 'Origin not allowed' });
-      return false;
+      return rejectHostRequest(res, 403, 'Origin not allowed');
     }
   }
 
@@ -513,25 +518,39 @@ async function verifyWithIntrospection(token: string): Promise<AuthInfo> {
   return buildIntrospectionAuthInfo(token, payload);
 }
 
+function resolveBearerToken(authHeader: string): string {
+  const [type, token] = authHeader.split(' ');
+  if (type !== 'Bearer' || !token) {
+    throw new InvalidTokenError('Invalid Authorization header format');
+  }
+  return token;
+}
+
+function authenticateWithToken(token: string): Promise<AuthInfo> {
+  return config.auth.mode === 'oauth'
+    ? verifyWithIntrospection(token)
+    : Promise.resolve(verifyStaticToken(token));
+}
+
+function authenticateWithApiKey(req: ShimRequest): AuthInfo {
+  const apiKey = getHeaderValue(req, 'x-api-key');
+  if (apiKey && config.auth.mode === 'static') {
+    return verifyStaticToken(apiKey);
+  }
+  if (apiKey && config.auth.mode === 'oauth') {
+    throw new InvalidTokenError('X-API-Key not supported for OAuth');
+  }
+  throw new InvalidTokenError('Missing Authorization header');
+}
+
 async function authenticate(req: ShimRequest): Promise<AuthInfo> {
   const authHeader = req.headers.authorization;
   if (!authHeader) {
-    const apiKey = getHeaderValue(req, 'x-api-key');
-    if (apiKey && config.auth.mode === 'static') {
-      return verifyStaticToken(apiKey);
-    }
-    if (apiKey && config.auth.mode === 'oauth') {
-      throw new InvalidTokenError('X-API-Key not supported for OAuth');
-    }
-    throw new InvalidTokenError('Missing Authorization header');
+    return authenticateWithApiKey(req);
   }
 
-  const [type, token] = authHeader.split(' ');
-  if (type !== 'Bearer' || !token)
-    throw new InvalidTokenError('Invalid Authorization header format');
-
-  if (config.auth.mode === 'oauth') return verifyWithIntrospection(token);
-  return verifyStaticToken(token);
+  const token = resolveBearerToken(authHeader);
+  return authenticateWithToken(token);
 }
 
 // --- MCP Routes ---

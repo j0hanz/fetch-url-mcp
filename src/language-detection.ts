@@ -7,7 +7,17 @@
  * Check if source contains the given word as a standalone word (not part of another word).
  */
 function containsWord(source: string, word: string): boolean {
-  return new RegExp(`\\b${word}\\b`).test(source);
+  return getWordRegex(word).test(source);
+}
+
+const WORD_REGEX_CACHE = new Map<string, RegExp>();
+
+function getWordRegex(word: string): RegExp {
+  const cached = WORD_REGEX_CACHE.get(word);
+  if (cached) return cached;
+  const compiled = new RegExp(`\\b${word}\\b`);
+  WORD_REGEX_CACHE.set(word, compiled);
+  return compiled;
 }
 
 /**

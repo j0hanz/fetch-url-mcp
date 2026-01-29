@@ -42,7 +42,27 @@ function post(message: WorkerResultMessage | WorkerErrorMessage): void {
   parentPort?.postMessage(message);
 }
 
+function postError(id: string, error: WorkerErrorMessage['error']): void {
+  post({ type: 'error', id, error });
+}
+
+function validateTransformMessage(message: TransformMessage): string | null {
+  if (!message.id.trim()) return 'Missing transform message id';
+  if (!message.url.trim()) return 'Missing transform URL';
+  return null;
+}
+
 function handleTransform(message: TransformMessage): void {
+  const validationError = validateTransformMessage(message);
+  if (validationError) {
+    postError(message.id, {
+      name: 'ValidationError',
+      message: validationError,
+      url: message.url,
+    });
+    return;
+  }
+
   const controller = new AbortController();
   controllers.set(message.id, controller);
 
@@ -63,28 +83,20 @@ function handleTransform(message: TransformMessage): void {
     });
   } catch (error: unknown) {
     if (error instanceof FetchError) {
-      post({
-        type: 'error',
-        id: message.id,
-        error: {
-          name: error.name,
-          message: error.message,
-          url: error.url,
-          statusCode: error.statusCode,
-          details: { ...error.details },
-        },
+      postError(message.id, {
+        name: error.name,
+        message: error.message,
+        url: error.url,
+        statusCode: error.statusCode,
+        details: { ...error.details },
       });
       return;
     }
 
-    post({
-      type: 'error',
-      id: message.id,
-      error: {
-        name: error instanceof Error ? error.name : 'Error',
-        message: getErrorMessage(error),
-        url: message.url,
-      },
+    postError(message.id, {
+      name: error instanceof Error ? error.name : 'Error',
+      message: getErrorMessage(error),
+      url: message.url,
     });
   } finally {
     controllers.delete(message.id);

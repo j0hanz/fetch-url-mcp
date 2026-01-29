@@ -107,6 +107,10 @@ function parseUrlEnv(value: string | undefined, name: string): URL | undefined {
   return new URL(value);
 }
 
+function readUrlEnv(name: string): URL | undefined {
+  return parseUrlEnv(process.env[name], name);
+}
+
 function parseAllowedHosts(envValue: string | undefined): Set<string> {
   const hosts = new Set<string>();
   for (const entry of parseList(envValue)) {
@@ -174,12 +178,9 @@ function readCoreOAuthUrls(): {
   tokenUrl: URL | undefined;
 } {
   return {
-    issuerUrl: parseUrlEnv(process.env.OAUTH_ISSUER_URL, 'OAUTH_ISSUER_URL'),
-    authorizationUrl: parseUrlEnv(
-      process.env.OAUTH_AUTHORIZATION_URL,
-      'OAUTH_AUTHORIZATION_URL'
-    ),
-    tokenUrl: parseUrlEnv(process.env.OAUTH_TOKEN_URL, 'OAUTH_TOKEN_URL'),
+    issuerUrl: readUrlEnv('OAUTH_ISSUER_URL'),
+    authorizationUrl: readUrlEnv('OAUTH_AUTHORIZATION_URL'),
+    tokenUrl: readUrlEnv('OAUTH_TOKEN_URL'),
   };
 }
 
@@ -190,18 +191,9 @@ function readOptionalOAuthUrls(baseUrl: URL): {
   resourceUrl: URL;
 } {
   return {
-    revocationUrl: parseUrlEnv(
-      process.env.OAUTH_REVOCATION_URL,
-      'OAUTH_REVOCATION_URL'
-    ),
-    registrationUrl: parseUrlEnv(
-      process.env.OAUTH_REGISTRATION_URL,
-      'OAUTH_REGISTRATION_URL'
-    ),
-    introspectionUrl: parseUrlEnv(
-      process.env.OAUTH_INTROSPECTION_URL,
-      'OAUTH_INTROSPECTION_URL'
-    ),
+    revocationUrl: readUrlEnv('OAUTH_REVOCATION_URL'),
+    registrationUrl: readUrlEnv('OAUTH_REGISTRATION_URL'),
+    introspectionUrl: readUrlEnv('OAUTH_INTROSPECTION_URL'),
     resourceUrl:
       parseUrlEnv(process.env.OAUTH_RESOURCE_URL, 'OAUTH_RESOURCE_URL') ??
       new URL('/mcp', baseUrl),

@@ -71,6 +71,23 @@ function handleSessionCleanupError(error: unknown): void {
   });
 }
 
+function moveSessionToEnd(
+  sessions: Map<string, SessionEntry>,
+  sessionId: string,
+  session: SessionEntry
+): void {
+  sessions.delete(sessionId);
+  sessions.set(sessionId, session);
+}
+
+function isSessionExpired(
+  session: SessionEntry,
+  now: number,
+  sessionTtlMs: number
+): boolean {
+  return now - session.lastSeen > sessionTtlMs;
+}
+
 async function runSessionCleanupLoop(
   store: SessionStore,
   sessionTtlMs: number,
@@ -119,8 +136,8 @@ export function createSessionStore(sessionTtlMs: number): SessionStore {
       const session = sessions.get(sessionId);
       if (session) {
         session.lastSeen = Date.now();
-        sessions.delete(sessionId); // Move to end (LRU behavior if needed, but Map insertion order)
-        sessions.set(sessionId, session);
+        // Move to end (LRU behavior if needed, but Map insertion order)
+        moveSessionToEnd(sessions, sessionId, session);
       }
     },
     set: (sessionId, entry) => {
@@ -148,7 +165,7 @@ export function createSessionStore(sessionTtlMs: number): SessionStore {
       const now = Date.now();
       const evicted: SessionEntry[] = [];
       for (const [id, session] of sessions.entries()) {
-        if (now - session.lastSeen > sessionTtlMs) {
+        if (isSessionExpired(session, now, sessionTtlMs)) {
           sessions.delete(id);
           evicted.push(session);
         }

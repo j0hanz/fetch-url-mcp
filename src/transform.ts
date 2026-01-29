@@ -1087,6 +1087,27 @@ function buildRawMarkdownPayload({
   return { content, title };
 }
 
+function buildRawMarkdownResult({
+  rawContent,
+  url,
+  includeMetadata,
+}: {
+  rawContent: string;
+  url: string;
+  includeMetadata: boolean;
+}): MarkdownTransformResult {
+  const { content, title } = buildRawMarkdownPayload({
+    rawContent,
+    url,
+    includeMetadata,
+  });
+  return {
+    markdown: content,
+    title,
+    truncated: false,
+  };
+}
+
 function tryTransformRawContent({
   html,
   url,
@@ -1101,16 +1122,11 @@ function tryTransformRawContent({
   }
 
   logDebug('Preserving raw markdown content', { url: truncateUrlForLog(url) });
-  const { content, title } = buildRawMarkdownPayload({
+  return buildRawMarkdownResult({
     rawContent: html,
     url,
     includeMetadata,
   });
-  return {
-    markdown: content,
-    title,
-    truncated: false,
-  };
 }
 
 const MIN_CONTENT_RATIO = 0.3;
@@ -1593,10 +1609,16 @@ function runTotalTransformStage<T>(url: string, fn: () => T): T {
     success = true;
     return result;
   } finally {
-    if (success) {
-      endTransformStage(totalStage, { truncated: false });
-    }
+    finalizeTotalTransformStage(totalStage, success);
   }
+}
+
+function finalizeTotalTransformStage(
+  stage: TransformStageContext | null,
+  success: boolean
+): void {
+  if (!success) return;
+  endTransformStage(stage, { truncated: false });
 }
 
 async function runTotalTransformStageAsync<T>(
@@ -1611,9 +1633,7 @@ async function runTotalTransformStageAsync<T>(
     success = true;
     return result;
   } finally {
-    if (success) {
-      endTransformStage(totalStage, { truncated: false });
-    }
+    finalizeTotalTransformStage(totalStage, success);
   }
 }
 
