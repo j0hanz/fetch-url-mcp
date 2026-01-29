@@ -1428,6 +1428,16 @@ function shouldUseArticleContent(
   const articleLength = article.textContent.length;
   const originalLength = getVisibleTextLength(originalHtmlOrDocument);
 
+  let articleDocument: Document | null = null;
+  const getArticleDocument = (): Document => {
+    if (articleDocument) return articleDocument;
+    const htmlToParse = needsDocumentWrapper(article.content)
+      ? wrapHtmlFragment(article.content)
+      : article.content;
+    articleDocument = parseHTML(htmlToParse).document;
+    return articleDocument;
+  };
+
   // If the document is tiny, don't gate too aggressively.
   if (originalLength >= MIN_HTML_LENGTH_FOR_GATE) {
     const ratio = articleLength / originalLength;
@@ -1440,7 +1450,7 @@ function shouldUseArticleContent(
   // Heading structure retention (compute counts once to avoid repeated DOM queries/parses).
   const originalHeadings = countHeadingsDom(originalHtmlOrDocument);
   if (originalHeadings > 0) {
-    const articleHeadings = countHeadingsDom(article.content);
+    const articleHeadings = countHeadingsDom(getArticleDocument());
     const retentionRatio = articleHeadings / originalHeadings;
 
     if (retentionRatio < MIN_HEADING_RETENTION_RATIO) {
@@ -1458,7 +1468,7 @@ function shouldUseArticleContent(
 
   const originalCodeBlocks = countCodeBlocksDom(originalHtmlOrDocument);
   if (originalCodeBlocks > 0) {
-    const articleCodeBlocks = countCodeBlocksDom(article.content);
+    const articleCodeBlocks = countCodeBlocksDom(getArticleDocument());
     const codeRetentionRatio = articleCodeBlocks / originalCodeBlocks;
 
     // Always log code block counts for debugging
@@ -1514,7 +1524,7 @@ function resolveContentSource({
     ...(signal ? { signal } : {}),
   });
 
-  const originalDocument = parseHTML(html).document;
+  const originalDocument = document;
 
   const useArticleContent = article
     ? shouldUseArticleContent(article, originalDocument, url)

@@ -44,6 +44,49 @@ import {
 } from './session.js';
 import { isObject } from './type-guards.js';
 
+function createTransportAdapter(
+  transportImpl: StreamableHTTPServerTransport
+): Transport {
+  type OnClose = NonNullable<Transport['onclose']>;
+  type OnError = NonNullable<Transport['onerror']>;
+  type OnMessage = NonNullable<Transport['onmessage']>;
+
+  const noopOnClose: OnClose = () => {};
+  const noopOnError: OnError = () => {};
+  const noopOnMessage: OnMessage = () => {};
+
+  let oncloseHandler = noopOnClose;
+  let onerrorHandler = noopOnError;
+  let onmessageHandler = noopOnMessage;
+
+  return {
+    start: () => transportImpl.start(),
+    send: (message, options) => transportImpl.send(message, options),
+    close: () => transportImpl.close(),
+    get onclose() {
+      return oncloseHandler;
+    },
+    set onclose(handler: OnClose) {
+      oncloseHandler = handler;
+      transportImpl.onclose = handler;
+    },
+    get onerror() {
+      return onerrorHandler;
+    },
+    set onerror(handler: OnError) {
+      onerrorHandler = handler;
+      transportImpl.onerror = handler;
+    },
+    get onmessage() {
+      return onmessageHandler;
+    },
+    set onmessage(handler: OnMessage) {
+      onmessageHandler = handler;
+      transportImpl.onmessage = handler;
+    },
+  };
+}
+
 // --- Shim Types ---
 
 interface ShimResponse extends ServerResponse {
@@ -570,7 +613,8 @@ async function createNewSession(
   };
 
   try {
-    await mcpServer.connect(transportImpl as unknown as Transport);
+    const transport = createTransportAdapter(transportImpl);
+    await mcpServer.connect(transport);
   } catch (err) {
     clearTimeout(initTimeout);
     tracker.releaseSlot();
