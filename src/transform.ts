@@ -94,6 +94,11 @@ const CODE_BLOCK = {
 };
 
 const transformChannel = diagnosticsChannel.channel('superfetch.transform');
+const LOG_URL_MAX = 80;
+
+function truncateUrlForLog(url: string): string {
+  return url.substring(0, LOG_URL_MAX);
+}
 
 function publishTransformEvent(event: TransformStageEvent): void {
   if (!transformChannel.hasSubscribers) return;
@@ -1095,7 +1100,7 @@ function tryTransformRawContent({
     return null;
   }
 
-  logDebug('Preserving raw markdown content', { url: url.substring(0, 80) });
+  logDebug('Preserving raw markdown content', { url: truncateUrlForLog(url) });
   const { content, title } = buildRawMarkdownPayload({
     rawContent: html,
     url,
@@ -1112,38 +1117,6 @@ const MIN_CONTENT_RATIO = 0.3;
 const MIN_HTML_LENGTH_FOR_GATE = 100;
 const MIN_HEADING_RETENTION_RATIO = 0.7;
 const MIN_CODE_BLOCK_RETENTION_RATIO = 0.5;
-
-/**
- * Count headings using DOM querySelectorAll.
- * Handles nested content like <h2><span>Text</span></h2> correctly.
- */
-function countHeadingsDom(htmlOrDocument: string | Document): number {
-  if (typeof htmlOrDocument === 'string') {
-    // Wrap fragments in document structure for proper parsing
-    const htmlToParse = needsDocumentWrapper(htmlOrDocument)
-      ? wrapHtmlFragment(htmlOrDocument)
-      : htmlOrDocument;
-
-    const { document: doc } = parseHTML(htmlToParse);
-    return doc.querySelectorAll('h1,h2,h3,h4,h5,h6').length;
-  }
-
-  return htmlOrDocument.querySelectorAll('h1,h2,h3,h4,h5,h6').length;
-}
-
-function countCodeBlocksDom(htmlOrDocument: string | Document): number {
-  if (typeof htmlOrDocument === 'string') {
-    // Wrap fragments in document structure for proper parsing
-    const htmlToParse = needsDocumentWrapper(htmlOrDocument)
-      ? wrapHtmlFragment(htmlOrDocument)
-      : htmlOrDocument;
-
-    const { document: doc } = parseHTML(htmlToParse);
-    return doc.querySelectorAll('pre').length;
-  }
-
-  return htmlOrDocument.querySelectorAll('pre').length;
-}
 
 /**
  * Check if HTML string needs document wrapper for proper parsing.
@@ -1165,47 +1138,69 @@ function wrapHtmlFragment(html: string): string {
   return `<!DOCTYPE html><html><body>${html}</body></html>`;
 }
 
+function resolveHtmlDocument(htmlOrDocument: string | Document): Document {
+  if (typeof htmlOrDocument !== 'string') {
+    return htmlOrDocument;
+  }
+
+  const htmlToParse = needsDocumentWrapper(htmlOrDocument)
+    ? wrapHtmlFragment(htmlOrDocument)
+    : htmlOrDocument;
+
+  return parseHTML(htmlToParse).document;
+}
+
+function countDomSelector(
+  htmlOrDocument: string | Document,
+  selector: string
+): number {
+  return resolveHtmlDocument(htmlOrDocument).querySelectorAll(selector).length;
+}
+
+/**
+ * Count headings using DOM querySelectorAll.
+ * Handles nested content like <h2><span>Text</span></h2> correctly.
+ */
+function countHeadingsDom(htmlOrDocument: string | Document): number {
+  return countDomSelector(htmlOrDocument, 'h1,h2,h3,h4,h5,h6');
+}
+
+function countCodeBlocksDom(htmlOrDocument: string | Document): number {
+  return countDomSelector(htmlOrDocument, 'pre');
+}
+
+function cloneDocumentIfNeeded(
+  htmlOrDocument: string | Document,
+  doc: Document
+): Document {
+  return typeof htmlOrDocument === 'string'
+    ? doc
+    : (doc.cloneNode(true) as Document);
+}
+
+function stripNonVisibleNodes(doc: Document): void {
+  for (const el of doc.querySelectorAll('script,style,noscript')) {
+    el.remove();
+  }
+}
+
+function resolveDocumentText(doc: Document): string {
+  // Note: linkedom may return null for body on HTML fragments despite types
+  const body = doc.body as HTMLElement | null;
+  const docElement = doc.documentElement as HTMLElement | null;
+  return body?.textContent ?? docElement?.textContent ?? '';
+}
+
 /**
  * Get visible text length from HTML, excluding script/style/noscript content.
  * Fixes the bug where stripHtmlTagsForLength() counted JS/CSS as visible text.
  */
 function getVisibleTextLength(htmlOrDocument: string | Document): number {
-  // For string input, parse the HTML
-  if (typeof htmlOrDocument === 'string') {
-    // Wrap fragments in document structure for proper parsing
-    const htmlToParse = needsDocumentWrapper(htmlOrDocument)
-      ? wrapHtmlFragment(htmlOrDocument)
-      : htmlOrDocument;
+  const doc = resolveHtmlDocument(htmlOrDocument);
+  const workDoc = cloneDocumentIfNeeded(htmlOrDocument, doc);
 
-    const { document: doc } = parseHTML(htmlToParse);
-
-    // Remove non-visible content that inflates text length
-    for (const el of doc.querySelectorAll('script,style,noscript')) {
-      el.remove();
-    }
-
-    // Get text content from body or documentElement
-    // Note: linkedom may return null for body on HTML fragments despite types
-    const body = doc.body as HTMLElement | null;
-    const docElement = doc.documentElement as HTMLElement | null;
-    const text = body?.textContent ?? docElement?.textContent ?? '';
-
-    return text.replace(/\s+/g, ' ').trim().length;
-  }
-
-  // For Document input, clone to avoid mutation
-  const workDoc = htmlOrDocument.cloneNode(true) as Document;
-
-  // Remove non-visible content that inflates text length
-  for (const el of workDoc.querySelectorAll('script,style,noscript')) {
-    el.remove();
-  }
-
-  // Get text content from body or documentElement
-  // Note: linkedom may return null for body on HTML fragments despite types
-  const body = workDoc.body as HTMLElement | null;
-  const docElement = workDoc.documentElement as HTMLElement | null;
-  const text = body?.textContent ?? docElement?.textContent ?? '';
+  stripNonVisibleNodes(workDoc);
+  const text = resolveDocumentText(workDoc);
 
   return text.replace(/\s+/g, ' ').trim().length;
 }
@@ -1382,7 +1377,7 @@ function buildContentSource({
     const contentRoot = findContentRoot(cleanedDoc);
     if (contentRoot) {
       logDebug('Using content root fallback instead of full HTML', {
-        url: url.substring(0, 80),
+        url: truncateUrlForLog(url),
         contentLength: contentRoot.length,
       });
       return {
@@ -1405,16 +1400,16 @@ function buildContentSource({
 }
 
 function logQualityGateFallback({
-  url,
+  safeUrl,
   articleLength,
 }: {
-  url: string;
+  safeUrl: string;
   articleLength: number;
 }): void {
   logDebug(
     'Quality gate: Readability extraction below threshold, using full HTML',
     {
-      url: url.substring(0, 80),
+      url: safeUrl,
       articleLength,
     }
   );
@@ -1427,14 +1422,12 @@ function shouldUseArticleContent(
 ): boolean {
   const articleLength = article.textContent.length;
   const originalLength = getVisibleTextLength(originalHtmlOrDocument);
+  const safeUrl = truncateUrlForLog(url);
 
   let articleDocument: Document | null = null;
   const getArticleDocument = (): Document => {
     if (articleDocument) return articleDocument;
-    const htmlToParse = needsDocumentWrapper(article.content)
-      ? wrapHtmlFragment(article.content)
-      : article.content;
-    articleDocument = parseHTML(htmlToParse).document;
+    articleDocument = resolveHtmlDocument(article.content);
     return articleDocument;
   };
 
@@ -1442,7 +1435,7 @@ function shouldUseArticleContent(
   if (originalLength >= MIN_HTML_LENGTH_FOR_GATE) {
     const ratio = articleLength / originalLength;
     if (ratio < MIN_CONTENT_RATIO) {
-      logQualityGateFallback({ url, articleLength });
+      logQualityGateFallback({ safeUrl, articleLength });
       return false;
     }
   }
@@ -1457,7 +1450,7 @@ function shouldUseArticleContent(
       logDebug(
         'Quality gate: Readability broke heading structure, using full HTML',
         {
-          url: url.substring(0, 80),
+          url: safeUrl,
           originalHeadings,
           articleHeadings,
         }
@@ -1473,7 +1466,7 @@ function shouldUseArticleContent(
 
     // Always log code block counts for debugging
     logDebug('Code block retention check', {
-      url: url.substring(0, 80),
+      url: safeUrl,
       originalCodeBlocks,
       articleCodeBlocks,
       codeRetentionRatio,
@@ -1483,7 +1476,7 @@ function shouldUseArticleContent(
       logDebug(
         'Quality gate: Readability removed code blocks, using full HTML',
         {
-          url: url.substring(0, 80),
+          url: safeUrl,
           originalCodeBlocks,
           articleCodeBlocks,
         }
@@ -1496,7 +1489,7 @@ function shouldUseArticleContent(
   if (hasTruncatedSentences(article.textContent)) {
     logDebug(
       'Quality gate: Extracted text has many truncated sentences, using full HTML',
-      { url: url.substring(0, 80) }
+      { url: safeUrl }
     );
     return false;
   }

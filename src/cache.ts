@@ -600,33 +600,30 @@ function buildCacheKeyFromParams(params: DownloadParams): string {
   return `${params.namespace}:${params.hash}`;
 }
 
+function sendJsonError(
+  res: ServerResponse,
+  status: number,
+  error: string,
+  code: string
+): void {
+  res.writeHead(status, { 'Content-Type': 'application/json' });
+  res.end(JSON.stringify({ error, code }));
+}
+
 function respondBadRequest(res: ServerResponse, message: string): void {
-  res.writeHead(400, { 'Content-Type': 'application/json' });
-  res.end(
-    JSON.stringify({
-      error: message,
-      code: 'BAD_REQUEST',
-    })
-  );
+  sendJsonError(res, 400, message, 'BAD_REQUEST');
 }
 
 function respondNotFound(res: ServerResponse): void {
-  res.writeHead(404, { 'Content-Type': 'application/json' });
-  res.end(
-    JSON.stringify({
-      error: 'Content not found or expired',
-      code: 'NOT_FOUND',
-    })
-  );
+  sendJsonError(res, 404, 'Content not found or expired', 'NOT_FOUND');
 }
 
 function respondServiceUnavailable(res: ServerResponse): void {
-  res.writeHead(503, { 'Content-Type': 'application/json' });
-  res.end(
-    JSON.stringify({
-      error: 'Download service is disabled',
-      code: 'SERVICE_UNAVAILABLE',
-    })
+  sendJsonError(
+    res,
+    503,
+    'Download service is disabled',
+    'SERVICE_UNAVAILABLE'
   );
 }
 
