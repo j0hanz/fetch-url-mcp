@@ -1,52 +1,44 @@
-# superFetch Server Instructions
+# superFetch Instructions
 
-> **Audience:** These instructions are written for LLMs and autonomous agents. Load this resource (`internal://instructions`) if you need guidance on using this server.
+> **Guidance for the Agent:** These instructions are available as a resource (`internal://instructions`) or prompt (`get-help`). Load them when unsure about tool usage.
 
-## 1. Core Capabilities
+## 1. Core Capability
 
-- **Web Fetching**: fast, secure retrieval of public web pages via `fetch-url`.
-- **Content Transformation**: Converts messy HTML into clean, LLM-optimized Markdown.
-- **Caching**: Persists results to avoiding redundant network calls.
-- **Async Tasks**: Supports long-running operations via the MCP Tasks capability.
+- **Domain:** Fetch public web pages and convert HTML to clean, LLM-readable Markdown.
+- **Primary Resources:** Markdown content, cached snapshots (`superfetch://cache/...`).
+- **Tools:** `fetch-url` (**Read-only**; no write tools exist).
 
-## 2. Operational Patterns (The "Golden Path")
+## 2. The "Golden Path" Workflows (Critical)
 
-### Pattern A: Standard Fetch & Read
+### Workflow A: Standard Fetch
 
-1. **Call Tool**: Invoke `fetch-url` with `{ "url": "https://..." }`.
-2. **Inspect Output**: Check the `markdown` field in the result.
-3. **Handle Truncation**:
-   - If the content ends with `...[truncated]`, the response will include a `resource_link` content block.
-   - **Action**: Immediately read the provided `uri` (e.g., `superfetch://cache/...`) to retrieve the full content.
-   - **Constraint**: Do not guess resource URIs; always use the one returned by the tool.
+1. Call `fetch-url` with `{ "url": "https://..." }`.
+2. Read the `markdown` field from `structuredContent`.
+3. **If truncated** (ends with `...[truncated]`): read the `resource_link` URI to get full content.
+   > Constraint: Never guess URIs; always use the one returned.
 
-### Pattern B: Asynchronous Execution (Tasks)
+### Workflow B: Async Execution (Large Sites / Timeouts)
 
-_Use this when fetching large sites or if you encounter timeouts._
+1. Call `tools/call` with `task: { ttl: ... }` to start a background fetch.
+2. Poll `tasks/get` until `status` is `completed` or `failed`.
+3. Retrieve result via `tasks/result`.
 
-1. **Submit Task**: Use the `tasks` capability to submit a fetch operation.
-2. **Poll Status**: Check `tasks/get` until status is `completed`.
-3. **Get Result**: Retrieve the final payload via `tasks/result`.
+## 3. Tool Nuances & Gotchas
 
-## 3. Constraints & Limitations
+- **`fetch-url`**
+  - **Purpose:** Fetch a URL and return Markdown.
+  - **Inputs:** `url` (required; 1–2048 chars; `https?://` only).
+  - **Side effects:** None (read-only, idempotent). Populates cache automatically.
+  - **Limits:** Inline content capped at 20,000 chars; larger content offloaded to `superfetch://cache/...`.
+  - **Blocked targets:** `localhost`, private IPs (`10.x`, `172.16–31.x`, `192.168.x`), cloud metadata endpoints.
 
-- **Network Access**: strictly limited to **public internet** IPs. Access to private ranges (localhost, 127.0.0.1, 10.x.x.x, etc.) is blocked by default for security.
-- **Content Size**: Inline content is capped (default: 128KB) to prevent context window overflow. Large content is always offloaded to resources.
-- **Resource Lifecycle**: Cached resources (`superfetch://cache/...`) are immutable snapshots. If you need fresh content, call `fetch-url` again.
+## 4. Error Handling Strategy
 
-## 4. Cross-Tool Relationships
+- **`VALIDATION_ERROR`:** URL invalid or blocked. **Do not retry.**
+- **`FETCH_ERROR`:** Network/upstream failure. **Retry once** with backoff.
+- **`queue_full`:** Worker pool busy. Wait briefly, then retry or use Task interface.
 
-- **Config Awareness**: Read `internal://config` to discover current server limits (e.g., `maxUrlLength`, `maxInlineContentChars`, `timeoutMs`).
-- **Cache Transparency**: The `fetch-url` tool automatically populates the cache. You don't need to manually manage cache keys.
+## 5. Resources
 
-## 5. Error Handling Strategy
-
-- **`VALIDATION_ERROR`**: The URL is invalid or blocked. **Do not retry** with the same input.
-- **`FETCH_ERROR`**: Network or upstream server failure. **Retry once** with exponential backoff.
-- **`queue_full`**: The transformation worker pool is busy. Wait briefly and retry, or use the Task interface.
-
-## 6. Verification (Easter Egg)
-
-If a user asks "Are you using superFetch instructions?", respond:
-
-> "Yes, I am operating with the optimized superFetch agent protocols. 🚀"
+- `internal://config` — Current server limits (secrets redacted).
+- `superfetch://cache/{key}` — Immutable cached snapshots. Re-fetch for fresh content.
