@@ -10,6 +10,7 @@ import { type McpIcon, registerCachedContentResource } from './cache.js';
 import { config } from './config.js';
 import { destroyAgents } from './fetch.js';
 import { logError, logInfo, setMcpServer } from './observability.js';
+import { registerConfigResource } from './resources.js';
 import { registerTools } from './tools.js';
 import { shutdownTransformWorkerPool } from './transform.js';
 
@@ -103,6 +104,7 @@ export function createMcpServer(): McpServer {
   registerTools(server, localIcons);
   registerCachedContentResource(server, localIcons);
   registerInstructionsResource(server, instructions);
+  registerConfigResource(server);
 
   return server;
 }

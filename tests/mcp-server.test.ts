@@ -99,4 +99,46 @@ describe('MCP Server', () => {
       }, 'Should handle object errors');
     });
   });
+
+  describe('Resources', () => {
+    it('registers and handles internal://config resource', async () => {
+      const server = createMcpServer();
+      const resourceName = 'config';
+      // Access private property for testing
+      // @ts-ignore
+      const templates = server._registeredResourceTemplates;
+      // @ts-ignore
+      const resource = templates[resourceName];
+
+      assert.ok(resource, 'Config resource should be registered');
+
+      const uri = new URL('internal://config');
+      // Use the actual internal handler name: readCallback
+      const result = await resource.readCallback(uri);
+
+      assert.ok(result.contents, 'Result should have contents');
+      assert.strictEqual(result.contents.length, 1);
+      assert.strictEqual(result.contents[0].mimeType, 'application/json');
+
+      const configData = JSON.parse(result.contents[0].text);
+      assert.ok(configData.server, 'Config should contain server info');
+      assert.ok(configData.fetcher, 'Config should contain fetcher info');
+
+      // Verify security measures
+      if (configData.auth?.clientSecret) {
+        assert.equal(
+          configData.auth.clientSecret,
+          '<REDACTED>',
+          'Client secret should be redacted'
+        );
+      }
+      if (configData.security?.apiKey) {
+        assert.equal(
+          configData.security.apiKey,
+          '<REDACTED>',
+          'API key should be redacted'
+        );
+      }
+    });
+  });
 });
