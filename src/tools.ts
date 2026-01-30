@@ -871,7 +871,7 @@ function resolveRequestIdFromExtra(extra: unknown): string | undefined {
   return undefined;
 }
 
-export function registerTools(server: McpServer): void {
+export function registerTools(server: McpServer, serverIcon?: string): void {
   server.registerTool(
     TOOL_DEFINITION.name,
     {
@@ -880,6 +880,17 @@ export function registerTools(server: McpServer): void {
       inputSchema: TOOL_DEFINITION.inputSchema,
       outputSchema: TOOL_DEFINITION.outputSchema,
       annotations: TOOL_DEFINITION.annotations,
+      ...(serverIcon
+        ? {
+            icons: [
+              {
+                src: serverIcon,
+                mimeType: 'image/svg+xml',
+                sizes: ['any'],
+              },
+            ],
+          }
+        : {}),
     },
     withRequestContextIfMissing(
       TOOL_DEFINITION.handler as unknown as (

@@ -26,14 +26,20 @@ function getLocalIconData(): string | undefined {
 function createServerInfo(): {
   name: string;
   version: string;
-  icons?: { src: string; sizes: string[] }[];
+  icons?: { src: string; mimeType: string; sizes: string[] }[];
 } {
   const localIcon = getLocalIconData();
 
   return {
     name: config.server.name,
     version: config.server.version,
-    ...(localIcon ? { icons: [{ src: localIcon, sizes: ['any'] }] } : {}),
+    ...(localIcon
+      ? {
+          icons: [
+            { src: localIcon, mimeType: 'image/svg+xml', sizes: ['any'] },
+          ],
+        }
+      : {}),
   };
 }
 
@@ -93,7 +99,7 @@ export function createMcpServer(): McpServer {
   });
 
   setMcpServer(server);
-  registerTools(server);
+  registerTools(server, getLocalIconData());
   registerCachedContentResource(server);
   registerInstructionsResource(server, instructions);
 
