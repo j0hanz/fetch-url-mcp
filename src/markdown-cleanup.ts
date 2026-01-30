@@ -194,21 +194,22 @@ function normalizeListsAndSpacing(text: string): string {
 }
 
 function fixConcatenatedProperties(text: string): string {
-  const quotedValuePattern = /([a-z_][a-z0-9_]{0,30}\??:\s+)([\u0022\u201C][^\u0022\u201C\u201D]*[\u0022\u201D])([a-z_][a-z0-9_]{0,30}\??:)/g;  
+  const quotedValuePattern =
+    /([a-z_][a-z0-9_]{0,30}\??:\s+)([\u0022\u201C][^\u0022\u201C\u201D]*[\u0022\u201D])([a-z_][a-z0-9_]{0,30}\??:)/g;
   let result = text;
   let iterations = 0;
   const maxIterations = 3;
-  
+
   while (iterations < maxIterations) {
     const before = result;
     result = result.replace(quotedValuePattern, '$1$2\n\n$3');
-    
+
     if (result === before) {
       break;
     }
     iterations++;
   }
-  
+
   return result;
 }
 

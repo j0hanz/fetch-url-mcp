@@ -717,9 +717,10 @@ function createCustomTranslators(): TranslatorConfigObject {
       if (!isObject(ctx) || !isObject(ctx.node)) {
         return {};
       }
-      
+
       const node = ctx.node as { attribs?: { class?: string } };
-      const className = typeof node.attribs?.class === 'string' ? node.attribs.class : '';
+      const className =
+        typeof node.attribs?.class === 'string' ? node.attribs.class : '';
       if (!className.includes('type')) {
         return {};
       }
@@ -727,7 +728,7 @@ function createCustomTranslators(): TranslatorConfigObject {
         postprocess: ({ content }: { content: string }) => {
           const lines = content.split('\n');
           const separated: string[] = [];
-          
+
           for (let i = 0; i < lines.length; i++) {
             const line = lines[i] ?? '';
             const nextLine = i < lines.length - 1 ? (lines[i + 1] ?? '') : '';
@@ -743,7 +744,7 @@ function createCustomTranslators(): TranslatorConfigObject {
               separated.push('');
             }
           }
-          
+
           return separated.join('\n');
         },
       };
