@@ -97,11 +97,15 @@ function writeLog(level: LogLevel, message: string, meta?: LogMetadata): void {
   process.stderr.write(`${formatLogEntry(level, message, meta)}\n`);
 
   if (mcpServer) {
+    const sessionId = getSessionId();
     mcpServer.server
-      .sendLoggingMessage({
-        level: mapToMcpLevel(level),
-        data: meta ? { message, ...meta } : message,
-      })
+      .sendLoggingMessage(
+        {
+          level: mapToMcpLevel(level),
+          data: meta ? { message, ...meta } : message,
+        },
+        sessionId
+      )
       .catch(() => {});
   }
 }

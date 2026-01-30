@@ -184,23 +184,37 @@ interface ProgressReporter {
  * Progress reporting
  * ------------------------------------------------------------------------------------------------- */
 
+function resolveRelatedTaskMeta(
+  meta?: RequestMeta
+): { taskId: string } | undefined {
+  if (!meta) return undefined;
+  const related = (
+    meta as { 'io.modelcontextprotocol/related-task'?: unknown }
+  )['io.modelcontextprotocol/related-task'];
+  if (!isObject(related)) return undefined;
+  const { taskId } = related as { taskId?: unknown };
+  return typeof taskId === 'string' ? { taskId } : undefined;
+}
+
 class ToolProgressReporter implements ProgressReporter {
   private constructor(
     private readonly token: ProgressToken,
     private readonly sendNotification: (
       notification: ProgressNotification
-    ) => Promise<void>
+    ) => Promise<void>,
+    private readonly relatedTaskMeta?: { taskId: string }
   ) {}
 
   static create(extra?: ToolHandlerExtra): ProgressReporter {
     const token = extra?._meta?.progressToken ?? null;
     const sendNotification = extra?.sendNotification;
+    const relatedTaskMeta = resolveRelatedTaskMeta(extra?._meta);
 
     if (token === null || !sendNotification) {
       return { report: async () => {} };
     }
 
-    return new ToolProgressReporter(token, sendNotification);
+    return new ToolProgressReporter(token, sendNotification, relatedTaskMeta);
   }
 
   async report(progress: number, message: string): Promise<void> {
@@ -213,6 +227,14 @@ class ToolProgressReporter implements ProgressReporter {
             progress,
             total: FETCH_PROGRESS_TOTAL,
             message,
+            ...(this.relatedTaskMeta
+              ? {
+                  _meta: {
+                    'io.modelcontextprotocol/related-task':
+                      this.relatedTaskMeta,
+                  },
+                }
+              : {}),
           },
         }),
         new Promise<void>((_, reject) => {
@@ -851,7 +873,6 @@ async function executeFetch(
   logDebug('Fetching URL', { url });
 
   await progress.report(2, 'Fetching content');
-  await progress.report(2, 'Fetching content'); // preserve existing behavior
 
   const { pipeline, inlineResult } = await fetchPipeline(url, signal, progress);
 
@@ -895,7 +916,7 @@ const TOOL_DEFINITION = {
   outputSchema: fetchUrlOutputSchema,
   handler: fetchUrlToolHandler,
   execution: {
-    taskSupport: true,
+    taskSupport: 'optional',
   },
   annotations: {
     readOnlyHint: true,
@@ -909,7 +930,7 @@ const TOOL_DEFINITION = {
   description: string;
   inputSchema: typeof fetchUrlInputSchema;
   outputSchema: typeof fetchUrlOutputSchema;
-  execution: { taskSupport: boolean };
+  execution: { taskSupport: 'optional' | 'required' | 'forbidden' };
   annotations: ToolAnnotations;
   handler: FetchUrlToolHandler;
 };
@@ -924,8 +945,13 @@ export function withRequestContextIfMissing<TParams, TResult, TExtra = unknown>(
     }
 
     const derivedRequestId = resolveRequestIdFromExtra(extra) ?? randomUUID();
+    const derivedSessionId = resolveSessionIdFromExtra(extra);
     return runWithRequestContext(
-      { requestId: derivedRequestId, operationId: derivedRequestId },
+      {
+        requestId: derivedRequestId,
+        operationId: derivedRequestId,
+        ...(derivedSessionId ? { sessionId: derivedSessionId } : {}),
+      },
       () => handler(params, extra)
     );
   };
@@ -940,6 +966,21 @@ function resolveRequestIdFromExtra(extra: unknown): string | undefined {
   return undefined;
 }
 
+function resolveSessionIdFromExtra(extra: unknown): string | undefined {
+  if (!isObject(extra)) return undefined;
+  const { sessionId } = extra as { sessionId?: unknown };
+  if (typeof sessionId === 'string') return sessionId;
+
+  const { requestInfo } = extra as { requestInfo?: unknown };
+  if (!isObject(requestInfo)) return undefined;
+  const { headers } = requestInfo as { headers?: unknown };
+  if (!isObject(headers)) return undefined;
+  const headerValue = (headers as { 'mcp-session-id'?: unknown })[
+    'mcp-session-id'
+  ];
+  return typeof headerValue === 'string' ? headerValue : undefined;
+}
+
 export function registerTools(server: McpServer): void {
   if (config.tools.enabled.includes(FETCH_URL_TOOL_NAME)) {
     server.registerTool(
@@ -950,6 +991,7 @@ export function registerTools(server: McpServer): void {
         inputSchema: TOOL_DEFINITION.inputSchema,
         outputSchema: TOOL_DEFINITION.outputSchema,
         annotations: TOOL_DEFINITION.annotations,
+        execution: TOOL_DEFINITION.execution,
         // Use specific tool icon here
         icons: [TOOL_ICON],
       } as { inputSchema: typeof fetchUrlInputSchema } & Record<
