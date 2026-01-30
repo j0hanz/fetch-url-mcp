@@ -124,7 +124,7 @@ const fetchUrlInputSchema = z.strictObject({
     .url({ protocol: /^https?$/i })
     .min(1)
     .max(config.constants.maxUrlLength)
-    .describe('The URL to fetch'),
+    .describe('The URL of the webpage to fetch and convert to Markdown'),
 });
 
 const fetchUrlOutputSchema = z.strictObject({
@@ -157,8 +157,24 @@ const fetchUrlOutputSchema = z.strictObject({
 });
 
 export const FETCH_URL_TOOL_NAME = 'fetch-url';
-export const FETCH_URL_TOOL_DESCRIPTION =
-  'Fetches a webpage and converts it to clean Markdown format';
+export const FETCH_URL_TOOL_DESCRIPTION = `
+Fetches a webpage and converts it to clean Markdown format optimized for LLM context.
+
+This tool is useful for:
+- Reading documentation, blog posts, or articles.
+- Extracting main content while removing navigation and ads (noise removal).
+- Caching content to speed up repeated queries.
+
+Limitations:
+- Returns truncated content if it exceeds ${config.constants.maxInlineContentChars} characters.
+- Does not execute complex client-side JavaScript interactions.
+`.trim();
+
+// Specific icon for the fetch-url tool (download cloud / web)
+const TOOL_ICON = {
+  src: 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSJjdXJyZW50Q29sb3IiIHN0cm9rZS13aWR0aD0iMiIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cGF0aCBkPSJNMjEgMTV2NGEyIDIgMCAwIDEtMiAySDVhMiAyIDAgMCAxLTItMnYtNCIvPjxwb2x5bGluZSBwb2ludHM9IjcgMTAgMTIgMTUgMTcgMTAiLz48bGluZSB4MT0iMTIiIHkxPSIxNSIgeDI9IjEyIiB5Mj0iMyIvPjwvc3ZnPg==',
+  mimeType: 'image/svg+xml',
+};
 
 interface ProgressReporter {
   report: (progress: number, message: string) => Promise<void>;
@@ -920,20 +936,23 @@ function resolveRequestIdFromExtra(extra: unknown): string | undefined {
   return undefined;
 }
 
-export function registerTools(
-  server: McpServer,
-  serverIcons?: cache.McpIcon[]
-): void {
-  server.registerTool(
-    TOOL_DEFINITION.name,
-    {
-      title: TOOL_DEFINITION.title,
-      description: TOOL_DEFINITION.description,
-      inputSchema: TOOL_DEFINITION.inputSchema,
-      outputSchema: TOOL_DEFINITION.outputSchema,
-      annotations: TOOL_DEFINITION.annotations,
-      ...(serverIcons ? { icons: serverIcons } : {}),
-    },
-    withRequestContextIfMissing(TOOL_DEFINITION.handler)
-  );
+export function registerTools(server: McpServer): void {
+  if (config.tools.enabled.includes(FETCH_URL_TOOL_NAME)) {
+    server.registerTool(
+      TOOL_DEFINITION.name,
+      {
+        title: TOOL_DEFINITION.title,
+        description: TOOL_DEFINITION.description,
+        inputSchema: TOOL_DEFINITION.inputSchema,
+        outputSchema: TOOL_DEFINITION.outputSchema,
+        annotations: TOOL_DEFINITION.annotations,
+        // Use specific tool icon here
+        icons: [TOOL_ICON],
+      } as { inputSchema: typeof fetchUrlInputSchema } & Record<
+        string,
+        unknown
+      >,
+      withRequestContextIfMissing(TOOL_DEFINITION.handler)
+    );
+  }
 }

@@ -334,6 +334,7 @@ export const config = {
     ),
   },
   tools: {
+    enabled: parseList(process.env.ENABLED_TOOLS ?? 'fetch-url'),
     timeoutMs: parseInteger(
       process.env.TOOL_TIMEOUT_MS,
       DEFAULT_TOOL_TIMEOUT_MS,
