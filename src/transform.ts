@@ -718,9 +718,12 @@ function createCustomTranslators(): TranslatorConfigObject {
         return {};
       }
 
-      const node = ctx.node as { attribs?: { class?: string } };
-      const className =
-        typeof node.attribs?.class === 'string' ? node.attribs.class : '';
+      const { node } = ctx;
+      const getAttribute = hasGetAttribute(node)
+        ? node.getAttribute.bind(node)
+        : undefined;
+      const className = getAttribute?.('class') ?? '';
+
       if (!className.includes('type')) {
         return {};
       }
@@ -761,8 +764,9 @@ function createCustomTranslators(): TranslatorConfigObject {
     sup: () => ({
       postprocess: ({ content }: { content: string }) => `^${content}^`,
     }),
-    // Note: section translator removed in favor of HTML preprocessing
-    // See preprocessPropertySections() for the fix to TypeDoc section spacing
+    section: () => ({
+      postprocess: ({ content }: { content: string }) => `\n\n${content}\n\n`,
+    }),
     pre: (ctx: unknown) => buildPreTranslator(ctx),
   };
 }
@@ -788,7 +792,7 @@ function getMarkdownConverter(): NodeHtmlMarkdown {
 
 function preprocessPropertySections(html: string): string {
   const result = html.replace(
-    /<\/section>\s*(<section[^>]*class="[^"]*tsd-panel[^"]*tsd-member[^"]*"[^>]*>)/g,
+    /<\/section>\s*(<section[^>]*class="[^"]*tsd-member[^"]*"[^>]*>)/g,
     '</section><p>&nbsp;</p>$1'
   );
   return result;

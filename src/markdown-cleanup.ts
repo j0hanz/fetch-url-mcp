@@ -119,7 +119,7 @@ function fixOrphanHeadings(text: string): string {
 }
 
 function removeSkipLinksAndEmptyAnchors(text: string): string {
-  const zeroWidthAnchorLink = /\[(?:\s|\u200B)*\]\(#[^)]*\)\s*/g;
+  const zeroWidthAnchorLink = /\[(?:\s|\u200B)*\]\(#[^)]*\)[ \t]*/g;
   return text
     .replace(zeroWidthAnchorLink, '')
     .replace(/^\[Skip to (?:main )?content\]\(#[^)]*\)\s*$/gim, '')
