@@ -2,6 +2,7 @@ import { readFile } from 'node:fs/promises';
 
 import { z } from 'zod';
 
+import { completable } from '@modelcontextprotocol/sdk/server/completable.js';
 import {
   McpServer,
   ResourceTemplate,
@@ -14,7 +15,11 @@ import {
   type Result,
 } from '@modelcontextprotocol/sdk/types.js';
 
-import { type McpIcon, registerCachedContentResource } from './cache.js';
+import {
+  getRecentCachedUrls,
+  type McpIcon,
+  registerCachedContentResource,
+} from './cache.js';
 import { config } from './config.js';
 import { destroyAgents } from './fetch.js';
 import { logError, logInfo, setMcpServer } from './observability.js';
@@ -591,7 +596,9 @@ function registerPrompts(server: McpServer): void {
         title: 'Summarize Webpage',
         description: 'Summarize the content of a webpage given its URL.',
         argsSchema: {
-          url: z.string().describe('The URL to summarize'),
+          url: completable(z.string().describe('The URL to summarize'), () =>
+            getRecentCachedUrls().map((entry) => entry.url)
+          ),
         },
       },
       (args) => ({
