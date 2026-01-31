@@ -30,7 +30,7 @@ export function getRequestId(): string | undefined {
   return requestContext.getStore()?.requestId;
 }
 
-export function getSessionId(): string | undefined {
+function getSessionId(): string | undefined {
   return requestContext.getStore()?.sessionId;
 }
 
@@ -141,18 +141,4 @@ export function redactUrl(rawUrl: string): string {
   } catch {
     return rawUrl;
   }
-}
-
-export function redactHeaders(
-  headers: Record<string, unknown>
-): Record<string, unknown> {
-  const redacted = { ...headers };
-  const sensitiveKeys = ['authorization', 'cookie', 'set-cookie', 'x-api-key'];
-
-  for (const key of Object.keys(redacted)) {
-    if (sensitiveKeys.includes(key.toLowerCase())) {
-      redacted[key] = '[REDACTED]';
-    }
-  }
-  return redacted;
 }

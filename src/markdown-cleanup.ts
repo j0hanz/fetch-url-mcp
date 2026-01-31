@@ -635,34 +635,3 @@ export function buildMetadataFooter(
 
   return lines.join('\n');
 }
-
-/* -------------------------------------------------------------------------------------------------
- * Heading promotion (fence-aware)
- * ------------------------------------------------------------------------------------------------- */
-
-/**
- * Promote standalone lines that look like headings to proper markdown headings.
- * Fence-aware: never modifies content inside fenced code blocks.
- */
-export function promoteOrphanHeadings(markdown: string): string {
-  if (!markdown) return '';
-
-  const lines = markdown.split('\n');
-  const result: string[] = [];
-  const state = initialFenceState();
-
-  for (let i = 0; i < lines.length; i += 1) {
-    const line = lines[i] ?? '';
-    const prevLine = i > 0 ? (lines[i - 1] ?? '') : '';
-
-    if (state.inFence || isFenceStart(line)) {
-      result.push(line);
-      advanceFenceState(line, state);
-      continue;
-    }
-
-    result.push(orphanHeadingPromoter.processLine(line, prevLine));
-  }
-
-  return result.join('\n');
-}

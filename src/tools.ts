@@ -157,7 +157,7 @@ const fetchUrlOutputSchema = z.strictObject({
 });
 
 export const FETCH_URL_TOOL_NAME = 'fetch-url';
-export const FETCH_URL_TOOL_DESCRIPTION = `
+const FETCH_URL_TOOL_DESCRIPTION = `
 Fetches a webpage and converts it to clean Markdown format optimized for LLM context.
 
 This tool is useful for:

@@ -60,7 +60,7 @@ function isTerminalStatus(status: TaskStatus): boolean {
   return TERMINAL_STATUSES.has(status);
 }
 
-export class TaskManager {
+class TaskManager {
   private tasks = new Map<string, TaskState>();
   private waiters = new Map<string, Set<(task: TaskState) => void>>();
 
@@ -167,21 +167,6 @@ export class TaskManager {
       nextIndex < allTasks.length ? this.encodeCursor(nextIndex) : undefined;
 
     return nextCursor ? { tasks: page, nextCursor } : { tasks: page };
-  }
-
-  // Helper to check if task is expired and could be cleaned up
-  // In a real implementation, this would be called by a periodic job
-  cleanupExpiredTasks(): number {
-    const now = Date.now();
-    let count = 0;
-    for (const [id, task] of this.tasks.entries()) {
-      const created = new Date(task.createdAt).getTime();
-      if (now - created > task.ttl) {
-        this.tasks.delete(id);
-        count++;
-      }
-    }
-    return count;
   }
 
   async waitForTerminalTask(

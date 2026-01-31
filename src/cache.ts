@@ -402,26 +402,6 @@ export function isEnabled(): boolean {
   return store.isEnabled();
 }
 
-export function getRecentCachedUrls(): { url: string; title?: string }[] {
-  const cacheKeys = store.keys();
-  const maxResults = 20;
-  const results: { url: string; title?: string }[] = [];
-
-  for (let i = 0; i < Math.min(cacheKeys.length, maxResults); i++) {
-    const key = cacheKeys[i];
-    if (!key) continue;
-    const entry = store.get(key);
-    if (entry) {
-      results.push({
-        url: entry.url,
-        ...(entry.title ? { title: entry.title } : {}),
-      });
-    }
-  }
-
-  return results;
-}
-
 /* -------------------------------------------------------------------------------------------------
  * MCP cached content resource (superfetch://cache/markdown/{urlHash})
  * ------------------------------------------------------------------------------------------------- */
