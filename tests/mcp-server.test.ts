@@ -154,6 +154,11 @@ describe('MCP Server', () => {
 
       assert.ok(prompt, 'Summarize webpage prompt should be registered');
       assert.strictEqual(
+        prompt.title,
+        'Summarize Webpage',
+        'Prompt should have correct title'
+      );
+      assert.strictEqual(
         prompt.description,
         'Summarize the content of a webpage given its URL.'
       );

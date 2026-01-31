@@ -588,6 +588,7 @@ function registerPrompts(server: McpServer): void {
     server.registerPrompt(
       'summarize-webpage',
       {
+        title: 'Summarize Webpage',
         description: 'Summarize the content of a webpage given its URL.',
         argsSchema: {
           url: z.string().describe('The URL to summarize'),
