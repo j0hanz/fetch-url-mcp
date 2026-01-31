@@ -141,4 +141,32 @@ describe('MCP Server', () => {
       }
     });
   });
+
+  describe('Prompts', () => {
+    it('registers summarize-webpage prompt', async () => {
+      const server = await createMcpServer();
+      // Access private property for testing
+      // @ts-ignore
+      const prompts = server._registeredPrompts;
+      const promptName = 'summarize-webpage';
+      // @ts-ignore
+      const prompt = prompts[promptName];
+
+      assert.ok(prompt, 'Summarize webpage prompt should be registered');
+      assert.strictEqual(
+        prompt.description,
+        'Summarize the content of a webpage given its URL.'
+      );
+      assert.ok(prompt.argsSchema, 'Prompt should have args schema');
+
+      // Test prompt execution
+      const result = await prompt.callback({ url: 'https://example.com' });
+      assert.ok(result.messages, 'Result should have messages');
+      assert.strictEqual(result.messages.length, 1);
+      assert.ok(
+        result.messages[0].content.text.includes('https://example.com'),
+        'Message should contain URL'
+      );
+    });
+  });
 });
