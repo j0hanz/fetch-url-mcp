@@ -963,7 +963,7 @@ function tryTransformRawContent(params: {
  * Quality gates + content source resolution
  * ------------------------------------------------------------------------------------------------- */
 
-const MIN_CONTENT_RATIO = 0.07;
+const MIN_CONTENT_RATIO = 0.15;
 const MIN_HTML_LENGTH_FOR_GATE = 100;
 const MIN_HEADING_RETENTION_RATIO = 0.3;
 const MIN_CODE_BLOCK_RETENTION_RATIO = 0.15;
@@ -1135,8 +1135,7 @@ function findContentRoot(document: Document): string | undefined {
 
 function shouldUseArticleContent(
   article: ExtractedArticle,
-  originalHtmlOrDocument: string | Document,
-  _url: string
+  originalHtmlOrDocument: string | Document
 ): boolean {
   const articleLength = article.textContent.length;
   const originalLength = getVisibleTextLength(originalHtmlOrDocument);
@@ -1200,12 +1199,25 @@ function buildContentSource(params: {
   );
 
   if (useArticleContent && article) {
-    return { sourceHtml: article.content, title: article.title, metadata };
+    // Apply noise removal to Readability-extracted content to remove
+    // author bylines, social share buttons, and other boilerplate
+    // that Readability may have included in the article content
+    const cleanedArticleHtml = removeNoiseFromHtml(
+      article.content,
+      undefined,
+      url
+    );
+    return {
+      sourceHtml: cleanedArticleHtml,
+      title: article.title,
+      metadata,
+      skipNoiseRemoval: true, // Already cleaned
+    };
   }
 
   if (document) {
-    removeNoiseFromHtml(html, document, url);
-    const cleanedDoc = document;
+    const cleanedHtml = removeNoiseFromHtml(html, undefined, url);
+    const { document: cleanedDoc } = parseHTML(cleanedHtml);
 
     const contentRoot = findContentRoot(cleanedDoc);
     if (contentRoot) {
@@ -1242,7 +1254,7 @@ function resolveContentSource(params: {
   });
 
   const useArticleContent = article
-    ? shouldUseArticleContent(article, document, params.url)
+    ? shouldUseArticleContent(article, document)
     : false;
 
   return buildContentSource({
