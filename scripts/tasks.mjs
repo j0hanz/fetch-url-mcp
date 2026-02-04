@@ -1,26 +1,31 @@
 /* eslint-disable */
 import { spawn } from 'node:child_process';
-import { access, chmod, copyFile, cp, mkdir, rm } from 'node:fs/promises';
+import { access, chmod, cp, mkdir, rm } from 'node:fs/promises';
 import { join } from 'node:path';
+import { performance } from 'node:perf_hooks';
 
 // --- Configuration (Single Source of Truth) ---
 const CONFIG = {
   paths: {
     dist: 'dist',
     assets: 'assets',
-    distAssets: 'dist/assets',
     instructions: 'src/instructions.md',
-    distInstructions: 'dist/instructions.md',
     executable: 'dist/index.js',
     tsBuildInfo: [
       '.tsbuildinfo',
       'tsconfig.tsbuildinfo',
       'tsconfig.build.tsbuildinfo',
-      'tsconfig.test.tsbuildinfo',
     ],
+    get distAssets() {
+      return join(this.dist, 'assets');
+    },
+    get distInstructions() {
+      return join(this.dist, 'instructions.md');
+    },
   },
   commands: {
-    tsc: 'npx tsc -p tsconfig.build.json',
+    tsc: ['npx', ['tsc', '-p', 'tsconfig.build.json']],
+    tscCheck: ['npx', ['tsc', '-p', 'tsconfig.json', '--noEmit']],
   },
 };
 
@@ -29,9 +34,8 @@ const Logger = {
   startGroup: (name) => process.stdout.write(`> ${name}... `),
   endGroupSuccess: (duration) => console.log(`✅ (${duration}s)`),
   endGroupFail: () => console.log(`❌`),
-  logShellSuccess: (name, duration) =>
-    console.log(`> ${name} ✅ (${duration}s)`),
-  logShellFail: (name, code) => console.log(`> ${name} ❌ (exit code ${code})`),
+  shellSuccess: (name, duration) => console.log(`> ${name} ✅ (${duration}s)`),
+  shellFail: (name, error) => console.log(`> ${name} ❌ (${error.message})`),
   info: (msg) => console.log(msg),
   error: (err) => console.error(err),
   newLine: () => console.log(),
@@ -46,33 +50,50 @@ const System = {
       return false;
     }
   },
+
   async remove(paths) {
     const targets = Array.isArray(paths) ? paths : [paths];
     await Promise.all(
       targets.map((p) => rm(p, { recursive: true, force: true }))
     );
   },
+
   async copy(src, dest, opts = {}) {
     await cp(src, dest, opts);
   },
+
   async makeDir(path) {
     await mkdir(path, { recursive: true });
   },
+
   async changeMode(path, mode) {
     await chmod(path, mode);
   },
-  async exec(command, args = []) {
+
+  exec(command, args = []) {
     return new Promise((resolve, reject) => {
-      const proc = spawn(command, args, { stdio: 'inherit', shell: true });
+      const useShell = command !== 'node';
+      const spawnArgs = useShell ? [] : args;
+      const spawnCommand = useShell
+        ? [command, ...args]
+            .map((arg) => (arg.includes(' ') ? `"${arg}"` : arg))
+            .join(' ')
+        : command;
+
+      const proc = spawn(spawnCommand, spawnArgs, {
+        stdio: 'inherit',
+        shell: useShell,
+      });
+
       proc.on('close', (code) => {
-        if (code === 0) resolve();
-        else reject(new Error(`Command failed: ${code}`));
+        if (code === 0) return resolve();
+        reject(new Error(`${command} exited with code ${code}`));
       });
     });
   },
 };
 
-// --- Domain Layer (Build Actions) ---
+// --- Domain Layer (Build & Test Actions) ---
 const BuildTasks = {
   async clean() {
     await System.remove(CONFIG.paths.dist);
@@ -80,7 +101,8 @@ const BuildTasks = {
   },
 
   async compile() {
-    await System.exec(CONFIG.commands.tsc);
+    const [cmd, args] = CONFIG.commands.tsc;
+    await System.exec(cmd, args);
   },
 
   async validate() {
@@ -90,13 +112,11 @@ const BuildTasks = {
   },
 
   async assets() {
-    const { rootDir = process.cwd() } = {};
     await System.makeDir(CONFIG.paths.dist);
     await System.copy(CONFIG.paths.instructions, CONFIG.paths.distInstructions);
 
-    const assetsPath = join(rootDir, CONFIG.paths.assets);
-    if (await System.exists(assetsPath)) {
-      await System.copy(assetsPath, join(rootDir, CONFIG.paths.distAssets), {
+    if (await System.exists(CONFIG.paths.assets)) {
+      await System.copy(CONFIG.paths.assets, CONFIG.paths.distAssets, {
         recursive: true,
       });
     }
@@ -107,18 +127,43 @@ const BuildTasks = {
   },
 };
 
+const TestTasks = {
+  async typeCheck() {
+    await Runner.runShellTask('Type-checking src', async () => {
+      const [cmd, args] = CONFIG.commands.tscCheck;
+      await System.exec(cmd, args);
+    });
+  },
+
+  async test(args = []) {
+    await Pipeline.fullBuild();
+
+    const extraArgs = args.includes('--coverage')
+      ? ['--experimental-test-coverage']
+      : [];
+
+    await Runner.runShellTask('Running tests', async () => {
+      await System.exec('node', [
+        '--test',
+        '--experimental-transform-types',
+        ...extraArgs,
+      ]);
+    });
+  },
+};
+
 // --- Application Layer (Task Running & Orchestration) ---
 class Runner {
   static async runTask(name, fn) {
     Logger.startGroup(name);
     const start = performance.now();
+
     try {
       await fn();
-      const duration = ((performance.now() - start) / 1000).toFixed(2);
-      Logger.endGroupSuccess(duration);
-    } catch (error) {
+      Logger.endGroupSuccess(((performance.now() - start) / 1000).toFixed(2));
+    } catch (err) {
       Logger.endGroupFail();
-      throw error; // Re-throw to be caught by top-level
+      throw err;
     }
   }
 
@@ -126,13 +171,16 @@ class Runner {
     Logger.startGroup(name);
     Logger.newLine();
     const start = performance.now();
+
     try {
-      await fn(); // execs with stdio inherit
-      const duration = ((performance.now() - start) / 1000).toFixed(2);
-      Logger.logShellSuccess(name, duration);
-    } catch (error) {
-      // System.exec throws on non-zero exit
-      throw error;
+      await fn();
+      Logger.shellSuccess(
+        name,
+        ((performance.now() - start) / 1000).toFixed(2)
+      );
+    } catch (err) {
+      Logger.shellFail(name, err);
+      throw err;
     }
   }
 }
@@ -140,7 +188,7 @@ class Runner {
 const Pipeline = {
   async fullBuild() {
     Logger.info('🚀 Starting build...');
-    const startTotal = performance.now();
+    const start = performance.now();
 
     await Runner.runTask('Cleaning dist', BuildTasks.clean);
     await Runner.runShellTask('Compiling TypeScript', BuildTasks.compile);
@@ -148,8 +196,11 @@ const Pipeline = {
     await Runner.runTask('Copying assets', BuildTasks.assets);
     await Runner.runTask('Making executable', BuildTasks.makeExecutable);
 
-    const durationTotal = ((performance.now() - startTotal) / 1000).toFixed(2);
-    Logger.info(`\n✨ Build completed in ${durationTotal}s`);
+    Logger.info(
+      `\n✨ Build completed in ${((performance.now() - start) / 1000).toFixed(
+        2
+      )}s`
+    );
   },
 };
 
@@ -163,10 +214,13 @@ const CLI = {
     'make-executable': () =>
       Runner.runTask('Making executable', BuildTasks.makeExecutable),
     build: Pipeline.fullBuild,
+    'type-check': () => TestTasks.typeCheck(),
+    test: (args) => TestTasks.test(args),
   },
 
   async main(args) {
-    const taskName = args[2] || 'build';
+    const taskName = args[2] ?? 'build';
+    const restArgs = args.slice(3);
     const action = this.routes[taskName];
 
     if (!action) {
@@ -176,9 +230,8 @@ const CLI = {
     }
 
     try {
-      await action();
-    } catch (err) {
-      Logger.error(err);
+      await action(restArgs);
+    } catch {
       process.exit(1);
     }
   },

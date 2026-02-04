@@ -16,8 +16,8 @@
 - `[src/]`: Main server implementation (MCP wiring, HTTP server, fetch + transform pipeline). (evidence: tsconfig.json, src/index.ts, src/mcp.ts, src/http-native.ts, src/fetch.ts, src/transform.ts)
 - `[src/workers/]`: Worker-thread transform worker implementation (used by transform pipeline). (evidence: src/transform.ts)
 - `[tests/]`: Node test runner tests; tests import built artifacts from `dist/`. (evidence: tests/fetch-url-tool.test.ts)
-- `[scripts/]`: Build orchestration and validation (TypeScript build, copying instructions/assets, making CLI executable). (evidence: scripts/build.mjs, package.json)
-- `[assets/]`: Static assets copied to `dist/assets` during build. (evidence: scripts/build.mjs, README.md)
+- `[scripts/]`: Build orchestration and validation (TypeScript build, copying instructions/assets, making CLI executable). (evidence: scripts/tasks.mjs, package.json)
+- `[assets/]`: Static assets copied to `dist/assets` during build. (evidence: scripts/tasks.mjs, README.md)
 - `[.github/workflows/]`: CI/release workflow (build + lint + type-check + publish). (evidence: .github/workflows/publish.yml)
 
 > Ignore generated/vendor dirs like `dist/`, `node_modules/`, coverage outputs, and local secrets. (evidence: .gitignore, tsconfig.json, .prettierignore)
@@ -28,7 +28,7 @@
 - **Install:** `npm ci` (CI) or `npm install` (local/dev). (evidence: .github/workflows/publish.yml, README.md)
 - **Dev:** `npm run dev` (tsc watch) and `npm run dev:run` (watch `dist/index.js` with `.env`). (evidence: package.json)
 - **Test:** `npm test` (builds first, then runs Node’s test runner). (evidence: package.json)
-- **Build:** `npm run build` (runs `node scripts/build.mjs`, compiling TS with `tsconfig.build.json` and copying required assets/instructions). (evidence: package.json, scripts/build.mjs, tsconfig.build.json)
+- **Build:** `npm run build` (runs `node scripts/tasks.mjs`, compiling TS with `tsconfig.build.json` and copying required assets/instructions). (evidence: package.json, scripts/tasks.mjs, tsconfig.build.json)
 - **Lint/Format:** `npm run lint`, `npm run lint:fix`, `npm run format`, `npm run type-check`. (evidence: package.json)
 
 ## 4) Coding Standards (Style & Patterns)
@@ -46,7 +46,7 @@
 - Do not add/remove dependencies without updating `package.json` and keeping `package-lock.json` consistent (CI uses `npm ci`). (evidence: package.json, package-lock.json, .github/workflows/publish.yml)
 - Do not bypass CI-quality gates: lint and type-check must stay green (CI runs them before build/publish). (evidence: .github/workflows/publish.yml, package.json)
 - Do not commit secrets or local environment configs; `.env*` is explicitly gitignored. (evidence: .gitignore)
-- Do not edit generated build output (`dist/`) as source of truth; update `src/` and rebuild instead (`outDir` is `dist`). (evidence: tsconfig.json, scripts/build.mjs, .gitignore)
+- Do not edit generated build output (`dist/`) as source of truth; update `src/` and rebuild instead (`outDir` is `dist`). (evidence: tsconfig.json, scripts/tasks.mjs, .gitignore)
 
 ## 6) Testing Strategy (Verified)
 

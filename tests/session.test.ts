@@ -324,7 +324,7 @@ describe('http session utilities', () => {
       const allowed = http.ensureSessionCapacity({
         store,
         maxSessions,
-        res: mockRes,
+        // res: mockRes, // Removed as it is not part of the signature
         evictOldest,
       });
 

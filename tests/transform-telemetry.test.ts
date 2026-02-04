@@ -2,11 +2,11 @@ import assert from 'node:assert/strict';
 import diagnosticsChannel from 'node:diagnostics_channel';
 import { describe, it } from 'node:test';
 
+import type { TransformStageEvent } from '../dist/transform-types.js';
 import {
   endTransformStage,
   type StageBudget,
   startTransformStage,
-  type TransformStageEvent,
 } from '../dist/transform.js';
 
 describe('transform telemetry', () => {

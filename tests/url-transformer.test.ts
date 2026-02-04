@@ -189,8 +189,8 @@ describe('url-transformer', () => {
     });
 
     it('handles non-string input gracefully', () => {
-      // @ts-expect-error - Testing invalid input
-      const result = transformToRawUrl(null);
+      // Testing invalid input
+      const result = transformToRawUrl(null as any);
       assert.equal(result.transformed, false);
     });
   });

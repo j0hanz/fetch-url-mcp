@@ -27,8 +27,8 @@ describe('performSharedFetch', () => {
         url: 'https://example.com',
         includeMetadata: true,
         transform: () => ({ content: 'hello' }),
-      },
-      { executeFetchPipeline }
+      } as any,
+      { executeFetchPipeline: executeFetchPipeline as any }
     );
 
     const call = executeFetchPipelineCalls[0] as

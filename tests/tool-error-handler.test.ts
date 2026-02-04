@@ -18,7 +18,7 @@ describe('tool error responses', () => {
       url: 'https://example.com',
     });
     assert.equal(
-      response.content[0]?.text,
+      (response.content[0] as { text: string })?.text,
       JSON.stringify(response.structuredContent)
     );
   });

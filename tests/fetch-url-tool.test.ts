@@ -48,7 +48,7 @@ describe('fetchUrlToolHandler', () => {
         assert.ok(structured);
         assert.equal(structured.url, 'https://example.com/test');
         assert.equal(typeof structured.markdown, 'string');
-        assert.ok(structured.markdown.includes('Hello'));
+        assert.ok((structured.markdown as string).includes('Hello'));
       }
     );
   });
