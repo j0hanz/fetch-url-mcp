@@ -25,6 +25,12 @@ cache, and SSRF protections.
 - Stdio or Streamable HTTP transport with session management.
 - SSRF protections: blocked private IP ranges and internal hostnames.
 
+> **Note:** Content extraction quality varies depending on the HTML structure and
+> complexity of the source page. SuperFetch works best with standard article and
+> documentation layouts. Always verify the fetched content to ensure it meets
+> your expectations, as some pages may require manual adjustment or alternative
+> approaches.
+
 ## Tech Stack
 
 - Runtime: Node.js >= 20.18.1 (engines)
@@ -245,6 +251,9 @@ Limitations:
 
 - Only http/https URLs are accepted; URLs with embedded credentials are rejected.
 - Client-side JavaScript is not executed.
+- Content extraction quality depends on the source HTML structure. Works best
+  with standard article and documentation layouts. Always verify output meets
+  expectations.
 
 Large content handling:
 

@@ -31,6 +31,7 @@
   - **Side effects:** None (read-only, idempotent). Populates cache automatically.
   - **Limits:** Inline content capped at 20,000 chars; larger content offloaded to `superfetch://cache/...`.
   - **Blocked targets:** `localhost`, private IPs (`10.x`, `172.16–31.x`, `192.168.x`), cloud metadata endpoints.
+  - **Content quality:** Extraction quality varies by HTML structure. Works best with standard articles/docs. Always verify output.
 
 ## 4. Error Handling Strategy
 
