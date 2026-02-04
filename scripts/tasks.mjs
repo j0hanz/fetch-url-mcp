@@ -28,7 +28,6 @@ const CONFIG = {
     tscCheck: ['npx', ['tsc', '-p', 'tsconfig.json', '--noEmit']],
   },
   test: {
-    loader: null,
     patterns: ['src/__tests__/**/*.test.ts', 'tests/**/*.test.ts'],
   },
 };
@@ -37,9 +36,9 @@ const CONFIG = {
 const Logger = {
   startGroup: (name) => process.stdout.write(`> ${name}... `),
   endGroupSuccess: (duration) => console.log(`✅ (${duration}s)`),
-  endGroupFail: () => console.log(`❌`),
+  endGroupFail: (err) =>
+    console.log(`❌${err?.message ? ` (${err.message})` : ''}`),
   shellSuccess: (name, duration) => console.log(`> ${name} ✅ (${duration}s)`),
-  shellFail: (name, error) => console.log(`> ${name} ❌ (${error.message})`),
   info: (msg) => console.log(msg),
   error: (err) => console.error(err),
   newLine: () => console.log(),
@@ -131,6 +130,32 @@ const BuildTasks = {
   },
 };
 
+// --- Test Helpers (Pure Functions) ---
+async function detectTestLoader() {
+  if (await System.exists('node_modules/tsx')) {
+    return ['--import', 'tsx/esm'];
+  }
+  if (await System.exists('node_modules/ts-node')) {
+    return ['--loader', 'ts-node/esm'];
+  }
+  return [];
+}
+
+function getCoverageArgs(args) {
+  return args.includes('--coverage') ? ['--experimental-test-coverage'] : [];
+}
+
+async function findTestPatterns() {
+  const existing = [];
+  for (const pattern of CONFIG.test.patterns) {
+    const basePath = pattern.split('/')[0];
+    if (await System.exists(basePath)) {
+      existing.push(pattern);
+    }
+  }
+  return existing;
+}
+
 const TestTasks = {
   async typeCheck() {
     await Runner.runShellTask('Type-checking src', async () => {
@@ -139,51 +164,27 @@ const TestTasks = {
     });
   },
 
-  async detectLoader() {
-    if (CONFIG.test.loader) {
-      return CONFIG.test.loader;
-    }
-
-    if (await System.exists('node_modules/tsx')) {
-      return ['--import', 'tsx/esm'];
-    }
-
-    if (await System.exists('node_modules/ts-node')) {
-      return ['--loader', 'ts-node/esm'];
-    }
-    return [];
-  },
-
   async test(args = []) {
     await Pipeline.fullBuild();
 
-    const extraArgs = args.includes('--coverage')
-      ? ['--experimental-test-coverage']
-      : [];
-
-    // Determine which test patterns exist
-    const existingPatterns = [];
-    for (const pattern of CONFIG.test.patterns) {
-      const basePath = pattern.split('/')[0];
-      if (await System.exists(basePath)) {
-        existingPatterns.push(pattern);
-      }
-    }
-
-    if (existingPatterns.length === 0) {
+    const patterns = await findTestPatterns();
+    if (patterns.length === 0) {
       throw new Error(
-        `No test directories found. Expected one of: ${CONFIG.test.patterns.join(', ')}`
+        `No test directories found. Expected one of: ${CONFIG.test.patterns.join(
+          ', '
+        )}`
       );
     }
 
-    const loader = await this.detectLoader();
+    const loader = await detectTestLoader();
+    const coverage = getCoverageArgs(args);
 
     await Runner.runShellTask('Running tests', async () => {
       await System.exec('node', [
         '--test',
         ...loader,
-        ...extraArgs,
-        ...existingPatterns,
+        ...coverage,
+        ...patterns,
       ]);
     });
   },
@@ -191,34 +192,26 @@ const TestTasks = {
 
 // --- Application Layer (Task Running & Orchestration) ---
 class Runner {
-  static async runTask(name, fn) {
-    Logger.startGroup(name);
-    const start = performance.now();
-
-    try {
-      await fn();
-      Logger.endGroupSuccess(((performance.now() - start) / 1000).toFixed(2));
-    } catch (err) {
-      Logger.endGroupFail();
-      throw err;
-    }
-  }
-
-  static async runShellTask(name, fn) {
+  static async #run(name, fn, logSuccess) {
     Logger.startGroup(name);
     Logger.newLine();
     const start = performance.now();
 
     try {
       await fn();
-      Logger.shellSuccess(
-        name,
-        ((performance.now() - start) / 1000).toFixed(2)
-      );
+      logSuccess(((performance.now() - start) / 1000).toFixed(2));
     } catch (err) {
-      Logger.shellFail(name, err);
+      Logger.endGroupFail(err);
       throw err;
     }
+  }
+
+  static runTask(name, fn) {
+    return this.#run(name, fn, Logger.endGroupSuccess);
+  }
+
+  static runShellTask(name, fn) {
+    return this.#run(name, fn, (d) => Logger.shellSuccess(name, d));
   }
 }
 
