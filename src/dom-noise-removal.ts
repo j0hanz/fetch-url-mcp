@@ -69,7 +69,7 @@ function mayContainNoise(html: string): boolean {
   );
 }
 
-const STRUCTURAL_TAGS = new Set([
+const BASE_STRUCTURAL_TAGS = [
   'script',
   'style',
   'noscript',
@@ -79,9 +79,19 @@ const STRUCTURAL_TAGS = new Set([
   'input',
   'select',
   'textarea',
-  'svg',
-  'canvas',
-]);
+] as const;
+
+// SVG and canvas tags are excluded from structural noise when preserveSvgCanvas is enabled.
+function getStructuralTags(): Set<string> {
+  const tags = new Set<string>(BASE_STRUCTURAL_TAGS);
+  if (!config.noiseRemoval.preserveSvgCanvas) {
+    tags.add('svg');
+    tags.add('canvas');
+  }
+  return tags;
+}
+
+const STRUCTURAL_TAGS = getStructuralTags();
 
 const ALWAYS_NOISE_TAGS = new Set(['nav', 'footer']);
 
@@ -197,17 +207,17 @@ const PROMO_TOKENS_ALWAYS = [
   'announcement',
   'cta',
   'advert',
-  'ad',
   'ads',
   'sponsor',
-  'related',
   'recommend',
-  'comment',
   'breadcrumb',
   'pagination',
   'pager',
   'taglist',
 ] as const;
+
+// Tokens with high false-positive risk, only used when aggressiveMode is enabled.
+const PROMO_TOKENS_AGGRESSIVE = ['ad', 'related', 'comment'] as const;
 
 const PROMO_TOKENS_BY_CATEGORY: Record<string, readonly string[]> = {
   [NOISE_CATEGORY.cookieBanners]: [
@@ -245,6 +255,11 @@ class PromoDetector {
     if (this.tokenCache) return this.tokenCache;
 
     const tokens = new Set<string>(PROMO_TOKENS_ALWAYS);
+
+    // Include high false-positive tokens only when aggressive mode is enabled.
+    if (config.noiseRemoval.aggressiveMode) {
+      for (const token of PROMO_TOKENS_AGGRESSIVE) tokens.add(token);
+    }
 
     for (const [category, categoryTokens] of Object.entries(
       PROMO_TOKENS_BY_CATEGORY

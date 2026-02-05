@@ -386,6 +386,8 @@ export const config = {
         'cookie-banners,newsletters,social-share,nav-footer'
     ),
     debug: parseBoolean(env.DEBUG_NOISE_REMOVAL, false),
+    aggressiveMode: parseBoolean(env.SUPERFETCH_AGGRESSIVE_NOISE, false),
+    preserveSvgCanvas: parseBoolean(env.SUPERFETCH_PRESERVE_SVG_CANVAS, false),
     weights: {
       hidden: parseInteger(env.NOISE_WEIGHT_HIDDEN, 50, 0, 100),
       structural: parseInteger(env.NOISE_WEIGHT_STRUCTURAL, 50, 0, 100),
