@@ -31,6 +31,47 @@ export interface TransformResult {
 }
 
 /* -------------------------------------------------------------------------------------------------
+ * Internal ports (DIP)
+ * ------------------------------------------------------------------------------------------------- */
+
+interface Logger {
+  debug(message: string, data?: Record<string, unknown>): void;
+  warn(message: string, data?: Record<string, unknown>): void;
+  error(message: string, data?: Record<string, unknown>): void;
+}
+
+interface RequestContextAccessor {
+  getRequestId(): string | undefined;
+  getOperationId(): string | undefined;
+}
+
+interface UrlRedactor {
+  redact(url: string): string;
+}
+
+type FetchLike = (
+  input: RequestInfo | URL,
+  init?: RequestInit
+) => Promise<Response>;
+
+const defaultLogger: Logger = {
+  debug: logDebug,
+  warn: logWarn,
+  error: logError,
+};
+
+const defaultContext: RequestContextAccessor = {
+  getRequestId,
+  getOperationId,
+};
+
+const defaultRedactor: UrlRedactor = {
+  redact: redactUrl,
+};
+
+const defaultFetch: FetchLike = (input, init) => fetch(input, init);
+
+/* -------------------------------------------------------------------------------------------------
  * SSRF / IP blocking
  * ------------------------------------------------------------------------------------------------- */
 
@@ -78,11 +119,15 @@ const BLOCKED_IPV6_SUBNETS: readonly { subnet: string; prefix: number }[] = [
   { subnet: IPV6_FF00, prefix: 8 },
 ];
 
+type SecurityConfig = typeof config.security;
+
 class IpBlocker {
   private cachedBlockList: BlockList | undefined;
 
+  constructor(private readonly security: SecurityConfig) {}
+
   isBlockedIp(candidate: string): boolean {
-    if (config.security.blockedHosts.has(candidate)) return true;
+    if (this.security.blockedHosts.has(candidate)) return true;
 
     const ipType = this.resolveIpType(candidate);
     if (!ipType) return false;
@@ -91,8 +136,8 @@ class IpBlocker {
     if (this.isBlockedBySubnetList(normalized, ipType)) return true;
 
     return (
-      config.security.blockedIpPattern.test(normalized) ||
-      config.security.blockedIpv4MappedPattern.test(normalized)
+      this.security.blockedIpPattern.test(normalized) ||
+      this.security.blockedIpv4MappedPattern.test(normalized)
     );
   }
 
@@ -107,23 +152,19 @@ class IpBlocker {
   }
 
   private getBlockList(): BlockList {
-    if (!this.cachedBlockList) {
-      const list = new BlockList();
-      for (const entry of BLOCKED_IPV4_SUBNETS)
-        list.addSubnet(entry.subnet, entry.prefix, 'ipv4');
-      for (const entry of BLOCKED_IPV6_SUBNETS)
-        list.addSubnet(entry.subnet, entry.prefix, 'ipv6');
-      this.cachedBlockList = list;
+    if (this.cachedBlockList) return this.cachedBlockList;
+
+    const list = new BlockList();
+    for (const entry of BLOCKED_IPV4_SUBNETS) {
+      list.addSubnet(entry.subnet, entry.prefix, 'ipv4');
     }
-    return this.cachedBlockList;
+    for (const entry of BLOCKED_IPV6_SUBNETS) {
+      list.addSubnet(entry.subnet, entry.prefix, 'ipv6');
+    }
+
+    this.cachedBlockList = list;
+    return list;
   }
-}
-
-const ipBlocker = new IpBlocker();
-
-/** Backwards-compatible export */
-export function isBlockedIp(ip: string): boolean {
-  return ipBlocker.isBlockedIp(ip);
 }
 
 /* -------------------------------------------------------------------------------------------------
@@ -138,7 +179,16 @@ function createValidationError(message: string): Error {
 
 const BLOCKED_HOST_SUFFIXES: readonly string[] = ['.local', '.internal'];
 
+type ConstantsConfig = typeof config.constants;
+
 class UrlNormalizer {
+  constructor(
+    private readonly constants: ConstantsConfig,
+    private readonly security: SecurityConfig,
+    private readonly ipBlocker: IpBlocker,
+    private readonly blockedHostSuffixes: readonly string[]
+  ) {}
+
   normalize(urlString: string): { normalizedUrl: string; hostname: string } {
     const trimmedUrl = this.requireTrimmedUrl(urlString);
     this.assertUrlLength(trimmedUrl);
@@ -150,9 +200,7 @@ class UrlNormalizer {
     const hostname = this.normalizeHostname(url);
     this.assertHostnameAllowed(hostname);
 
-    // Canonicalize hostname to avoid trailing-dot variants and keep url.href consistent.
     url.hostname = hostname;
-
     return { normalizedUrl: url.href, hostname };
   }
 
@@ -171,15 +219,16 @@ class UrlNormalizer {
   }
 
   private assertUrlLength(url: string): void {
-    if (url.length <= config.constants.maxUrlLength) return;
+    if (url.length <= this.constants.maxUrlLength) return;
     throw createValidationError(
-      `URL exceeds maximum length of ${config.constants.maxUrlLength} characters`
+      `URL exceeds maximum length of ${this.constants.maxUrlLength} characters`
     );
   }
 
   private parseUrl(urlString: string): URL {
-    if (!URL.canParse(urlString))
+    if (!URL.canParse(urlString)) {
       throw createValidationError('Invalid URL format');
+    }
     return new URL(urlString);
   }
 
@@ -200,8 +249,11 @@ class UrlNormalizer {
   private normalizeHostname(url: URL): string {
     let hostname = url.hostname.toLowerCase();
     while (hostname.endsWith('.')) hostname = hostname.slice(0, -1);
-    if (!hostname)
+
+    if (!hostname) {
       throw createValidationError('URL must have a valid hostname');
+    }
+
     return hostname;
   }
 
@@ -212,42 +264,29 @@ class UrlNormalizer {
   }
 
   private assertNotBlockedHost(hostname: string): void {
-    if (!config.security.blockedHosts.has(hostname)) return;
+    if (!this.security.blockedHosts.has(hostname)) return;
     throw createValidationError(
       `Blocked host: ${hostname}. Internal hosts are not allowed`
     );
   }
 
   private assertNotBlockedIp(hostname: string): void {
-    if (!ipBlocker.isBlockedIp(hostname)) return;
+    if (!this.ipBlocker.isBlockedIp(hostname)) return;
     throw createValidationError(
       `Blocked IP range: ${hostname}. Private IPs are not allowed`
     );
   }
 
   private assertNotBlockedHostnameSuffix(hostname: string): void {
-    const blocked = BLOCKED_HOST_SUFFIXES.some((suffix) =>
+    const blocked = this.blockedHostSuffixes.some((suffix) =>
       hostname.endsWith(suffix)
     );
     if (!blocked) return;
+
     throw createValidationError(
       `Blocked hostname pattern: ${hostname}. Internal domain suffixes are not allowed`
     );
   }
-}
-
-const urlNormalizer = new UrlNormalizer();
-
-/** Backwards-compatible exports */
-export function normalizeUrl(urlString: string): {
-  normalizedUrl: string;
-  hostname: string;
-} {
-  return urlNormalizer.normalize(urlString);
-}
-
-export function validateAndNormalizeUrl(urlString: string): string {
-  return urlNormalizer.validateAndNormalize(urlString);
 }
 
 /* -------------------------------------------------------------------------------------------------
@@ -337,21 +376,23 @@ const RAW_TEXT_EXTENSIONS = new Set([
 ]);
 
 class RawUrlTransformer {
+  constructor(private readonly logger: Logger) {}
+
   transformToRawUrl(url: string): TransformResult {
     if (!url) return { url, transformed: false };
     if (this.isRawUrl(url)) return { url, transformed: false };
 
     const { base, hash } = this.splitParams(url);
-    const result = this.applyRules(base, hash);
-    if (!result) return { url, transformed: false };
+    const match = this.applyRules(base, hash);
+    if (!match) return { url, transformed: false };
 
-    logDebug('URL transformed to raw content URL', {
-      platform: result.platform,
+    this.logger.debug('URL transformed to raw content URL', {
+      platform: match.platform,
       original: url.substring(0, 100),
-      transformed: result.url.substring(0, 100),
+      transformed: match.url.substring(0, 100),
     });
 
-    return { url: result.url, transformed: true, platform: result.platform };
+    return { url: match.url, transformed: true, platform: match.platform };
   }
 
   isRawTextContentUrl(url: string): boolean {
@@ -397,256 +438,80 @@ class RawUrlTransformer {
         rule.name === 'github-gist' && hash.startsWith('#file-')
           ? base + hash
           : base;
+
       const match = rule.pattern.exec(urlToMatch);
       if (match) return { url: rule.transform(match), platform: rule.name };
     }
+
     return null;
   }
-}
-
-const rawUrlTransformer = new RawUrlTransformer();
-
-/** Backwards-compatible exports */
-export function transformToRawUrl(url: string): TransformResult {
-  return rawUrlTransformer.transformToRawUrl(url);
-}
-
-export function isRawTextContentUrl(url: string): boolean {
-  return rawUrlTransformer.isRawTextContentUrl(url);
 }
 
 /* -------------------------------------------------------------------------------------------------
  * Safe DNS lookup (preflight)
  * ------------------------------------------------------------------------------------------------- */
 
-type LookupCallback = (
-  err: NodeJS.ErrnoException | null,
-  address: string | dns.LookupAddress[],
-  family?: number
-) => void;
-
 const DNS_LOOKUP_TIMEOUT_MS = 5000;
 
-class SafeDnsLookup {
-  lookup(
-    hostname: string,
-    options: dns.LookupOptions | number,
-    callback: LookupCallback
-  ): void {
-    const normalizedOptions = this.normalizeOptions(options);
-    const useAll = Boolean(normalizedOptions.all);
-    const resolvedFamily = this.resolveFamily(normalizedOptions.family);
+async function withTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  onTimeout: () => Error
+): Promise<T> {
+  let timer: NodeJS.Timeout | undefined;
 
-    const lookupOptions: dns.LookupOptions = {
-      family: normalizedOptions.family,
-      hints: normalizedOptions.hints,
-      all: true, // Always request all results; we select based on caller preference.
-      order: this.resolveOrder(normalizedOptions),
-    };
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => {
+      reject(onTimeout());
+    }, timeoutMs);
+    timer.unref();
+  });
 
-    const timeout = this.createTimeout(hostname, callback);
-    const safeCallback: LookupCallback = (err, address, family) => {
-      if (timeout.isDone()) return;
-      timeout.markDone();
-      callback(err, address, family);
-    };
+  try {
+    return await Promise.race([promise, timeout]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
 
-    (async () => {
-      try {
-        const result = await dns.promises.lookup(hostname, lookupOptions);
-        const addresses = Array.isArray(result) ? result : [result];
-        this.handleLookupResult(
-          null,
-          addresses,
-          hostname,
-          resolvedFamily,
-          useAll,
-          safeCallback
-        );
-      } catch (error: unknown) {
-        this.handleLookupResult(
-          error as NodeJS.ErrnoException,
-          [],
-          hostname,
-          resolvedFamily,
-          useAll,
-          safeCallback
-        );
-      }
-    })().catch((error: unknown) => {
-      if (!timeout.isDone()) {
-        safeCallback(error as NodeJS.ErrnoException, []);
-      }
+class SafeDnsResolver {
+  constructor(private readonly ipBlocker: IpBlocker) {}
+
+  async assertSafeHostname(hostname: string): Promise<void> {
+    const resultPromise = dns.promises.lookup(hostname, {
+      all: true,
+      order: 'verbatim',
     });
-  }
 
-  private normalizeOptions(
-    options: dns.LookupOptions | number
-  ): dns.LookupOptions {
-    return typeof options === 'number' ? { family: options } : options;
-  }
+    const addresses = await withTimeout(
+      resultPromise,
+      DNS_LOOKUP_TIMEOUT_MS,
+      () =>
+        createErrorWithCode(`DNS lookup timed out for ${hostname}`, 'ETIMEOUT')
+    );
 
-  private resolveFamily(
-    family: dns.LookupOptions['family']
-  ): number | undefined {
-    if (family === 'IPv4') return 4;
-    if (family === 'IPv6') return 6;
-    return family;
-  }
-
-  private resolveOrder(options: dns.LookupOptions): dns.LookupOptions['order'] {
-    if (options.order) return options.order;
-
-    // legacy `verbatim` option support
-    if (isObject(options)) {
-      const legacy = (options as { verbatim?: unknown }).verbatim;
-      if (typeof legacy === 'boolean') return legacy ? 'verbatim' : 'ipv4first';
-    }
-
-    return 'verbatim';
-  }
-
-  private handleLookupResult(
-    error: NodeJS.ErrnoException | null,
-    addresses: string | dns.LookupAddress[],
-    hostname: string,
-    resolvedFamily: number | undefined,
-    useAll: boolean,
-    callback: LookupCallback
-  ): void {
-    if (error) {
-      callback(error, addresses);
-      return;
-    }
-
-    const list = this.normalizeResults(addresses, resolvedFamily);
-    const validationError = this.validateResults(list, hostname);
-    if (validationError) {
-      callback(validationError, list);
-      return;
-    }
-
-    const selection = this.selectResult(list, useAll, hostname);
-    if (selection.error) {
-      callback(selection.error, selection.fallback);
-      return;
-    }
-
-    callback(null, selection.address, selection.family);
-  }
-
-  private normalizeResults(
-    addresses: string | dns.LookupAddress[],
-    family: number | undefined
-  ): dns.LookupAddress[] {
-    if (Array.isArray(addresses)) return addresses;
-    return [{ address: addresses, family: family ?? 4 }];
-  }
-
-  private validateResults(
-    list: dns.LookupAddress[],
-    hostname: string
-  ): NodeJS.ErrnoException | null {
-    if (list.length === 0) {
-      return createErrorWithCode(
+    if (addresses.length === 0) {
+      throw createErrorWithCode(
         `No DNS results returned for ${hostname}`,
         'ENODATA'
       );
     }
 
-    for (const addr of list) {
+    for (const addr of addresses) {
       if (addr.family !== 4 && addr.family !== 6) {
-        return createErrorWithCode(
+        throw createErrorWithCode(
           `Invalid address family returned for ${hostname}`,
           'EINVAL'
         );
       }
-      if (ipBlocker.isBlockedIp(addr.address)) {
-        return createErrorWithCode(
+      if (this.ipBlocker.isBlockedIp(addr.address)) {
+        throw createErrorWithCode(
           `Blocked IP detected for ${hostname}`,
           'EBLOCKED'
         );
       }
     }
-
-    return null;
   }
-
-  private selectResult(
-    list: dns.LookupAddress[],
-    useAll: boolean,
-    hostname: string
-  ): {
-    address: string | dns.LookupAddress[];
-    family?: number;
-    error?: NodeJS.ErrnoException;
-    fallback: dns.LookupAddress[];
-  } {
-    if (list.length === 0) {
-      return {
-        error: createErrorWithCode(
-          `No DNS results returned for ${hostname}`,
-          'ENODATA'
-        ),
-        fallback: [],
-        address: [],
-      };
-    }
-
-    if (useAll) return { address: list, fallback: list };
-
-    const first = list.at(0);
-    if (!first) {
-      return {
-        error: createErrorWithCode(
-          `No DNS results returned for ${hostname}`,
-          'ENODATA'
-        ),
-        fallback: [],
-        address: [],
-      };
-    }
-
-    return { address: first.address, family: first.family, fallback: list };
-  }
-
-  private createTimeout(
-    hostname: string,
-    callback: LookupCallback
-  ): { isDone: () => boolean; markDone: () => void } {
-    let done = false;
-    const timer = setTimeout(() => {
-      if (done) return;
-      done = true;
-      callback(
-        createErrorWithCode(`DNS lookup timed out for ${hostname}`, 'ETIMEOUT'),
-        []
-      );
-    }, DNS_LOOKUP_TIMEOUT_MS);
-    timer.unref();
-
-    return {
-      isDone: () => done,
-      markDone: () => {
-        done = true;
-        clearTimeout(timer);
-      },
-    };
-  }
-}
-
-const safeDns = new SafeDnsLookup();
-
-async function assertSafeDnsLookup(hostname: string): Promise<void> {
-  await new Promise<void>((resolve, reject) => {
-    safeDns.lookup(hostname, { all: true }, (err) => {
-      if (err) {
-        reject(err);
-        return;
-      }
-      resolve();
-    });
-  });
 }
 
 /* -------------------------------------------------------------------------------------------------
@@ -655,6 +520,7 @@ async function assertSafeDnsLookup(hostname: string): Promise<void> {
 
 function parseRetryAfter(header: string | null): number {
   if (!header) return 60;
+
   const parsed = Number.parseInt(header, 10);
   return Number.isNaN(parsed) ? 60 : parsed;
 }
@@ -801,10 +667,16 @@ export interface FetchTelemetryContext {
 const SLOW_REQUEST_THRESHOLD_MS = 5000;
 
 class FetchTelemetry {
+  constructor(
+    private readonly logger: Logger,
+    private readonly context: RequestContextAccessor,
+    private readonly redactor: UrlRedactor
+  ) {}
+
   start(url: string, method: string): FetchTelemetryContext {
-    const safeUrl = redactUrl(url);
-    const contextRequestId = getRequestId();
-    const operationId = getOperationId();
+    const safeUrl = this.redactor.redact(url);
+    const contextRequestId = this.context.getRequestId();
+    const operationId = this.context.getOperationId();
 
     const ctx: FetchTelemetryContext = {
       requestId: randomUUID(),
@@ -827,7 +699,7 @@ class FetchTelemetry {
       ...(ctx.operationId ? { operationId: ctx.operationId } : {}),
     });
 
-    logDebug('HTTP Request', {
+    this.logger.debug('HTTP Request', {
       requestId: ctx.requestId,
       method: ctx.method,
       url: ctx.url,
@@ -866,7 +738,7 @@ class FetchTelemetry {
       contentLengthHeader ??
       (contentSize === undefined ? undefined : String(contentSize));
 
-    logDebug('HTTP Response', {
+    this.logger.debug('HTTP Response', {
       requestId: context.requestId,
       status: response.status,
       url: context.url,
@@ -880,7 +752,7 @@ class FetchTelemetry {
     });
 
     if (duration > SLOW_REQUEST_THRESHOLD_MS) {
-      logWarn('Slow HTTP request detected', {
+      this.logger.warn('Slow HTTP request detected', {
         requestId: context.requestId,
         url: context.url,
         duration: durationLabel,
@@ -916,7 +788,15 @@ class FetchTelemetry {
       ...(context.operationId ? { operationId: context.operationId } : {}),
     });
 
-    const log = status === 429 ? logWarn : logError;
+    const log =
+      status === 429
+        ? (message: string, data?: Record<string, unknown>) => {
+            this.logger.warn(message, data);
+          }
+        : (message: string, data?: Record<string, unknown>) => {
+            this.logger.error(message, data);
+          };
+
     log('HTTP Request Error', {
       requestId: context.requestId,
       url: context.url,
@@ -932,38 +812,13 @@ class FetchTelemetry {
 
   private publish(event: FetchChannelEvent): void {
     if (!fetchChannel.hasSubscribers) return;
+
     try {
       fetchChannel.publish(event);
     } catch {
       // Best-effort; subscriber failures must not crash request path.
     }
   }
-}
-
-const telemetry = new FetchTelemetry();
-
-/** Backwards-compatible exports */
-export function startFetchTelemetry(
-  url: string,
-  method: string
-): FetchTelemetryContext {
-  return telemetry.start(url, method);
-}
-
-export function recordFetchResponse(
-  context: FetchTelemetryContext,
-  response: Response,
-  contentSize?: number
-): void {
-  telemetry.recordResponse(context, response, contentSize);
-}
-
-export function recordFetchError(
-  context: FetchTelemetryContext,
-  error: unknown,
-  status?: number
-): void {
-  telemetry.recordError(context, error, status);
 }
 
 /* -------------------------------------------------------------------------------------------------
@@ -978,13 +833,21 @@ function isRedirectStatus(status: number): boolean {
 
 function cancelResponseBody(response: Response): void {
   const cancelPromise = response.body?.cancel();
-  if (cancelPromise)
-    cancelPromise.catch(() => {
-      /* ignore */
-    });
+  if (!cancelPromise) return;
+
+  cancelPromise.catch(() => {
+    /* ignore */
+  });
 }
 
+type NormalizeUrl = (urlString: string) => string;
+
 class RedirectFollower {
+  constructor(
+    private readonly fetchFn: FetchLike,
+    private readonly normalizeUrl: NormalizeUrl
+  ) {}
+
   async fetchWithRedirects(
     url: string,
     init: RequestInit,
@@ -1017,7 +880,10 @@ class RedirectFollower {
     redirectLimit: number,
     redirectCount: number
   ): Promise<{ response: Response; nextUrl?: string }> {
-    const response = await fetch(currentUrl, { ...init, redirect: 'manual' });
+    const response = await this.fetchFn(currentUrl, {
+      ...init,
+      redirect: 'manual',
+    });
 
     if (!isRedirectStatus(response.status)) return { response };
 
@@ -1027,9 +893,10 @@ class RedirectFollower {
       redirectLimit,
       redirectCount
     );
-    const location = this.getRedirectLocation(response, currentUrl);
 
+    const location = this.getRedirectLocation(response, currentUrl);
     cancelResponseBody(response);
+
     return {
       response,
       nextUrl: this.resolveRedirectTarget(currentUrl, location),
@@ -1043,6 +910,7 @@ class RedirectFollower {
     redirectCount: number
   ): void {
     if (redirectCount < redirectLimit) return;
+
     cancelResponseBody(response);
     throw fetchErrors.tooManyRedirects(currentUrl);
   }
@@ -1056,8 +924,9 @@ class RedirectFollower {
   }
 
   private resolveRedirectTarget(baseUrl: string, location: string): string {
-    if (!URL.canParse(location, baseUrl))
+    if (!URL.canParse(location, baseUrl)) {
       throw createErrorWithCode('Invalid redirect target', 'EBADREDIRECT');
+    }
 
     const resolved = new URL(location, baseUrl);
     if (resolved.username || resolved.password) {
@@ -1067,7 +936,7 @@ class RedirectFollower {
       );
     }
 
-    return validateAndNormalizeUrl(resolved.href);
+    return this.normalizeUrl(resolved.href);
   }
 
   private annotateRedirectError(error: unknown, url: string): void {
@@ -1086,17 +955,6 @@ class RedirectFollower {
       throw error;
     }
   }
-}
-
-const redirectFollower = new RedirectFollower();
-
-/** Backwards-compatible export */
-export async function fetchWithRedirects(
-  url: string,
-  init: RequestInit,
-  maxRedirects: number
-): Promise<{ response: Response; url: string }> {
-  return redirectFollower.fetchWithRedirects(url, init, maxRedirects);
 }
 
 /* -------------------------------------------------------------------------------------------------
@@ -1164,13 +1022,18 @@ class ResponseTextReader {
       }
     } catch (error: unknown) {
       await this.cancelReaderQuietly(reader);
-      if (signal?.aborted)
+
+      if (signal?.aborted) {
         throw new FetchError(
           'Request was aborted during response read',
           url,
           499,
-          { reason: 'aborted' }
+          {
+            reason: 'aborted',
+          }
         );
+      }
+
       throw error;
     } finally {
       reader.releaseLock();
@@ -1188,6 +1051,7 @@ class ResponseTextReader {
     reader: ReadableStreamDefaultReader<Uint8Array>
   ): Promise<void> {
     if (!signal?.aborted) return;
+
     await this.cancelReaderQuietly(reader);
     throw new FetchError('Request was aborted during response read', url, 499, {
       reason: 'aborted',
@@ -1203,18 +1067,6 @@ class ResponseTextReader {
       // ignore
     }
   }
-}
-
-const responseReader = new ResponseTextReader();
-
-/** Backwards-compatible export */
-export async function readResponseText(
-  response: Response,
-  url: string,
-  maxBytes: number,
-  signal?: AbortSignal
-): Promise<{ text: string; size: number }> {
-  return responseReader.read(response, url, maxBytes, signal);
 }
 
 /* -------------------------------------------------------------------------------------------------
@@ -1259,6 +1111,7 @@ function resolveResponseError(
       response.headers.get('retry-after')
     );
   }
+
   return response.ok
     ? null
     : fetchErrors.http(finalUrl, response.status, response.statusText);
@@ -1268,6 +1121,9 @@ async function handleFetchResponse(
   response: Response,
   finalUrl: string,
   ctx: FetchTelemetryContext,
+  telemetry: FetchTelemetry,
+  reader: ResponseTextReader,
+  maxBytes: number,
   signal?: AbortSignal
 ): Promise<string> {
   const responseError = resolveResponseError(response, finalUrl);
@@ -1276,58 +1132,166 @@ async function handleFetchResponse(
     throw responseError;
   }
 
-  const { text, size } = await responseReader.read(
+  const { text, size } = await reader.read(
     response,
     finalUrl,
-    config.fetcher.maxContentLength,
+    maxBytes,
     signal
   );
   telemetry.recordResponse(ctx, response, size);
   return text;
 }
 
+type FetcherConfig = typeof config.fetcher;
+
 class HttpFetcher {
+  constructor(
+    private readonly fetcherConfig: FetcherConfig,
+    private readonly dnsResolver: SafeDnsResolver,
+    private readonly redirectFollower: RedirectFollower,
+    private readonly reader: ResponseTextReader,
+    private readonly telemetry: FetchTelemetry
+  ) {}
+
   async fetchNormalizedUrl(
     normalizedUrl: string,
     options?: FetchOptions
   ): Promise<string> {
     const { hostname } = new URL(normalizedUrl);
-    await assertSafeDnsLookup(hostname);
+    await this.dnsResolver.assertSafeHostname(hostname);
 
-    const timeoutMs = config.fetcher.timeout;
+    const timeoutMs = this.fetcherConfig.timeout;
     const headers = buildHeaders();
     const signal = buildRequestSignal(timeoutMs, options?.signal);
     const init = buildRequestInit(headers, signal);
 
-    const ctx = telemetry.start(normalizedUrl, 'GET');
+    const ctx = this.telemetry.start(normalizedUrl, 'GET');
 
     try {
       const { response, url: finalUrl } =
-        await redirectFollower.fetchWithRedirects(
+        await this.redirectFollower.fetchWithRedirects(
           normalizedUrl,
           init,
-          config.fetcher.maxRedirects
+          this.fetcherConfig.maxRedirects
         );
 
       ctx.url = finalUrl;
+
       return await handleFetchResponse(
         response,
         finalUrl,
         ctx,
+        this.telemetry,
+        this.reader,
+        this.fetcherConfig.maxContentLength,
         init.signal ?? undefined
       );
     } catch (error: unknown) {
       const mapped = mapFetchError(error, normalizedUrl, timeoutMs);
       ctx.url = mapped.url;
-      telemetry.recordError(ctx, mapped, mapped.statusCode);
+      this.telemetry.recordError(ctx, mapped, mapped.statusCode);
       throw mapped;
     }
   }
 }
 
-const httpFetcher = new HttpFetcher();
+/* -------------------------------------------------------------------------------------------------
+ * Wiring (composition root)
+ * ------------------------------------------------------------------------------------------------- */
 
-/** Backwards-compatible export */
+const ipBlocker = new IpBlocker(config.security);
+const urlNormalizer = new UrlNormalizer(
+  config.constants,
+  config.security,
+  ipBlocker,
+  BLOCKED_HOST_SUFFIXES
+);
+const rawUrlTransformer = new RawUrlTransformer(defaultLogger);
+const dnsResolver = new SafeDnsResolver(ipBlocker);
+const telemetry = new FetchTelemetry(
+  defaultLogger,
+  defaultContext,
+  defaultRedactor
+);
+const redirectFollower = new RedirectFollower(defaultFetch, (u) =>
+  urlNormalizer.validateAndNormalize(u)
+);
+const responseReader = new ResponseTextReader();
+const httpFetcher = new HttpFetcher(
+  config.fetcher,
+  dnsResolver,
+  redirectFollower,
+  responseReader,
+  telemetry
+);
+
+/* -------------------------------------------------------------------------------------------------
+ * Backwards-compatible exports (public API)
+ * ------------------------------------------------------------------------------------------------- */
+
+export function isBlockedIp(ip: string): boolean {
+  return ipBlocker.isBlockedIp(ip);
+}
+
+export function normalizeUrl(urlString: string): {
+  normalizedUrl: string;
+  hostname: string;
+} {
+  return urlNormalizer.normalize(urlString);
+}
+
+export function validateAndNormalizeUrl(urlString: string): string {
+  return urlNormalizer.validateAndNormalize(urlString);
+}
+
+export function transformToRawUrl(url: string): TransformResult {
+  return rawUrlTransformer.transformToRawUrl(url);
+}
+
+export function isRawTextContentUrl(url: string): boolean {
+  return rawUrlTransformer.isRawTextContentUrl(url);
+}
+
+export function startFetchTelemetry(
+  url: string,
+  method: string
+): FetchTelemetryContext {
+  return telemetry.start(url, method);
+}
+
+export function recordFetchResponse(
+  context: FetchTelemetryContext,
+  response: Response,
+  contentSize?: number
+): void {
+  telemetry.recordResponse(context, response, contentSize);
+}
+
+export function recordFetchError(
+  context: FetchTelemetryContext,
+  error: unknown,
+  status?: number
+): void {
+  telemetry.recordError(context, error, status);
+}
+
+export async function fetchWithRedirects(
+  url: string,
+  init: RequestInit,
+  maxRedirects: number
+): Promise<{ response: Response; url: string }> {
+  return redirectFollower.fetchWithRedirects(url, init, maxRedirects);
+}
+
+export async function readResponseText(
+  response: Response,
+  url: string,
+  maxBytes: number,
+  signal?: AbortSignal
+): Promise<{ text: string; size: number }> {
+  return responseReader.read(response, url, maxBytes, signal);
+}
+
 export async function fetchNormalizedUrl(
   normalizedUrl: string,
   options?: FetchOptions
