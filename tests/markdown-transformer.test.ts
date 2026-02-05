@@ -25,15 +25,19 @@ describe('htmlToMarkdown noise filtering', () => {
     const markdown = htmlToMarkdown(html);
 
     assert.ok(markdown.includes('Keep me'));
+
+    // Strong signals removed (score >= 50)
     assert.ok(!markdown.includes('NAVTEXT'));
     assert.ok(!markdown.includes('FOOTER'));
     assert.ok(!markdown.includes('HIDDEN'));
     assert.ok(!markdown.includes('ARIAHIDDEN'));
     assert.ok(!markdown.includes('ROLETEXT'));
-    assert.ok(!markdown.includes('PROMO'));
-    assert.ok(!markdown.includes('FIXED'));
-    assert.ok(!markdown.includes('ZISO'));
     assert.ok(!markdown.includes('HIDDENSTYLE'));
+
+    // Weaker signals preserved (score < 50)
+    assert.ok(markdown.includes('PROMO'));
+    assert.ok(markdown.includes('FIXED'));
+    assert.ok(markdown.includes('ZISO'));
   });
 
   it('preserves <aside> content including role="complementary"', () => {

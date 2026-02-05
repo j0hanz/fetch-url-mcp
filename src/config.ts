@@ -90,6 +90,7 @@ function parseBoolean(
   defaultValue: boolean
 ): boolean {
   if (!envValue) return defaultValue;
+  // Anything except "false" enables.
   return envValue !== 'false';
 }
 
@@ -365,6 +366,19 @@ export const config = {
   noiseRemoval: {
     extraTokens: parseList(process.env.SUPERFETCH_EXTRA_NOISE_TOKENS),
     extraSelectors: parseList(process.env.SUPERFETCH_EXTRA_NOISE_SELECTORS),
+    enabledCategories: parseList(
+      process.env.NOISE_REMOVAL_CATEGORIES ??
+        'cookie-banners,newsletters,social-share,nav-footer'
+    ),
+    debug: parseBoolean(process.env.DEBUG_NOISE_REMOVAL, false),
+  },
+  markdownCleanup: {
+    promoteOrphanHeadings: parseBoolean(
+      process.env.MARKDOWN_PROMOTE_ORPHAN_HEADINGS,
+      true
+    ),
+    removeSkipLinks: parseBoolean(process.env.MARKDOWN_REMOVE_SKIP_LINKS, true),
+    removeTocBlocks: parseBoolean(process.env.MARKDOWN_REMOVE_TOC_BLOCKS, true),
   },
   logging: {
     level: parseLogLevel(process.env.LOG_LEVEL),
@@ -403,8 +417,7 @@ export const config = {
       /^::ffff:192\.168\./,
       /^::ffff:169\.254\./,
     ] as const,
-    // Combined regex patterns for fast IP blocking (used in fetch.ts)
-    // Split into two patterns to reduce complexity while maintaining performance
+    // Fast IP block regexes.
     blockedIpPattern:
       /^(?:10\.|172\.(?:1[6-9]|2\d|3[01])\.|192\.168\.|127\.|0\.|169\.254\.|100\.64\.|fc00:|fd00:|fe80:)/i,
     blockedIpv4MappedPattern:

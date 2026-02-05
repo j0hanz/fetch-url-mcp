@@ -50,10 +50,6 @@ import type {
 } from './transform-types.js';
 import { isObject } from './type-guards.js';
 
-/* -------------------------------------------------------------------------------------------------
- * Contracts
- * ------------------------------------------------------------------------------------------------- */
-
 interface ExtractionContext extends ExtractionResult {
   document: Document;
   truncated?: boolean;
@@ -63,10 +59,6 @@ export interface StageBudget {
   totalBudgetMs: number;
   elapsedMs: number;
 }
-
-/* -------------------------------------------------------------------------------------------------
- * Abort policy (single source of truth)
- * ------------------------------------------------------------------------------------------------- */
 
 class AbortPolicy {
   private getAbortReason(signal: AbortSignal): unknown {
@@ -110,10 +102,6 @@ class AbortPolicy {
 }
 
 const abortPolicy = new AbortPolicy();
-
-/* -------------------------------------------------------------------------------------------------
- * Stage tracking & diagnostics
- * ------------------------------------------------------------------------------------------------- */
 
 class StageTracker {
   private readonly channel = diagnosticsChannel.channel('superfetch.transform');
@@ -222,14 +210,13 @@ class StageTracker {
     try {
       this.channel.publish(event);
     } catch {
-      // Intentionally ignore diagnostics failures
+      void 0;
     }
   }
 }
 
 const stageTracker = new StageTracker();
 
-/** Backwards-compatible exports */
 export function startTransformStage(
   url: string,
   stage: string,
@@ -245,10 +232,6 @@ export function endTransformStage(
   return stageTracker.end(context, options);
 }
 
-/* -------------------------------------------------------------------------------------------------
- * HTML size guard
- * ------------------------------------------------------------------------------------------------- */
-
 function truncateHtml(html: string): { html: string; truncated: boolean } {
   const maxSize = config.constants.maxHtmlSize;
 
@@ -262,10 +245,6 @@ function truncateHtml(html: string): { html: string; truncated: boolean } {
   });
   return { html: html.substring(0, maxSize), truncated: true };
 }
-
-/* -------------------------------------------------------------------------------------------------
- * Metadata extraction
- * ------------------------------------------------------------------------------------------------- */
 
 interface MetaContext {
   title: { og?: string; twitter?: string; standard?: string };
@@ -381,10 +360,6 @@ class MetadataExtractor {
 
 const metadataExtractor = new MetadataExtractor();
 
-/* -------------------------------------------------------------------------------------------------
- * Article extraction (Readability)
- * ------------------------------------------------------------------------------------------------- */
-
 function isReadabilityCompatible(doc: unknown): doc is Document {
   if (!isObject(doc)) return false;
   const record = doc as Record<string, unknown>;
@@ -447,10 +422,6 @@ class ArticleExtractor {
 }
 
 const articleExtractor = new ArticleExtractor();
-
-/* -------------------------------------------------------------------------------------------------
- * Content extraction orchestration
- * ------------------------------------------------------------------------------------------------- */
 
 function validateRequiredString(value: unknown, message: string): boolean {
   if (typeof value === 'string' && value.length > 0) return true;
@@ -537,7 +508,6 @@ class ContentExtractor {
 
 const contentExtractor = new ContentExtractor();
 
-/** Backwards-compatible export */
 export function extractContent(
   html: string,
   url: string,
@@ -548,10 +518,6 @@ export function extractContent(
   const result = contentExtractor.extract(html, url, options);
   return { article: result.article, metadata: result.metadata };
 }
-
-/* -------------------------------------------------------------------------------------------------
- * Markdown conversion
- * ------------------------------------------------------------------------------------------------- */
 
 const CODE_BLOCK = {
   fence: '```',
@@ -923,10 +889,6 @@ export function htmlToMarkdown(
   }
 }
 
-/* -------------------------------------------------------------------------------------------------
- * Raw content shortcut
- * ------------------------------------------------------------------------------------------------- */
-
 function shouldPreserveRawContent(url: string, content: string): boolean {
   if (isRawTextContentUrl(url)) return !isLikelyHtmlContent(content);
   return isRawTextContent(content);
@@ -964,10 +926,6 @@ function tryTransformRawContent(params: {
 
   return { markdown: content, title, truncated: false };
 }
-
-/* -------------------------------------------------------------------------------------------------
- * Quality gates + content source resolution
- * ------------------------------------------------------------------------------------------------- */
 
 const MIN_CONTENT_RATIO = 0.15;
 const MIN_HTML_LENGTH_FOR_GATE = 100;
@@ -1241,9 +1199,7 @@ function buildContentSource(params: {
   );
 
   if (useArticleContent && article) {
-    // Apply noise removal to Readability-extracted content to remove
-    // author bylines, social share buttons, and other boilerplate
-    // that Readability may have included in the article content
+    // Clean Readability HTML; it can include boilerplate.
     const cleanedArticleHtml = removeNoiseFromHtml(
       article.content,
       undefined,
@@ -1253,21 +1209,21 @@ function buildContentSource(params: {
       sourceHtml: cleanedArticleHtml,
       title: article.title,
       metadata,
-      skipNoiseRemoval: true, // Already cleaned
+      skipNoiseRemoval: true, // cleaned
     };
   }
 
   if (document) {
-    const cleanedHtml = removeNoiseFromHtml(html, undefined, url);
-    const { document: cleanedDoc } = parseHTML(cleanedHtml);
+    removeNoiseFromHtml(html, document, url);
 
-    const contentRoot = findContentRoot(cleanedDoc);
+    const contentRoot = findContentRoot(document);
     if (contentRoot) {
       return {
         sourceHtml: contentRoot,
         title: extractedMeta.title,
         metadata,
         skipNoiseRemoval: true,
+        document,
       };
     }
   }
@@ -1288,10 +1244,6 @@ function resolveContentSource(params: {
 }): ContentSource {
   return contentSourceResolver.resolve(params);
 }
-
-/* -------------------------------------------------------------------------------------------------
- * In-process transform pipeline (public)
- * ------------------------------------------------------------------------------------------------- */
 
 function buildMarkdownFromContext(
   context: ContentSource,
@@ -1349,10 +1301,6 @@ export function transformHtmlToMarkdownInProcess(
     if (success) stageTracker.end(totalStage, { truncated: false });
   }
 }
-
-/* -------------------------------------------------------------------------------------------------
- * Worker pool
- * ------------------------------------------------------------------------------------------------- */
 
 const workerMessageSchema = z.discriminatedUnion('type', [
   z.object({
@@ -1587,7 +1535,7 @@ class WorkerPool implements TransformWorkerPool {
       try {
         slot.worker.postMessage({ type: 'cancel', id });
       } catch {
-        /* ignore */
+        void 0;
       }
     }
     this.failTask(
@@ -1605,7 +1553,7 @@ class WorkerPool implements TransformWorkerPool {
     try {
       signal.removeEventListener('abort', listener);
     } catch {
-      /* ignore */
+      void 0;
     }
   }
 
@@ -1792,7 +1740,7 @@ class WorkerPool implements TransformWorkerPool {
       try {
         slot.worker.postMessage({ type: 'cancel', id: task.id });
       } catch {
-        /* ignore */
+        void 0;
       }
 
       const inflight = this.takeInflight(task.id);

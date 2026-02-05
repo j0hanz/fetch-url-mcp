@@ -1,8 +1,3 @@
-/**
- * Language detection for code blocks.
- * Detects programming languages from code content and HTML attributes.
- */
-
 interface LanguagePattern {
   keywords?: readonly string[];
   wordBoundary?: readonly string[];
@@ -27,10 +22,6 @@ function createCodeSample(code: string): CodeSample {
   };
 }
 
-/* -------------------------------------------------------------------------------------------------
- * Word boundary matcher (cached)
- * ------------------------------------------------------------------------------------------------- */
-
 class WordBoundaryMatcher {
   private readonly cache = new Map<string, RegExp>();
 
@@ -42,7 +33,7 @@ class WordBoundaryMatcher {
     const cached = this.cache.get(word);
     if (cached) return cached;
 
-    // Keep behavior: compile `\b${word}\b` without escaping (words are controlled by patterns).
+    // Patterns are controlled; keep raw word boundaries.
     const compiled = new RegExp(`\\b${word}\\b`);
     this.cache.set(word, compiled);
     return compiled;
@@ -51,20 +42,12 @@ class WordBoundaryMatcher {
 
 const wordMatcher = new WordBoundaryMatcher();
 
-/* -------------------------------------------------------------------------------------------------
- * Attribute-based language resolution
- * ------------------------------------------------------------------------------------------------- */
-
 class LanguageAttributeResolver {
   resolve(className: string, dataLang: string): string | undefined {
     const classMatch = this.extractFromClassName(className);
     return classMatch ?? this.resolveFromDataAttribute(dataLang);
   }
 
-  /**
-   * Extract language from class name (e.g., "language-typescript", "lang-js", "hljs javascript").
-   * Note: preserves current behavior by returning the sliced original token casing.
-   */
   private extractFromClassName(className: string): string | undefined {
     const tokens = className.match(/\S+/g);
     if (!tokens) return undefined;
@@ -87,10 +70,6 @@ class LanguageAttributeResolver {
     return undefined;
   }
 
-  /**
-   * Resolve language from data-language attribute.
-   * Only allows word characters (alphanumeric + underscore).
-   */
   private resolveFromDataAttribute(dataLang: string): string | undefined {
     const trimmed = dataLang.trim();
     if (!trimmed) return undefined;
@@ -100,13 +79,8 @@ class LanguageAttributeResolver {
 
 const attributeResolver = new LanguageAttributeResolver();
 
-/* -------------------------------------------------------------------------------------------------
- * Heuristics
- * ------------------------------------------------------------------------------------------------- */
-
 const Heuristics = {
   containsJsxTag(code: string): boolean {
-    // Preserve original behavior (scan for `<` followed by A-Z).
     for (let i = 0; i < code.length - 1; i += 1) {
       if (code[i] !== '<') continue;
       const next = code[i + 1];
@@ -210,16 +184,14 @@ const Heuristics = {
   },
 } as const;
 
-/* -------------------------------------------------------------------------------------------------
- * Pattern engine
- * ------------------------------------------------------------------------------------------------- */
-
 const LANGUAGE_PATTERNS: readonly {
   language: string;
+  weight: number;
   pattern: LanguagePattern;
 }[] = [
   {
     language: 'jsx',
+    weight: 22,
     pattern: {
       keywords: ['classname=', 'jsx:', "from 'react'", 'from "react"'],
       custom: (code) => Heuristics.containsJsxTag(code),
@@ -227,6 +199,7 @@ const LANGUAGE_PATTERNS: readonly {
   },
   {
     language: 'typescript',
+    weight: 20,
     pattern: {
       wordBoundary: ['interface', 'type'],
       custom: (_code, lower) =>
@@ -250,6 +223,7 @@ const LANGUAGE_PATTERNS: readonly {
   },
   {
     language: 'rust',
+    weight: 25,
     pattern: {
       regex: /\b(?:fn|impl|struct|enum)\b/,
       keywords: ['let mut'],
@@ -258,12 +232,14 @@ const LANGUAGE_PATTERNS: readonly {
   },
   {
     language: 'javascript',
+    weight: 12,
     pattern: {
       regex: /\b(?:const|let|var|function|class|async|await|export|import)\b/,
     },
   },
   {
     language: 'python',
+    weight: 18,
     pattern: {
       regex: /\b(?:def|class|import|from)\b/,
       keywords: ['print(', '__name__'],
@@ -271,12 +247,14 @@ const LANGUAGE_PATTERNS: readonly {
   },
   {
     language: 'bash',
+    weight: 15,
     pattern: {
       custom: (_code, _lower, lines) => Heuristics.bash.detectIndicators(lines),
     },
   },
   {
     language: 'css',
+    weight: 18,
     pattern: {
       regex: /@media|@import|@keyframes/,
       custom: (_code, _lower, lines) => Heuristics.css.detectStructure(lines),
@@ -284,6 +262,7 @@ const LANGUAGE_PATTERNS: readonly {
   },
   {
     language: 'html',
+    weight: 12,
     pattern: {
       keywords: [
         '<!doctype',
@@ -301,18 +280,21 @@ const LANGUAGE_PATTERNS: readonly {
   },
   {
     language: 'json',
+    weight: 10,
     pattern: {
       startsWith: ['{', '['],
     },
   },
   {
     language: 'yaml',
+    weight: 15,
     pattern: {
       custom: (_code, _lower, lines) => Heuristics.yaml.detectStructure(lines),
     },
   },
   {
     language: 'sql',
+    weight: 20,
     pattern: {
       wordBoundary: [
         'select',
@@ -327,6 +309,7 @@ const LANGUAGE_PATTERNS: readonly {
   },
   {
     language: 'go',
+    weight: 22,
     pattern: {
       wordBoundary: ['package', 'func'],
       keywords: ['import "'],
@@ -364,32 +347,38 @@ class LanguageDetector {
 
   detect(code: string): string | undefined {
     const sample = createCodeSample(code);
+    const scores = new Map<string, number>();
 
-    for (const { language, pattern } of LANGUAGE_PATTERNS) {
-      if (this.engine.matches(sample, pattern)) return language;
+    for (const { language, weight, pattern } of LANGUAGE_PATTERNS) {
+      if (this.engine.matches(sample, pattern)) {
+        const current = scores.get(language) ?? 0;
+        scores.set(language, current + weight);
+      }
     }
 
-    return undefined;
+    if (scores.size === 0) return undefined;
+
+    let maxLang: string | undefined;
+    let maxScore = 0;
+
+    for (const [lang, score] of scores.entries()) {
+      if (score > maxScore) {
+        maxScore = score;
+        maxLang = lang;
+      }
+    }
+
+    return maxLang;
   }
 }
 
 const detector = new LanguageDetector();
 
-/* -------------------------------------------------------------------------------------------------
- * Public API
- * ------------------------------------------------------------------------------------------------- */
-
-/**
- * Detect programming language from code content using heuristics.
- */
 export function detectLanguageFromCode(code: string): string | undefined {
   if (!code || code.trim().length === 0) return undefined;
   return detector.detect(code);
 }
 
-/**
- * Resolve language from HTML attributes (class name and data-language).
- */
 export function resolveLanguageFromAttributes(
   className: string,
   dataLang: string

@@ -1,10 +1,6 @@
 import { config } from './config.js';
 import type { MetadataBlock } from './transform-types.js';
 
-/* -------------------------------------------------------------------------------------------------
- * Fences
- * ------------------------------------------------------------------------------------------------- */
-
 function isFenceStart(line: string): boolean {
   const trimmed = line.trimStart();
   return trimmed.startsWith('```') || trimmed.startsWith('~~~');
@@ -60,7 +56,6 @@ class FencedSegmenter {
     let currentIsFence = false;
 
     for (const line of lines) {
-      // Transition into fence: flush outside segment first.
       if (!state.inFence && isFenceStart(line)) {
         if (current.length > 0) {
           segments.push({
@@ -79,8 +74,6 @@ class FencedSegmenter {
       current.push(line);
       const wasInFence = state.inFence;
       advanceFenceState(line, state);
-
-      // Transition out of fence: flush fence segment.
       if (wasInFence && !state.inFence) {
         segments.push({ content: current.join('\n'), inFence: true });
         current = [];
@@ -97,10 +90,6 @@ class FencedSegmenter {
 }
 
 const fencedSegmenter = new FencedSegmenter();
-
-/* -------------------------------------------------------------------------------------------------
- * Orphan heading promotion
- * ------------------------------------------------------------------------------------------------- */
 
 const HEADING_KEYWORDS = new Set([
   'overview',
@@ -179,17 +168,12 @@ class OrphanHeadingPromoter {
 
 const orphanHeadingPromoter = new OrphanHeadingPromoter();
 
-/* -------------------------------------------------------------------------------------------------
- * Cleanup rules (OUTSIDE fences only)
- * ------------------------------------------------------------------------------------------------- */
-
 function removeEmptyHeadings(text: string): string {
   return text.replace(/^#{1,6}[ \t\u00A0]*$\r?\n?/gm, '');
 }
 
-function fixOrphanHeadings(text: string): string {
-  // Pattern: hashes on their own line, blank line, then a "heading-like" line.
-  return text.replace(
+function fixAndSpaceHeadings(text: string): string {
+  text = text.replace(
     /^(.*?)(#{1,6})\s*(?:\r?\n){2}([A-Z][^\r\n]+?)(?:\r?\n)/gm,
     (_match: string, prefix: string, hashes: string, heading: string) => {
       if (heading.length > 150) return _match;
@@ -201,6 +185,11 @@ function fixOrphanHeadings(text: string): string {
       return `${trimmedPrefix}\n\n${hashes} ${heading}\n\n`;
     }
   );
+  text = text.replace(/(^#{1,6}\s+\w+)```/gm, '$1\n\n```');
+  text = text.replace(/(^#{1,6}\s+\w*[A-Z])([A-Z][a-z])/gm, '$1\n\n$2');
+  text = text.replace(/(^#{1,6}\s[^\n]*)\n([^\n])/gm, '$1\n\n$2');
+
+  return text;
 }
 
 function removeSkipLinksAndEmptyAnchors(text: string): string {
@@ -212,22 +201,6 @@ function removeSkipLinksAndEmptyAnchors(text: string): string {
     .replace(/^\[Skip link\]\(#[^)]*\)\s*$/gim, '');
 }
 
-function ensureBlankLineAfterHeadings(text: string): string {
-  // Heading followed immediately by a fence marker
-  text = text.replace(/(^#{1,6}\s+\w+)```/gm, '$1\n\n```');
-
-  // Heuristic: Some converters jam words together after a heading
-  text = text.replace(/(^#{1,6}\s+\w*[A-Z])([A-Z][a-z])/gm, '$1\n\n$2');
-
-  // Any heading line should be followed by a blank line before body
-  return text.replace(/(^#{1,6}\s[^\n]*)\n([^\n])/gm, '$1\n\n$2');
-}
-
-/**
- * Remove markdown TOC blocks of the form:
- * - [Title](#anchor)
- * outside fenced code blocks.
- */
 function removeTocBlocks(text: string): string {
   const tocLine = /^- \[[^\]]+\]\(#[^)]+\)\s*$/;
   const lines = text.split('\n');
@@ -270,11 +243,8 @@ function tidyLinksAndEscapes(text: string): string {
 }
 
 function normalizeListsAndSpacing(text: string): string {
-  // Ensure blank line before list starts (bullet/ordered)
   text = text.replace(/([^\n])\n([-*+] )/g, '$1\n\n$2');
   text = text.replace(/(\S)\n(\d+\. )/g, '$1\n\n$2');
-
-  // Collapse excessive blank lines
   return text.replace(/\n{3,}/g, '\n\n');
 }
 
@@ -299,10 +269,9 @@ function fixConcatenatedProperties(text: string): string {
 }
 
 const CLEANUP_STEPS: readonly ((text: string) => string)[] = [
-  fixOrphanHeadings,
+  fixAndSpaceHeadings,
   removeEmptyHeadings,
   removeSkipLinksAndEmptyAnchors,
-  ensureBlankLineAfterHeadings,
   removeTocBlocks,
   tidyLinksAndEscapes,
   normalizeListsAndSpacing,
@@ -351,10 +320,6 @@ const markdownCleanupPipeline = new MarkdownCleanupPipeline();
 export function cleanupMarkdownArtifacts(content: string): string {
   return markdownCleanupPipeline.cleanup(content);
 }
-
-/* -------------------------------------------------------------------------------------------------
- * Raw markdown handling + metadata footer
- * ------------------------------------------------------------------------------------------------- */
 
 const HEADING_PATTERN = /^#{1,6}\s/m;
 const LIST_PATTERN = /^(?:[-*+])\s/m;
@@ -538,7 +503,7 @@ export function addSourceToMarkdown(content: string, url: string): string {
   }
 
   if (!fm) {
-    // Preserve existing behavior: always uses LF even if content uses CRLF.
+    // Keep LF frontmatter (back-compat).
     return `---\nsource: "${url}"\n---\n\n${content}`;
   }
 

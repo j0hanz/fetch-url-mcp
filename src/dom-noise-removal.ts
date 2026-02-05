@@ -1,15 +1,7 @@
-/**
- * DOM noise removal utilities for cleaning HTML before markdown conversion.
- * Removes navigation, ads, popups, and other non-content elements.
- */
 import { parseHTML } from 'linkedom';
 
 import { config } from './config.js';
 import { isObject } from './type-guards.js';
-
-/* -------------------------------------------------------------------------------------------------
- * DOM guards & small helpers
- * ------------------------------------------------------------------------------------------------- */
 
 function isElement(node: unknown): node is HTMLElement {
   return (
@@ -42,31 +34,34 @@ function getNodeListItem(
   return (nodes as ArrayLike<Element>)[index] ?? null;
 }
 
-/**
- * Remove nodes from a list/iterable.
- * - For NodeList-like collections we iterate backwards to be safe with live collections.
- * - For iterables we snapshot into an array first.
- */
+function removeNodeFromDom(
+  node: Element,
+  shouldRemove: (node: Element) => boolean,
+  auditCallback?: (node: Element, reason: string) => void
+): void {
+  if (!shouldRemove(node)) return;
+  if (auditCallback) auditCallback(node, 'noise-filter');
+  node.remove();
+}
+
+// Remove matching nodes (iterate backwards for NodeList-like collections).
 function removeNodes(
   nodes: NodeListOf<Element> | Iterable<Element>,
-  shouldRemove: (node: Element) => boolean
+  shouldRemove: (node: Element) => boolean,
+  auditCallback?: (node: Element, reason: string) => void
 ): void {
   if (isNodeListLike(nodes)) {
     for (let i = nodes.length - 1; i >= 0; i -= 1) {
       const node = getNodeListItem(nodes, i);
-      if (node && shouldRemove(node)) node.remove();
+      if (node) removeNodeFromDom(node, shouldRemove, auditCallback);
     }
     return;
   }
 
   for (const node of nodes) {
-    if (shouldRemove(node)) node.remove();
+    removeNodeFromDom(node, shouldRemove, auditCallback);
   }
 }
-
-/* -------------------------------------------------------------------------------------------------
- * Fast-path parsing heuristics
- * ------------------------------------------------------------------------------------------------- */
 
 const HTML_DOCUMENT_MARKERS = /<\s*(?:!doctype|html|head|body)\b/i;
 
@@ -136,10 +131,6 @@ function mayContainNoise(html: string): boolean {
   const haystack = sample.toLowerCase();
   return NOISE_MARKERS.some((marker) => haystack.includes(marker));
 }
-
-/* -------------------------------------------------------------------------------------------------
- * Noise selectors & classification
- * ------------------------------------------------------------------------------------------------- */
 
 const STRUCTURAL_TAGS = new Set([
   'script',
@@ -295,23 +286,54 @@ type ElementMetadata = Readonly<{
   isHidden: boolean;
 }>;
 
+// Weighted heuristic: higher score => more likely boilerplate UI.
+const NOISE_WEIGHTS = {
+  HIDDEN: 50,
+  STRUCTURAL: 50,
+  PROMO: 35,
+  STICKY_FIXED: 30,
+  THRESHOLD: 50,
+} as const;
+
 class NoiseClassifier {
   constructor(private readonly promo: PromoDetector) {}
 
   isNoise(element: HTMLElement): boolean {
+    const score = this.calculateNoiseScore(element);
+    return score >= NOISE_WEIGHTS.THRESHOLD;
+  }
+
+  private calculateNoiseScore(element: HTMLElement): number {
     const meta = this.readMetadata(element);
+    let score = 0;
 
-    if (this.isStructuralNoise(meta, element)) return true;
-    if (ALWAYS_NOISE_TAGS.has(meta.tagName)) return true;
-    if (this.isHeaderBoilerplate(meta)) return true;
+    if (this.isStructuralNoise(meta, element)) {
+      score += NOISE_WEIGHTS.STRUCTURAL;
+    }
+    if (ALWAYS_NOISE_TAGS.has(meta.tagName)) {
+      score += NOISE_WEIGHTS.STRUCTURAL;
+    }
+    if (this.isHeaderBoilerplate(meta)) {
+      score += NOISE_WEIGHTS.STRUCTURAL;
+    }
 
-    if (this.isHiddenNoise(meta, element)) return true;
-    if (this.isRoleNoise(meta)) return true;
+    if (this.isHiddenNoise(meta, element)) {
+      score += NOISE_WEIGHTS.HIDDEN;
+    }
 
-    if (this.matchesFixedOrHighZIsolate(meta.className)) return true;
-    if (this.promo.matches(meta.className, meta.id)) return true;
+    if (this.isRoleNoise(meta)) {
+      score += NOISE_WEIGHTS.STRUCTURAL;
+    }
 
-    return false;
+    if (this.matchesFixedOrHighZIsolate(meta.className)) {
+      score += NOISE_WEIGHTS.STICKY_FIXED;
+    }
+
+    if (this.promo.matches(meta.className, meta.id)) {
+      score += NOISE_WEIGHTS.PROMO;
+    }
+
+    return score;
   }
 
   private readMetadata(element: HTMLElement): ElementMetadata {
@@ -329,8 +351,6 @@ class NoiseClassifier {
     element: HTMLElement
   ): boolean {
     if (!STRUCTURAL_TAGS.has(meta.tagName)) return false;
-
-    // Interactive structural components (dialogs, menus) are handled elsewhere.
     return !this.isInteractiveComponent(element);
   }
 
@@ -344,7 +364,7 @@ class NoiseClassifier {
 
   private isHiddenNoise(meta: ElementMetadata, element: HTMLElement): boolean {
     if (!meta.isHidden) return false;
-    // Don't remove hidden interactive components (they may be managed by UI framework state).
+    // Keep hidden interactive components (often framework-managed).
     return !this.isInteractiveComponent(element);
   }
 
@@ -403,13 +423,9 @@ class NoiseStripper {
     this.removeBySelector(
       document,
       buildNoiseSelector(config.noiseRemoval.extraSelectors),
-      /* checkNoise */ false
+      false
     );
-    this.removeBySelector(
-      document,
-      CANDIDATE_NOISE_SELECTOR,
-      /* checkNoise */ true
-    );
+    this.removeBySelector(document, CANDIDATE_NOISE_SELECTOR, true);
   }
 
   private removeBySelector(
@@ -424,10 +440,6 @@ class NoiseStripper {
     });
   }
 }
-
-/* -------------------------------------------------------------------------------------------------
- * Relative URL resolution
- * ------------------------------------------------------------------------------------------------- */
 
 const SKIP_URL_PREFIXES = [
   '#',
@@ -457,7 +469,7 @@ class RelativeUrlResolver {
     try {
       base = new URL(baseUrl);
     } catch {
-      // invalid base URL - skip resolution
+      // Invalid base URL -> skip.
       return;
     }
 
@@ -487,9 +499,7 @@ class RelativeUrlResolver {
     if (resolved) element.setAttribute('src', resolved);
   }
 
-  /**
-   * Keep original behavior: srcset entries are always attempted to be resolved (no prefix skipping).
-   */
+  // Resolve all srcset URLs (even if they have special prefixes).
   private resolveSource(element: Element, base: URL): void {
     const srcset = element.getAttribute('srcset');
     if (!srcset) return;
@@ -511,16 +521,8 @@ class RelativeUrlResolver {
   }
 }
 
-/* -------------------------------------------------------------------------------------------------
- * Serialization
- * ------------------------------------------------------------------------------------------------- */
-
 class DocumentSerializer {
-  /**
-   * Preserve existing behavior:
-   * - Prefer body.innerHTML only if it has "substantial" content (> 100 chars).
-   * - Otherwise fall back to document.toString(), then documentElement.outerHTML, then original HTML.
-   */
+  // Prefer substantial body HTML; otherwise fall back to document serialization or original input.
   serialize(document: unknown, fallbackHtml: string): string {
     const bodyInner = this.getBodyInnerHtml(document);
     if (bodyInner && bodyInner.trim().length > 100) return bodyInner;
@@ -565,10 +567,6 @@ class DocumentSerializer {
     return undefined;
   }
 }
-
-/* -------------------------------------------------------------------------------------------------
- * Public pipeline
- * ------------------------------------------------------------------------------------------------- */
 
 class HtmlNoiseRemovalPipeline {
   private readonly promo = new PromoDetector();
