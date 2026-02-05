@@ -5,7 +5,8 @@ import { readResponseText } from '../dist/fetch.js';
 
 function createResponseWithTrackableBody(
   bodyText: string,
-  headers?: HeadersInit
+  headers?: HeadersInit,
+  closeStream = true
 ): {
   response: Response;
   cancelled: { value: boolean };
@@ -15,7 +16,9 @@ function createResponseWithTrackableBody(
   const tracked = new ReadableStream<Uint8Array>({
     start(controller) {
       controller.enqueue(new TextEncoder().encode(bodyText));
-      controller.close();
+      if (closeStream) {
+        controller.close();
+      }
     },
     cancel() {
       cancelled.value = true;
@@ -26,33 +29,37 @@ function createResponseWithTrackableBody(
   return { response, cancelled };
 }
 
-test('readResponseText cancels body when Content-Length exceeds maxBytes', async () => {
-  const { response, cancelled } = createResponseWithTrackableBody('hello', {
-    'content-length': '9999',
-  });
-
-  await assert.rejects(() =>
-    readResponseText(
-      response,
-      'https://example.com',
-      1,
-      AbortSignal.timeout(5_000)
-    )
+test('readResponseText truncates body when Content-Length exceeds maxBytes', async () => {
+  const { response, cancelled } = createResponseWithTrackableBody(
+    'hello',
+    {
+      'content-length': '9999',
+    },
+    false // Do not close stream to verify explicit cancellation
   );
 
+  const result = await readResponseText(
+    response,
+    'https://example.com',
+    2,
+    AbortSignal.timeout(5_000)
+  );
+
+  assert.equal(result.text, 'he');
   assert.equal(cancelled.value, true);
 });
 
-test('readResponseText enforces maxBytes in the no-body text() fallback', async () => {
+test('readResponseText enforces maxBytes in the no-body arrayBuffer fallback', async () => {
+  const data = new TextEncoder().encode('x'.repeat(10));
   const fakeResponse = {
     headers: new Headers(),
     body: null,
-    text: async () => 'x'.repeat(10),
+    arrayBuffer: async () => data.buffer,
   } as unknown as Response;
 
-  await assert.rejects(() =>
-    readResponseText(fakeResponse, 'https://example.com', 1)
-  );
+  const result = await readResponseText(fakeResponse, 'https://example.com', 5);
+  assert.equal(result.text, 'xxxxx');
+  assert.equal(result.size, 5);
 });
 
 test('readResponseText preserves UTF-8 decoding across chunk boundaries', async () => {

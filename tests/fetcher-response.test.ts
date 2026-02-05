@@ -29,36 +29,23 @@ describe('readResponseText', () => {
     assert.equal(result.size, 5);
   });
 
-  it('rejects responses that exceed the content-length limit', async () => {
+  it('does not error when Content-Length exceeds limit, but truncates if body is larger', async () => {
     const response = new Response('hello', {
       status: 200,
       headers: { 'content-length': '100' },
     });
 
-    await assert.rejects(
-      () => readResponseText(response, 'https://example.com', 10),
-      (error) => {
-        assert.ok(error instanceof FetchError);
-        assert.equal(
-          error.message,
-          'Response exceeds maximum size of 10 bytes'
-        );
-        return true;
-      }
-    );
+    const result = await readResponseText(response, 'https://example.com', 10);
+    assert.equal(result.text, 'hello');
+    assert.equal(result.size, 5);
   });
 
-  it('rejects streamed responses that exceed the byte limit', async () => {
+  it('truncates streamed responses that exceed the byte limit', async () => {
     const response = createStreamResponse('hello world');
 
-    await assert.rejects(
-      () => readResponseText(response, 'https://example.com', 5),
-      (error) => {
-        assert.ok(error instanceof FetchError);
-        assert.equal(error.message, 'Response exceeds maximum size of 5 bytes');
-        return true;
-      }
-    );
+    const result = await readResponseText(response, 'https://example.com', 5);
+    assert.equal(result.text, 'hello');
+    assert.equal(result.size, 5);
   });
 
   it('returns an abort error when the signal is already aborted', async () => {

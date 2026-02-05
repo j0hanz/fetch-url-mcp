@@ -426,7 +426,7 @@ export const config = {
     removeTocBlocks: parseBoolean(env.MARKDOWN_REMOVE_TOC_BLOCKS, true),
     removeTypeDocComments: parseBoolean(
       env.MARKDOWN_REMOVE_TYPEDOC_COMMENTS,
-      true
+      false
     ),
   },
   logging: {

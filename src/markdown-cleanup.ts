@@ -305,15 +305,18 @@ function removeTypeDocComments(text: string): string {
 type CleanupStep = (text: string) => string;
 
 const CLEANUP_PIPELINE: CleanupStep[] = [
-  ...(config.markdownCleanup.promoteOrphanHeadings
-    ? [promoteOrphanHeadings]
-    : []),
+  (text) =>
+    config.markdownCleanup.promoteOrphanHeadings
+      ? promoteOrphanHeadings(text)
+      : text,
   fixAndSpaceHeadings,
-  ...(config.markdownCleanup.removeTypeDocComments
-    ? [removeTypeDocComments]
-    : []),
-  ...(config.markdownCleanup.removeSkipLinks ? [removeSkipLinks] : []),
-  ...(config.markdownCleanup.removeTocBlocks ? [removeToc] : []),
+  (text) =>
+    config.markdownCleanup.removeTypeDocComments
+      ? removeTypeDocComments(text)
+      : text,
+  (text) =>
+    config.markdownCleanup.removeSkipLinks ? removeSkipLinks(text) : text,
+  (text) => (config.markdownCleanup.removeTocBlocks ? removeToc(text) : text),
   removeEmptyHeadings,
   normalizeSpacing,
   fixProperties,

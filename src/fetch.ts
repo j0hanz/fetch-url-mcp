@@ -605,13 +605,6 @@ function createMissingRedirectLocationFetchError(url: string): FetchError {
   return new FetchError('Redirect response missing Location header', url);
 }
 
-function createSizeLimitFetchError(url: string, maxBytes: number): FetchError {
-  return new FetchError(
-    `Response exceeds maximum size of ${maxBytes} bytes`,
-    url
-  );
-}
-
 function createNetworkFetchError(url: string, message?: string): FetchError {
   return new FetchError(
     `Network error: Could not reach ${url}`,
@@ -1050,21 +1043,6 @@ function getCharsetFromContentType(
   return charset.trim();
 }
 
-function assertContentLengthWithinLimit(
-  response: Response,
-  url: string,
-  maxBytes: number
-): void {
-  const header = response.headers.get('content-length');
-  if (!header) return;
-
-  const contentLength = Number.parseInt(header, 10);
-  if (Number.isNaN(contentLength) || contentLength <= maxBytes) return;
-
-  cancelResponseBody(response);
-  throw createSizeLimitFetchError(url, maxBytes);
-}
-
 function createDecoder(encoding: string | undefined): TextDecoder {
   if (!encoding) return new TextDecoder('utf-8');
 
@@ -1083,8 +1061,6 @@ class ResponseTextReader {
     signal?: AbortSignal,
     encoding?: string
   ): Promise<{ text: string; size: number }> {
-    assertContentLengthWithinLimit(response, url, maxBytes);
-
     if (signal?.aborted) {
       cancelResponseBody(response);
       throw createAbortedFetchError(url);
@@ -1093,9 +1069,9 @@ class ResponseTextReader {
     if (!response.body) {
       if (signal?.aborted) throw createCanceledFetchError(url);
 
-      const buffer = await response.arrayBuffer();
+      let buffer = await response.arrayBuffer();
       if (buffer.byteLength > maxBytes) {
-        throw createSizeLimitFetchError(url, maxBytes);
+        buffer = buffer.slice(0, maxBytes);
       }
 
       const decoder = createDecoder(encoding);
@@ -1140,21 +1116,30 @@ class ResponseTextReader {
     try {
       let result = await this.readNext(reader, abortRace.abortPromise);
       while (!result.done) {
-        total += result.value.byteLength;
-        if (total > maxBytes) throw createSizeLimitFetchError(url, maxBytes);
+        const chunk = result.value;
+        const newTotal = total + chunk.byteLength;
 
-        const decoded = decoder.decode(result.value, { stream: true });
+        if (newTotal > maxBytes) {
+          const remaining = maxBytes - total;
+          if (remaining > 0) {
+            const partial = chunk.subarray(0, remaining);
+            const decoded = decoder.decode(partial, { stream: true });
+            if (decoded) parts.push(decoded);
+            total += remaining;
+          }
+          await this.cancelReaderQuietly(reader);
+          break;
+        }
+
+        total = newTotal;
+        const decoded = decoder.decode(chunk, { stream: true });
         if (decoded) parts.push(decoded);
 
         result = await this.readNext(reader, abortRace.abortPromise);
       }
     } catch (error: unknown) {
       await this.cancelReaderQuietly(reader);
-
-      if (error instanceof FetchError) throw error;
-      if (signal?.aborted) throw createAbortedFetchError(url);
-
-      throw error;
+      this.handleReadingError(error, url, signal);
     } finally {
       abortRace.cleanup();
       reader.releaseLock();
@@ -1164,6 +1149,16 @@ class ResponseTextReader {
     if (final) parts.push(final);
 
     return { text: parts.join(''), size: total };
+  }
+
+  private handleReadingError(
+    error: unknown,
+    url: string,
+    signal?: AbortSignal
+  ): never {
+    if (error instanceof FetchError) throw error;
+    if (signal?.aborted) throw createAbortedFetchError(url);
+    throw error;
   }
 
   private async cancelReaderQuietly(
