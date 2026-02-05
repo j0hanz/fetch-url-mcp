@@ -3,63 +3,38 @@ import { parseHTML } from 'linkedom';
 import { config } from './config.js';
 import { isObject } from './type-guards.js';
 
-function isElement(node: unknown): node is HTMLElement {
-  return (
-    isObject(node) &&
-    'getAttribute' in node &&
-    typeof (node as { getAttribute?: unknown }).getAttribute === 'function'
-  );
-}
+type NodeListLike<T> =
+  | ArrayLike<T>
+  | { length: number; item: (index: number) => T | null };
 
-function isNodeListLike(
-  value: unknown
-): value is
-  | ArrayLike<Element>
-  | { length: number; item: (index: number) => Element | null } {
+function isNodeListLike<T>(value: unknown): value is NodeListLike<T> {
   return (
     isObject(value) &&
     typeof (value as { length?: unknown }).length === 'number'
   );
 }
 
-function getNodeListItem(
-  nodes:
-    | ArrayLike<Element>
-    | { length: number; item: (index: number) => Element | null },
-  index: number
-): Element | null {
-  if ('item' in nodes && typeof nodes.item === 'function') {
+function getNodeListItem<T>(nodes: NodeListLike<T>, index: number): T | null {
+  if ('item' in nodes && typeof nodes.item === 'function')
     return nodes.item(index);
-  }
-  return (nodes as ArrayLike<Element>)[index] ?? null;
+  return (nodes as ArrayLike<T>)[index] ?? null;
 }
 
-function removeNodeFromDom(
-  node: Element,
-  shouldRemove: (node: Element) => boolean,
-  auditCallback?: (node: Element, reason: string) => void
-): void {
-  if (!shouldRemove(node)) return;
-  if (auditCallback) auditCallback(node, 'noise-filter');
-  node.remove();
-}
-
-// Remove matching nodes (iterate backwards for NodeList-like collections).
 function removeNodes(
   nodes: NodeListOf<Element> | Iterable<Element>,
-  shouldRemove: (node: Element) => boolean,
-  auditCallback?: (node: Element, reason: string) => void
+  shouldRemove: (node: Element) => boolean
 ): void {
-  if (isNodeListLike(nodes)) {
+  if (isNodeListLike<Element>(nodes)) {
+    // Iterate backwards to be safe for live collections (even though querySelectorAll is typically static).
     for (let i = nodes.length - 1; i >= 0; i -= 1) {
       const node = getNodeListItem(nodes, i);
-      if (node) removeNodeFromDom(node, shouldRemove, auditCallback);
+      if (node && shouldRemove(node)) node.remove();
     }
     return;
   }
 
   for (const node of nodes) {
-    removeNodeFromDom(node, shouldRemove, auditCallback);
+    if (shouldRemove(node)) node.remove();
   }
 }
 
@@ -164,6 +139,7 @@ const BASE_NOISE_SELECTORS = [
 ] as const;
 
 const BASE_NOISE_SELECTOR = BASE_NOISE_SELECTORS.join(',');
+
 const CANDIDATE_NOISE_SELECTOR = [
   ...STRUCTURAL_TAGS,
   ...ALWAYS_NOISE_TAGS,
@@ -175,11 +151,19 @@ const CANDIDATE_NOISE_SELECTOR = [
   '[style]',
 ].join(',');
 
-function buildNoiseSelector(extraSelectors: readonly string[]): string {
-  const extra = extraSelectors.filter((s) => s.trim().length > 0);
-  return extra.length === 0
-    ? BASE_NOISE_SELECTOR
-    : `${BASE_NOISE_SELECTOR},${extra.join(',')}`;
+function normalizeSelectors(selectors: readonly string[]): string[] {
+  return selectors.map((s) => s.trim()).filter((s) => s.length > 0);
+}
+
+function safeQuerySelectorAll(
+  document: Document,
+  selector: string
+): NodeListOf<Element> | null {
+  try {
+    return document.querySelectorAll(selector);
+  } catch {
+    return null;
+  }
 }
 
 const NAVIGATION_ROLES = new Set([
@@ -244,6 +228,10 @@ const FIXED_PATTERN = /\b(fixed|sticky)\b/;
 const HIGH_Z_PATTERN = /\bz-(?:4\d|50)\b/;
 const ISOLATE_PATTERN = /\bisolate\b/;
 
+function escapeRegexLiteral(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 class PromoDetector {
   private tokenCache: Set<string> | null = null;
   private regexCache: RegExp | null = null;
@@ -269,8 +257,7 @@ class PromoDetector {
   private getRegex(): RegExp {
     if (this.regexCache) return this.regexCache;
 
-    const tokens = [...this.getTokens()];
-    const escaped = tokens.map((t) => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+    const escaped = [...this.getTokens()].map(escapeRegexLiteral);
     const pattern = `(?:^|[^a-z0-9])(?:${escaped.join('|')})(?:$|[^a-z0-9])`;
 
     this.regexCache = new RegExp(pattern, 'i');
@@ -284,9 +271,9 @@ type ElementMetadata = Readonly<{
   id: string;
   role: string | null;
   isHidden: boolean;
+  isInteractive: boolean;
 }>;
 
-// Weighted heuristic: higher score => more likely boilerplate UI.
 const NOISE_WEIGHTS = {
   HIDDEN: 50,
   STRUCTURAL: 50,
@@ -298,60 +285,44 @@ const NOISE_WEIGHTS = {
 class NoiseClassifier {
   constructor(private readonly promo: PromoDetector) {}
 
-  isNoise(element: HTMLElement): boolean {
-    const score = this.calculateNoiseScore(element);
-    return score >= NOISE_WEIGHTS.THRESHOLD;
+  isNoise(element: Element): boolean {
+    return this.calculateNoiseScore(element) >= NOISE_WEIGHTS.THRESHOLD;
   }
 
-  private calculateNoiseScore(element: HTMLElement): number {
+  private calculateNoiseScore(element: Element): number {
     const meta = this.readMetadata(element);
     let score = 0;
 
-    if (this.isStructuralNoise(meta, element)) {
-      score += NOISE_WEIGHTS.STRUCTURAL;
-    }
-    if (ALWAYS_NOISE_TAGS.has(meta.tagName)) {
-      score += NOISE_WEIGHTS.STRUCTURAL;
-    }
-    if (this.isHeaderBoilerplate(meta)) {
-      score += NOISE_WEIGHTS.STRUCTURAL;
-    }
+    if (this.isStructuralNoise(meta)) score += NOISE_WEIGHTS.STRUCTURAL;
+    if (ALWAYS_NOISE_TAGS.has(meta.tagName)) score += NOISE_WEIGHTS.STRUCTURAL;
+    if (this.isHeaderBoilerplate(meta)) score += NOISE_WEIGHTS.STRUCTURAL;
 
-    if (this.isHiddenNoise(meta, element)) {
-      score += NOISE_WEIGHTS.HIDDEN;
-    }
+    if (this.isHiddenNoise(meta)) score += NOISE_WEIGHTS.HIDDEN;
+    if (this.isRoleNoise(meta)) score += NOISE_WEIGHTS.STRUCTURAL;
 
-    if (this.isRoleNoise(meta)) {
-      score += NOISE_WEIGHTS.STRUCTURAL;
-    }
-
-    if (this.matchesFixedOrHighZIsolate(meta.className)) {
+    if (this.matchesFixedOrHighZIsolate(meta.className))
       score += NOISE_WEIGHTS.STICKY_FIXED;
-    }
-
-    if (this.promo.matches(meta.className, meta.id)) {
+    if (this.promo.matches(meta.className, meta.id))
       score += NOISE_WEIGHTS.PROMO;
-    }
 
     return score;
   }
 
-  private readMetadata(element: HTMLElement): ElementMetadata {
-    return {
-      tagName: element.tagName.toLowerCase(),
-      className: element.getAttribute('class') ?? '',
-      id: element.getAttribute('id') ?? '',
-      role: element.getAttribute('role'),
-      isHidden: this.isHidden(element),
-    };
+  private readMetadata(element: Element): ElementMetadata {
+    const tagName = element.tagName.toLowerCase();
+    const className = element.getAttribute('class') ?? '';
+    const id = element.getAttribute('id') ?? '';
+    const role = element.getAttribute('role');
+
+    const isInteractive = this.isInteractiveComponent(element, role);
+    const isHidden = this.isHidden(element);
+
+    return { tagName, className, id, role, isHidden, isInteractive };
   }
 
-  private isStructuralNoise(
-    meta: ElementMetadata,
-    element: HTMLElement
-  ): boolean {
+  private isStructuralNoise(meta: ElementMetadata): boolean {
     if (!STRUCTURAL_TAGS.has(meta.tagName)) return false;
-    return !this.isInteractiveComponent(element);
+    return !meta.isInteractive;
   }
 
   private isHeaderBoilerplate(meta: ElementMetadata): boolean {
@@ -362,10 +333,9 @@ class NoiseClassifier {
     return HEADER_NOISE_PATTERN.test(combined);
   }
 
-  private isHiddenNoise(meta: ElementMetadata, element: HTMLElement): boolean {
+  private isHiddenNoise(meta: ElementMetadata): boolean {
     if (!meta.isHidden) return false;
-    // Keep hidden interactive components (often framework-managed).
-    return !this.isInteractiveComponent(element);
+    return !meta.isInteractive;
   }
 
   private isRoleNoise(meta: ElementMetadata): boolean {
@@ -387,7 +357,7 @@ class NoiseClassifier {
     );
   }
 
-  private isHidden(element: HTMLElement): boolean {
+  private isHidden(element: Element): boolean {
     const style = element.getAttribute('style') ?? '';
     return (
       element.getAttribute('hidden') !== null ||
@@ -397,8 +367,10 @@ class NoiseClassifier {
     );
   }
 
-  private isInteractiveComponent(element: HTMLElement): boolean {
-    const role = element.getAttribute('role');
+  private isInteractiveComponent(
+    element: Element,
+    role: string | null
+  ): boolean {
     if (role && INTERACTIVE_CONTENT_ROLES.has(role)) return true;
 
     const dataState = element.getAttribute('data-state');
@@ -420,24 +392,39 @@ class NoiseStripper {
   constructor(private readonly classifier: NoiseClassifier) {}
 
   strip(document: Document): void {
-    this.removeBySelector(
-      document,
-      buildNoiseSelector(config.noiseRemoval.extraSelectors),
-      false
-    );
-    this.removeBySelector(document, CANDIDATE_NOISE_SELECTOR, true);
+    this.removeBaseAndExtras(document);
+    this.removeCandidates(document);
   }
 
-  private removeBySelector(
-    document: Document,
-    selector: string,
-    checkNoise: boolean
-  ): void {
-    const nodes = document.querySelectorAll(selector);
-    removeNodes(nodes, (node) => {
-      if (!isElement(node)) return false;
-      return checkNoise ? this.classifier.isNoise(node) : true;
-    });
+  private removeBaseAndExtras(document: Document): void {
+    const extra = normalizeSelectors(config.noiseRemoval.extraSelectors);
+    const combined =
+      extra.length === 0
+        ? BASE_NOISE_SELECTOR
+        : `${BASE_NOISE_SELECTOR},${extra.join(',')}`;
+
+    // Fast path: same behavior as before when selectors are valid.
+    const combinedNodes = safeQuerySelectorAll(document, combined);
+    if (combinedNodes) {
+      removeNodes(combinedNodes, () => true);
+      return;
+    }
+
+    // Robust fallback: one invalid extra selector should not disable base stripping.
+    const baseNodes = safeQuerySelectorAll(document, BASE_NOISE_SELECTOR);
+    if (baseNodes) removeNodes(baseNodes, () => true);
+
+    for (const selector of extra) {
+      const nodes = safeQuerySelectorAll(document, selector);
+      if (nodes) removeNodes(nodes, () => true);
+    }
+  }
+
+  private removeCandidates(document: Document): void {
+    const nodes = safeQuerySelectorAll(document, CANDIDATE_NOISE_SELECTOR);
+    if (!nodes) return;
+
+    removeNodes(nodes, (node) => this.classifier.isNoise(node));
   }
 }
 
@@ -469,7 +456,6 @@ class RelativeUrlResolver {
     try {
       base = new URL(baseUrl);
     } catch {
-      // Invalid base URL -> skip.
       return;
     }
 
@@ -477,30 +463,27 @@ class RelativeUrlResolver {
       'a[href], img[src], source[srcset]'
     )) {
       const tag = element.tagName.toLowerCase();
-      if (tag === 'a') this.resolveAnchor(element, base);
-      else if (tag === 'img') this.resolveImage(element, base);
-      else if (tag === 'source') this.resolveSource(element, base);
+      if (tag === 'a') this.resolveUrlAttr(element, 'href', base, true);
+      else if (tag === 'img') this.resolveUrlAttr(element, 'src', base, true);
+      else if (tag === 'source') this.resolveSrcset(element, base);
     }
   }
 
-  private resolveAnchor(element: Element, base: URL): void {
-    const href = element.getAttribute('href');
-    if (!href || shouldSkipUrlResolution(href)) return;
+  private resolveUrlAttr(
+    element: Element,
+    attr: 'href' | 'src',
+    base: URL,
+    shouldSkip: boolean
+  ): void {
+    const value = element.getAttribute(attr);
+    if (!value) return;
+    if (shouldSkip && shouldSkipUrlResolution(value)) return;
 
-    const resolved = tryResolveUrl(href, base);
-    if (resolved) element.setAttribute('href', resolved);
+    const resolved = tryResolveUrl(value, base);
+    if (resolved) element.setAttribute(attr, resolved);
   }
 
-  private resolveImage(element: Element, base: URL): void {
-    const src = element.getAttribute('src');
-    if (!src || shouldSkipUrlResolution(src)) return;
-
-    const resolved = tryResolveUrl(src, base);
-    if (resolved) element.setAttribute('src', resolved);
-  }
-
-  // Resolve all srcset URLs (even if they have special prefixes).
-  private resolveSource(element: Element, base: URL): void {
+  private resolveSrcset(element: Element, base: URL): void {
     const srcset = element.getAttribute('srcset');
     if (!srcset) return;
 
@@ -509,10 +492,11 @@ class RelativeUrlResolver {
       .map((entry) => {
         const parts = entry.trim().split(/\s+/);
         const url = parts[0];
-        if (url) {
-          const resolvedUrl = tryResolveUrl(url, base);
-          if (resolvedUrl) parts[0] = resolvedUrl;
-        }
+        if (!url) return entry.trim();
+
+        const resolvedUrl = tryResolveUrl(url, base);
+        if (resolvedUrl) parts[0] = resolvedUrl;
+
         return parts.join(' ');
       })
       .join(', ');
@@ -551,8 +535,8 @@ class DocumentSerializer {
   private getDocumentToString(document: unknown): (() => string) | undefined {
     if (!isObject(document)) return undefined;
     const fn = (document as { toString?: unknown }).toString;
-    if (typeof fn === 'function') return fn.bind(document) as () => string;
-    return undefined;
+    if (typeof fn !== 'function') return undefined;
+    return fn.bind(document) as () => string;
   }
 
   private getDocumentElementOuterHtml(document: unknown): string | undefined {
@@ -579,14 +563,13 @@ class HtmlNoiseRemovalPipeline {
     const shouldParse = isFullDocumentHtml(html) || mayContainNoise(html);
     if (!shouldParse) return html;
 
+    // Best-effort: keep the original behavior of never throwing.
     try {
       const resolvedDocument = document ?? parseHTML(html).document;
 
       this.stripper.strip(resolvedDocument);
 
-      if (baseUrl) {
-        this.urlResolver.resolve(resolvedDocument, baseUrl);
-      }
+      if (baseUrl) this.urlResolver.resolve(resolvedDocument, baseUrl);
 
       return this.serializer.serialize(resolvedDocument, html);
     } catch {

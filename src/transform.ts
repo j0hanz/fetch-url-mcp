@@ -383,7 +383,8 @@ class ArticleExtractor {
 
       const rawText =
         doc.querySelector('body')?.textContent ??
-        doc.documentElement.textContent;
+        (doc.documentElement.textContent as string | null | undefined) ??
+        '';
       const textLength = rawText.replace(/\s+/g, ' ').trim().length;
 
       if (textLength < 100) {
@@ -955,7 +956,12 @@ function resolveHtmlDocument(htmlOrDocument: string | Document): Document {
     ? wrapHtmlFragment(htmlOrDocument)
     : htmlOrDocument;
 
-  return parseHTML(htmlToParse).document;
+  try {
+    return parseHTML(htmlToParse).document;
+  } catch {
+    // Fallback: parsing failures should not crash extraction quality gates.
+    return parseHTML('<!DOCTYPE html><html><body></body></html>').document;
+  }
 }
 
 function countDomSelector(
@@ -1067,6 +1073,7 @@ interface ContentSource {
   readonly metadata: ReturnType<typeof createContentMetadataBlock>;
   readonly document?: Document;
   readonly skipNoiseRemoval?: boolean;
+  readonly truncated: boolean;
 }
 
 class ContentSourceResolver {
@@ -1082,6 +1089,7 @@ class ContentSourceResolver {
       article,
       metadata: extractedMeta,
       document,
+      truncated,
     } = this.extractor.extract(params.html, params.url, {
       extractArticle: true,
       ...(params.signal ? { signal: params.signal } : {}),
@@ -1099,6 +1107,7 @@ class ContentSourceResolver {
       includeMetadata: params.includeMetadata,
       useArticleContent,
       document,
+      truncated: truncated ?? false,
     });
   }
 }
@@ -1183,6 +1192,7 @@ function buildContentSource(params: {
   includeMetadata: boolean;
   useArticleContent: boolean;
   document?: Document;
+  truncated: boolean;
 }): ContentSource {
   const {
     html,
@@ -1192,6 +1202,7 @@ function buildContentSource(params: {
     includeMetadata,
     useArticleContent,
     document,
+    truncated,
   } = params;
 
   const metadata = createContentMetadataBlock(
@@ -1214,6 +1225,7 @@ function buildContentSource(params: {
       title: article.title,
       metadata,
       skipNoiseRemoval: true, // cleaned
+      truncated,
     };
   }
 
@@ -1228,6 +1240,7 @@ function buildContentSource(params: {
         metadata,
         skipNoiseRemoval: true,
         document,
+        truncated,
       };
     }
 
@@ -1237,6 +1250,7 @@ function buildContentSource(params: {
       metadata,
       skipNoiseRemoval: true,
       document,
+      truncated,
     };
   }
 
@@ -1244,6 +1258,7 @@ function buildContentSource(params: {
     sourceHtml: html,
     title: extractedMeta.title,
     metadata,
+    truncated,
   };
 }
 
@@ -1270,7 +1285,11 @@ function buildMarkdownFromContext(
     })
   );
 
-  return { markdown: content, title: context.title, truncated: false };
+  return {
+    markdown: content,
+    title: context.title,
+    truncated: context.truncated,
+  };
 }
 
 export function transformHtmlToMarkdownInProcess(
@@ -1279,7 +1298,7 @@ export function transformHtmlToMarkdownInProcess(
   options: TransformOptions
 ): MarkdownTransformResult {
   const totalStage = stageTracker.start(url, 'transform:total');
-  let success = false;
+  let completed: MarkdownTransformResult | null = null;
 
   try {
     abortPolicy.throwIfAborted(options.signal, url, 'transform:begin');
@@ -1292,7 +1311,7 @@ export function transformHtmlToMarkdownInProcess(
       })
     );
     if (raw) {
-      success = true;
+      completed = raw;
       return raw;
     }
 
@@ -1306,10 +1325,11 @@ export function transformHtmlToMarkdownInProcess(
     );
 
     const result = buildMarkdownFromContext(context, url, options.signal);
-    success = true;
+    completed = result;
     return result;
   } finally {
-    if (success) stageTracker.end(totalStage, { truncated: false });
+    if (completed)
+      stageTracker.end(totalStage, { truncated: completed.truncated });
   }
 }
 
@@ -1534,8 +1554,13 @@ class WorkerPool implements TransformWorkerPool {
 
     const queuedIndex = this.findQueuedIndex(id);
     if (queuedIndex !== null) {
+      const task = this.queue[queuedIndex];
+      if (task) this.clearAbortListener(task.signal, task.abortListener);
+
       this.queue.splice(queuedIndex, 1);
-      reject(abortPolicy.createAbortError(url, 'transform:queued-abort'));
+      (task?.reject ?? reject)(
+        abortPolicy.createAbortError(url, 'transform:queued-abort')
+      );
       this.maybeCompactQueue();
     }
   }
@@ -1901,7 +1926,7 @@ export async function transformHtmlToMarkdown(
   options: TransformOptions
 ): Promise<MarkdownTransformResult> {
   const totalStage = stageTracker.start(url, 'transform:total');
-  let success = false;
+  let completed: MarkdownTransformResult | null = null;
 
   try {
     abortPolicy.throwIfAborted(options.signal, url, 'transform:begin');
@@ -1909,16 +1934,17 @@ export async function transformHtmlToMarkdown(
     const workerStage = stageTracker.start(url, 'transform:worker');
     try {
       const result = await transformWithWorkerPool(html, url, options);
-      success = true;
+      completed = result;
       return result;
     } catch (error: unknown) {
       const fallback = resolveWorkerFallback(error, html, url, options);
-      success = true;
+      completed = fallback;
       return fallback;
     } finally {
       stageTracker.end(workerStage);
     }
   } finally {
-    if (success) stageTracker.end(totalStage, { truncated: false });
+    if (completed)
+      stageTracker.end(totalStage, { truncated: completed.truncated });
   }
 }
