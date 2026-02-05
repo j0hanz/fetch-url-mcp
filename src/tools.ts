@@ -34,6 +34,7 @@ import { isObject } from './type-guards.js';
 export interface FetchUrlInput {
   url: string;
   skipNoiseRemoval?: boolean | undefined;
+  forceRefresh?: boolean | undefined;
 }
 
 export interface ToolContentBlock {
@@ -78,6 +79,7 @@ export interface FetchPipelineOptions<T> {
   cacheNamespace: string;
   signal?: AbortSignal;
   cacheVary?: Record<string, unknown> | string;
+  forceRefresh?: boolean;
   transform: (
     input: { buffer: Uint8Array; encoding: string },
     url: string
@@ -138,6 +140,12 @@ export const fetchUrlInputSchema = z.strictObject({
     .optional()
     .describe(
       'When true, preserves navigation, footers, and other elements normally filtered as noise'
+    ),
+  forceRefresh: z
+    .boolean()
+    .optional()
+    .describe(
+      'When true, bypasses the cache and fetches fresh content from the URL'
     ),
 });
 
@@ -409,6 +417,19 @@ function getOpenCodeFence(
   return { fenceChar, fenceLength };
 }
 
+function findSafeLinkBoundary(content: string): number {
+  const lastBracket = content.lastIndexOf('[');
+  if (lastBracket === -1) return content.length;
+  const afterBracket = content.substring(lastBracket);
+  const closedPattern = /^\[[^\]]*\]\([^)]*\)/;
+  if (closedPattern.test(afterBracket)) return content.length;
+  const start =
+    lastBracket > 0 && content[lastBracket - 1] === '!'
+      ? lastBracket - 1
+      : lastBracket;
+  return start;
+}
+
 function truncateWithMarker(
   content: string,
   limit: number,
@@ -417,7 +438,7 @@ function truncateWithMarker(
   if (content.length <= limit) return content;
 
   const maxContentLength = Math.max(0, limit - marker.length);
-  const truncatedContent = content.substring(0, maxContentLength);
+  let truncatedContent = content.substring(0, maxContentLength);
 
   // Check if we're inside an open code fence
   const openFence = getOpenCodeFence(truncatedContent);
@@ -429,6 +450,11 @@ function truncateWithMarker(
       limit - marker.length - fenceCloser.length
     );
     return `${content.substring(0, adjustedLength)}${fenceCloser}${marker}`;
+  }
+
+  const safeBoundary = findSafeLinkBoundary(truncatedContent);
+  if (safeBoundary < truncatedContent.length) {
+    truncatedContent = truncatedContent.substring(0, safeBoundary);
   }
 
   return `${truncatedContent}${marker}`;
@@ -717,13 +743,15 @@ export async function executeFetchPipeline<T>(
     options.cacheVary
   );
 
-  const cachedResult = attemptCacheRetrieval({
-    cacheKey,
-    deserialize: options.deserialize,
-    cacheNamespace: options.cacheNamespace,
-    normalizedUrl: resolvedUrl.normalizedUrl,
-  });
-  if (cachedResult) return cachedResult;
+  if (!options.forceRefresh) {
+    const cachedResult = attemptCacheRetrieval({
+      cacheKey,
+      deserialize: options.deserialize,
+      cacheNamespace: options.cacheNamespace,
+      normalizedUrl: resolvedUrl.normalizedUrl,
+    });
+    if (cachedResult) return cachedResult;
+  }
 
   logDebug('Fetching URL', { url: resolvedUrl.normalizedUrl });
 
@@ -762,6 +790,8 @@ export async function executeFetchPipeline<T>(
 interface SharedFetchOptions<T extends { content: string }> {
   readonly url: string;
   readonly signal?: AbortSignal;
+  readonly cacheVary?: Record<string, unknown> | string;
+  readonly forceRefresh?: boolean;
   readonly transform: (
     input: { buffer: Uint8Array; encoding: string },
     normalizedUrl: string
@@ -787,6 +817,8 @@ export async function performSharedFetch<T extends { content: string }>(
     url: options.url,
     cacheNamespace: 'markdown',
     ...withSignal(options.signal),
+    ...(options.cacheVary ? { cacheVary: options.cacheVary } : {}),
+    ...(options.forceRefresh ? { forceRefresh: true } : {}),
     transform: options.transform,
     ...(options.serialize ? { serialize: options.serialize } : {}),
     ...(options.deserialize ? { deserialize: options.deserialize } : {}),
@@ -998,7 +1030,8 @@ async function fetchPipeline(
   url: string,
   signal?: AbortSignal,
   progress?: ProgressReporter,
-  skipNoiseRemoval?: boolean
+  skipNoiseRemoval?: boolean,
+  forceRefresh?: boolean
 ): Promise<{
   pipeline: PipelineResult<MarkdownPipelineResult>;
   inlineResult: InlineResult;
@@ -1006,6 +1039,8 @@ async function fetchPipeline(
   return performSharedFetch<MarkdownPipelineResult>({
     url,
     ...withSignal(signal),
+    ...(skipNoiseRemoval ? { cacheVary: { skipNoiseRemoval: true } } : {}),
+    ...(forceRefresh ? { forceRefresh: true } : {}),
     transform: async ({ buffer, encoding }, normalizedUrl) => {
       if (progress) {
         void progress.report(3, 'Transforming content');
@@ -1042,7 +1077,8 @@ async function executeFetch(
     url,
     signal,
     progress,
-    input.skipNoiseRemoval
+    input.skipNoiseRemoval,
+    input.forceRefresh
   );
 
   if (pipeline.fromCache) {

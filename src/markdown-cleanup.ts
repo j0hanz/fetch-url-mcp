@@ -133,10 +133,15 @@ const HeadingHeuristics = {
       );
     }
     if (words.length >= 2 && words.length <= 6) {
-      return words.every(
+      const allTitleCase = words.every(
         (w) =>
           /^[A-Z][a-z]*$/.test(w) || /^(?:and|or|the|of|in|for|to|a)$/i.test(w)
       );
+      if (!allTitleCase) return false;
+      const capitalizedCount = words.filter((w) =>
+        /^[A-Z][a-z]*$/.test(w)
+      ).length;
+      return capitalizedCount >= 2;
     }
     return false;
   },
@@ -169,6 +174,31 @@ function getHeadingPrefix(trimmed: string): string | null {
   return null;
 }
 
+function hasFollowingContent(lines: string[], startIndex: number): boolean {
+  return lines.slice(startIndex + 1).some((l) => l.trim() !== '');
+}
+
+function isPromotableLine(
+  lines: string[],
+  index: number,
+  trimmed: string
+): string | null {
+  const prevLine = index > 0 ? (lines[index - 1] ?? '') : '';
+  const isOrphan = index === 0 || prevLine.trim() === '';
+  if (!isOrphan) return null;
+
+  const prefix = getHeadingPrefix(trimmed);
+  if (!prefix) return null;
+  const isTitleCaseOnly =
+    prefix === '## ' &&
+    !HeadingHeuristics.isSpecialPrefix(trimmed) &&
+    trimmed.split(/\s+/).length >= 2;
+
+  if (isTitleCaseOnly && !hasFollowingContent(lines, index)) return null;
+
+  return prefix;
+}
+
 function promoteOrphanHeadings(segmentText: string): string {
   if (!segmentText) return '';
   const lines = segmentText.split('\n');
@@ -178,12 +208,7 @@ function promoteOrphanHeadings(segmentText: string): string {
     const trimmed = line.trim();
     if (!trimmed) continue;
 
-    const prevLine = i > 0 ? (lines[i - 1] ?? '') : '';
-    const isOrphan = i === 0 || prevLine.trim() === '';
-
-    if (!isOrphan) continue;
-
-    const prefix = getHeadingPrefix(trimmed);
+    const prefix = isPromotableLine(lines, i, trimmed);
     if (prefix) {
       lines[i] = `${prefix}${trimmed}`;
     }
@@ -258,14 +283,14 @@ function removeToc(text: string): string {
 
 function normalizeSpacing(text: string): string {
   return text
-    .replace(/\]\(([^)]+)\)\[/g, ']($1)\n\n[') // Space between adjacent links
+    .replace(/\]\(([^)]+)\)\[/g, ']($1)\n\n[')
     .replace(REGEX.HELPFUL_PROMPT, '')
     .replace(/\]\([^)]+\)(?=[A-Za-z0-9])/g, '$& ')
     .replace(/`[^`]+`(?=[A-Za-z0-9])/g, '$& ')
-    .replace(/(`[^`]+`)\s*\\-\s*/g, '$1 - ') // Fix escaped hyphens after code
-    .replace(/\\([[]])/g, '$1') // Unescape brackets
-    .replace(/([^\n])\n([-*+] )/g, '$1\n\n$2') // Ensure lists start on new paragraph
-    .replace(/(\S)\n(\d+\. )/g, '$1\n\n$2') // Ensure numbered lists start on new paragraph
+    .replace(/(`[^`]+`)\s*\\-\s*/g, '$1 - ')
+    .replace(/\\([[]])/g, '$1')
+    .replace(/([^\n])\n([-*+] )/g, '$1\n\n$2')
+    .replace(/(\S)\n(\d+\. )/g, '$1\n\n$2')
     .replace(REGEX.DOUBLE_NEWLINE_REDUCER, '\n\n');
 }
 

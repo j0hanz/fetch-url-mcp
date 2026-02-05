@@ -64,8 +64,7 @@ const defaultRedactor: UrlRedactor = {
   redact: redactUrl,
 };
 
-const defaultFetch: FetchLike = (input, init) =>
-  globalThis.fetch(input, init);
+const defaultFetch: FetchLike = (input, init) => globalThis.fetch(input, init);
 
 type IpSegment = number | string;
 
