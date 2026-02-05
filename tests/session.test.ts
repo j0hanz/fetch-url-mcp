@@ -73,6 +73,8 @@ describe('http session utilities', () => {
         createdAt: Date.now(),
         lastSeen: Date.now(),
         protocolInitialized: false,
+
+        authFingerprint: 'test',
       };
 
       store.set(sessionId, entry);
@@ -92,6 +94,8 @@ describe('http session utilities', () => {
         createdAt: Date.now(),
         lastSeen: Date.now(),
         protocolInitialized: false,
+
+        authFingerprint: 'test',
       };
 
       store.set(sessionId, entry);
@@ -117,6 +121,8 @@ describe('http session utilities', () => {
         createdAt: initialTime,
         lastSeen: initialTime,
         protocolInitialized: false,
+
+        authFingerprint: 'test',
       };
 
       store.set(sessionId, entry);
@@ -138,6 +144,8 @@ describe('http session utilities', () => {
         createdAt: Date.now(),
         lastSeen: Date.now(),
         protocolInitialized: false,
+
+        authFingerprint: 'test',
       };
 
       store.set('session-1', entry);
@@ -160,6 +168,8 @@ describe('http session utilities', () => {
         createdAt: Date.now(),
         lastSeen: Date.now(),
         protocolInitialized: false,
+
+        authFingerprint: 'test',
       };
 
       assert.equal(store.size(), 0, 'Initial size should be 0');
@@ -183,6 +193,8 @@ describe('http session utilities', () => {
         createdAt: now - 3000,
         lastSeen: now - 3000,
         protocolInitialized: false,
+
+        authFingerprint: 'test',
       });
 
       store.set('middle', {
@@ -190,6 +202,8 @@ describe('http session utilities', () => {
         createdAt: now - 2000,
         lastSeen: now - 2000,
         protocolInitialized: false,
+
+        authFingerprint: 'test',
       });
 
       store.set('newest', {
@@ -197,6 +211,8 @@ describe('http session utilities', () => {
         createdAt: now,
         lastSeen: now,
         protocolInitialized: false,
+
+        authFingerprint: 'test',
       });
 
       const evicted = store.evictOldest();
@@ -224,6 +240,8 @@ describe('http session utilities', () => {
         createdAt: now - 200,
         lastSeen: now - 200,
         protocolInitialized: false,
+
+        authFingerprint: 'test',
       });
 
       // Add fresh session
@@ -232,6 +250,8 @@ describe('http session utilities', () => {
         createdAt: now,
         lastSeen: now,
         protocolInitialized: false,
+
+        authFingerprint: 'test',
       });
 
       const evicted = store.evictExpired();

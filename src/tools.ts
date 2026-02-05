@@ -121,7 +121,7 @@ const TRUNCATION_MARKER = '...[truncated]';
 const FETCH_PROGRESS_TOTAL = 4;
 const PROGRESS_NOTIFICATION_TIMEOUT_MS = 5000;
 
-const fetchUrlInputSchema = z.strictObject({
+export const fetchUrlInputSchema = z.strictObject({
   url: z
     .url({ protocol: /^https?$/i })
     .min(1)

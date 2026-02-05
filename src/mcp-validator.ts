@@ -19,12 +19,14 @@ export interface McpRequestBody {
 // --- Validation ---
 
 const paramsSchema = z.looseObject({});
-const mcpRequestSchema = z.looseObject({
-  jsonrpc: z.literal('2.0'),
-  method: z.string().min(1),
-  id: z.union([z.string(), z.number(), z.null()]).optional(),
-  params: paramsSchema.optional(),
-});
+const mcpRequestSchema = z
+  .object({
+    jsonrpc: z.literal('2.0'),
+    method: z.string().min(1),
+    id: z.union([z.string(), z.number(), z.null()]).optional(),
+    params: paramsSchema.optional(),
+  })
+  .strict();
 
 export function isJsonRpcBatchRequest(body: unknown): boolean {
   return Array.isArray(body);

@@ -21,6 +21,7 @@ import { registerConfigResource } from './resources.js';
 import { type CreateTaskResult, taskManager } from './tasks.js';
 import {
   FETCH_URL_TOOL_NAME,
+  fetchUrlInputSchema,
   fetchUrlToolHandler,
   type ProgressNotification,
   registerTools,
@@ -64,7 +65,7 @@ function createServerCapabilities(): {
 } {
   return {
     tools: { listChanged: false },
-    resources: { listChanged: false, subscribe: false },
+    resources: { listChanged: true, subscribe: true },
     logging: {},
     tasks: {
       list: {},
@@ -256,13 +257,14 @@ function resolveToolCallContext(extra?: HandlerExtra): ToolCallContext {
 }
 
 function requireFetchUrlArgs(args: unknown): { url: string } {
-  if (!isObject(args) || typeof (args as { url?: unknown }).url !== 'string') {
+  const parsed = fetchUrlInputSchema.safeParse(args);
+  if (!parsed.success) {
     throw new McpError(
       ErrorCode.InvalidParams,
       'Invalid arguments for fetch-url'
     );
   }
-  return { url: (args as { url: string }).url };
+  return parsed.data;
 }
 
 function throwTaskNotFound(): never {

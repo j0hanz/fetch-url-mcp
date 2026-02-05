@@ -19,6 +19,8 @@ function createStore(initialSize: number): SessionStore {
       createdAt: Date.now(),
       lastSeen: Date.now(),
       protocolInitialized: false,
+
+      authFingerprint: 'test',
     });
   }
 

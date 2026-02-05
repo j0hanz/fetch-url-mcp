@@ -9,6 +9,7 @@ export interface SessionEntry {
   createdAt: number;
   lastSeen: number;
   protocolInitialized: boolean;
+  authFingerprint: string;
 }
 
 export interface SessionStore {

@@ -386,6 +386,13 @@ export const config = {
         'cookie-banners,newsletters,social-share,nav-footer'
     ),
     debug: parseBoolean(env.DEBUG_NOISE_REMOVAL, false),
+    weights: {
+      hidden: parseInteger(env.NOISE_WEIGHT_HIDDEN, 50, 0, 100),
+      structural: parseInteger(env.NOISE_WEIGHT_STRUCTURAL, 50, 0, 100),
+      promo: parseInteger(env.NOISE_WEIGHT_PROMO, 35, 0, 100),
+      stickyFixed: parseInteger(env.NOISE_WEIGHT_STICKY_FIXED, 30, 0, 100),
+      threshold: parseInteger(env.NOISE_WEIGHT_THRESHOLD, 50, 0, 100),
+    },
   },
   markdownCleanup: {
     promoteOrphanHeadings: parseBoolean(

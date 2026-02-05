@@ -239,11 +239,33 @@ function truncateHtml(html: string): { html: string; truncated: boolean } {
     return { html, truncated: false };
   }
 
+  let limit = maxSize;
+  // Prevent splitting surrogate pairs: check if the char at limit-1 is a high surrogate
+  if (
+    limit > 0 &&
+    html.charCodeAt(limit - 1) >= 0xd800 &&
+    html.charCodeAt(limit - 1) <= 0xdbff
+  ) {
+    limit--;
+  }
+
+  let content = html.substring(0, limit);
+
+  // Avoid cutting inside a tag (e.g. <div cla...)
+  // If the last '<' is after the last '>', we are likely inside an open tag.
+  const lastOpen = content.lastIndexOf('<');
+  const lastClose = content.lastIndexOf('>');
+
+  if (lastOpen > lastClose) {
+    content = content.substring(0, lastOpen);
+  }
+
   logWarn('HTML content exceeds maximum size, truncating', {
     size: html.length,
     maxSize,
+    truncatedSize: content.length,
   });
-  return { html: html.substring(0, maxSize), truncated: true };
+  return { html: content, truncated: true };
 }
 
 interface MetaContext {

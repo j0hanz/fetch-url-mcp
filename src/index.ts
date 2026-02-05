@@ -26,6 +26,15 @@ function attemptShutdown(signal: string): void {
   void shutdownHandlerRef.current(signal);
 }
 
+function registerHttpSignalHandlers(): void {
+  process.once('SIGINT', () => {
+    if (shouldAttemptShutdown()) attemptShutdown('SIGINT');
+  });
+  process.once('SIGTERM', () => {
+    if (shouldAttemptShutdown()) attemptShutdown('SIGTERM');
+  });
+}
+
 function handleFatalError(label: string, error: Error, signal: string): void {
   logError(label, error);
   process.stderr.write(`${label}: ${error.message}\n`);
@@ -53,6 +62,7 @@ try {
   } else {
     const { shutdown } = await startHttpServer();
     shutdownHandlerRef.current = shutdown;
+    registerHttpSignalHandlers();
   }
 } catch (error: unknown) {
   logError(

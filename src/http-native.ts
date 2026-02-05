@@ -19,7 +19,7 @@ import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
 
 import { keys as cacheKeys, handleDownload } from './cache.js';
 import { config, enableHttpMode, serverVersion } from './config.js';
-import { timingSafeEqualUtf8 } from './crypto.js';
+import { sha256Hex, timingSafeEqualUtf8 } from './crypto.js';
 import { normalizeHost } from './host-normalization.js';
 import {
   acceptsEventStream,
@@ -230,7 +230,13 @@ async function closeTransportBestEffort(
 
 class CorsPolicy {
   handle(req: IncomingMessage, res: ServerResponse): boolean {
-    res.setHeader('Access-Control-Allow-Origin', '*');
+    const origin = getHeaderValue(req, 'origin');
+    if (origin) {
+      res.setHeader('Access-Control-Allow-Origin', origin);
+      res.setHeader('Vary', 'Origin');
+    } else {
+      res.setHeader('Access-Control-Allow-Origin', '*');
+    }
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS, DELETE');
     res.setHeader(
       'Access-Control-Allow-Headers',
@@ -631,6 +637,13 @@ function ensureMcpProtocolVersion(
   return true;
 }
 
+function buildAuthFingerprint(auth: AuthInfo | undefined): string | null {
+  if (!auth) return null;
+  const { token, clientId } = auth;
+  if (!token && !clientId) return null;
+  return sha256Hex(`${clientId}:${token}`);
+}
+
 class McpSessionGateway {
   constructor(
     private readonly store: SessionStore,
@@ -719,6 +732,14 @@ class McpSessionGateway {
         sendError(res, -32600, 'Session not found', 404, requestId);
         return null;
       }
+      const incomingFingerprint = buildAuthFingerprint(req.auth);
+      if (
+        !incomingFingerprint ||
+        session.authFingerprint !== incomingFingerprint
+      ) {
+        sendError(res, -32600, 'Session not found', 404, requestId);
+        return null;
+      }
       this.store.touch(sessionId);
       return session.transport;
     }
@@ -728,13 +749,20 @@ class McpSessionGateway {
       return null;
     }
 
-    return this.createNewSession(res, requestId);
+    return this.createNewSession(req, res, requestId);
   }
 
   private async createNewSession(
+    req: ShimRequest,
     res: ShimResponse,
     requestId: JsonRpcId
   ): Promise<StreamableHTTPServerTransport | null> {
+    const authFingerprint = buildAuthFingerprint(req.auth);
+    if (!authFingerprint) {
+      sendError(res, -32603, 'Missing auth context', 500, requestId);
+      return null;
+    }
+
     const allowed = ensureSessionCapacity({
       store: this.store,
       maxSessions: config.server.maxSessions,
@@ -798,6 +826,7 @@ class McpSessionGateway {
       createdAt: Date.now(),
       lastSeen: Date.now(),
       protocolInitialized: false,
+      authFingerprint,
     });
 
     transportImpl.onclose = composeCloseHandlers(transportImpl.onclose, () => {
@@ -952,7 +981,11 @@ class HttpRequestPipeline {
     try {
       req.body = await jsonBodyReader.read(req);
     } catch {
-      res.status(400).json({ error: 'Invalid JSON or Payload too large' });
+      if (url.pathname === '/mcp' && req.method === 'POST') {
+        sendError(res, -32700, 'Parse error', 400, null);
+      } else {
+        res.status(400).json({ error: 'Invalid JSON or Payload too large' });
+      }
       return;
     }
 

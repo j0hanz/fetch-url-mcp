@@ -46,65 +46,26 @@ function isFullDocumentHtml(html: string): boolean {
 
 const NOISE_SCAN_LIMIT = 50_000;
 
-const NOISE_MARKERS = [
-  '<script',
-  '<style',
-  '<noscript',
-  '<iframe',
-  '<nav',
-  '<footer',
-  '<header',
-  '<form',
-  '<button',
-  '<input',
-  '<select',
-  '<textarea',
-  '<svg',
-  '<canvas',
-  ' aria-hidden="true"',
-  " aria-hidden='true'",
-  ' hidden',
-  ' role="navigation"',
-  " role='navigation'",
-  ' role="banner"',
-  " role='banner'",
-  ' role="complementary"',
-  " role='complementary'",
-  ' role="contentinfo"',
-  " role='contentinfo'",
-  ' role="tree"',
-  " role='tree'",
-  ' role="menubar"',
-  " role='menubar'",
-  ' role="menu"',
-  " role='menu'",
-  ' banner',
-  ' promo',
-  ' announcement',
-  ' cta',
-  ' advert',
-  ' newsletter',
-  ' subscribe',
-  ' cookie',
-  ' consent',
-  ' popup',
-  ' modal',
-  ' overlay',
-  ' toast',
-  ' fixed',
-  ' sticky',
-  ' z-50',
-  ' z-4',
-  ' isolate',
-  ' breadcrumb',
-  ' pagination',
-] as const;
+const NOISE_TAGS =
+  /<\s*(?:script|style|noscript|iframe|nav|footer|header|form|button|input|select|textarea|svg|canvas)\b/i;
+
+const NOISE_ROLES =
+  /[\s"']role\s*=\s*['"]?(?:navigation|banner|complementary|contentinfo|tree|menubar|menu)['"]?/i;
+
+const NOISE_OTHER_ATTRS = /[\s"'](?:aria-hidden\s*=\s*['"]?true['"]?|hidden)/i;
+
+const NOISE_CLASSES =
+  /[\s"'](?:banner|promo|announcement|cta|advert|newsletter|subscribe|cookie|consent|popup|modal|overlay|toast|fixed|sticky|z-50|z-4|isolate|breadcrumb|pagination)\b/i;
 
 function mayContainNoise(html: string): boolean {
   const sample =
-    html.length > NOISE_SCAN_LIMIT ? html.slice(0, NOISE_SCAN_LIMIT) : html;
-  const haystack = sample.toLowerCase();
-  return NOISE_MARKERS.some((marker) => haystack.includes(marker));
+    html.length > NOISE_SCAN_LIMIT ? html.substring(0, NOISE_SCAN_LIMIT) : html;
+  return (
+    NOISE_TAGS.test(sample) ||
+    NOISE_ROLES.test(sample) ||
+    NOISE_OTHER_ATTRS.test(sample) ||
+    NOISE_CLASSES.test(sample)
+  );
 }
 
 const STRUCTURAL_TAGS = new Set([
@@ -274,36 +235,30 @@ type ElementMetadata = Readonly<{
   isInteractive: boolean;
 }>;
 
-const NOISE_WEIGHTS = {
-  HIDDEN: 50,
-  STRUCTURAL: 50,
-  PROMO: 35,
-  STICKY_FIXED: 30,
-  THRESHOLD: 50,
-} as const;
-
 class NoiseClassifier {
   constructor(private readonly promo: PromoDetector) {}
 
   isNoise(element: Element): boolean {
-    return this.calculateNoiseScore(element) >= NOISE_WEIGHTS.THRESHOLD;
+    return (
+      this.calculateNoiseScore(element) >= config.noiseRemoval.weights.threshold
+    );
   }
 
   private calculateNoiseScore(element: Element): number {
     const meta = this.readMetadata(element);
+    const { weights } = config.noiseRemoval;
     let score = 0;
 
-    if (this.isStructuralNoise(meta)) score += NOISE_WEIGHTS.STRUCTURAL;
-    if (ALWAYS_NOISE_TAGS.has(meta.tagName)) score += NOISE_WEIGHTS.STRUCTURAL;
-    if (this.isHeaderBoilerplate(meta)) score += NOISE_WEIGHTS.STRUCTURAL;
+    if (this.isStructuralNoise(meta)) score += weights.structural;
+    if (ALWAYS_NOISE_TAGS.has(meta.tagName)) score += weights.structural;
+    if (this.isHeaderBoilerplate(meta)) score += weights.structural;
 
-    if (this.isHiddenNoise(meta)) score += NOISE_WEIGHTS.HIDDEN;
-    if (this.isRoleNoise(meta)) score += NOISE_WEIGHTS.STRUCTURAL;
+    if (this.isHiddenNoise(meta)) score += weights.hidden;
+    if (this.isRoleNoise(meta)) score += weights.structural;
 
     if (this.matchesFixedOrHighZIsolate(meta.className))
-      score += NOISE_WEIGHTS.STICKY_FIXED;
-    if (this.promo.matches(meta.className, meta.id))
-      score += NOISE_WEIGHTS.PROMO;
+      score += weights.stickyFixed;
+    if (this.promo.matches(meta.className, meta.id)) score += weights.promo;
 
     return score;
   }
