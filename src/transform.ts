@@ -512,7 +512,23 @@ function extractArticle(
     // F1: Check abort before heavy Readability parse
     abortPolicy.throwIfAborted(signal, url, 'extract:article:parse');
 
-    const reader = new Readability(readabilityDoc, { maxElemsToParse: 20_000 });
+    const reader = new Readability(readabilityDoc, {
+      maxElemsToParse: 20_000,
+      classesToPreserve: [
+        'admonition',
+        'callout',
+        'custom-block',
+        'alert',
+        'note',
+        'tip',
+        'info',
+        'warning',
+        'danger',
+        'caution',
+        'important',
+        'mermaid',
+      ],
+    });
     const parsed = reader.parse();
     if (!parsed) return null;
 
@@ -796,6 +812,35 @@ function buildImageTranslator(ctx: unknown): TranslatorConfig {
   return { content: `\n\n${markdown}\n\n` };
 }
 
+const GFM_ALERT_MAP: ReadonlyMap<string, string> = new Map([
+  ['note', 'NOTE'],
+  ['info', 'NOTE'],
+  ['tip', 'TIP'],
+  ['hint', 'TIP'],
+  ['warning', 'WARNING'],
+  ['warn', 'WARNING'],
+  ['caution', 'CAUTION'],
+  ['danger', 'CAUTION'],
+  ['important', 'IMPORTANT'],
+]);
+
+function resolveGfmAlertType(className: string): string | undefined {
+  const lower = className.toLowerCase();
+  for (const [key, type] of GFM_ALERT_MAP) {
+    if (lower.includes(key)) return type;
+  }
+  return undefined;
+}
+
+function hasComplexTableLayout(node: unknown): boolean {
+  if (!isObject(node)) return false;
+  const innerHTML =
+    typeof (node as { innerHTML?: unknown }).innerHTML === 'string'
+      ? (node as { innerHTML: string }).innerHTML
+      : '';
+  return /(?:colspan|rowspan)=["']?[2-9]/i.test(innerHTML);
+}
+
 function buildPreTranslator(ctx: unknown): TranslatorConfig {
   if (!isObject(ctx)) return {};
 
@@ -814,6 +859,20 @@ function createCustomTranslators(): TranslatorConfigObject {
   return {
     code: (ctx: unknown) => buildCodeTranslator(ctx),
     img: (ctx: unknown) => buildImageTranslator(ctx),
+    table: (ctx: unknown) => {
+      if (!isObject(ctx)) return {};
+      const { node } = ctx as { node?: unknown };
+      if (hasComplexTableLayout(node)) {
+        return {
+          postprocess: ({ content }: { content: string }) => {
+            const trimmed = content.trim();
+            if (!trimmed) return '';
+            return `\n\n${trimmed}\n\n`;
+          },
+        };
+      }
+      return {};
+    },
     dl: (ctx: unknown) => {
       if (!isObject(ctx) || !isObject((ctx as { node?: unknown }).node))
         return { content: '' };
@@ -865,12 +924,15 @@ function createCustomTranslators(): TranslatorConfigObject {
         className.includes('admonition') ||
         className.includes('callout') ||
         className.includes('custom-block') ||
-        /\b(note|tip|info|warning|danger|caution)\b/i.test(className);
+        getAttribute?.('role') === 'alert' ||
+        /\b(note|tip|info|warning|danger|caution|important)\b/i.test(className);
       if (isAdmonition) {
         return {
           postprocess: ({ content }: { content: string }) => {
+            const alertType = resolveGfmAlertType(className);
             const lines = content.trim().split('\n');
-            return `\n\n> ${lines.join('\n> ')}\n\n`;
+            const header = alertType ? `> [!${alertType}]\n` : '';
+            return `\n\n${header}> ${lines.join('\n> ')}\n\n`;
           },
         };
       }
@@ -918,6 +980,17 @@ function createCustomTranslators(): TranslatorConfigObject {
     }),
     section: () => ({
       postprocess: ({ content }: { content: string }) => `\n\n${content}\n\n`,
+    }),
+    details: () => ({
+      postprocess: ({ content }: { content: string }) => {
+        const trimmed = content.trim();
+        if (!trimmed) return '';
+        return `\n\n<details>\n${trimmed}\n</details>\n\n`;
+      },
+    }),
+    summary: () => ({
+      postprocess: ({ content }: { content: string }) =>
+        `<summary>${content.trim()}</summary>\n\n`,
     }),
     span: (ctx: unknown) => {
       if (!isObject(ctx) || !isObject((ctx as { node?: unknown }).node))
@@ -971,6 +1044,7 @@ function getMarkdownConverter(): NodeHtmlMarkdown {
       codeBlockStyle: 'fenced',
       emDelimiter: '_',
       bulletMarker: '-',
+      globalEscape: [/[\\`*_~]/gm, '\\$&'],
     },
     createCustomTranslators()
   );
@@ -981,11 +1055,186 @@ function translateHtmlFragmentToMarkdown(html: string): string {
   return getMarkdownConverter().translate(html).trim();
 }
 
+function isWhitespaceChar(code: number): boolean {
+  return code === 9 || code === 10 || code === 12 || code === 13 || code === 32;
+}
+
+function containsWhitespace(value: string): boolean {
+  for (let i = 0; i < value.length; i += 1) {
+    if (isWhitespaceChar(value.charCodeAt(i))) return true;
+  }
+  return false;
+}
+
+function extractClassAttribute(openTag: string): string | null {
+  const lower = openTag.toLowerCase();
+  const classIndex = lower.indexOf('class');
+  if (classIndex === -1) return null;
+
+  let i = classIndex + 5;
+  while (i < lower.length && isWhitespaceChar(lower.charCodeAt(i))) i += 1;
+  if (lower[i] !== '=') return null;
+  i += 1;
+  while (i < lower.length && isWhitespaceChar(lower.charCodeAt(i))) i += 1;
+
+  const quote = openTag[i];
+  if (quote !== '"' && quote !== "'") return null;
+  i += 1;
+  const end = openTag.indexOf(quote, i);
+  if (end === -1) return null;
+  return openTag.slice(i, end);
+}
+
+function skipWhitespace(text: string, start: number): number {
+  let index = start;
+  while (index < text.length && isWhitespaceChar(text.charCodeAt(index))) {
+    index += 1;
+  }
+  return index;
+}
+
+function isTsdMemberSectionTag(openTag: string): boolean {
+  const classValue = extractClassAttribute(openTag);
+  return classValue ? classValue.toLowerCase().includes('tsd-member') : false;
+}
+
+function findTsdMemberSectionStart(html: string, scan: number): number | null {
+  if (scan >= html.length || !html.startsWith('<section', scan)) return null;
+
+  const tagEnd = html.indexOf('>', scan);
+  if (tagEnd === -1) return null;
+
+  const openTag = html.slice(scan, tagEnd + 1);
+  return isTsdMemberSectionTag(openTag) ? scan : null;
+}
+
+function resolveRelativeHref(
+  href: string,
+  baseUrl: string,
+  origin: string
+): string {
+  const trimmedHref = href.trim();
+  if (!trimmedHref || containsWhitespace(trimmedHref)) return href;
+  if (isAbsoluteOrSpecialUrl(trimmedHref)) return trimmedHref;
+
+  try {
+    return new URL(trimmedHref, baseUrl).href;
+  } catch {
+    if (trimmedHref.startsWith('/')) return `${origin}${trimmedHref}`;
+    return trimmedHref;
+  }
+}
+
+function findInlineLink(
+  markdown: string,
+  start: number
+): {
+  prefixStart: number;
+  closeParen: number;
+  prefix: string;
+  href: string;
+} | null {
+  let searchFrom = start;
+
+  while (searchFrom < markdown.length) {
+    const openBracket = markdown.indexOf('[', searchFrom);
+    if (openBracket === -1) return null;
+
+    const closeBracket = markdown.indexOf(']', openBracket + 1);
+    if (closeBracket === -1) return null;
+
+    if (markdown[closeBracket + 1] !== '(') {
+      searchFrom = closeBracket + 1;
+      continue;
+    }
+
+    const closeParen = markdown.indexOf(')', closeBracket + 2);
+    if (closeParen === -1) return null;
+
+    const prefixStart =
+      openBracket > 0 && markdown[openBracket - 1] === '!'
+        ? openBracket - 1
+        : openBracket;
+    const prefix = markdown.slice(prefixStart, closeBracket + 1);
+    const href = markdown.slice(closeBracket + 2, closeParen);
+
+    return { prefixStart, closeParen, prefix, href };
+  }
+
+  return null;
+}
+
 function preprocessPropertySections(html: string): string {
-  return html.replace(
-    /<\/section>\s*(<section[^>]*class="[^"]*tsd-member[^"]*"[^>]*>)/g,
-    '</section><p>&nbsp;</p>$1'
-  );
+  const closeTag = '</section>';
+  let cursor = 0;
+  let output = '';
+
+  for (
+    let closeIndex = html.indexOf(closeTag, cursor);
+    closeIndex !== -1;
+    closeIndex = html.indexOf(closeTag, cursor)
+  ) {
+    const afterClose = closeIndex + closeTag.length;
+    output += html.slice(cursor, afterClose);
+
+    const scan = skipWhitespace(html, afterClose);
+    const sectionStart = findTsdMemberSectionStart(html, scan);
+    if (sectionStart !== null) {
+      output += '<p>&nbsp;</p>';
+      cursor = sectionStart;
+      continue;
+    }
+
+    output += html.slice(afterClose, scan);
+    cursor = scan;
+  }
+
+  output += html.slice(cursor);
+  return output;
+}
+
+const ABSOLUTE_URL_PREFIXES = [
+  'http://',
+  'https://',
+  'mailto:',
+  'data:',
+  '#',
+  'tel:',
+] as const;
+
+function isAbsoluteOrSpecialUrl(href: string): boolean {
+  return ABSOLUTE_URL_PREFIXES.some((p) => href.startsWith(p));
+}
+
+function resolveRelativeUrls(markdown: string, baseUrl: string): string {
+  let origin: string;
+  try {
+    ({ origin } = new URL(baseUrl));
+  } catch {
+    return markdown;
+  }
+
+  let cursor = 0;
+  let output = '';
+
+  while (cursor < markdown.length) {
+    const link = findInlineLink(markdown, cursor);
+    if (!link) {
+      output += markdown.slice(cursor);
+      break;
+    }
+
+    output += markdown.slice(cursor, link.prefixStart);
+    output += `${link.prefix}(${resolveRelativeHref(
+      link.href,
+      baseUrl,
+      origin
+    )})`;
+
+    cursor = link.closeParen + 1;
+  }
+
+  return output;
 }
 
 function translateHtmlToMarkdown(params: {
@@ -1017,7 +1266,8 @@ function translateHtmlToMarkdown(params: {
 
   abortPolicy.throwIfAborted(signal, url, 'markdown:translated');
 
-  return cleanupMarkdownArtifacts(content);
+  const cleaned = cleanupMarkdownArtifacts(content);
+  return url ? resolveRelativeUrls(cleaned, url) : cleaned;
 }
 
 function appendMetadataFooter(
