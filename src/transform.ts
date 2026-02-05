@@ -422,7 +422,14 @@ class ArticleExtractor {
         return null;
       }
 
-      const reader = new Readability(doc, { maxElemsToParse: 20_000 });
+      const readabilityDoc =
+        typeof doc.cloneNode === 'function'
+          ? (doc.cloneNode(true) as Document)
+          : doc;
+
+      const reader = new Readability(readabilityDoc, {
+        maxElemsToParse: 20_000,
+      });
       const parsed = reader.parse();
       if (!parsed) return null;
 

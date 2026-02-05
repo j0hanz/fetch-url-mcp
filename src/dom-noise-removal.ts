@@ -1,6 +1,7 @@
 import { parseHTML } from 'linkedom';
 
 import { config } from './config.js';
+import { logDebug } from './observability.js';
 import { isObject } from './type-guards.js';
 
 type NodeListLike<T> =
@@ -84,22 +85,31 @@ const STRUCTURAL_TAGS = new Set([
 
 const ALWAYS_NOISE_TAGS = new Set(['nav', 'footer']);
 
-const BASE_NOISE_SELECTORS = [
-  'nav',
-  'footer',
-  'header[class*="site"]',
-  'header[class*="nav"]',
-  'header[class*="menu"]',
-  '[role="banner"]',
-  '[role="navigation"]',
-  '[role="dialog"]',
-  '[style*="display: none"]',
-  '[style*="display:none"]',
-  '[hidden]',
-  '[aria-hidden="true"]',
-] as const;
+const NOISE_CATEGORY = {
+  cookieBanners: 'cookie-banners',
+  navFooter: 'nav-footer',
+  newsletters: 'newsletters',
+  socialShare: 'social-share',
+} as const;
 
-const BASE_NOISE_SELECTOR = BASE_NOISE_SELECTORS.join(',');
+const BASE_NOISE_SELECTORS = {
+  navFooter: [
+    'nav',
+    'footer',
+    'header[class*="site"]',
+    'header[class*="nav"]',
+    'header[class*="menu"]',
+    '[role="banner"]',
+    '[role="navigation"]',
+  ],
+  cookieBanners: ['[role="dialog"]'],
+  hidden: [
+    '[style*="display: none"]',
+    '[style*="display:none"]',
+    '[hidden]',
+    '[aria-hidden="true"]',
+  ],
+} as const;
 
 const CANDIDATE_NOISE_SELECTOR = [
   ...STRUCTURAL_TAGS,
@@ -114,6 +124,32 @@ const CANDIDATE_NOISE_SELECTOR = [
 
 function normalizeSelectors(selectors: readonly string[]): string[] {
   return selectors.map((s) => s.trim()).filter((s) => s.length > 0);
+}
+
+function createEnabledCategorySet(): Set<string> {
+  return new Set(
+    config.noiseRemoval.enabledCategories.map((c) => c.toLowerCase().trim())
+  );
+}
+
+const enabledCategories = createEnabledCategorySet();
+
+function isCategoryEnabled(category: string): boolean {
+  return enabledCategories.has(category.toLowerCase());
+}
+
+function buildBaseNoiseSelector(): string {
+  const selectors: string[] = [...BASE_NOISE_SELECTORS.hidden];
+
+  if (isCategoryEnabled(NOISE_CATEGORY.navFooter)) {
+    selectors.push(...BASE_NOISE_SELECTORS.navFooter);
+  }
+
+  if (isCategoryEnabled(NOISE_CATEGORY.cookieBanners)) {
+    selectors.push(...BASE_NOISE_SELECTORS.cookieBanners);
+  }
+
+  return selectors.join(',');
 }
 
 function safeQuerySelectorAll(
@@ -155,7 +191,7 @@ const INTERACTIVE_CONTENT_ROLES = new Set([
   'alert',
 ]);
 
-const BASE_PROMO_TOKENS = [
+const PROMO_TOKENS_ALWAYS = [
   'banner',
   'promo',
   'announcement',
@@ -164,16 +200,6 @@ const BASE_PROMO_TOKENS = [
   'ad',
   'ads',
   'sponsor',
-  'newsletter',
-  'subscribe',
-  'cookie',
-  'consent',
-  'popup',
-  'modal',
-  'overlay',
-  'toast',
-  'share',
-  'social',
   'related',
   'recommend',
   'comment',
@@ -182,6 +208,19 @@ const BASE_PROMO_TOKENS = [
   'pager',
   'taglist',
 ] as const;
+
+const PROMO_TOKENS_BY_CATEGORY: Record<string, readonly string[]> = {
+  [NOISE_CATEGORY.cookieBanners]: [
+    'cookie',
+    'consent',
+    'popup',
+    'modal',
+    'overlay',
+    'toast',
+  ],
+  [NOISE_CATEGORY.newsletters]: ['newsletter', 'subscribe'],
+  [NOISE_CATEGORY.socialShare]: ['share', 'social'],
+};
 
 const HEADER_NOISE_PATTERN =
   /\b(site-header|masthead|topbar|navbar|nav(?:bar)?|menu|header-nav)\b/i;
@@ -205,7 +244,14 @@ class PromoDetector {
   private getTokens(): Set<string> {
     if (this.tokenCache) return this.tokenCache;
 
-    const tokens = new Set<string>(BASE_PROMO_TOKENS);
+    const tokens = new Set<string>(PROMO_TOKENS_ALWAYS);
+
+    for (const [category, categoryTokens] of Object.entries(
+      PROMO_TOKENS_BY_CATEGORY
+    )) {
+      if (!isCategoryEnabled(category)) continue;
+      for (const token of categoryTokens) tokens.add(token);
+    }
     for (const token of config.noiseRemoval.extraTokens) {
       const normalized = token.toLowerCase().trim();
       if (normalized) tokens.add(normalized);
@@ -248,17 +294,25 @@ class NoiseClassifier {
     const meta = this.readMetadata(element);
     const { weights } = config.noiseRemoval;
     let score = 0;
+    const navFooterEnabled = isCategoryEnabled(NOISE_CATEGORY.navFooter);
+    const promoEnabled =
+      isCategoryEnabled(NOISE_CATEGORY.cookieBanners) ||
+      isCategoryEnabled(NOISE_CATEGORY.newsletters) ||
+      isCategoryEnabled(NOISE_CATEGORY.socialShare);
 
     if (this.isStructuralNoise(meta)) score += weights.structural;
-    if (ALWAYS_NOISE_TAGS.has(meta.tagName)) score += weights.structural;
-    if (this.isHeaderBoilerplate(meta)) score += weights.structural;
+    if (navFooterEnabled && ALWAYS_NOISE_TAGS.has(meta.tagName))
+      score += weights.structural;
+    if (navFooterEnabled && this.isHeaderBoilerplate(meta))
+      score += weights.structural;
 
     if (this.isHiddenNoise(meta)) score += weights.hidden;
-    if (this.isRoleNoise(meta)) score += weights.structural;
+    if (navFooterEnabled && this.isRoleNoise(meta)) score += weights.structural;
 
     if (this.matchesFixedOrHighZIsolate(meta.className))
       score += weights.stickyFixed;
-    if (this.promo.matches(meta.className, meta.id)) score += weights.promo;
+    if (promoEnabled && this.promo.matches(meta.className, meta.id))
+      score += weights.promo;
 
     return score;
   }
@@ -353,10 +407,9 @@ class NoiseStripper {
 
   private removeBaseAndExtras(document: Document): void {
     const extra = normalizeSelectors(config.noiseRemoval.extraSelectors);
+    const baseSelector = buildBaseNoiseSelector();
     const combined =
-      extra.length === 0
-        ? BASE_NOISE_SELECTOR
-        : `${BASE_NOISE_SELECTOR},${extra.join(',')}`;
+      extra.length === 0 ? baseSelector : `${baseSelector},${extra.join(',')}`;
 
     // Fast path: same behavior as before when selectors are valid.
     const combinedNodes = safeQuerySelectorAll(document, combined);
@@ -366,7 +419,7 @@ class NoiseStripper {
     }
 
     // Robust fallback: one invalid extra selector should not disable base stripping.
-    const baseNodes = safeQuerySelectorAll(document, BASE_NOISE_SELECTOR);
+    const baseNodes = safeQuerySelectorAll(document, baseSelector);
     if (baseNodes) removeNodes(baseNodes, () => true);
 
     for (const selector of extra) {
@@ -520,6 +573,12 @@ class HtmlNoiseRemovalPipeline {
 
     // Best-effort: keep the original behavior of never throwing.
     try {
+      if (config.noiseRemoval.debug) {
+        logDebug('Noise removal audit enabled', {
+          categories: [...enabledCategories],
+        });
+      }
+
       const resolvedDocument = document ?? parseHTML(html).document;
 
       this.stripper.strip(resolvedDocument);

@@ -259,11 +259,13 @@ function fixProperties(text: string): string {
 }
 
 const CLEANUP_PIPELINE = [
-  promoteOrphanHeadings,
+  ...(config.markdownCleanup.promoteOrphanHeadings
+    ? [promoteOrphanHeadings]
+    : []),
   fixAndSpaceHeadings,
   removeEmptyHeadings,
-  removeSkipLinks,
-  removeToc,
+  ...(config.markdownCleanup.removeSkipLinks ? [removeSkipLinks] : []),
+  ...(config.markdownCleanup.removeTocBlocks ? [removeToc] : []),
   normalizeSpacing,
   fixProperties,
 ] as const;

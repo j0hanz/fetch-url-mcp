@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { after, describe, it } from 'node:test';
 
+import { config } from '../dist/config.js';
 import { fetchUrlToolHandler } from '../dist/tools.js';
 import { shutdownTransformWorkerPool } from '../dist/transform.js';
 
@@ -89,5 +90,34 @@ describe('fetchUrlToolHandler', () => {
         assert.match(String(structured.error), /cancel|abort/i);
       }
     );
+  });
+
+  it('exposes truncated flag when inline content is trimmed', async () => {
+    const originalCacheEnabled = config.cache.enabled;
+    config.cache.enabled = false;
+
+    const html = `<html><body><p>${'a'.repeat(21000)}</p></body></html>`;
+
+    try {
+      await withMockedFetch(
+        async () => {
+          return new Response(html, {
+            status: 200,
+            headers: { 'content-type': 'text/html' },
+          });
+        },
+        async () => {
+          const response = await fetchUrlToolHandler({
+            url: 'https://example.com/large',
+          });
+
+          const structured = response.structuredContent;
+          assert.ok(structured);
+          assert.equal(structured.truncated, true);
+        }
+      );
+    } finally {
+      config.cache.enabled = originalCacheEnabled;
+    }
   });
 });

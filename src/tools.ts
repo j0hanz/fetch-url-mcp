@@ -826,6 +826,7 @@ function buildStructuredContent(
     inputUrl,
     title: pipeline.data.title,
     markdown: inlineResult.content,
+    ...(inlineResult.truncated ? { truncated: true } : {}),
   };
 }
 
