@@ -65,33 +65,21 @@ function isCachedPayload(value: unknown): value is CachedPayload {
   return true;
 }
 
-class CachedPayloadCodec {
-  parse(raw: string): CachedPayload | null {
-    try {
-      const parsed: unknown = JSON.parse(raw);
-      return isCachedPayload(parsed) ? parsed : null;
-    } catch {
-      return null;
-    }
-  }
-
-  resolveContent(payload: CachedPayload): string | null {
-    if (typeof payload.markdown === 'string') return payload.markdown;
-    if (typeof payload.content === 'string') return payload.content;
+export function parseCachedPayload(raw: string): CachedPayload | null {
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    return isCachedPayload(parsed) ? parsed : null;
+  } catch {
     return null;
   }
-}
-
-const payloadCodec = new CachedPayloadCodec();
-
-export function parseCachedPayload(raw: string): CachedPayload | null {
-  return payloadCodec.parse(raw);
 }
 
 export function resolveCachedPayloadContent(
   payload: CachedPayload
 ): string | null {
-  return payloadCodec.resolveContent(payload);
+  if (typeof payload.markdown === 'string') return payload.markdown;
+  if (typeof payload.content === 'string') return payload.content;
+  return null;
 }
 
 /* -------------------------------------------------------------------------------------------------
@@ -141,52 +129,32 @@ function buildCacheResourceUri(namespace: string, urlHash: string): string {
   return `superfetch://cache/${namespace}/${urlHash}`;
 }
 
-class CacheKeyCodec {
-  create(
-    namespace: string,
-    url: string,
-    vary?: Record<string, unknown> | string
-  ): string | null {
-    if (!namespace || !url) return null;
-
-    const urlHash = createHashFragment(url, CACHE_HASH.URL_HASH_LENGTH);
-    const varyHash = getVaryHash(vary);
-    if (varyHash === null) return null;
-
-    return buildCacheKey(namespace, urlHash, varyHash);
-  }
-
-  parse(cacheKey: string): CacheKeyParts | null {
-    if (!cacheKey) return null;
-    const [namespace, ...rest] = cacheKey.split(':');
-    const urlHash = rest.join(':');
-    if (!namespace || !urlHash) return null;
-    return { namespace, urlHash };
-  }
-
-  toResourceUri(cacheKey: string): string | null {
-    const parts = this.parse(cacheKey);
-    if (!parts) return null;
-    return buildCacheResourceUri(parts.namespace, parts.urlHash);
-  }
-}
-
-const cacheKeyCodec = new CacheKeyCodec();
-
 export function createCacheKey(
   namespace: string,
   url: string,
   vary?: Record<string, unknown> | string
 ): string | null {
-  return cacheKeyCodec.create(namespace, url, vary);
+  if (!namespace || !url) return null;
+
+  const urlHash = createHashFragment(url, CACHE_HASH.URL_HASH_LENGTH);
+  const varyHash = getVaryHash(vary);
+  if (varyHash === null) return null;
+
+  return buildCacheKey(namespace, urlHash, varyHash);
 }
 
 export function parseCacheKey(cacheKey: string): CacheKeyParts | null {
-  return cacheKeyCodec.parse(cacheKey);
+  if (!cacheKey) return null;
+  const [namespace, ...rest] = cacheKey.split(':');
+  const urlHash = rest.join(':');
+  if (!namespace || !urlHash) return null;
+  return { namespace, urlHash };
 }
 
 export function toResourceUri(cacheKey: string): string | null {
-  return cacheKeyCodec.toResourceUri(cacheKey);
+  const parts = parseCacheKey(cacheKey);
+  if (!parts) return null;
+  return buildCacheResourceUri(parts.namespace, parts.urlHash);
 }
 
 /* -------------------------------------------------------------------------------------------------
@@ -361,7 +329,7 @@ class InMemoryCacheStore {
   private notify(cacheKey: string): void {
     if (this.listeners.size === 0) return;
 
-    const parts = cacheKeyCodec.parse(cacheKey);
+    const parts = parseCacheKey(cacheKey);
     if (!parts) return;
 
     const event: CacheUpdateEvent = { cacheKey, ...parts };
@@ -504,7 +472,7 @@ function listCachedResources(): {
 } {
   const resources = keys()
     .map((key) => {
-      const parts = cacheKeyCodec.parse(key);
+      const parts = parseCacheKey(key);
       if (parts?.namespace !== CACHE_NAMESPACE) return null;
       return buildResourceEntry(parts.namespace, parts.urlHash);
     })
@@ -607,8 +575,8 @@ function buildMarkdownContentResponse(
   uri: URL,
   content: string
 ): { contents: { uri: string; mimeType: string; text: string }[] } {
-  const payload = payloadCodec.parse(content);
-  const resolvedContent = payload ? payloadCodec.resolveContent(payload) : null;
+  const payload = parseCachedPayload(content);
+  const resolvedContent = payload ? resolveCachedPayloadContent(payload) : null;
 
   if (!resolvedContent) {
     throw new McpError(
@@ -667,7 +635,7 @@ function registerCacheUpdateSubscription(
     const { listChanged, subscribe } = getClientResourceCapabilities(server);
 
     if (subscribe) {
-      const resourceUri = cacheKeyCodec.toResourceUri(cacheKey);
+      const resourceUri = toResourceUri(cacheKey);
       if (resourceUri) notifyResourceUpdate(server, resourceUri, subscriptions);
     }
 
@@ -864,10 +832,10 @@ function resolveDownloadPayload(
   params: DownloadParams,
   cacheEntry: CacheEntry
 ): DownloadPayload | null {
-  const payload = payloadCodec.parse(cacheEntry.content);
+  const payload = parseCachedPayload(cacheEntry.content);
   if (!payload) return null;
 
-  const content = payloadCodec.resolveContent(payload);
+  const content = resolveCachedPayloadContent(payload);
   if (!content) return null;
 
   const safeTitle =
