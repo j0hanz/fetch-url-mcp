@@ -248,7 +248,6 @@ class TaskManager {
           this.tasks.delete(taskId);
           resolve(undefined);
         }, timeoutMs);
-        timeoutId.unref();
       }
     });
   }
