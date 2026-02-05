@@ -11,7 +11,6 @@ import { arch, freemem, hostname, platform, totalmem } from 'node:os';
 import { monitorEventLoopDelay, performance } from 'node:perf_hooks';
 import process from 'node:process';
 import { setInterval as setIntervalPromise } from 'node:timers/promises';
-import { URL, URLSearchParams } from 'node:url';
 
 import {
   InvalidTokenError,
@@ -943,6 +942,7 @@ class McpSessionGateway {
         void closeTransportBestEffort(transportImpl, 'session-init-timeout');
       }
     }, config.server.sessionInitTimeoutMs);
+    initTimeout.unref();
 
     transportImpl.onclose = () => {
       clearTimeout(initTimeout);

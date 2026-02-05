@@ -5,7 +5,6 @@ import dns from 'node:dns';
 import { BlockList, isIP } from 'node:net';
 import { performance } from 'node:perf_hooks';
 import { setTimeout as delay } from 'node:timers/promises';
-import { URL } from 'node:url';
 import { types } from 'node:util';
 
 import { config } from './config.js';
@@ -65,7 +64,8 @@ const defaultRedactor: UrlRedactor = {
   redact: redactUrl,
 };
 
-const defaultFetch: FetchLike = (input, init) => fetch(input, init);
+const defaultFetch: FetchLike = (input, init) =>
+  globalThis.fetch(input, init);
 
 type IpSegment = number | string;
 

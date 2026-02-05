@@ -4,12 +4,17 @@
   "mcpName": "io.github.j0hanz/superfetch",
   "description": "Intelligent web content fetcher MCP server that converts HTML to clean, AI-readable Markdown",
   "type": "module",
-  "main": "dist/index.js",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
   "bin": {
     "superfetch": "dist/index.js"
   },
   "exports": {
-    ".": "./dist/index.js"
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
   },
   "files": [
     "dist",
@@ -68,7 +73,7 @@
   "devDependencies": {
     "@eslint/js": "^9.39.2",
     "@trivago/prettier-plugin-sort-imports": "^6.0.2",
-    "@types/node": "^22.19.8",
+    "@types/node": "^24.13.0",
     "eslint": "^9.23.2",
     "eslint-config-prettier": "^10.1.8",
     "eslint-plugin-de-morgan": "^2.0.0",
@@ -81,6 +86,6 @@
     "typescript-eslint": "^8.54.0"
   },
   "engines": {
-    "node": ">=22.19.8"
+    "node": ">=24.13.0"
   }
 }
