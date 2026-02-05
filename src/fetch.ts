@@ -445,6 +445,13 @@ class RawUrlTransformer {
 }
 
 const DNS_LOOKUP_TIMEOUT_MS = 5000;
+const CNAME_LOOKUP_MAX_DEPTH = 5;
+
+function normalizeDnsName(value: string): string {
+  let normalized = value.trim().toLowerCase();
+  while (normalized.endsWith('.')) normalized = normalized.slice(0, -1);
+  return normalized;
+}
 
 interface AbortRace {
   abortPromise: Promise<never> | null;
@@ -524,14 +531,46 @@ async function withTimeout<T>(
   }
 }
 
+function createAbortSignalError(): Error {
+  const err = new Error('Request was canceled');
+  err.name = 'AbortError';
+  return err;
+}
+
 class SafeDnsResolver {
-  constructor(private readonly ipBlocker: IpBlocker) {}
+  constructor(
+    private readonly ipBlocker: IpBlocker,
+    private readonly security: SecurityConfig,
+    private readonly blockedHostSuffixes: readonly string[]
+  ) {}
 
   async assertSafeHostname(
     hostname: string,
     signal?: AbortSignal
   ): Promise<void> {
-    const resultPromise = dns.promises.lookup(hostname, {
+    const normalizedHostname = normalizeDnsName(hostname);
+
+    if (!normalizedHostname) {
+      throw createErrorWithCode('Invalid hostname provided', 'EINVAL');
+    }
+
+    if (signal?.aborted) {
+      throw createAbortSignalError();
+    }
+
+    if (isIP(normalizedHostname)) {
+      if (this.ipBlocker.isBlockedIp(normalizedHostname)) {
+        throw createErrorWithCode(
+          `Blocked IP range: ${normalizedHostname}. Private IPs are not allowed`,
+          'EBLOCKED'
+        );
+      }
+      return;
+    }
+
+    await this.assertNoBlockedCname(normalizedHostname, signal);
+
+    const resultPromise = dns.promises.lookup(normalizedHostname, {
       all: true,
       order: 'verbatim',
     });
@@ -540,18 +579,17 @@ class SafeDnsResolver {
       resultPromise,
       DNS_LOOKUP_TIMEOUT_MS,
       () =>
-        createErrorWithCode(`DNS lookup timed out for ${hostname}`, 'ETIMEOUT'),
+        createErrorWithCode(
+          `DNS lookup timed out for ${normalizedHostname}`,
+          'ETIMEOUT'
+        ),
       signal,
-      () => {
-        const err = new Error('Request was canceled');
-        err.name = 'AbortError';
-        return err;
-      }
+      createAbortSignalError
     );
 
     if (addresses.length === 0) {
       throw createErrorWithCode(
-        `No DNS results returned for ${hostname}`,
+        `No DNS results returned for ${normalizedHostname}`,
         'ENODATA'
       );
     }
@@ -559,16 +597,87 @@ class SafeDnsResolver {
     for (const addr of addresses) {
       if (addr.family !== 4 && addr.family !== 6) {
         throw createErrorWithCode(
-          `Invalid address family returned for ${hostname}`,
+          `Invalid address family returned for ${normalizedHostname}`,
           'EINVAL'
         );
       }
       if (this.ipBlocker.isBlockedIp(addr.address)) {
         throw createErrorWithCode(
-          `Blocked IP detected for ${hostname}`,
+          `Blocked IP detected for ${normalizedHostname}`,
           'EBLOCKED'
         );
       }
+    }
+  }
+
+  private isBlockedHostname(hostname: string): boolean {
+    if (this.security.blockedHosts.has(hostname)) return true;
+    return this.blockedHostSuffixes.some((suffix) => hostname.endsWith(suffix));
+  }
+
+  private async assertNoBlockedCname(
+    hostname: string,
+    signal?: AbortSignal
+  ): Promise<void> {
+    let current = hostname;
+    const seen = new Set<string>();
+
+    for (let depth = 0; depth < CNAME_LOOKUP_MAX_DEPTH; depth += 1) {
+      if (!current || seen.has(current)) return;
+      seen.add(current);
+
+      const cnames = await this.resolveCname(current, signal);
+      if (cnames.length === 0) return;
+
+      for (const cname of cnames) {
+        if (this.isBlockedHostname(cname)) {
+          throw createErrorWithCode(
+            `Blocked DNS CNAME detected for ${hostname}: ${cname}`,
+            'EBLOCKED'
+          );
+        }
+      }
+
+      current = cnames[0] ?? '';
+    }
+  }
+
+  private async resolveCname(
+    hostname: string,
+    signal?: AbortSignal
+  ): Promise<string[]> {
+    try {
+      const resultPromise = dns.promises.resolveCname(hostname);
+      const cnames = await withTimeout(
+        resultPromise,
+        DNS_LOOKUP_TIMEOUT_MS,
+        () =>
+          createErrorWithCode(
+            `DNS CNAME lookup timed out for ${hostname}`,
+            'ETIMEOUT'
+          ),
+        signal,
+        createAbortSignalError
+      );
+
+      return cnames
+        .map((value) => normalizeDnsName(value))
+        .filter((value) => value.length > 0);
+    } catch (error) {
+      if (types.isNativeError(error) && error.name === 'AbortError') {
+        throw error;
+      }
+
+      if (
+        isSystemError(error) &&
+        (error.code === 'ENODATA' ||
+          error.code === 'ENOTFOUND' ||
+          error.code === 'ENODOMAIN')
+      ) {
+        return [];
+      }
+
+      return [];
     }
   }
 }
@@ -1161,9 +1270,11 @@ function detectHtmlDeclaredEncoding(buffer: Uint8Array): string | undefined {
   const scanSize = Math.min(buffer.length, 8_192);
   if (scanSize === 0) return undefined;
 
-  const headSnippet = new TextDecoder('latin1').decode(
-    buffer.subarray(0, scanSize)
-  );
+  const headSnippet = Buffer.from(
+    buffer.buffer,
+    buffer.byteOffset,
+    scanSize
+  ).toString('latin1');
 
   return extractHtmlCharset(headSnippet) ?? extractXmlEncoding(headSnippet);
 }
@@ -1683,7 +1794,11 @@ const urlNormalizer = new UrlNormalizer(
   BLOCKED_HOST_SUFFIXES
 );
 const rawUrlTransformer = new RawUrlTransformer(defaultLogger);
-const dnsResolver = new SafeDnsResolver(ipBlocker);
+const dnsResolver = new SafeDnsResolver(
+  ipBlocker,
+  config.security,
+  BLOCKED_HOST_SUFFIXES
+);
 const telemetry = new FetchTelemetry(
   defaultLogger,
   defaultContext,

@@ -1,3 +1,4 @@
+import { Buffer } from 'node:buffer';
 import { createHash, hash as oneShotHash, timingSafeEqual } from 'node:crypto';
 
 const MAX_HASH_INPUT_BYTES = 5 * 1024 * 1024;
@@ -30,8 +31,18 @@ function assertAllowedAlgorithm(
 export function timingSafeEqualUtf8(a: string, b: string): boolean {
   const aBuffer = Buffer.from(a, 'utf8');
   const bBuffer = Buffer.from(b, 'utf8');
-  if (aBuffer.length !== bBuffer.length) return false;
-  return timingSafeEqual(aBuffer, bBuffer);
+  if (aBuffer.length === bBuffer.length) {
+    return timingSafeEqual(aBuffer, bBuffer);
+  }
+
+  // Avoid early return timing differences on length mismatch.
+  const maxLength = Math.max(aBuffer.length, bBuffer.length);
+  const paddedA = Buffer.alloc(maxLength);
+  const paddedB = Buffer.alloc(maxLength);
+  aBuffer.copy(paddedA);
+  bBuffer.copy(paddedB);
+
+  return timingSafeEqual(paddedA, paddedB) && aBuffer.length === bBuffer.length;
 }
 
 function hashHex(

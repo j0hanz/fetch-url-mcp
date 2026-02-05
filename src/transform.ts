@@ -1,5 +1,7 @@
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { randomUUID } from 'node:crypto';
 import diagnosticsChannel from 'node:diagnostics_channel';
+import { availableParallelism } from 'node:os';
 import { performance } from 'node:perf_hooks';
 import {
   type Transferable as NodeTransferable,
@@ -662,9 +664,22 @@ function deriveAltFromImageUrl(src: string): string {
   if (!src) return '';
 
   try {
-    const pathname = src.startsWith('http')
-      ? new URL(src).pathname
-      : (src.split('?')[0] ?? '');
+    const pathname = (() => {
+      if (URL.canParse(src)) {
+        const parsed = new URL(src);
+        if (parsed.protocol === 'http:' || parsed.protocol === 'https:') {
+          return parsed.pathname;
+        }
+        return '';
+      }
+
+      if (URL.canParse(src, 'http://localhost')) {
+        return new URL(src, 'http://localhost').pathname;
+      }
+
+      const withoutQuery = src.split('?')[0] ?? '';
+      return (withoutQuery.split('#')[0] ?? withoutQuery).trim();
+    })();
     const segments = pathname.split('/');
     const filename = segments.pop() ?? '';
     if (!filename) return '';
@@ -1484,6 +1499,8 @@ const workerMessageSchema = z.discriminatedUnion('type', [
   }),
 ]);
 
+type RunInContext = ReturnType<typeof AsyncLocalStorage.snapshot>;
+
 interface PendingTask {
   id: string;
   html?: string;
@@ -1494,6 +1511,7 @@ interface PendingTask {
   skipNoiseRemoval?: boolean;
   signal: AbortSignal | undefined;
   abortListener: (() => void) | undefined;
+  runInContext: RunInContext;
   resolve: (result: MarkdownTransformResult) => void;
   reject: (error: unknown) => void;
 }
@@ -1505,6 +1523,7 @@ interface InflightTask {
   signal: AbortSignal | undefined;
   abortListener: (() => void) | undefined;
   workerIndex: number;
+  runInContext: RunInContext;
 }
 
 interface WorkerSlot {
@@ -1529,7 +1548,10 @@ interface TransformWorkerPool {
   getCapacity(): number;
 }
 
-const POOL_MIN_WORKERS = 2;
+const POOL_MIN_WORKERS = Math.max(
+  2,
+  Math.min(4, Math.floor(availableParallelism() / 2))
+);
 const POOL_MAX_WORKERS = config.transform.maxWorkerScale;
 const POOL_SCALE_THRESHOLD = 0.5;
 
@@ -1653,18 +1675,21 @@ class WorkerPool implements TransformWorkerPool {
     this.workers.fill(undefined);
     this.workers.length = 0;
 
-    for (const [id, inflight] of this.inflight.entries()) {
-      clearTimeout(inflight.timer);
-      this.clearAbortListener(inflight.signal, inflight.abortListener);
-      inflight.reject(new Error(WorkerPool.CLOSED_MESSAGE));
-      this.inflight.delete(id);
+    for (const id of Array.from(this.inflight.keys())) {
+      const inflight = this.takeInflight(id);
+      if (!inflight) continue;
+      this.finalizeTask(inflight.runInContext, () => {
+        inflight.reject(new Error(WorkerPool.CLOSED_MESSAGE));
+      });
     }
 
     for (let i = this.queueHead; i < this.queue.length; i += 1) {
       const task = this.queue[i];
       if (!task) continue;
       this.clearAbortListener(task.signal, task.abortListener);
-      task.reject(new Error(WorkerPool.CLOSED_MESSAGE));
+      this.finalizeTask(task.runInContext, () => {
+        task.reject(new Error(WorkerPool.CLOSED_MESSAGE));
+      });
     }
     this.queue.length = 0;
     this.queueHead = 0;
@@ -1690,10 +1715,14 @@ class WorkerPool implements TransformWorkerPool {
   ): PendingTask {
     const id = randomUUID();
 
+    // Preserve request context for resolve/reject even when callbacks fire
+    // from worker thread events.
+    const runInContext = AsyncLocalStorage.snapshot();
+
     let abortListener: (() => void) | undefined;
     if (options.signal) {
       abortListener = () => {
-        this.onAbortSignal(id, url, reject);
+        this.onAbortSignal(id, url, runInContext, reject);
       };
       options.signal.addEventListener('abort', abortListener, { once: true });
     }
@@ -1705,6 +1734,7 @@ class WorkerPool implements TransformWorkerPool {
       ...(options.skipNoiseRemoval ? { skipNoiseRemoval: true } : {}),
       signal: options.signal,
       abortListener,
+      runInContext,
       resolve,
       reject,
     };
@@ -1724,10 +1754,13 @@ class WorkerPool implements TransformWorkerPool {
   private onAbortSignal(
     id: string,
     url: string,
+    runInContext: RunInContext,
     reject: (error: unknown) => void
   ): void {
     if (this.closed) {
-      reject(new Error(WorkerPool.CLOSED_MESSAGE));
+      runInContext(() => {
+        reject(new Error(WorkerPool.CLOSED_MESSAGE));
+      });
       return;
     }
 
@@ -1743,9 +1776,17 @@ class WorkerPool implements TransformWorkerPool {
       if (task) this.clearAbortListener(task.signal, task.abortListener);
 
       this.queue.splice(queuedIndex, 1);
-      (task?.reject ?? reject)(
-        abortPolicy.createAbortError(url, 'transform:queued-abort')
-      );
+      if (task) {
+        this.finalizeTask(task.runInContext, () => {
+          task.reject(
+            abortPolicy.createAbortError(url, 'transform:queued-abort')
+          );
+        });
+      } else {
+        runInContext(() => {
+          reject(abortPolicy.createAbortError(url, 'transform:queued-abort'));
+        });
+      }
       this.maybeCompactQueue();
     }
   }
@@ -1837,24 +1878,30 @@ class WorkerPool implements TransformWorkerPool {
     this.markIdle(workerIndex);
 
     if (message.type === 'result') {
-      inflight.resolve({
-        markdown: message.result.markdown,
-        truncated: message.result.truncated,
-        title: message.result.title,
+      this.finalizeTask(inflight.runInContext, () => {
+        inflight.resolve({
+          markdown: message.result.markdown,
+          truncated: message.result.truncated,
+          title: message.result.title,
+        });
       });
     } else {
       const err = message.error;
       if (err.name === 'FetchError') {
-        inflight.reject(
-          new FetchError(
-            err.message,
-            err.url,
-            err.statusCode,
-            err.details ?? {}
-          )
-        );
+        this.finalizeTask(inflight.runInContext, () => {
+          inflight.reject(
+            new FetchError(
+              err.message,
+              err.url,
+              err.statusCode,
+              err.details ?? {}
+            )
+          );
+        });
       } else {
-        inflight.reject(new Error(err.message));
+        this.finalizeTask(inflight.runInContext, () => {
+          inflight.reject(new Error(err.message));
+        });
       }
     }
 
@@ -1883,7 +1930,9 @@ class WorkerPool implements TransformWorkerPool {
     const inflight = this.takeInflight(id);
     if (!inflight) return;
 
-    inflight.reject(error);
+    this.finalizeTask(inflight.runInContext, () => {
+      inflight.reject(error);
+    });
     this.markIdle(inflight.workerIndex);
   }
 
@@ -1944,13 +1993,19 @@ class WorkerPool implements TransformWorkerPool {
 
     if (this.closed) {
       this.clearAbortListener(task.signal, task.abortListener);
-      task.reject(new Error(WorkerPool.CLOSED_MESSAGE));
+      this.finalizeTask(task.runInContext, () => {
+        task.reject(new Error(WorkerPool.CLOSED_MESSAGE));
+      });
       return;
     }
 
     if (task.signal?.aborted) {
       this.clearAbortListener(task.signal, task.abortListener);
-      task.reject(abortPolicy.createAbortError(task.url, 'transform:dispatch'));
+      this.finalizeTask(task.runInContext, () => {
+        task.reject(
+          abortPolicy.createAbortError(task.url, 'transform:dispatch')
+        );
+      });
       return;
     }
 
@@ -1967,12 +2022,14 @@ class WorkerPool implements TransformWorkerPool {
       const inflight = this.takeInflight(task.id);
       if (!inflight) return;
 
-      inflight.reject(
-        new FetchError('Request timeout', task.url, 504, {
-          reason: 'timeout',
-          stage: 'transform:worker-timeout',
-        })
-      );
+      this.finalizeTask(inflight.runInContext, () => {
+        inflight.reject(
+          new FetchError('Request timeout', task.url, 504, {
+            reason: 'timeout',
+            stage: 'transform:worker-timeout',
+          })
+        );
+      });
 
       this.restartWorker(workerIndex, slot);
     }, this.timeoutMs);
@@ -1985,6 +2042,7 @@ class WorkerPool implements TransformWorkerPool {
       signal: task.signal,
       abortListener: task.abortListener,
       workerIndex,
+      runInContext: task.runInContext,
     });
 
     try {
@@ -2001,7 +2059,13 @@ class WorkerPool implements TransformWorkerPool {
       if (task.htmlBuffer) {
         message.htmlBuffer = task.htmlBuffer;
         message.encoding = task.encoding;
-        transferList.push(task.htmlBuffer.buffer as ArrayBuffer);
+        const transferBuffer = task.htmlBuffer.buffer;
+        if (
+          typeof SharedArrayBuffer === 'undefined' ||
+          !(transferBuffer instanceof SharedArrayBuffer)
+        ) {
+          transferList.push(transferBuffer as ArrayBuffer);
+        }
       } else {
         message.html = task.html;
       }
@@ -2013,13 +2077,19 @@ class WorkerPool implements TransformWorkerPool {
       this.inflight.delete(task.id);
       this.markIdle(workerIndex);
 
-      task.reject(
-        error instanceof Error
-          ? error
-          : new Error('Failed to dispatch transform worker message')
-      );
+      this.finalizeTask(task.runInContext, () => {
+        task.reject(
+          error instanceof Error
+            ? error
+            : new Error('Failed to dispatch transform worker message')
+        );
+      });
       this.restartWorker(workerIndex, slot);
     }
+  }
+
+  private finalizeTask(runInContext: RunInContext, fn: () => void): void {
+    runInContext(fn);
   }
 
   private findQueuedIndex(id: string): number | null {

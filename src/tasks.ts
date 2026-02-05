@@ -1,3 +1,4 @@
+import { Buffer } from 'node:buffer';
 import { randomUUID } from 'node:crypto';
 
 import { ErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js';
@@ -268,12 +269,12 @@ class TaskManager {
   }
 
   private encodeCursor(index: number): string {
-    return Buffer.from(String(index)).toString('base64');
+    return Buffer.from(String(index)).toString('base64url');
   }
 
   private decodeCursor(cursor: string): number | null {
     try {
-      const decoded = Buffer.from(cursor, 'base64').toString('utf8');
+      const decoded = Buffer.from(cursor, 'base64url').toString('utf8');
       const value = Number.parseInt(decoded, 10);
       if (!Number.isFinite(value) || value < 0) return null;
       return value;

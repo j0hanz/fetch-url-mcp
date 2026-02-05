@@ -35,11 +35,12 @@
  *   ]
  * }
  */
-import { existsSync } from 'node:fs';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { access, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
+import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 import { pathToFileURL } from 'node:url';
+import { parseArgs } from 'node:util';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -47,17 +48,21 @@ const projectRoot = resolve(__dirname, '..');
 
 // Import the transform function from built dist
 const distPath = join(projectRoot, 'dist', 'transform.js');
-if (!existsSync(distPath)) {
-  console.error(
-    '❌ Error: dist/transform.js not found. Run `npm run build` first.'
-  );
-  process.exit(1);
-}
+let transformHtmlToMarkdown;
+let fetchNormalizedUrl;
 
-const { transformHtmlToMarkdown } = await import(pathToFileURL(distPath).href);
-const { fetchNormalizedUrl } = await import(
-  pathToFileURL(join(projectRoot, 'dist', 'fetch.js')).href
-);
+async function loadDistModules() {
+  try {
+    await access(distPath);
+  } catch {
+    throw new Error('dist/transform.js not found. Run `npm run build` first.');
+  }
+
+  ({ transformHtmlToMarkdown } = await import(pathToFileURL(distPath).href));
+  ({ fetchNormalizedUrl } = await import(
+    pathToFileURL(join(projectRoot, 'dist', 'fetch.js')).href
+  ));
+}
 
 // ============================================================================
 // Validators
@@ -308,6 +313,10 @@ const validators = {
 async function fetchAndTransform(url, options = {}) {
   const startTime = Date.now();
 
+  if (!fetchNormalizedUrl || !transformHtmlToMarkdown) {
+    throw new Error('Dist modules not loaded. Run `npm run build` first.');
+  }
+
   try {
     // Fetch HTML
     console.log(`\n🌐 Fetching: ${url}`);
@@ -513,7 +522,7 @@ Config file format (JSON):
 `);
 }
 
-function parseArgs(args) {
+function parseCliArgs(args) {
   const parsed = {
     url: null,
     config: null,
@@ -523,31 +532,56 @@ function parseArgs(args) {
     help: false,
   };
 
-  for (let i = 0; i < args.length; i++) {
-    const arg = args[i];
+  const { values, positionals } = parseArgs({
+    args,
+    allowPositionals: true,
+    strict: false,
+    options: {
+      help: { type: 'boolean' },
+      config: { type: 'string' },
+      'expect-text': { type: 'string' },
+      'expect-code-blocks': { type: 'boolean' },
+      'min-code-blocks': { type: 'string' },
+      'min-length': { type: 'string' },
+      reference: { type: 'string' },
+      'save-output': { type: 'string' },
+      verbose: { type: 'boolean' },
+    },
+  });
 
-    if (arg === '--help') {
-      parsed.help = true;
-    } else if (arg === '--config') {
-      parsed.config = args[++i];
-    } else if (arg === '--expect-text') {
-      parsed.validations.expectText = args[++i].split(',').map((s) => s.trim());
-    } else if (arg === '--expect-code-blocks') {
-      parsed.validations.minCodeBlocks = 1;
-    } else if (arg === '--min-code-blocks') {
-      parsed.validations.minCodeBlocks = parseInt(args[++i], 10);
-    } else if (arg === '--min-length') {
-      parsed.validations.minLength = parseInt(args[++i], 10);
-    } else if (arg === '--reference') {
-      parsed.validations.reference = args[++i];
-    } else if (arg === '--save-output') {
-      parsed.saveOutput = args[++i];
-    } else if (arg === '--verbose') {
-      parsed.verbose = true;
-    } else if (!arg.startsWith('--')) {
-      parsed.url = arg;
-    }
+  if (values.help) parsed.help = true;
+  if (values.config) parsed.config = values.config;
+  if (values['save-output']) parsed.saveOutput = values['save-output'];
+  if (values.verbose) parsed.verbose = true;
+
+  const url = positionals[0];
+  if (typeof url === 'string' && url.length > 0) {
+    parsed.url = url;
   }
+
+  const expectText = values['expect-text'];
+  if (typeof expectText === 'string' && expectText.length > 0) {
+    parsed.validations.expectText = expectText
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean);
+  }
+
+  if (values['expect-code-blocks']) {
+    parsed.validations.minCodeBlocks = 1;
+  }
+
+  const minCodeBlocks = Number.parseInt(values['min-code-blocks'] ?? '', 10);
+  if (Number.isFinite(minCodeBlocks)) {
+    parsed.validations.minCodeBlocks = minCodeBlocks;
+  }
+
+  const minLength = Number.parseInt(values['min-length'] ?? '', 10);
+  if (Number.isFinite(minLength)) {
+    parsed.validations.minLength = minLength;
+  }
+
+  if (values.reference) parsed.validations.reference = values.reference;
 
   return parsed;
 }
@@ -555,16 +589,11 @@ function parseArgs(args) {
 async function main() {
   const args = process.argv.slice(2);
 
-  if (args.length === 0 || args.includes('--help')) {
-    printHelp();
-    process.exit(0);
-  }
+  const parsed = parseCliArgs(args);
 
-  const parsed = parseArgs(args);
-
-  if (parsed.help) {
+  if (args.length === 0 || parsed.help) {
     printHelp();
-    process.exit(0);
+    return 0;
   }
 
   let tests = [];
@@ -592,7 +621,15 @@ async function main() {
   } else {
     console.error('❌ Error: No URL or config file provided');
     printHelp();
-    process.exit(1);
+    return 1;
+  }
+
+  try {
+    await loadDistModules();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(`❌ Error: ${message}`);
+    return 1;
   }
 
   // Run tests
@@ -620,14 +657,18 @@ async function main() {
           console.log(`     Error: ${r.error}`);
         }
       });
-    process.exit(1);
-  } else {
-    console.log(`\n✅ All tests passed!`);
-    process.exit(0);
+    return 1;
   }
+
+  console.log(`\n✅ All tests passed!`);
+  return 0;
 }
 
-main().catch((error) => {
-  console.error('❌ Fatal error:', error);
-  process.exit(1);
-});
+main()
+  .then((code) => {
+    process.exitCode = code;
+  })
+  .catch((error) => {
+    console.error('❌ Fatal error:', error);
+    process.exitCode = 1;
+  });

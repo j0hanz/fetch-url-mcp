@@ -1,3 +1,4 @@
+import { Buffer } from 'node:buffer';
 import { randomUUID } from 'node:crypto';
 import {
   createServer,
@@ -5,6 +6,10 @@ import {
   type Server,
   type ServerResponse,
 } from 'node:http';
+import { isIP } from 'node:net';
+import { arch, freemem, hostname, platform, totalmem } from 'node:os';
+import { monitorEventLoopDelay, performance } from 'node:perf_hooks';
+import process from 'node:process';
 import { setInterval as setIntervalPromise } from 'node:timers/promises';
 import { URL, URLSearchParams } from 'node:url';
 
@@ -117,17 +122,23 @@ interface AuthenticatedContext extends RequestContext {
 
 function sendJson(res: ServerResponse, status: number, body: unknown): void {
   res.statusCode = status;
-  res.setHeader('Content-Type', 'application/json');
+  res.setHeader('Content-Type', 'application/json; charset=utf-8');
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('Cache-Control', 'no-store');
   res.end(JSON.stringify(body));
 }
 
 function sendText(res: ServerResponse, status: number, body: string): void {
   res.statusCode = status;
+  res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('Cache-Control', 'no-store');
   res.end(body);
 }
 
 function sendEmpty(res: ServerResponse, status: number): void {
   res.statusCode = status;
+  res.setHeader('Content-Length', '0');
   res.end();
 }
 
@@ -143,6 +154,34 @@ function parseQuery(url: URL): QueryParams {
     }
   }
   return query;
+}
+
+function drainRequest(req: IncomingMessage): void {
+  if (req.readableEnded) return;
+  try {
+    req.resume();
+  } catch {
+    // Best-effort only.
+  }
+}
+
+function normalizeRemoteAddress(address: string | undefined): string | null {
+  if (!address) return null;
+  const trimmed = address.trim();
+  if (!trimmed) return null;
+
+  const zoneIndex = trimmed.indexOf('%');
+  const withoutZone = zoneIndex > 0 ? trimmed.slice(0, zoneIndex) : trimmed;
+  const normalized = withoutZone.toLowerCase();
+
+  if (normalized.startsWith('::ffff:')) {
+    const mapped = normalized.slice('::ffff:'.length);
+    if (isIP(mapped) === 4) return mapped;
+  }
+
+  if (isIP(normalized)) return normalized;
+
+  return trimmed;
 }
 
 function getHeaderValue(req: IncomingMessage, name: string): string | null {
@@ -177,7 +216,7 @@ function buildRequestContext(
     url,
     method: req.method,
     query: parseQuery(url),
-    ip: req.socket.remoteAddress ?? null,
+    ip: normalizeRemoteAddress(req.socket.remoteAddress),
     body: undefined,
   };
 }
@@ -256,7 +295,7 @@ class JsonBodyReader {
     }
 
     if (chunks.length === 0) return undefined;
-    return Buffer.concat(chunks).toString();
+    return Buffer.concat(chunks, size).toString();
   }
 
   private normalizeChunk(chunk: Buffer | Uint8Array | string): Buffer {
@@ -658,6 +697,70 @@ class AuthService {
 
 const authService = new AuthService();
 
+const EVENT_LOOP_DELAY_RESOLUTION_MS = 20;
+const eventLoopDelay = monitorEventLoopDelay({
+  resolution: EVENT_LOOP_DELAY_RESOLUTION_MS,
+});
+let lastEventLoopUtilization = performance.eventLoopUtilization();
+
+function roundTo(value: number, precision: number): number {
+  const factor = 10 ** precision;
+  return Math.round(value * factor) / factor;
+}
+
+function formatEventLoopUtilization(
+  snapshot: ReturnType<typeof performance.eventLoopUtilization>
+): { utilization: number; activeMs: number; idleMs: number } {
+  return {
+    utilization: roundTo(snapshot.utilization, 4),
+    activeMs: Math.round(snapshot.active),
+    idleMs: Math.round(snapshot.idle),
+  };
+}
+
+function toMs(valueNs: number): number {
+  return roundTo(valueNs / 1_000_000, 3);
+}
+
+function getEventLoopStats(): {
+  utilization: {
+    total: { utilization: number; activeMs: number; idleMs: number };
+    sinceLast: { utilization: number; activeMs: number; idleMs: number };
+  };
+  delay: {
+    minMs: number;
+    maxMs: number;
+    meanMs: number;
+    stddevMs: number;
+    p50Ms: number;
+    p95Ms: number;
+    p99Ms: number;
+  };
+} {
+  const current = performance.eventLoopUtilization();
+  const delta = performance.eventLoopUtilization(
+    current,
+    lastEventLoopUtilization
+  );
+  lastEventLoopUtilization = current;
+
+  return {
+    utilization: {
+      total: formatEventLoopUtilization(current),
+      sinceLast: formatEventLoopUtilization(delta),
+    },
+    delay: {
+      minMs: toMs(eventLoopDelay.min),
+      maxMs: toMs(eventLoopDelay.max),
+      meanMs: toMs(eventLoopDelay.mean),
+      stddevMs: toMs(eventLoopDelay.stddev),
+      p50Ms: toMs(eventLoopDelay.percentile(50)),
+      p95Ms: toMs(eventLoopDelay.percentile(95)),
+      p99Ms: toMs(eventLoopDelay.percentile(99)),
+    },
+  };
+}
+
 function sendError(
   res: ServerResponse,
   code: number,
@@ -963,11 +1066,20 @@ class HttpDispatcher {
 
   private handleHealthCheck(res: ServerResponse): void {
     const poolStats = getTransformPoolStats();
+    res.setHeader('Cache-Control', 'no-store');
     sendJson(res, 200, {
       status: 'ok',
       version: serverVersion,
       uptime: Math.floor(process.uptime()),
       timestamp: new Date().toISOString(),
+      os: {
+        hostname: hostname(),
+        platform: platform(),
+        arch: arch(),
+        memoryFree: freemem(),
+        memoryTotal: totalmem(),
+      },
+      perf: getEventLoopStats(),
       stats: {
         activeSessions: this.store.size(),
         cacheKeys: cacheKeys().length,
@@ -1024,13 +1136,22 @@ class HttpRequestPipeline {
       { requestId, ...(sessionId ? { sessionId } : {}) },
       async () => {
         const ctx = buildRequestContext(rawReq, rawRes);
-        if (!ctx) return;
+        if (!ctx) {
+          drainRequest(rawReq);
+          return;
+        }
 
-        if (!hostOriginPolicy.validate(ctx)) return;
-        if (corsPolicy.handle(ctx)) return;
+        if (!hostOriginPolicy.validate(ctx)) {
+          drainRequest(rawReq);
+          return;
+        }
+        if (corsPolicy.handle(ctx)) {
+          drainRequest(rawReq);
+          return;
+        }
 
         if (!this.rateLimiter.check(ctx)) {
-          rawReq.resume();
+          drainRequest(rawReq);
           return;
         }
 
@@ -1044,6 +1165,7 @@ class HttpRequestPipeline {
               error: 'Invalid JSON or Payload too large',
             });
           }
+          drainRequest(rawReq);
           return;
         }
 
@@ -1107,6 +1229,7 @@ function createShutdownHandler(options: {
     options.rateLimiter.stop();
     options.sessionCleanup.abort();
     drainConnectionsOnShutdown(options.server);
+    eventLoopDelay.disable();
 
     const sessions = options.sessionStore.clear();
     await Promise.all(
@@ -1134,6 +1257,10 @@ export async function startHttpServer(): Promise<{
   assertHttpModeConfiguration();
   enableHttpMode();
 
+  lastEventLoopUtilization = performance.eventLoopUtilization();
+  eventLoopDelay.reset();
+  eventLoopDelay.enable();
+
   const mcpServer = await createMcpServer();
   const rateLimiter = createRateLimitManagerImpl(config.rateLimit);
 
@@ -1157,7 +1284,12 @@ export async function startHttpServer(): Promise<{
   await listen(server, config.server.host, config.server.port);
 
   const port = resolveListeningPort(server, config.server.port);
-  logInfo(`HTTP server listening on port ${port}`);
+  logInfo(`HTTP server listening on port ${port}`, {
+    platform: platform(),
+    arch: arch(),
+    hostname: hostname(),
+    nodeVersion: process.version,
+  });
 
   return {
     port,

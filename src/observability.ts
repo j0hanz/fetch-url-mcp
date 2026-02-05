@@ -1,4 +1,5 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
+import process from 'node:process';
 import { inspect } from 'node:util';
 
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
@@ -183,14 +184,11 @@ export function logError(message: string, error?: Error | LogMetadata): void {
 }
 
 export function redactUrl(rawUrl: string): string {
-  try {
-    const url = new URL(rawUrl);
-    url.username = '';
-    url.password = '';
-    url.hash = '';
-    url.search = '';
-    return url.toString();
-  } catch {
-    return rawUrl;
-  }
+  if (!URL.canParse(rawUrl)) return rawUrl;
+  const url = new URL(rawUrl);
+  url.username = '';
+  url.password = '';
+  url.hash = '';
+  url.search = '';
+  return url.toString();
 }

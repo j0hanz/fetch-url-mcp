@@ -134,10 +134,12 @@ test('fetchNormalizedUrl aborts during DNS preflight', async () => {
   controller.abort();
 
   const originalLookup = dns.promises.lookup;
+  const originalResolveCname = dns.promises.resolveCname;
   dns.promises.lookup = async () =>
     await new Promise(() => {
       // Never resolves; abort should win.
     });
+  dns.promises.resolveCname = async () => [];
 
   const originalFetch: typeof fetch = fetch;
   (globalThis as typeof globalThis & { fetch: typeof fetch }).fetch =
@@ -159,6 +161,7 @@ test('fetchNormalizedUrl aborts during DNS preflight', async () => {
     );
   } finally {
     dns.promises.lookup = originalLookup;
+    dns.promises.resolveCname = originalResolveCname;
     (globalThis as typeof globalThis & { fetch: typeof fetch }).fetch =
       originalFetch;
   }
@@ -168,6 +171,7 @@ test('fetchNormalizedUrl aborts during redirect DNS preflight', async () => {
   const controller = new AbortController();
 
   const originalLookup = dns.promises.lookup;
+  const originalResolveCname = dns.promises.resolveCname;
   dns.promises.lookup = async (hostname, _options) => {
     if (hostname === 'example.com') {
       return [{ address: '93.184.216.34', family: 4 }];
@@ -181,6 +185,7 @@ test('fetchNormalizedUrl aborts during redirect DNS preflight', async () => {
 
     return await originalLookup(hostname, _options);
   };
+  dns.promises.resolveCname = async () => [];
 
   const originalFetch: typeof fetch = fetch;
   (globalThis as typeof globalThis & { fetch: typeof fetch }).fetch = async (
@@ -223,6 +228,7 @@ test('fetchNormalizedUrl aborts during redirect DNS preflight', async () => {
     );
   } finally {
     dns.promises.lookup = originalLookup;
+    dns.promises.resolveCname = originalResolveCname;
     (globalThis as typeof globalThis & { fetch: typeof fetch }).fetch =
       originalFetch;
   }

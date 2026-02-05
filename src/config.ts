@@ -1,4 +1,15 @@
-import packageJson from '../package.json' with { type: 'json' };
+import { createRequire } from 'node:module';
+import process from 'node:process';
+import { fileURLToPath } from 'node:url';
+
+const require = createRequire(import.meta.url);
+const packageJsonPath = fileURLToPath(
+  new URL('../package.json', import.meta.url)
+);
+const packageJson = require(packageJsonPath) as { version?: string };
+if (typeof packageJson.version !== 'string') {
+  throw new Error('package.json version is missing');
+}
 
 export const serverVersion: string = packageJson.version;
 

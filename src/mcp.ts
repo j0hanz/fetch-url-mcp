@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
+import process from 'node:process';
 
 import { z } from 'zod';
 
@@ -42,10 +43,10 @@ import { isObject } from './type-guards.js';
 async function getLocalIcons(): Promise<McpIcon[] | undefined> {
   try {
     const iconPath = new URL('../assets/logo.svg', import.meta.url);
-    const buffer = await readFile(iconPath);
+    const base64 = await readFile(iconPath, { encoding: 'base64' });
     return [
       {
-        src: `data:image/svg+xml;base64,${buffer.toString('base64')}`,
+        src: `data:image/svg+xml;base64,${base64}`,
         mimeType: 'image/svg+xml',
         sizes: ['any'],
       },

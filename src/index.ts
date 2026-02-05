@@ -1,15 +1,46 @@
 #!/usr/bin/env node
+import process from 'node:process';
 import { parseArgs } from 'node:util';
 
+import { serverVersion } from './config.js';
 import { startHttpServer } from './http-native.js';
 import { startStdioServer } from './mcp.js';
 import { logError } from './observability.js';
 
+function printUsage(): void {
+  process.stdout.write(
+    [
+      'superfetch MCP server',
+      '',
+      'Usage:',
+      '  superfetch [--stdio] [--help] [--version]',
+      '',
+      'Options:',
+      '  --stdio    Run in stdio mode (no HTTP server).',
+      '  --help     Show this help message.',
+      '  --version  Show server version.',
+      '',
+    ].join('\n')
+  );
+}
+
 const { values } = parseArgs({
   options: {
     stdio: { type: 'boolean', default: false },
+    help: { type: 'boolean', default: false },
+    version: { type: 'boolean', default: false },
   },
 });
+
+if (values.help) {
+  printUsage();
+  process.exit(0);
+}
+
+if (values.version) {
+  process.stdout.write(`${serverVersion}\n`);
+  process.exit(0);
+}
 const isStdioMode = values.stdio;
 let isShuttingDown = false;
 

@@ -3,8 +3,13 @@ import { spawn } from 'node:child_process';
 import { access, chmod, cp, mkdir, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { performance } from 'node:perf_hooks';
+import process from 'node:process';
 
 // --- Configuration (Single Source of Truth) ---
+const BIN = {
+  tsc: join('node_modules', 'typescript', 'bin', 'tsc'),
+};
+
 const CONFIG = {
   paths: {
     dist: 'dist',
@@ -24,8 +29,8 @@ const CONFIG = {
     },
   },
   commands: {
-    tsc: ['npx', ['tsc', '-p', 'tsconfig.build.json']],
-    tscCheck: ['npx', ['tsc', '-p', 'tsconfig.json', '--noEmit']],
+    tsc: ['node', [BIN.tsc, '-p', 'tsconfig.build.json']],
+    tscCheck: ['node', [BIN.tsc, '-p', 'tsconfig.json', '--noEmit']],
   },
   test: {
     patterns: ['src/__tests__/**/*.test.ts', 'tests/**/*.test.ts'],
@@ -75,22 +80,22 @@ const System = {
 
   exec(command, args = []) {
     return new Promise((resolve, reject) => {
-      const useShell = command !== 'node';
-      const spawnArgs = useShell ? [] : args;
-      const spawnCommand = useShell
-        ? [command, ...args]
-            .map((arg) => (arg.includes(' ') ? `"${arg}"` : arg))
-            .join(' ')
-        : command;
+      const resolvedCommand = command === 'node' ? process.execPath : command;
 
-      const proc = spawn(spawnCommand, spawnArgs, {
+      const proc = spawn(resolvedCommand, args, {
         stdio: 'inherit',
-        shell: useShell,
+        shell: false,
+        windowsHide: true,
       });
 
-      proc.on('close', (code) => {
+      proc.on('error', (error) => {
+        reject(error);
+      });
+
+      proc.on('close', (code, signal) => {
         if (code === 0) return resolve();
-        reject(new Error(`${command} exited with code ${code}`));
+        const suffix = signal ? ` (signal ${signal})` : '';
+        reject(new Error(`${command} exited with code ${code}${suffix}`));
       });
     });
   },
@@ -256,13 +261,14 @@ const CLI = {
     if (!action) {
       Logger.error(`Unknown task: ${taskName}`);
       Logger.error(`Available tasks: ${Object.keys(this.routes).join(', ')}`);
-      process.exit(1);
+      process.exitCode = 1;
+      return;
     }
 
     try {
       await action(restArgs);
     } catch {
-      process.exit(1);
+      process.exitCode = 1;
     }
   },
 };

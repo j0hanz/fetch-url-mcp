@@ -462,12 +462,8 @@ function resolveCacheParams(params: unknown): {
 function isValidCacheResourceUri(uri: string): boolean {
   if (!uri) return false;
 
-  let parsed: URL;
-  try {
-    parsed = new URL(uri);
-  } catch {
-    return false;
-  }
+  if (!URL.canParse(uri)) return false;
+  const parsed = new URL(uri);
 
   if (parsed.protocol !== 'superfetch:') return false;
   if (parsed.hostname !== 'cache') return false;
@@ -736,14 +732,11 @@ function getLastPathSegment(url: URL): string | null {
 }
 
 function extractFilenameFromUrl(url: string): string | null {
-  try {
-    const urlObj = new URL(url);
-    const lastSegment = getLastPathSegment(urlObj);
-    if (!lastSegment) return null;
-    return normalizeUrlFilenameSegment(lastSegment);
-  } catch {
-    return null;
-  }
+  if (!URL.canParse(url)) return null;
+  const urlObj = new URL(url);
+  const lastSegment = getLastPathSegment(urlObj);
+  if (!lastSegment) return null;
+  return normalizeUrlFilenameSegment(lastSegment);
 }
 
 function slugifyTitle(title: string): string | null {
@@ -836,7 +829,10 @@ function sendJsonError(
   error: string,
   code: string
 ): void {
-  res.writeHead(status, { 'Content-Type': 'application/json' });
+  res.writeHead(status, {
+    'Content-Type': 'application/json; charset=utf-8',
+    'X-Content-Type-Options': 'nosniff',
+  });
   res.end(JSON.stringify({ error, code }));
 }
 
