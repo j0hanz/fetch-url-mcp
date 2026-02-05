@@ -187,4 +187,29 @@ describe('readResponseText', () => {
       }
     );
   });
+
+  it('detects UTF-16LE via BOM and avoids false binary detection', async () => {
+    const text = 'Hello world';
+    const utf16Body = Buffer.from(text, 'utf16le');
+    const bomPrefixed = new Uint8Array([0xff, 0xfe, ...utf16Body]);
+    const response = new Response(bomPrefixed, {
+      status: 200,
+      headers: { 'content-type': 'text/html' },
+    });
+
+    const result = await readResponseText(response, 'https://example.com', 4096);
+    assert.equal(result.text.replace(/^\ufeff/, ''), text);
+  });
+
+  it('detects HTML-declared charset when content-type charset is missing', async () => {
+    const html = '<meta charset="windows-1252"><p>caf\xe9</p>';
+    const bytes = new Uint8Array([...html].map((char) => char.charCodeAt(0)));
+    const response = new Response(bytes, {
+      status: 200,
+      headers: { 'content-type': 'text/html' },
+    });
+
+    const result = await readResponseText(response, 'https://example.com', 4096);
+    assert.match(result.text, /café/);
+  });
 });

@@ -1053,82 +1053,138 @@ function createDecoder(encoding: string | undefined): TextDecoder {
   }
 }
 
-function isBinaryContent(buffer: Uint8Array): boolean {
-  // Check for common binary magic numbers
-  // PDF: %PDF
-  if (
-    buffer.length >= 4 &&
-    buffer[0] === 0x25 &&
-    buffer[1] === 0x50 &&
-    buffer[2] === 0x44 &&
-    buffer[3] === 0x46
-  ) {
-    return true;
+function normalizeEncodingLabel(encoding: string | undefined): string {
+  return encoding?.trim().toLowerCase() ?? '';
+}
+
+function isUnicodeWideEncoding(encoding: string | undefined): boolean {
+  const normalized = normalizeEncodingLabel(encoding);
+  return (
+    normalized.startsWith('utf-16') ||
+    normalized.startsWith('utf-32') ||
+    normalized === 'ucs-2' ||
+    normalized === 'unicodefffe' ||
+    normalized === 'unicodefeff'
+  );
+}
+
+function detectBomEncoding(buffer: Uint8Array): string | undefined {
+  const startsWith = (...values: number[]): boolean =>
+    values.every((value, index) => buffer[index] === value);
+
+  if (buffer.length >= 4 && startsWith(0xff, 0xfe, 0x00, 0x00)) {
+    return 'utf-32le';
   }
 
-  // PNG: \x89PNG
-  if (
-    buffer.length >= 4 &&
-    buffer[0] === 0x89 &&
-    buffer[1] === 0x50 &&
-    buffer[2] === 0x4e &&
-    buffer[3] === 0x47
-  ) {
-    return true;
+  if (buffer.length >= 4 && startsWith(0x00, 0x00, 0xfe, 0xff)) {
+    return 'utf-32be';
   }
 
-  // GIF: GIF8
-  if (
-    buffer.length >= 4 &&
-    buffer[0] === 0x47 &&
-    buffer[1] === 0x49 &&
-    buffer[2] === 0x46 &&
-    buffer[3] === 0x38
-  ) {
-    return true;
+  if (buffer.length >= 3 && startsWith(0xef, 0xbb, 0xbf)) return 'utf-8';
+  if (buffer.length >= 2 && startsWith(0xff, 0xfe)) return 'utf-16le';
+  if (buffer.length >= 2 && startsWith(0xfe, 0xff)) return 'utf-16be';
+
+  return undefined;
+}
+
+function readQuotedValue(input: string, startIndex: number): string {
+  const first = input[startIndex];
+  if (!first) return '';
+
+  const quoted = first === '"' || first === "'";
+  if (quoted) {
+    const end = input.indexOf(first, startIndex + 1);
+    return end === -1 ? '' : input.slice(startIndex + 1, end).trim();
   }
 
-  // JPEG: \xFF\xD8\xFF
-  if (
-    buffer.length >= 3 &&
-    buffer[0] === 0xff &&
-    buffer[1] === 0xd8 &&
-    buffer[2] === 0xff
-  ) {
-    return true;
-  }
+  const tail = input.slice(startIndex);
+  const stop = tail.search(/[\s/>]/);
+  return (stop === -1 ? tail : tail.slice(0, stop)).trim();
+}
 
-  // ZIP/JAR/APK: PK\x03\x04
-  if (
-    buffer.length >= 4 &&
-    buffer[0] === 0x50 &&
-    buffer[1] === 0x4b &&
-    buffer[2] === 0x03 &&
-    buffer[3] === 0x04
-  ) {
-    return true;
-  }
+function extractHtmlCharset(headSnippet: string): string | undefined {
+  const lower = headSnippet.toLowerCase();
+  const charsetToken = 'charset=';
+  const charsetIdx = lower.indexOf(charsetToken);
+  if (charsetIdx === -1) return undefined;
 
-  // ELF: \x7fELF
-  if (
-    buffer.length >= 4 &&
-    buffer[0] === 0x7f &&
-    buffer[1] === 0x45 &&
-    buffer[2] === 0x4c &&
-    buffer[3] === 0x46
-  ) {
-    return true;
-  }
+  const valueStart = charsetIdx + charsetToken.length;
+  const charset = readQuotedValue(headSnippet, valueStart);
+  return charset ? charset.toLowerCase() : undefined;
+}
 
-  // Check for null bytes in the first 1000 bytes (heuristics)
-  const checkLen = Math.min(buffer.length, 1000);
+function extractXmlEncoding(headSnippet: string): string | undefined {
+  const lower = headSnippet.toLowerCase();
+  const xmlStart = lower.indexOf('<?xml');
+  if (xmlStart === -1) return undefined;
+
+  const xmlEnd = lower.indexOf('?>', xmlStart);
+  const declaration =
+    xmlEnd === -1
+      ? headSnippet.slice(xmlStart)
+      : headSnippet.slice(xmlStart, xmlEnd + 2);
+  const declarationLower = declaration.toLowerCase();
+
+  const encodingToken = 'encoding=';
+  const encodingIdx = declarationLower.indexOf(encodingToken);
+  if (encodingIdx === -1) return undefined;
+
+  const valueStart = encodingIdx + encodingToken.length;
+  const encoding = readQuotedValue(declaration, valueStart);
+  return encoding ? encoding.toLowerCase() : undefined;
+}
+
+function detectHtmlDeclaredEncoding(buffer: Uint8Array): string | undefined {
+  const scanSize = Math.min(buffer.length, 8_192);
+  if (scanSize === 0) return undefined;
+
+  const headSnippet = new TextDecoder('latin1').decode(
+    buffer.subarray(0, scanSize)
+  );
+
+  return extractHtmlCharset(headSnippet) ?? extractXmlEncoding(headSnippet);
+}
+
+function resolveEncoding(
+  declaredEncoding: string | undefined,
+  sample: Uint8Array
+): string | undefined {
+  const bomEncoding = detectBomEncoding(sample);
+  if (bomEncoding) return bomEncoding;
+
+  if (declaredEncoding) return declaredEncoding;
+
+  return detectHtmlDeclaredEncoding(sample);
+}
+
+const BINARY_SIGNATURES = [
+  [0x25, 0x50, 0x44, 0x46], // PDF
+  [0x89, 0x50, 0x4e, 0x47], // PNG
+  [0x47, 0x49, 0x46, 0x38], // GIF8
+  [0xff, 0xd8, 0xff], // JPEG
+  [0x50, 0x4b, 0x03, 0x04], // ZIP/JAR/APK
+  [0x7f, 0x45, 0x4c, 0x46], // ELF
+] as const;
+
+function startsWithBytes(buffer: Uint8Array, signature: readonly number[]): boolean {
+  if (buffer.length < signature.length) return false;
+  return signature.every((value, index) => buffer[index] === value);
+}
+
+function hasNullByte(buffer: Uint8Array, limit: number): boolean {
+  const checkLen = Math.min(buffer.length, limit);
   for (let i = 0; i < checkLen; i++) {
-    if (buffer[i] === 0x00) {
-      // Allow UTF-16 BOM? Naive check usually assumes UTF-8/Ascii for web.
-      // But let's be safe: if we see nulls, it's likely binary.
-      return true;
-    }
+    if (buffer[i] === 0x00) return true;
   }
+  return false;
+}
+
+function isBinaryContent(buffer: Uint8Array, encoding?: string): boolean {
+  if (BINARY_SIGNATURES.some((signature) => startsWithBytes(buffer, signature))) {
+    return true;
+  }
+
+  if (!isUnicodeWideEncoding(encoding) && hasNullByte(buffer, 1000)) return true;
 
   return false;
 }
@@ -1155,7 +1211,9 @@ class ResponseTextReader {
       }
 
       const uint8 = new Uint8Array(buffer);
-      if (isBinaryContent(uint8)) {
+      const effectiveEncoding = resolveEncoding(encoding, uint8);
+
+      if (isBinaryContent(uint8, effectiveEncoding ?? encoding)) {
         throw new FetchError(
           'Detailed content type check failed: binary content detected',
           url,
@@ -1164,7 +1222,7 @@ class ResponseTextReader {
         );
       }
 
-      const decoder = createDecoder(encoding);
+      const decoder = createDecoder(effectiveEncoding ?? encoding);
       const text = decoder.decode(buffer);
       return { text, size: buffer.byteLength };
     }
@@ -1194,7 +1252,7 @@ class ResponseTextReader {
     signal?: AbortSignal,
     encoding?: string
   ): Promise<{ text: string; size: number }> {
-    const decoder = createDecoder(encoding);
+    let decoder: TextDecoder | null = null;
     const parts: string[] = [];
     let total = 0;
 
@@ -1206,7 +1264,12 @@ class ResponseTextReader {
     try {
       let result = await this.readNext(reader, abortRace.abortPromise);
 
-      if (!result.done && isBinaryContent(result.value)) {
+      if (!result.done) {
+        const effectiveEncoding = resolveEncoding(encoding, result.value);
+        decoder = createDecoder(effectiveEncoding ?? encoding);
+      }
+
+      if (!result.done && isBinaryContent(result.value, decoder?.encoding)) {
         await this.cancelReaderQuietly(reader);
         throw new FetchError(
           'Detailed content type check failed: binary content detected',
@@ -1217,6 +1280,7 @@ class ResponseTextReader {
       }
 
       while (!result.done) {
+        decoder ??= createDecoder(encoding);
         const { shouldBreak, newTotal } = this.processChunk(
           result.value,
           total,
@@ -1241,6 +1305,7 @@ class ResponseTextReader {
       reader.releaseLock();
     }
 
+    decoder ??= createDecoder(encoding);
     const final = decoder.decode();
     if (final) parts.push(final);
 
