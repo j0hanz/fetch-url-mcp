@@ -4,7 +4,11 @@ export const serverVersion: string = packageJson.version;
 
 export type LogLevel = 'debug' | 'info' | 'warn' | 'error';
 
+const LOG_LEVELS: readonly LogLevel[] = ['debug', 'info', 'warn', 'error'];
+
 export type TransformMetadataFormat = 'markdown' | 'frontmatter';
+
+type AuthMode = 'oauth' | 'static';
 
 const { env } = process;
 
@@ -17,7 +21,6 @@ function buildIpv4(parts: readonly [number, number, number, number]): string {
 }
 
 function formatHostForUrl(hostname: string): string {
-  // IPv6 literal in URLs must be wrapped in brackets.
   if (hostname.includes(':') && !hostname.startsWith('['))
     return `[${hostname}]`;
   return hostname;
@@ -27,50 +30,24 @@ function normalizeHostValue(value: string): string | null {
   const raw = value.trim();
   if (!raw) return null;
 
-  // Accept full URLs (e.g. "https://example.com:443/path") by extracting the hostname.
   if (raw.includes('://') && URL.canParse(raw)) {
     return new URL(raw).hostname.toLowerCase();
   }
 
-  const trimmed = raw.toLowerCase();
+  const lowered = raw.toLowerCase();
 
-  // Bracketed IPv6 literal, possibly with a port: "[::1]:8080"
-  if (trimmed.startsWith('[')) {
-    if (!trimmed.includes(']')) return null;
-    const end = trimmed.indexOf(']');
-    return trimmed.slice(1, end);
+  if (lowered.startsWith('[')) {
+    const end = lowered.indexOf(']');
+    if (end === -1) return null;
+    return lowered.slice(1, end);
   }
 
-  if (!trimmed.includes(':')) return trimmed;
-  const firstColon = trimmed.indexOf(':');
+  const firstColon = lowered.indexOf(':');
+  if (firstColon === -1) return lowered;
+  if (lowered.includes(':', firstColon + 1)) return lowered;
 
-  // If there are multiple colons, assume an IPv6 literal without brackets.
-  if (trimmed.includes(':', firstColon + 1)) return trimmed;
-
-  // Otherwise treat as "host:port".
-  const host = trimmed.slice(0, firstColon);
+  const host = lowered.slice(0, firstColon);
   return host || null;
-}
-
-const ALLOWED_LOG_LEVELS: ReadonlySet<string> = new Set([
-  'debug',
-  'info',
-  'warn',
-  'error',
-]);
-
-function isLogLevel(value: string): value is LogLevel {
-  return ALLOWED_LOG_LEVELS.has(value);
-}
-
-function isOutsideRange(
-  value: number,
-  min: number | undefined,
-  max: number | undefined
-): boolean {
-  return (
-    (min !== undefined && value < min) || (max !== undefined && value > max)
-  );
 }
 
 function parseIntegerValue(
@@ -81,7 +58,8 @@ function parseIntegerValue(
   if (!envValue) return null;
   const parsed = Number.parseInt(envValue, 10);
   if (Number.isNaN(parsed)) return null;
-  if (isOutsideRange(parsed, min, max)) return null;
+  if (min !== undefined && parsed < min) return null;
+  if (max !== undefined && parsed > max) return null;
   return parsed;
 }
 
@@ -108,7 +86,6 @@ function parseBoolean(
 ): boolean {
   if (!envValue) return defaultValue;
 
-  // Anything except "false" enables.
   return envValue.trim().toLowerCase() !== 'false';
 }
 
@@ -150,46 +127,62 @@ function parseAllowedHosts(envValue: string | undefined): Set<string> {
   return hosts;
 }
 
+const ALLOWED_LOG_LEVELS: ReadonlySet<string> = new Set(LOG_LEVELS);
+
+function isLogLevel(value: string): value is LogLevel {
+  return ALLOWED_LOG_LEVELS.has(value);
+}
+
 function parseLogLevel(envValue: string | undefined): LogLevel {
-  const level = envValue?.toLowerCase();
-  if (!level) return 'info';
+  if (!envValue) return 'info';
+  const level = envValue.toLowerCase();
   return isLogLevel(level) ? level : 'info';
 }
 
 function parseTransformMetadataFormat(
   envValue: string | undefined
 ): TransformMetadataFormat {
-  const normalized = envValue?.trim().toLowerCase();
+  if (!envValue) return 'markdown';
+  const normalized = envValue.trim().toLowerCase();
   return normalized === 'frontmatter' ? 'frontmatter' : 'markdown';
 }
 
-const SIZE_LIMITS = {
-  TEN_MB: 10 * 1024 * 1024,
-};
+function parsePort(envValue: string | undefined): number {
+  if (envValue?.trim() === '0') return 0;
+  return parseInteger(envValue, 3000, 1024, 65535);
+}
 
-const TIMEOUT = {
-  DEFAULT_FETCH_TIMEOUT_MS: parseInteger(
-    env.FETCH_TIMEOUT_MS,
-    15000,
-    1000,
-    60000
-  ),
-  DEFAULT_SESSION_TTL_MS: 30 * 60 * 1000,
-  DEFAULT_TRANSFORM_TIMEOUT_MS: parseInteger(
-    env.TRANSFORM_TIMEOUT_MS,
-    30000,
-    5000,
-    120000
-  ),
-};
+const MAX_HTML_BYTES = 10 * 1024 * 1024;
+const DEFAULT_SESSION_TTL_MS = 30 * 60 * 1000;
+const DEFAULT_SESSION_INIT_TIMEOUT_MS = 10000;
+const DEFAULT_MAX_SESSIONS = 200;
+const DEFAULT_USER_AGENT = 'superFetch-MCP/2.0';
+const DEFAULT_ENABLED_TOOLS = 'fetch-url';
+const DEFAULT_NOISE_REMOVAL_CATEGORIES =
+  'cookie-banners,newsletters,social-share,nav-footer';
+const DEFAULT_TOOL_TIMEOUT_PADDING_MS = 5000;
 
+const DEFAULT_FETCH_TIMEOUT_MS = parseInteger(
+  env.FETCH_TIMEOUT_MS,
+  15000,
+  1000,
+  60000
+);
+const DEFAULT_TRANSFORM_TIMEOUT_MS = parseInteger(
+  env.TRANSFORM_TIMEOUT_MS,
+  30000,
+  5000,
+  120000
+);
 const DEFAULT_TOOL_TIMEOUT_MS =
-  TIMEOUT.DEFAULT_FETCH_TIMEOUT_MS +
-  TIMEOUT.DEFAULT_TRANSFORM_TIMEOUT_MS +
-  5000;
+  DEFAULT_FETCH_TIMEOUT_MS +
+  DEFAULT_TRANSFORM_TIMEOUT_MS +
+  DEFAULT_TOOL_TIMEOUT_PADDING_MS;
+
+const SERVER_TIMEOUT_RANGE = { min: 1000, max: 600000 };
 
 interface AuthConfig {
-  mode: 'oauth' | 'static';
+  mode: AuthMode;
   issuerUrl: URL | undefined;
   authorizationUrl: URL | undefined;
   tokenUrl: URL | undefined;
@@ -204,35 +197,7 @@ interface AuthConfig {
   staticTokens: string[];
 }
 
-function readCoreOAuthUrls(): {
-  issuerUrl: URL | undefined;
-  authorizationUrl: URL | undefined;
-  tokenUrl: URL | undefined;
-} {
-  return {
-    issuerUrl: readUrlEnv('OAUTH_ISSUER_URL'),
-    authorizationUrl: readUrlEnv('OAUTH_AUTHORIZATION_URL'),
-    tokenUrl: readUrlEnv('OAUTH_TOKEN_URL'),
-  };
-}
-
-function readOptionalOAuthUrls(baseUrl: URL): {
-  revocationUrl: URL | undefined;
-  registrationUrl: URL | undefined;
-  introspectionUrl: URL | undefined;
-  resourceUrl: URL;
-} {
-  return {
-    revocationUrl: readUrlEnv('OAUTH_REVOCATION_URL'),
-    registrationUrl: readUrlEnv('OAUTH_REGISTRATION_URL'),
-    introspectionUrl: readUrlEnv('OAUTH_INTROSPECTION_URL'),
-    resourceUrl:
-      parseUrlEnv(env.OAUTH_RESOURCE_URL, 'OAUTH_RESOURCE_URL') ??
-      new URL('/mcp', baseUrl),
-  };
-}
-
-function readOAuthUrls(baseUrl: URL): {
+interface OAuthUrls {
   issuerUrl: URL | undefined;
   authorizationUrl: URL | undefined;
   tokenUrl: URL | undefined;
@@ -240,21 +205,44 @@ function readOAuthUrls(baseUrl: URL): {
   registrationUrl: URL | undefined;
   introspectionUrl: URL | undefined;
   resourceUrl: URL;
-} {
-  return { ...readCoreOAuthUrls(), ...readOptionalOAuthUrls(baseUrl) };
+}
+
+type OAuthModeInputs = Pick<
+  OAuthUrls,
+  'issuerUrl' | 'authorizationUrl' | 'tokenUrl' | 'introspectionUrl'
+>;
+
+function readOAuthUrls(baseUrl: URL): OAuthUrls {
+  const issuerUrl = readUrlEnv('OAUTH_ISSUER_URL');
+  const authorizationUrl = readUrlEnv('OAUTH_AUTHORIZATION_URL');
+  const tokenUrl = readUrlEnv('OAUTH_TOKEN_URL');
+  const revocationUrl = readUrlEnv('OAUTH_REVOCATION_URL');
+  const registrationUrl = readUrlEnv('OAUTH_REGISTRATION_URL');
+  const introspectionUrl = readUrlEnv('OAUTH_INTROSPECTION_URL');
+  const resourceUrl =
+    parseUrlEnv(env.OAUTH_RESOURCE_URL, 'OAUTH_RESOURCE_URL') ??
+    new URL('/mcp', baseUrl);
+
+  return {
+    issuerUrl,
+    authorizationUrl,
+    tokenUrl,
+    revocationUrl,
+    registrationUrl,
+    introspectionUrl,
+    resourceUrl,
+  };
 }
 
 function resolveAuthMode(
   authModeEnv: string | undefined,
-  urls: {
-    issuerUrl: URL | undefined;
-    authorizationUrl: URL | undefined;
-    tokenUrl: URL | undefined;
-    introspectionUrl: URL | undefined;
+  urls: OAuthModeInputs
+): AuthMode {
+  if (authModeEnv) {
+    const normalized = authModeEnv.toLowerCase();
+    if (normalized === 'oauth') return 'oauth';
+    if (normalized === 'static') return 'static';
   }
-): 'oauth' | 'static' {
-  if (authModeEnv === 'oauth') return 'oauth';
-  if (authModeEnv === 'static') return 'static';
 
   const oauthConfigured = [
     urls.issuerUrl,
@@ -274,7 +262,7 @@ function collectStaticTokens(): string[] {
 
 function buildAuthConfig(baseUrl: URL): AuthConfig {
   const urls = readOAuthUrls(baseUrl);
-  const mode = resolveAuthMode(env.AUTH_MODE?.toLowerCase(), urls);
+  const mode = resolveAuthMode(env.AUTH_MODE, urls);
 
   return {
     mode,
@@ -297,9 +285,43 @@ const ANY_V4 = buildIpv4([0, 0, 0, 0]);
 const METADATA_V4_AWS = buildIpv4([169, 254, 169, 254]);
 const METADATA_V4_AZURE = buildIpv4([100, 100, 100, 200]);
 
+const BLOCKED_HOSTS = new Set<string>([
+  'localhost',
+  LOOPBACK_V4,
+  ANY_V4,
+  '::1',
+  METADATA_V4_AWS,
+  'metadata.google.internal',
+  'metadata.azure.com',
+  METADATA_V4_AZURE,
+  'instance-data',
+]);
+
+const BLOCKED_IP_PATTERNS: readonly RegExp[] = [
+  /^10\./,
+  /^172\.(1[6-9]|2\d|3[01])\./,
+  /^192\.168\./,
+  /^127\./,
+  /^0\./,
+  /^169\.254\./,
+  /^100\.64\./,
+  /^fc00:/i,
+  /^fd00:/i,
+  /^fe80:/i,
+  /^::ffff:127\./,
+  /^::ffff:10\./,
+  /^::ffff:172\.(1[6-9]|2\d|3[01])\./,
+  /^::ffff:192\.168\./,
+  /^::ffff:169\.254\./,
+];
+
+const BLOCKED_IP_PATTERN =
+  /^(?:10\.|172\.(?:1[6-9]|2\d|3[01])\.|192\.168\.|127\.|0\.|169\.254\.|100\.64\.|fc00:|fd00:|fe80:)/i;
+const BLOCKED_IPV4_MAPPED_PATTERN =
+  /^::ffff:(?:127\.|10\.|172\.(?:1[6-9]|2\d|3[01])\.|192\.168\.|169\.254\.)/i;
+
 const host = (env.HOST ?? LOOPBACK_V4).trim();
-const port =
-  env.PORT?.trim() === '0' ? 0 : parseInteger(env.PORT, 3000, 1024, 65535);
+const port = parsePort(env.PORT);
 
 const baseUrl = new URL(`http://${formatHostForUrl(host)}:${port}`);
 
@@ -319,24 +341,24 @@ export const config = {
     version: serverVersion,
     port,
     host,
-    sessionTtlMs: TIMEOUT.DEFAULT_SESSION_TTL_MS,
-    sessionInitTimeoutMs: 10000,
-    maxSessions: 200,
+    sessionTtlMs: DEFAULT_SESSION_TTL_MS,
+    sessionInitTimeoutMs: DEFAULT_SESSION_INIT_TIMEOUT_MS,
+    maxSessions: DEFAULT_MAX_SESSIONS,
     http: {
       headersTimeoutMs: parseOptionalInteger(
         env.SERVER_HEADERS_TIMEOUT_MS,
-        1000,
-        600000
+        SERVER_TIMEOUT_RANGE.min,
+        SERVER_TIMEOUT_RANGE.max
       ),
       requestTimeoutMs: parseOptionalInteger(
         env.SERVER_REQUEST_TIMEOUT_MS,
-        1000,
-        600000
+        SERVER_TIMEOUT_RANGE.min,
+        SERVER_TIMEOUT_RANGE.max
       ),
       keepAliveTimeoutMs: parseOptionalInteger(
         env.SERVER_KEEP_ALIVE_TIMEOUT_MS,
-        1000,
-        600000
+        SERVER_TIMEOUT_RANGE.min,
+        SERVER_TIMEOUT_RANGE.max
       ),
       shutdownCloseIdleConnections: parseBoolean(
         env.SERVER_SHUTDOWN_CLOSE_IDLE,
@@ -349,19 +371,19 @@ export const config = {
     },
   },
   fetcher: {
-    timeout: TIMEOUT.DEFAULT_FETCH_TIMEOUT_MS,
+    timeout: DEFAULT_FETCH_TIMEOUT_MS,
     maxRedirects: 5,
-    userAgent: env.USER_AGENT ?? 'superFetch-MCP/2.0',
-    maxContentLength: SIZE_LIMITS.TEN_MB,
+    userAgent: env.USER_AGENT ?? DEFAULT_USER_AGENT,
+    maxContentLength: MAX_HTML_BYTES,
   },
   transform: {
-    timeoutMs: TIMEOUT.DEFAULT_TRANSFORM_TIMEOUT_MS,
+    timeoutMs: DEFAULT_TRANSFORM_TIMEOUT_MS,
     stageWarnRatio: parseFloatOrDefault(env.TRANSFORM_STAGE_WARN_RATIO, 0.5),
     metadataFormat: parseTransformMetadataFormat(env.TRANSFORM_METADATA_FORMAT),
     maxWorkerScale: parseInteger(env.TRANSFORM_WORKER_MAX_SCALE, 4, 1, 16),
   },
   tools: {
-    enabled: parseList(env.ENABLED_TOOLS ?? 'fetch-url'),
+    enabled: parseList(env.ENABLED_TOOLS ?? DEFAULT_ENABLED_TOOLS),
     timeoutMs: parseInteger(
       env.TOOL_TIMEOUT_MS,
       DEFAULT_TOOL_TIMEOUT_MS,
@@ -382,8 +404,7 @@ export const config = {
     extraTokens: parseList(env.SUPERFETCH_EXTRA_NOISE_TOKENS),
     extraSelectors: parseList(env.SUPERFETCH_EXTRA_NOISE_SELECTORS),
     enabledCategories: parseList(
-      env.NOISE_REMOVAL_CATEGORIES ??
-        'cookie-banners,newsletters,social-share,nav-footer'
+      env.NOISE_REMOVAL_CATEGORIES ?? DEFAULT_NOISE_REMOVAL_CATEGORIES
     ),
     debug: parseBoolean(env.DEBUG_NOISE_REMOVAL, false),
     aggressiveMode: parseBoolean(env.SUPERFETCH_AGGRESSIVE_NOISE, false),
@@ -408,44 +429,15 @@ export const config = {
     level: parseLogLevel(env.LOG_LEVEL),
   },
   constants: {
-    maxHtmlSize: SIZE_LIMITS.TEN_MB,
+    maxHtmlSize: MAX_HTML_BYTES,
     maxUrlLength: 2048,
     maxInlineContentChars: 20000,
   },
   security: {
-    blockedHosts: new Set([
-      'localhost',
-      LOOPBACK_V4,
-      ANY_V4,
-      '::1',
-      METADATA_V4_AWS,
-      'metadata.google.internal',
-      'metadata.azure.com',
-      METADATA_V4_AZURE,
-      'instance-data',
-    ]),
-    blockedIpPatterns: [
-      /^10\./,
-      /^172\.(1[6-9]|2\d|3[01])\./,
-      /^192\.168\./,
-      /^127\./,
-      /^0\./,
-      /^169\.254\./,
-      /^100\.64\./,
-      /^fc00:/i,
-      /^fd00:/i,
-      /^fe80:/i,
-      /^::ffff:127\./,
-      /^::ffff:10\./,
-      /^::ffff:172\.(1[6-9]|2\d|3[01])\./,
-      /^::ffff:192\.168\./,
-      /^::ffff:169\.254\./,
-    ] as const,
-    // Fast IP block regexes.
-    blockedIpPattern:
-      /^(?:10\.|172\.(?:1[6-9]|2\d|3[01])\.|192\.168\.|127\.|0\.|169\.254\.|100\.64\.|fc00:|fd00:|fe80:)/i,
-    blockedIpv4MappedPattern:
-      /^::ffff:(?:127\.|10\.|172\.(?:1[6-9]|2\d|3[01])\.|192\.168\.|169\.254\.)/i,
+    blockedHosts: BLOCKED_HOSTS,
+    blockedIpPatterns: BLOCKED_IP_PATTERNS,
+    blockedIpPattern: BLOCKED_IP_PATTERN,
+    blockedIpv4MappedPattern: BLOCKED_IPV4_MAPPED_PATTERN,
     allowedHosts: parseAllowedHosts(env.ALLOWED_HOSTS),
     apiKey: env.API_KEY,
     allowRemote,
