@@ -272,6 +272,8 @@ function normalizeSpacing(text: string): string {
   return text
     .replace(/\]\(([^)]+)\)\[/g, ']($1)\n\n[') // Space between adjacent links
     .replace(REGEX.HELPFUL_PROMPT, '')
+    .replace(/\]\([^)]+\)(?=[A-Za-z0-9])/g, '$& ')
+    .replace(/`[^`]+`(?=[A-Za-z0-9])/g, '$& ')
     .replace(/(`[^`]+`)\s*\\-\s*/g, '$1 - ') // Fix escaped hyphens after code
     .replace(/\\([[]])/g, '$1') // Unescape brackets
     .replace(/([^\n])\n([-*+] )/g, '$1\n\n$2') // Ensure lists start on new paragraph

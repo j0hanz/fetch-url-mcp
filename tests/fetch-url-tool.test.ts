@@ -6,6 +6,7 @@ import { NodeHtmlMarkdown } from 'node-html-markdown';
 import * as cache from '../dist/cache.js';
 import { config } from '../dist/config.js';
 import { normalizeUrl } from '../dist/fetch.js';
+import { cleanupMarkdownArtifacts } from '../dist/markdown-cleanup.js';
 import { fetchUrlToolHandler } from '../dist/tools.js';
 import {
   htmlToMarkdown,
@@ -26,6 +27,36 @@ function withMockedFetch(mock, execute) {
 }
 
 describe('fetchUrlToolHandler', () => {
+  it('inserts spaces after inline links/code without touching fenced code blocks', () => {
+    const input = [
+      'Chakra UI relies on [next-themes](https://example.com)to add support.',
+      '',
+      'In most cases, it is set up in the `Provider`component.',
+      '',
+      '```js',
+      'const x = "[next-themes](https://example.com)to";',
+      'const y = "`Provider`component";',
+      '```',
+    ].join('\n');
+
+    const cleaned = cleanupMarkdownArtifacts(input);
+
+    assert.ok(
+      cleaned.includes(
+        'Chakra UI relies on [next-themes](https://example.com) to add support.'
+      )
+    );
+    assert.ok(
+      cleaned.includes(
+        'In most cases, it is set up in the `Provider` component.'
+      )
+    );
+    assert.ok(
+      cleaned.includes('const x = "[next-themes](https://example.com)to";')
+    );
+    assert.ok(cleaned.includes('const y = "`Provider`component";'));
+  });
+
   it('returns a validation error when url is missing', async () => {
     const response = await fetchUrlToolHandler({ url: '' });
 
