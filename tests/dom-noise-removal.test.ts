@@ -56,6 +56,33 @@ describe('Dialog preservation', () => {
     );
   });
 
+  it('preserves short dialogs inside main content', () => {
+    const shortText = 'Short dialog inside main.';
+    const html = `
+      <html>
+        <body>
+          <main>
+            <div role="dialog">
+              <p>${shortText}</p>
+            </div>
+            <p>Main content</p>
+          </main>
+        </body>
+      </html>
+    `;
+
+    const result = removeNoiseFromHtml(html, undefined, 'https://example.com');
+
+    assert.ok(
+      result.includes('role="dialog"'),
+      'Dialog inside main should be preserved'
+    );
+    assert.ok(
+      result.includes(shortText),
+      'Dialog content inside main should be preserved'
+    );
+  });
+
   it('preserves dialogs containing headings (structured content)', () => {
     const html = `
       <html>
@@ -246,6 +273,60 @@ describe('Nav and footer preservation', () => {
     assert.ok(
       result.includes('Featured Content'),
       'Nav section content should be preserved'
+    );
+  });
+
+  it('preserves nav containing role=main content', () => {
+    const html = `
+      <html>
+        <body>
+          <nav>
+            <div role="main">
+              <p>Primary nav content</p>
+            </div>
+          </nav>
+          <main>
+            <p>Main content</p>
+          </main>
+        </body>
+      </html>
+    `;
+
+    const result = removeNoiseFromHtml(html, undefined, 'https://example.com');
+
+    assert.ok(
+      result.includes('<nav>'),
+      'Nav with role=main should be preserved'
+    );
+    assert.ok(
+      result.includes('Primary nav content'),
+      'Role=main content should be preserved'
+    );
+  });
+});
+
+describe('Noise scan limits', () => {
+  it('detects noise markers near the end of large HTML', () => {
+    const filler = 'A'.repeat(60000);
+    const html = `
+      <html>
+        <body>
+          <div>${filler}</div>
+          <nav><p>LATE_NAV</p></nav>
+          <main><p>Main content</p></main>
+        </body>
+      </html>
+    `;
+
+    const result = removeNoiseFromHtml(html, undefined, 'https://example.com');
+
+    assert.ok(
+      !result.includes('LATE_NAV'),
+      'Late nav content should be removed'
+    );
+    assert.ok(
+      result.includes('Main content'),
+      'Main content should be preserved'
     );
   });
 });

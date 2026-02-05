@@ -484,6 +484,8 @@ function shouldPreserveDialog(element: Element): boolean {
   const role = element.getAttribute('role');
   if (role !== 'dialog' && role !== 'alertdialog') return false;
 
+  if (isWithinPrimaryContent(element)) return true;
+
   const textContent = element.textContent || '';
   if (textContent.length > DIALOG_MIN_CHARS_FOR_PRESERVATION) return true;
 
@@ -494,7 +496,11 @@ function shouldPreserveNavFooter(element: Element): boolean {
   const tagName = element.tagName.toLowerCase();
   if (tagName !== 'nav' && tagName !== 'footer') return false;
 
-  return element.querySelector('article, main, section') !== null;
+  if (element.querySelector('article, main, section') !== null) return true;
+  if (element.querySelector('[role="main"]') !== null) return true;
+
+  const textContent = element.textContent || '';
+  return textContent.trim().length >= MIN_BODY_CONTENT_LENGTH;
 }
 
 function shouldPreserveElement(element: Element): boolean {
@@ -695,13 +701,23 @@ function isFullDocumentHtml(html: string): boolean {
 }
 
 function mayContainNoise(html: string): boolean {
-  const sample =
-    html.length > NOISE_SCAN_LIMIT ? html.substring(0, NOISE_SCAN_LIMIT) : html;
+  if (html.length <= NOISE_SCAN_LIMIT) {
+    return (
+      NOISE_TAGS_PATTERN.test(html) ||
+      NOISE_ROLES_PATTERN.test(html) ||
+      NOISE_OTHER_ATTRS_PATTERN.test(html) ||
+      NOISE_CLASSES_PATTERN.test(html)
+    );
+  }
+
+  const headSample = html.substring(0, NOISE_SCAN_LIMIT);
+  const tailSample = html.substring(html.length - NOISE_SCAN_LIMIT);
+  const combinedSample = `${headSample}\n${tailSample}`;
   return (
-    NOISE_TAGS_PATTERN.test(sample) ||
-    NOISE_ROLES_PATTERN.test(sample) ||
-    NOISE_OTHER_ATTRS_PATTERN.test(sample) ||
-    NOISE_CLASSES_PATTERN.test(sample)
+    NOISE_TAGS_PATTERN.test(combinedSample) ||
+    NOISE_ROLES_PATTERN.test(combinedSample) ||
+    NOISE_OTHER_ATTRS_PATTERN.test(combinedSample) ||
+    NOISE_CLASSES_PATTERN.test(combinedSample)
   );
 }
 

@@ -284,9 +284,9 @@ const CLEANUP_PIPELINE = [
     ? [promoteOrphanHeadings]
     : []),
   fixAndSpaceHeadings,
-  removeEmptyHeadings,
   ...(config.markdownCleanup.removeSkipLinks ? [removeSkipLinks] : []),
   ...(config.markdownCleanup.removeTocBlocks ? [removeToc] : []),
+  removeEmptyHeadings,
   normalizeSpacing,
   fixProperties,
 ] as const;

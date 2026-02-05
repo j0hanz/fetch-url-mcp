@@ -26,7 +26,6 @@ import {
   buildMetadataFooter,
   cleanupMarkdownArtifacts,
   extractTitleFromRawMarkdown,
-  isLikelyHtmlContent,
   isRawTextContent,
 } from './markdown-cleanup.js';
 import {
@@ -899,12 +898,18 @@ export function htmlToMarkdown(
       'Failed to convert HTML to markdown',
       error instanceof Error ? error : undefined
     );
-    return buildMetadataFooter(metadata, url);
+    throw new FetchError('Failed to convert HTML to markdown', url, 500, {
+      reason: 'markdown_convert_failed',
+    });
   }
 }
 
+const HTML_DOCUMENT_START = /^\s*<(?:!doctype|html|head|body)\b/i;
+
 function shouldPreserveRawContent(url: string, content: string): boolean {
-  if (isRawTextContentUrl(url)) return !isLikelyHtmlContent(content);
+  if (isRawTextContentUrl(url)) {
+    return !HTML_DOCUMENT_START.test(content.trim());
+  }
   return isRawTextContent(content);
 }
 

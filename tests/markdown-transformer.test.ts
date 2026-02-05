@@ -106,6 +106,29 @@ describe('htmlToMarkdown noise filtering', () => {
     assert.ok(markdown.includes('Keep me'));
     assert.ok(!markdown.includes('SHOULD_NOT_APPEAR'));
   });
+
+  it('removes TOC headings when the list is stripped', () => {
+    const html = `
+      <html>
+        <body>
+          <h2>Table of Contents</h2>
+          <ul>
+            <li><a href="#intro">Intro</a></li>
+            <li><a href="#usage">Usage</a></li>
+          </ul>
+          <h2>Intro</h2>
+          <p>Content</p>
+        </body>
+      </html>
+    `;
+
+    const markdown = htmlToMarkdown(html);
+
+    assert.ok(!markdown.toLowerCase().includes('table of contents'));
+    assert.ok(!markdown.includes('[Intro](#intro)'));
+    assert.ok(markdown.includes('Intro'));
+    assert.ok(markdown.includes('Content'));
+  });
 });
 
 describe('htmlToMarkdown metadata footer', () => {

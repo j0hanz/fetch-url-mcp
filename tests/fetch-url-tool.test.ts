@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import { after, describe, it } from 'node:test';
 
+import { NodeHtmlMarkdown } from 'node-html-markdown';
+
 import * as cache from '../dist/cache.js';
 import { config } from '../dist/config.js';
 import { normalizeUrl } from '../dist/fetch.js';
@@ -209,6 +211,61 @@ describe('fetchUrlToolHandler', () => {
         assert.ok(markdown.includes('[Usage](#usage)'));
       }
     );
+  });
+
+  it('preserves raw markdown content even with inline HTML', async () => {
+    const rawContent =
+      '# Title\n\n<details><summary>More</summary>Details</details>';
+
+    await withMockedFetch(
+      async () => {
+        return new Response(rawContent, {
+          status: 200,
+          headers: { 'content-type': 'text/plain' },
+        });
+      },
+      async () => {
+        const response = await fetchUrlToolHandler({
+          url: 'https://example.com/readme.md',
+        });
+
+        const structured = response.structuredContent;
+        assert.ok(structured);
+        const markdown = String(structured.markdown);
+        assert.ok(markdown.includes('<details>'));
+        assert.ok(markdown.includes('Source: https://example.com/readme.md'));
+      }
+    );
+  });
+
+  it('returns an error response when markdown conversion fails', async () => {
+    const originalTranslate = NodeHtmlMarkdown.prototype.translate;
+    NodeHtmlMarkdown.prototype.translate = () => {
+      throw new Error('Translate failed');
+    };
+
+    try {
+      await withMockedFetch(
+        async () => {
+          return new Response('<html><body><p>Fail</p></body></html>', {
+            status: 200,
+            headers: { 'content-type': 'text/html' },
+          });
+        },
+        async () => {
+          const response = await fetchUrlToolHandler({
+            url: 'https://example.com/convert-fail',
+          });
+
+          assert.equal(response.isError, true);
+          const structured = response.structuredContent;
+          assert.ok(structured);
+          assert.match(String(structured.error), /convert|markdown/i);
+        }
+      );
+    } finally {
+      NodeHtmlMarkdown.prototype.translate = originalTranslate;
+    }
   });
 
   it('does not drop aggressive promo matches inside main content', () => {
