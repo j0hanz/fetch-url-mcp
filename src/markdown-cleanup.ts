@@ -32,11 +32,6 @@ function getLineEnding(content: string): '\n' | '\r\n' {
   return content.includes('\r\n') ? '\r\n' : '\n';
 }
 
-// Create fresh regex to avoid shared lastIndex state across calls
-function createCommonTagsRegex(): RegExp {
-  return /<(html|head|body|div|span|script|style|meta|link)\b/gi;
-}
-
 const HEADING_KEYWORDS = new Set([
   'overview',
   'introduction',
@@ -128,13 +123,6 @@ function splitByFences(content: string): Segment[] {
 
 const HeadingHeuristics = {
   isTooLong: (line: string) => line.length > MAX_LINE_LENGTH,
-  hasExistingMarkup: (line: string) =>
-    REGEX.HEADING_MARKER.test(line) ||
-    REGEX.LIST_MARKER.test(line) ||
-    /^\d+\.\s/.test(line) ||
-    /[.!?]$/.test(line) ||
-    /^\[.*\]\(.*\)$/.test(line),
-
   isSpecialPrefix: (line: string) => SPECIAL_PREFIXES.test(line),
 
   isTitleCaseOrKeyword: (trimmed: string) => {
@@ -459,7 +447,7 @@ export function addSourceToMarkdown(content: string, url: string): string {
 function countCommonTags(content: string, limit: number): number {
   if (limit <= 0) return 0;
 
-  const regex = createCommonTagsRegex();
+  const regex = /<(html|head|body|div|span|script|style|meta|link)\b/gi;
   let count = 0;
   while (regex.exec(content)) {
     count += 1;
@@ -483,14 +471,6 @@ export function isRawTextContent(content: string): boolean {
     REGEX.LIST_MARKER.test(content) ||
     content.includes('```')
   );
-}
-
-export function isLikelyHtmlContent(content: string): boolean {
-  const trimmed = content.trim();
-  if (!trimmed) return false;
-  if (REGEX.HTML_DOC_START.test(trimmed)) return true;
-  const tagCount = countCommonTags(content, 5);
-  return tagCount > 5;
 }
 
 export function buildMetadataFooter(

@@ -132,4 +132,41 @@ describe('readResponseText', () => {
     // \ufffd is the replacement character
     assert.equal(result.text, '\ufffd');
   });
+
+  it('rejects responses with unhandled Content-Encoding header', async () => {
+    // 0x1f 0x8b 0x08 is gzip magic number
+    const buffer = new Uint8Array([0x1f, 0x8b, 0x08]);
+    const response = new Response(buffer, {
+      status: 200,
+      headers: {
+        'content-type': 'text/html',
+        'content-encoding': 'gzip',
+      },
+    });
+
+    await assert.rejects(
+      () => readResponseText(response, 'https://example.com', 10000),
+      (error: unknown) => {
+        assert.ok(error instanceof FetchError);
+        assert.equal(error.statusCode, 500);
+        assert.match(error.message, /Content-Encoding/);
+        assert.match(error.message, /gzip/);
+        return true;
+      }
+    );
+  });
+
+  it('allows responses with identity Content-Encoding', async () => {
+    const response = new Response('hello', {
+      status: 200,
+      headers: {
+        'content-type': 'text/html',
+        'content-encoding': 'identity',
+      },
+    });
+
+    const result = await readResponseText(response, 'https://example.com', 10);
+    assert.equal(result.text, 'hello');
+    assert.equal(result.size, 5);
+  });
 });

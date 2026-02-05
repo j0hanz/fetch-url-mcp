@@ -1061,6 +1061,20 @@ class ResponseTextReader {
     signal?: AbortSignal,
     encoding?: string
   ): Promise<{ text: string; size: number }> {
+    const contentEncoding = response.headers.get('content-encoding');
+    if (contentEncoding && contentEncoding.toLowerCase() !== 'identity') {
+      throw new FetchError(
+        `Response has unhandled Content-Encoding: ${contentEncoding}. Body may still be compressed.`,
+        url,
+        500,
+        {
+          reason: 'compression_error',
+          encoding: contentEncoding,
+          stage: 'response_decode',
+        }
+      );
+    }
+
     if (signal?.aborted) {
       cancelResponseBody(response);
       throw createAbortedFetchError(url);
