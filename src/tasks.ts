@@ -33,6 +33,10 @@ export interface TaskState {
   error?: TaskError;
 }
 
+interface InternalTaskState extends TaskState {
+  _createdAtMs: number;
+}
+
 export interface CreateTaskOptions {
   ttl?: number;
 }
@@ -58,38 +62,29 @@ const DEFAULT_PAGE_SIZE = 50;
 const CLEANUP_INTERVAL_MS = 60_000;
 const MAX_CURSOR_LENGTH = 256;
 
-const TERMINAL_STATUSES: ReadonlySet<TaskStatus> = new Set<TaskStatus>([
-  'completed',
-  'failed',
-  'cancelled',
-]);
-
-type RunInContext = ReturnType<typeof AsyncLocalStorage.snapshot>;
-
-function nowIsoString(): string {
-  return new Date().toISOString();
-}
-
 function isTerminalStatus(status: TaskStatus): boolean {
-  return TERMINAL_STATUSES.has(status);
+  return (
+    status === 'completed' || status === 'failed' || status === 'cancelled'
+  );
 }
 
-function snapshotRunInContext(): RunInContext {
-  const maybeSnapshot = (
-    AsyncLocalStorage as unknown as {
-      snapshot?: () => RunInContext;
-    }
-  ).snapshot;
+type RunInContext = (fn: () => void) => void;
 
-  return typeof maybeSnapshot === 'function'
-    ? maybeSnapshot()
-    : (((fn: () => void) => {
+const asyncLocalStorageSnapshot = (
+  AsyncLocalStorage as unknown as {
+    snapshot?: () => RunInContext;
+  }
+).snapshot;
+
+const snapshotRunInContext: () => RunInContext =
+  typeof asyncLocalStorageSnapshot === 'function'
+    ? asyncLocalStorageSnapshot
+    : () => (fn) => {
         fn();
-      }) as unknown as RunInContext);
-}
+      };
 
 class TaskManager {
-  private tasks = new Map<string, TaskState>();
+  private tasks = new Map<string, InternalTaskState>();
   private waiters = new Map<string, Set<(task: TaskState) => void>>();
 
   constructor() {
@@ -98,8 +93,9 @@ class TaskManager {
 
   private startCleanupLoop(): void {
     const interval = setInterval(() => {
+      const now = Date.now();
       for (const [id, task] of this.tasks) {
-        if (this.isExpired(task)) {
+        if (now - task._createdAtMs > task.ttl) {
           this.tasks.delete(id);
         }
       }
@@ -113,16 +109,19 @@ class TaskManager {
     statusMessage = 'Task started',
     ownerKey: string = DEFAULT_OWNER_KEY
   ): TaskState {
-    const now = nowIsoString();
-    const task: TaskState = {
+    const now = new Date();
+    const createdAt = now.toISOString();
+
+    const task: InternalTaskState = {
       taskId: randomUUID(),
       ownerKey,
       status: 'working',
       statusMessage,
-      createdAt: now,
-      lastUpdatedAt: now,
+      createdAt,
+      lastUpdatedAt: createdAt,
       ttl: options?.ttl ?? DEFAULT_TTL_MS,
       pollInterval: DEFAULT_POLL_INTERVAL_MS,
+      _createdAtMs: now.getTime(),
     };
 
     this.tasks.set(task.taskId, task);
@@ -156,7 +155,7 @@ class TaskManager {
 
     Object.assign(task, {
       ...updates,
-      lastUpdatedAt: nowIsoString(),
+      lastUpdatedAt: new Date().toISOString(),
     });
 
     this.notifyWaiters(task);
@@ -181,6 +180,34 @@ class TaskManager {
     return this.tasks.get(taskId);
   }
 
+  private collectPage(
+    ownerKey: string,
+    startIndex: number,
+    pageSize: number
+  ): TaskState[] {
+    const page: TaskState[] = [];
+    let currentIndex = 0;
+    const now = Date.now();
+
+    for (const task of this.tasks.values()) {
+      if (task.ownerKey !== ownerKey) continue;
+
+      if (now - task._createdAtMs > task.ttl) {
+        this.tasks.delete(task.taskId);
+        continue;
+      }
+
+      if (currentIndex >= startIndex) {
+        page.push(task);
+        if (page.length > pageSize) {
+          break;
+        }
+      }
+      currentIndex++;
+    }
+    return page;
+  }
+
   listTasks(options: { ownerKey: string; cursor?: string; limit?: number }): {
     tasks: TaskState[];
     nextCursor?: string;
@@ -194,20 +221,15 @@ class TaskManager {
       throw new McpError(ErrorCode.InvalidParams, 'Invalid cursor');
     }
 
-    const allTasks: TaskState[] = [];
-    for (const task of this.tasks.values()) {
-      if (task.ownerKey !== ownerKey) continue;
-      if (this.isExpired(task)) {
-        this.tasks.delete(task.taskId);
-        continue;
-      }
-      allTasks.push(task);
+    const page = this.collectPage(ownerKey, startIndex, pageSize);
+    const hasMore = page.length > pageSize;
+    if (hasMore) {
+      page.pop();
     }
 
-    const page = allTasks.slice(startIndex, startIndex + pageSize);
-    const nextIndex = startIndex + page.length;
-    const nextCursor =
-      nextIndex < allTasks.length ? this.encodeCursor(nextIndex) : undefined;
+    const nextCursor = hasMore
+      ? this.encodeCursor(startIndex + page.length)
+      : undefined;
 
     return nextCursor ? { tasks: page, nextCursor } : { tasks: page };
   }
@@ -217,16 +239,22 @@ class TaskManager {
     ownerKey: string,
     signal?: AbortSignal
   ): Promise<TaskState | undefined> {
-    const task = this.getTask(taskId, ownerKey);
+    const task = this.tasks.get(taskId);
     if (!task) return undefined;
+
+    if (ownerKey && task.ownerKey !== ownerKey) return undefined;
+
+    if (this.isExpired(task)) {
+      this.tasks.delete(taskId);
+      return undefined;
+    }
+
     if (isTerminalStatus(task.status)) return task;
 
-    const createdAtMs = Date.parse(task.createdAt);
-    const deadlineMs = Number.isFinite(createdAtMs)
-      ? createdAtMs + task.ttl
-      : Number.NaN;
+    const deadlineMs = task._createdAtMs + task.ttl;
+    const now = Date.now();
 
-    if (Number.isFinite(deadlineMs) && deadlineMs <= Date.now()) {
+    if (deadlineMs <= now) {
       this.tasks.delete(taskId);
       return undefined;
     }
@@ -250,20 +278,6 @@ class TaskManager {
       let waiter: ((updated: TaskState) => void) | null = null;
       let deadlineTimeout: CancellableTimeout<{ timeout: true }> | undefined;
 
-      const settleOnce = (fn: () => void): void => {
-        if (settled) return;
-        settled = true;
-        fn();
-      };
-
-      const removeWaiter = (): void => {
-        const set = this.waiters.get(taskId);
-        if (!set) return;
-
-        if (waiter) set.delete(waiter);
-        if (set.size === 0) this.waiters.delete(taskId);
-      };
-
       const cleanup = (): void => {
         if (deadlineTimeout) {
           deadlineTimeout.cancel();
@@ -272,6 +286,22 @@ class TaskManager {
         if (signal) {
           signal.removeEventListener('abort', onAbort);
         }
+      };
+
+      const removeWaiter = (): void => {
+        if (waiter) {
+          const set = this.waiters.get(taskId);
+          if (set) {
+            set.delete(waiter);
+            if (set.size === 0) this.waiters.delete(taskId);
+          }
+        }
+      };
+
+      const settleOnce = (fn: () => void): void => {
+        if (settled) return;
+        settled = true;
+        fn();
       };
 
       const onAbort = (): void => {
@@ -287,13 +317,10 @@ class TaskManager {
       waiter = (updated: TaskState): void => {
         settleOnce(() => {
           cleanup();
-
-          // Enforce the same ownerKey contract as getTask().
           if (updated.ownerKey !== ownerKey) {
             resolveInContext(undefined);
             return;
           }
-
           resolveInContext(updated);
         });
       };
@@ -303,26 +330,18 @@ class TaskManager {
         return;
       }
 
-      const set = this.waiters.get(taskId) ?? new Set();
+      let set = this.waiters.get(taskId);
+      if (!set) {
+        set = new Set();
+        this.waiters.set(taskId, set);
+      }
       set.add(waiter);
-      this.waiters.set(taskId, set);
 
       if (signal) {
         signal.addEventListener('abort', onAbort, { once: true });
       }
 
-      if (!Number.isFinite(deadlineMs)) return;
-
       const timeoutMs = Math.max(0, deadlineMs - Date.now());
-      if (timeoutMs === 0) {
-        settleOnce(() => {
-          cleanup();
-          removeWaiter();
-          this.tasks.delete(taskId);
-          resolveInContext(undefined);
-        });
-        return;
-      }
 
       deadlineTimeout = createUnrefTimeout(timeoutMs, { timeout: true });
       void deadlineTimeout.promise
@@ -348,38 +367,20 @@ class TaskManager {
     for (const waiter of waiters) waiter(task);
   }
 
-  private isExpired(task: TaskState): boolean {
-    const createdAt = Date.parse(task.createdAt);
-    if (!Number.isFinite(createdAt)) return false;
-    return Date.now() - createdAt > task.ttl;
+  private isExpired(task: InternalTaskState): boolean {
+    return Date.now() - task._createdAtMs > task.ttl;
   }
 
   private encodeCursor(index: number): string {
-    // Base64url cursors are opaque pagination tokens, not encryption.
-    const raw = String(index);
-
-    const bytes = new TextEncoder().encode(raw);
-    if (hasToBase64Method(bytes)) {
-      return bytes.toBase64({ alphabet: 'base64url', omitPadding: true });
-    }
-
-    return Buffer.from(raw, 'utf8').toString('base64url');
+    return Buffer.from(String(index), 'utf8').toString('base64url');
   }
 
   private decodeCursor(cursor: string): number | null {
-    // Base64url cursors are opaque pagination tokens, not encryption.
     try {
       if (!isValidBase64UrlCursor(cursor)) return null;
 
-      const fromBase64 = getUint8ArrayFromBase64();
-      const bytes = fromBase64
-        ? fromBase64(cursor, {
-            alphabet: 'base64url',
-            lastChunkHandling: 'strict',
-          })
-        : Buffer.from(cursor, 'base64url');
+      const decoded = Buffer.from(cursor, 'base64url').toString('utf8');
 
-      const decoded = new TextDecoder('utf-8').decode(bytes);
       if (!/^\d+$/u.test(decoded)) return null;
 
       const value = Number.parseInt(decoded, 10);
@@ -392,56 +393,17 @@ class TaskManager {
   }
 }
 
-interface FromBase64Options {
-  alphabet?: 'base64url' | 'base64';
-  lastChunkHandling?: 'strict' | 'loose' | 'stop-before-partial';
-}
-
-type Uint8ArrayFromBase64 = (
-  input: string,
-  options?: FromBase64Options
-) => Uint8Array;
-
-interface ToBase64Options {
-  alphabet?: 'base64url' | 'base64';
-  omitPadding?: boolean;
-}
-
-type Uint8ArrayWithToBase64 = Uint8Array & {
-  toBase64: (options?: ToBase64Options) => string;
-};
-
-function getUint8ArrayFromBase64(): Uint8ArrayFromBase64 | undefined {
-  const maybe = (Uint8Array as unknown as { fromBase64?: unknown }).fromBase64;
-  return typeof maybe === 'function'
-    ? (maybe as Uint8ArrayFromBase64)
-    : undefined;
-}
-
-function hasToBase64Method(bytes: Uint8Array): bytes is Uint8ArrayWithToBase64 {
-  return (
-    typeof (bytes as unknown as { toBase64?: unknown }).toBase64 === 'function'
-  );
-}
-
 function isValidBase64UrlCursor(cursor: string): boolean {
   if (!cursor) return false;
   if (cursor.length > MAX_CURSOR_LENGTH) return false;
-
-  // base64url alphabet + optional padding.
   if (!/^[A-Za-z0-9_-]+={0,2}$/u.test(cursor)) return false;
-
   const firstPaddingIndex = cursor.indexOf('=');
   if (firstPaddingIndex !== -1) {
     for (let i = firstPaddingIndex; i < cursor.length; i += 1) {
       if (cursor[i] !== '=') return false;
     }
-
-    // With padding, base64 strings must have a length divisible by 4.
     return cursor.length % 4 === 0;
   }
-
-  // Without padding, valid lengths are 0,2,3 mod 4 (never 1 mod 4).
   return cursor.length % 4 !== 1;
 }
 
