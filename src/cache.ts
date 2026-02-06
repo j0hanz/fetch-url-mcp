@@ -159,80 +159,6 @@ export function toResourceUri(cacheKey: string): string | null {
   return buildCacheResourceUri(parts.namespace, parts.urlHash);
 }
 
-/* -------------------------------------------------------------------------------------------------
- * In-memory LRU cache (native)
- * Contract:
- * - Max entries: config.cache.maxKeys
- * - TTL in ms: config.cache.ttl * 1000
- * - Access does NOT extend TTL
- * ------------------------------------------------------------------------------------------------- */
-
-class NativeLruCache<K, V> {
-  private readonly max: number;
-  private readonly ttlMs: number;
-  private readonly entries = new Map<K, { value: V; expiresAtMs: number }>();
-  private nextPurgeAtMs = 0;
-
-  constructor({ max, ttlMs }: { max: number; ttlMs: number }) {
-    this.max = max;
-    this.ttlMs = ttlMs;
-  }
-
-  get(key: K): V | undefined {
-    const entry = this.entries.get(key);
-    if (!entry) return undefined;
-
-    if (this.isExpired(entry, Date.now())) {
-      this.entries.delete(key);
-      return undefined;
-    }
-
-    // Refresh LRU order without extending TTL.
-    this.entries.delete(key);
-    this.entries.set(key, entry);
-
-    return entry.value;
-  }
-
-  set(key: K, value: V): void {
-    if (this.max <= 0 || this.ttlMs <= 0) return;
-
-    const now = Date.now();
-    this.entries.delete(key);
-    this.entries.set(key, { value, expiresAtMs: now + this.ttlMs });
-
-    this.maybePurge(now);
-
-    while (this.entries.size > this.max) {
-      const oldestKey = this.entries.keys().next().value;
-      if (oldestKey === undefined) break;
-      this.entries.delete(oldestKey);
-    }
-  }
-
-  keys(): readonly K[] {
-    this.maybePurge(Date.now());
-    return [...this.entries.keys()];
-  }
-
-  private maybePurge(now: number): void {
-    if (this.entries.size > this.max || now >= this.nextPurgeAtMs) {
-      this.purgeExpired(now);
-      this.nextPurgeAtMs = now + this.ttlMs;
-    }
-  }
-
-  private purgeExpired(now: number): void {
-    for (const [key, entry] of this.entries) {
-      if (this.isExpired(entry, now)) this.entries.delete(key);
-    }
-  }
-
-  private isExpired(entry: { expiresAtMs: number }, now: number): boolean {
-    return entry.expiresAtMs <= now;
-  }
-}
-
 interface CacheUpdateEvent {
   cacheKey: string;
   namespace: string;
@@ -258,12 +184,12 @@ interface CacheEntryMetadata {
   title?: string;
 }
 
-class InMemoryCacheStore {
-  private readonly cache = new NativeLruCache<string, CacheEntry>({
-    max: config.cache.maxKeys,
-    ttlMs: config.cache.ttl * 1000,
-  });
+type StoredCacheEntry = CacheEntry & { expiresAtMs: number };
 
+class InMemoryCacheStore {
+  private readonly max = config.cache.maxKeys;
+  private readonly ttlMs = config.cache.ttl * 1000;
+  private readonly entries = new Map<string, StoredCacheEntry>();
   private readonly updateEmitter = new EventEmitter();
 
   isEnabled(): boolean {
@@ -272,7 +198,15 @@ class InMemoryCacheStore {
 
   keys(): readonly string[] {
     if (!this.isEnabled()) return [];
-    return [...this.cache.keys()];
+
+    const now = Date.now();
+    const result: string[] = [];
+    for (const [key, entry] of this.entries) {
+      if (entry.expiresAtMs > now) {
+        result.push(key);
+      }
+    }
+    return result;
   }
 
   onUpdate(listener: CacheUpdateListener): () => void {
@@ -309,10 +243,23 @@ class InMemoryCacheStore {
     cacheKey: string | null,
     options?: CacheGetOptions
   ): CacheEntry | undefined {
-    if (!this.isReadable(cacheKey, options?.force)) return undefined;
-    return this.run(cacheKey, 'Cache get error', () =>
-      this.cache.get(cacheKey)
-    );
+    if (!cacheKey || (!config.cache.enabled && !options?.force))
+      return undefined;
+    try {
+      const entry = this.entries.get(cacheKey);
+      if (!entry) return undefined;
+      if (entry.expiresAtMs <= Date.now()) {
+        this.entries.delete(cacheKey);
+        return undefined;
+      }
+      this.entries.delete(cacheKey);
+      this.entries.set(cacheKey, entry);
+
+      return entry;
+    } catch (error: unknown) {
+      this.logError('Cache get error', cacheKey, error);
+      return undefined;
+    }
   }
 
   set(
@@ -321,59 +268,33 @@ class InMemoryCacheStore {
     metadata: CacheEntryMetadata,
     options?: CacheSetOptions
   ): void {
-    if (!this.isWritable(cacheKey, content, options?.force)) return;
+    if (!cacheKey || !content) return;
+    if (!config.cache.enabled && !options?.force) return;
 
-    this.run(cacheKey, 'Cache set error', () => {
-      const now = Date.now();
-      const expiresAtMs = now + config.cache.ttl * 1000; // preserve existing behavior
-      const entry = this.buildEntry(content, metadata, now, expiresAtMs);
-      this.cache.set(cacheKey, entry);
-      this.notify(cacheKey);
-    });
-  }
-
-  private isReadable(
-    cacheKey: string | null,
-    force = false
-  ): cacheKey is string {
-    return (config.cache.enabled || force) && Boolean(cacheKey);
-  }
-
-  private isWritable(
-    cacheKey: string | null,
-    content: string,
-    force = false
-  ): cacheKey is string {
-    if (!cacheKey || !content) return false;
-    return config.cache.enabled || force;
-  }
-
-  private run<T>(
-    cacheKey: string,
-    message: string,
-    operation: () => T
-  ): T | undefined {
     try {
-      return operation();
-    } catch (error: unknown) {
-      this.logError(message, cacheKey, error);
-      return undefined;
-    }
-  }
+      const now = Date.now();
+      const expiresAtMs = now + this.ttlMs;
+      const entry: StoredCacheEntry = {
+        url: metadata.url,
+        content,
+        fetchedAt: new Date(now).toISOString(),
+        expiresAt: new Date(expiresAtMs).toISOString(),
+        expiresAtMs,
+        ...(metadata.title === undefined ? {} : { title: metadata.title }),
+      };
+      this.entries.delete(cacheKey);
+      this.entries.set(cacheKey, entry);
+      if (this.entries.size > this.max) {
+        const oldestKey = this.entries.keys().next().value;
+        if (oldestKey !== undefined) {
+          this.entries.delete(oldestKey);
+        }
+      }
 
-  private buildEntry(
-    content: string,
-    metadata: CacheEntryMetadata,
-    fetchedAtMs: number,
-    expiresAtMs: number
-  ): CacheEntry {
-    return {
-      url: metadata.url,
-      content,
-      fetchedAt: new Date(fetchedAtMs).toISOString(),
-      expiresAt: new Date(expiresAtMs).toISOString(),
-      ...(metadata.title === undefined ? {} : { title: metadata.title }),
-    };
+      this.notify(cacheKey);
+    } catch (error: unknown) {
+      this.logError('Cache set error', cacheKey, error);
+    }
   }
 
   private notify(cacheKey: string): void {
