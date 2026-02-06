@@ -1696,21 +1696,110 @@ function createUnsupportedContentEncodingError(
   );
 }
 
-function decodeResponseIfNeeded(
+function createPumpedStream(
+  initialChunk: Uint8Array,
+  reader: ReadableStreamDefaultReader<Uint8Array>
+): ReadableStream<Uint8Array> {
+  return new ReadableStream({
+    start(controller) {
+      if (initialChunk.byteLength > 0) {
+        controller.enqueue(initialChunk);
+      }
+    },
+    async pull(controller) {
+      try {
+        const { done, value } = await reader.read();
+        if (done) {
+          controller.close();
+        } else {
+          controller.enqueue(value);
+        }
+      } catch (error) {
+        controller.error(error);
+      }
+    },
+    cancel(reason) {
+      void reader.cancel(reason).catch(() => undefined);
+    },
+  });
+}
+
+function isLikelyCompressed(
+  chunk: Uint8Array,
+  encoding: 'gzip' | 'deflate' | 'br'
+): boolean {
+  if (chunk.byteLength === 0) return false;
+
+  if (encoding === 'gzip') {
+    return chunk.byteLength >= 2 && chunk[0] === 0x1f && chunk[1] === 0x8b;
+  }
+
+  if (encoding === 'deflate') {
+    if (chunk.byteLength < 2) return false;
+    const byte0 = chunk[0] ?? 0;
+    const byte1 = chunk[1] ?? 0;
+    const cm = byte0 & 0x0f;
+    if (cm !== 8) return false;
+    return (byte0 * 256 + byte1) % 31 === 0;
+  }
+  let nonPrintable = 0;
+  const limit = Math.min(chunk.length, 50);
+  for (let i = 0; i < limit; i += 1) {
+    const b = chunk[i] ?? 0;
+    if (b < 0x09 || (b > 0x0d && b < 0x20) || b === 0x7f) nonPrintable += 1;
+  }
+  return nonPrintable / limit > 0.1;
+}
+
+async function decodeResponseIfNeeded(
   response: Response,
   url: string,
   signal?: AbortSignal
-): Response {
+): Promise<Response> {
   const encodingHeader = response.headers.get('content-encoding');
   const encoding = parseSingleContentEncoding(encodingHeader);
 
-  if (encoding === null) return response;
+  if (encoding === null || encoding === 'identity') return response;
   if (encoding === undefined) {
     throw createUnsupportedContentEncodingError(url, encodingHeader ?? '');
   }
-  if (encoding === 'identity') return response;
   if (!response.body) return response;
 
+  // Peek at first chunk to check if actually compressed
+  const reader = response.body.getReader();
+  let initialChunk: Uint8Array;
+  try {
+    const { done, value } = await reader.read();
+    if (done) {
+      return new Response(null, {
+        status: response.status,
+        statusText: response.statusText,
+        headers: response.headers,
+      });
+    }
+    initialChunk = value;
+  } catch (error) {
+    // If read fails, throw properly
+    throw new FetchError(
+      `Failed to read response body: ${isError(error) ? error.message : String(error)}`,
+      url,
+      502
+    );
+  }
+
+  if (
+    !isLikelyCompressed(initialChunk, encoding as 'gzip' | 'deflate' | 'br')
+  ) {
+    // Already decompressed (or invalid), pass through
+    const body = createPumpedStream(initialChunk, reader);
+    return new Response(body, {
+      status: response.status,
+      statusText: response.statusText,
+      headers: response.headers,
+    });
+  }
+
+  // Set up decompression
   let decompressor: ReturnType<typeof createGunzip> | null = null;
   switch (encoding) {
     case 'gzip':
@@ -1723,10 +1812,12 @@ function decodeResponseIfNeeded(
       decompressor = createBrotliDecompress();
       break;
     default:
+      // Should have been caught by parseSingleContentEncoding check, but safe fallback
       decompressor = null;
   }
 
   if (!decompressor) {
+    // Should be unreachable if encoding valid
     throw createUnsupportedContentEncodingError(
       url,
       encodingHeader ?? encoding
@@ -1734,7 +1825,10 @@ function decodeResponseIfNeeded(
   }
 
   const sourceStream = Readable.fromWeb(
-    response.body as unknown as NodeReadableStream<Uint8Array>
+    createPumpedStream(
+      initialChunk,
+      reader
+    ) as unknown as NodeReadableStream<Uint8Array>
   );
   const decodedNodeStream = sourceStream.pipe(decompressor);
 
@@ -1801,7 +1895,11 @@ async function readAndRecordDecodedResponse(
     throw responseError;
   }
 
-  const decodedResponse = decodeResponseIfNeeded(response, finalUrl, signal);
+  const decodedResponse = await decodeResponseIfNeeded(
+    response,
+    finalUrl,
+    signal
+  );
 
   const contentType = decodedResponse.headers.get('content-type');
   assertSupportedContentType(contentType, finalUrl);
@@ -2030,7 +2128,7 @@ export async function readResponseText(
   signal?: AbortSignal,
   encoding?: string
 ): Promise<{ text: string; size: number }> {
-  const decodedResponse = decodeResponseIfNeeded(response, url, signal);
+  const decodedResponse = await decodeResponseIfNeeded(response, url, signal);
   return responseReader.read(decodedResponse, url, maxBytes, signal, encoding);
 }
 
@@ -2041,7 +2139,7 @@ export async function readResponseBuffer(
   signal?: AbortSignal,
   encoding?: string
 ): Promise<{ buffer: Uint8Array; encoding: string; size: number }> {
-  const decodedResponse = decodeResponseIfNeeded(response, url, signal);
+  const decodedResponse = await decodeResponseIfNeeded(response, url, signal);
   return responseReader.readBuffer(
     decodedResponse,
     url,
