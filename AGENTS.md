@@ -4,68 +4,110 @@
 
 ## 1) Project Context
 
-- **Domain:** Intelligent web content fetcher MCP server (HTML to Markdown conversion).
+- **Domain:** MCP (Model Context Protocol) server that fetches web pages and converts HTML to clean, AI-readable Markdown.
 - **Tech Stack (Verified):**
-  - **Runtime:** Node.js >= 24.13.0 (cite `package.json` engines)
-  - **Languages:** TypeScript 5.9.3 (cite `package.json`)
-  - **Frameworks:** Model Context Protocol (MCP) SDK (`@modelcontextprotocol/sdk`)
-  - **Key Libraries:** `@mozilla/readability`, `linkedom`, `node-html-markdown`, `zod`.
-  - **Build Tool:** `tsc` + Custom Task Runner (`scripts/tasks.mjs`).
-- **Architecture:** Service-based / Layered (inferred from imports: services, middleware, transformers, tools).
+  - **Languages:** TypeScript 5.9+ (`package.json` → `"typescript": "^5.9.3"`), ESM (`"type": "module"`)
+  - **Frameworks:** `@modelcontextprotocol/sdk` v1.x (`"^1.26.0"` in `package.json`), Node.js ≥24 (`engines`)
+  - **Key Libraries:**
+    - `zod` v4 (`"^4.3.6"`) — input/output schema validation
+    - `@mozilla/readability` (`"^0.6.0"`) — article extraction
+    - `linkedom` (`"^0.18.12"`) — DOM parsing (no browser required)
+    - `node-html-markdown` (`"^2.0.0"`) — HTML→Markdown conversion
+- **Architecture:** Single-package MCP server with modular source files (one concern per file). Supports both **stdio** and **Streamable HTTP** transports. Features an in-memory cache, task API, worker pool for transforms, IP blocklist, session management, and OAuth/static-token auth.
 
 ## 2) Repository Map (High-Level)
 
-- `src/`: Application source code (`rootDir`).
-- `tests/`: Unit and integration tests.
-- `scripts/`: Build and task automation scripts.
-- `assets/`: Static assets (prompts, instructions).
-- `dist/`: Compiled output (`outDir`).
-  > Ignore generated/vendor dirs like `dist/`, `node_modules/`, `.git/`.
+- `src/` — All production TypeScript source
+  - `index.ts` — CLI entrypoint (shebang, arg parsing, transport selection, shutdown)
+  - `mcp.ts` — McpServer creation, resource/tool registration, task handlers
+  - `tools.ts` — `fetch-url` tool definition, pipeline, error mapping, progress reporting
+  - `http-native.ts` — Streamable HTTP server (sessions, auth, health endpoint)
+  - `config.ts` — Centralized env-based configuration (all settings)
+  - `fetch.ts` — URL normalization, HTTP fetching
+  - `transform.ts` / `workers/` — HTML→Markdown transform with worker pool
+  - `cache.ts` — In-memory content cache with resource serving
+  - `errors.ts` — `FetchError`, `getErrorMessage`, error helpers
+  - `session.ts` — HTTP session store and lifecycle
+  - `ip-blocklist.ts` — Private/metadata IP blocking
+  - `observability.ts` — Structured logging with request context
+- `tests/` — All test files (`*.test.ts`), run against compiled `dist/`
+- `scripts/` — Build orchestration (`tasks.mjs`), validation scripts
+- `assets/` — Static assets (logo SVG)
+- `.github/workflows/` — CI/CD (publish to npm on release)
+- `.github/instructions/` — Agent instruction files for MCP server conventions
+
+> Ignore: `dist/`, `node_modules/`, `.tsbuildinfo`
 
 ## 3) Operational Commands (Verified)
 
-- **Install:** `npm install`
-- **Dev:** `npm run dev` (Runs `tsc` in watch mode) or `npm run dev:run` (Runs `dist/index.js` in watch mode)
-- **Test:** `npm test` (Runs `node --test` via `scripts/tasks.mjs`)
-- **Build:** `npm run build` (Clean, Compile, Assets, Make Executable)
-- **Lint:** `npm run lint` (ESLint)
+- **Environment:** Node.js ≥24, npm
+- **Install:** `npm ci` (CI from `publish.yml`) or `npm install`
+- **Dev:** `npm run dev` (tsc watch) / `npm run dev:run` (run with .env + watch)
+- **Build:** `npm run build` (clean → compile → validate instructions → copy assets → chmod; via `scripts/tasks.mjs`)
+- **Test:** `npm test` (builds first, then runs `node --test` on `tests/**/*.test.ts` against compiled `dist/`)
+- **Type-check:** `npm run type-check` (tsc --noEmit)
+- **Lint:** `npm run lint` (ESLint) / `npm run lint:fix`
 - **Format:** `npm run format` (Prettier)
-- **Type Check:** `npm run type-check` (TSC noEmit)
-- **Inspector:** `npm run inspector` (MCP Inspector)
+- **Dead code:** `npm run knip` / `npm run knip:fix`
+- **Inspector:** `npm run inspector` (build + launch MCP Inspector on stdio)
 
 ## 4) Coding Standards (Style & Patterns)
 
-- **Naming:**
-  - Variables/Functions: `camelCase` (Verified `eslint.config.mjs`)
-  - Types/Classes/Enums: `PascalCase` (Verified `eslint.config.mjs`)
-  - Imports: `camelCase` or `PascalCase` (Verified `eslint.config.mjs`)
-- **Structure:**
-  - Logic split into `services`, `transformers`, `tools`, `utils`.
-  - Explicit `import type` usage required (`consistent-type-imports`).
-- **Typing/Strictness:**
-  - Strict TypeScript (`strict: true`, `noImplicitOverride`, `noImplicitReturns`).
-  - No explicit `any` (`@typescript-eslint/no-explicit-any`: error).
+- **Naming:** `camelCase` for variables/functions, `PascalCase` for types/classes/enums, `UPPER_CASE` for constants. Enforced via `@typescript-eslint/naming-convention` in `eslint.config.mjs`.
+- **Imports:**
+  - **Type-only imports required:** `import type { X }` / `import { type X }` (ESLint `consistent-type-imports` rule: error)
+  - **Named exports only:** no default exports
+  - `.js` extensions in local imports (NodeNext module resolution)
+  - Sorted by `@trivago/prettier-plugin-sort-imports`
+  - Unused imports are errors (`eslint-plugin-unused-imports`)
+- **TypeScript Strictness** (all enabled in `tsconfig.json`):
+  - `strict`, `noUncheckedIndexedAccess`, `verbatimModuleSyntax`, `isolatedModules`
+  - `exactOptionalPropertyTypes`, `noImplicitOverride`, `noImplicitReturns`, `noFallthroughCasesInSwitch`
+- **Explicit return types** required on functions (`explicit-function-return-type`: error)
+- **No `any`:** `@typescript-eslint/no-explicit-any`: error
+- **Schemas:** Use `z.strictObject()` for all Zod schemas; add `.describe()` to every parameter; add bounds (`.min()`/`.max()`)
+- **Tool pattern:** One MCP tool per registration; return both `content` (JSON stringified text block) and `structuredContent`; use `isError: true` on failure (never throw uncaught)
+- **Error handling:** Prefer tool execution errors over protocol errors; centralized via `getErrorMessage()`, `createToolErrorResponse()`, `handleToolError()` in `errors.ts`/`tools.ts`
+- **Logging:** Never write to `stdout` in stdio mode; use `logInfo`/`logError`/`logWarn`/`logDebug` from `observability.ts` (writes to stderr)
 - **Patterns Observed:**
-  - Custom Task Runner in `scripts/tasks.mjs` handles build lifecycle.
-  - Configuration single source of truth in `package.json` (version, mcpName).
-  - Import sorting via `@trivago/prettier-plugin-sort-imports`.
+  - Configuration via environment variables, parsed once at import in `config.ts`
+  - Worker pool pattern for CPU-bound transforms (`src/workers/`, `src/transform.ts`)
+  - Inline content truncation with safe code-fence closing (`tools.ts`)
+  - Session-scoped task ownership for async tool execution (`mcp.ts`)
 
 ## 5) Agent Behavioral Rules (Do Nots)
 
-- Do not introduce new dependencies without updating `package.json` and running `npm install`.
+- Do not introduce new dependencies without updating manifests/lockfiles via the package manager.
 - Do not edit `package-lock.json` manually.
-- Do not commit secrets; never print `.env` values.
-- Do not disable `eslint` rules or `typescript-eslint` strict checks without explicit justification.
-- Do not use `console.log` for production logging; use the `Logger` or observability module.
+- Do not commit secrets; never print `.env` values; use existing `config.ts` env parsing.
+- Do not change public APIs (tool schemas, MCP resource URIs) without updating docs/tests and noting migration impact.
+- Do not disable or bypass existing ESLint/TypeScript rules without explicit approval.
+- Do not use default exports; always use named exports.
+- Do not use `any`; use `unknown` and narrow with type guards (`type-guards.ts`).
+- Do not write to `stdout` in production code (corrupts JSON-RPC stdio transport); use `process.stderr` or observability helpers.
+- Do not add `.js` extension-less local imports — NodeNext resolution requires `.js` extensions.
+- Do not use Zod v3 APIs (`z.object()` → use `z.strictObject()`).
+- Do not throw uncaught exceptions from tool handlers — return `isError: true` responses.
 
 ## 6) Testing Strategy (Verified)
 
-- **Framework:** Node.js Native Test Runner (`node --test`).
-- **Where tests live:** `tests/*.test.ts` and `src/__tests__/*.test.ts`.
+- **Framework:** `node:test` (built-in Node.js test runner) + `node:assert/strict`
+- **Where tests live:** `tests/` directory (all `*.test.ts` files)
 - **Approach:**
-  - Unit tests co-located or in `tests/` directory.
-  - Tests run against source files (requires build/loader handling in `scripts/tasks.mjs`).
-  - Strict coverage checks available via `npm run test:coverage`.
+  - Tests run against **compiled output** (`dist/`) — build is a prerequisite
+  - Unit tests with `t.mock.method()` for mocking (`globalThis.fetch`, library methods)
+  - No external test dependencies (no Jest, Vitest, etc.)
+  - Patterns: describe/it blocks, setUp/tearDown via `after()`, config mutations restored in `finally`
+  - ~45 test files covering tools, cache, transform, URL handling, HTTP server, sessions, errors, etc.
+  - Coverage available via `npm run test:coverage` (`--experimental-test-coverage`)
+
+## 7) Common Pitfalls (Verified)
+
+- **Tests require build first** — `npm test` runs the build automatically, but if running `node --test` manually, ensure `dist/` is current.
+- **CI uses Node 20 but `engines` requires ≥24** — local dev/tests must use Node ≥24; the publish workflow pins Node 20 for npm compatibility.
+- **Config mutations in tests** — tests that modify `config.*` properties must restore original values in `finally` blocks to avoid leaking state across tests.
+- **Worker pool shutdown** — tests using the transform pipeline should call `shutdownTransformWorkerPool()` in `after()` hooks to prevent hanging processes.
+- **Shebang line** — `src/index.ts` must keep `#!/usr/bin/env node` as the exact first line (no BOM, no blank lines before it).
 
 ## 8) Evolution Rules
 

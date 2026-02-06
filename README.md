@@ -4,18 +4,15 @@
 
 <img src="assets/logo.svg" alt="SuperFetch MCP Logo" width="300">
 
-[![npm version](https://img.shields.io/npm/v/@j0hanz/superfetch.svg)](https://www.npmjs.com/package/@j0hanz/superfetch) [![license](https://img.shields.io/npm/l/@j0hanz/superfetch.svg)](https://www.npmjs.com/package/@j0hanz/superfetch) [![Node.js](https://img.shields.io/badge/Node.js-%3E=20.18.1-339933?logo=nodedotjs&logoColor=white)](https://nodejs.org/) [![TypeScript](https://img.shields.io/badge/TypeScript-5.9-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/) [![MCP SDK](https://img.shields.io/badge/MCP%20SDK-1.25.x-6f42c1)](https://github.com/modelcontextprotocol/sdk)
+[![npm version](https://img.shields.io/npm/v/%40j0hanz%2Fsuperfetch)](https://www.npmjs.com/package/@j0hanz/superfetch) [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT) [![Node.js](https://img.shields.io/badge/node-%3E%3D24-brightgreen)](https://nodejs.org) [![TypeScript](https://img.shields.io/badge/TypeScript-5.9-blue)](https://www.typescriptlang.org) [![MCP SDK](https://img.shields.io/badge/MCP%20SDK-1.26-purple)](https://modelcontextprotocol.io)
 
-[![Install with NPX in VS Code](https://img.shields.io/badge/VS_Code-Install-0098FF?style=flat-square&logo=visualstudiocode&logoColor=white)](https://insiders.vscode.dev/redirect/mcp/install?name=superfetch&inputs=%5B%5D&config=%7B%22command%22%3A%22npx%22%2C%22args%22%3A%5B%22-y%22%2C%22%40j0hanz%2Fsuperfetch%40latest%22%2C%22--stdio%22%5D%7D) [![Install with NPX in VS Code Insiders](https://img.shields.io/badge/VS_Code_Insiders-Install-24bfa5?style=flat-square&logo=visualstudiocode&logoColor=white)](https://insiders.vscode.dev/redirect/mcp/install?name=superfetch&inputs=%5B%5D&config=%7B%22command%22%3A%22npx%22%2C%22args%22%3A%5B%22-y%22%2C%22%40j0hanz%2Fsuperfetch%40latest%22%2C%22--stdio%22%5D%7D&quality=insiders) [![Install in Claude Desktop](https://img.shields.io/badge/Claude_Desktop-Install-ff9800?style=flat-square&logo=anthropic&logoColor=white)](https://claude.ai/desktop/mcp/install?name=superfetch&config=%7B%22command%22%3A%22npx%22%2C%22args%22%3A%5B%22-y%22%2C%22%40j0hanz%2Fsuperfetch%40latest%22%2C%22--stdio%22%5D%7D)
+[![Install in VS Code](https://img.shields.io/badge/VS_Code-Install-0078d7?logo=visual-studio-code&logoColor=white)](https://insiders.vscode.dev/redirect?url=vscode%3Amcp%2Finstall%3F%7B%22name%22%3A%22superfetch%22%2C%22command%22%3A%22npx%22%2C%22args%22%3A%5B%22-y%22%2C%22%40j0hanz%2Fsuperfetch%40latest%22%2C%22--stdio%22%5D%7D) [![Install in VS Code Insiders](https://img.shields.io/badge/VS_Code_Insiders-Install-24bfa5?logo=visual-studio-code&logoColor=white)](https://insiders.vscode.dev/redirect?url=vscode-insiders%3Amcp%2Finstall%3F%7B%22name%22%3A%22superfetch%22%2C%22command%22%3A%22npx%22%2C%22args%22%3A%5B%22-y%22%2C%22%40j0hanz%2Fsuperfetch%40latest%22%2C%22--stdio%22%5D%7D) [![Install in Cursor](https://img.shields.io/badge/Cursor-Install-f97316?logo=cursor&logoColor=white)](https://cursor.com/install-mcp?name=superfetch&config=eyJjb21tYW5kIjoibnB4IiwiYXJncyI6WyIteSIsIkBqMGhhbnovc3VwZXJmZXRjaEBsYXRlc3QiLCItLXN0ZGlvIl19)
 
-Fetch and convert public web pages to clean, AI-friendly Markdown via MCP.
+Fetch and convert public web content to clean Markdown both readable by humans and optimized for LLM context.
 
 ## Overview
 
-SuperFetch is a Node.js MCP server that fetches public HTTP(S) pages, extracts
-primary content, and converts it into clean Markdown. It runs either as a stdio
-MCP server (for local clients) or as a Streamable HTTP MCP server with auth,
-cache, and SSRF protections.
+superFetch is a [Model Context Protocol](https://modelcontextprotocol.io) (MCP) server that fetches public web pages, extracts meaningful content using Mozilla's Readability algorithm, and converts the result into clean Markdown optimized for LLM context windows. It handles noise removal, caching, SSRF protection, async task execution, and supports both stdio and Streamable HTTP transports.
 
 ## Key Features
 
@@ -33,63 +30,93 @@ cache, and SSRF protections.
 
 ## Tech Stack
 
-- Runtime: Node.js >= 20.18.1 (engines)
-- Language: TypeScript 5.9.3 (dev dependency)
-- MCP SDK: @modelcontextprotocol/sdk ^1.25.3
-- HTML processing: @mozilla/readability ^0.6.0, linkedom ^0.18.12
-- Markdown conversion: node-html-markdown ^2.0.0
-- HTTP client: undici ^7.19.2
-- Validation: zod ^4.3.6
-- Package manager: npm (package-lock.json)
+| Component           | Technology                          |
+| ------------------- | ----------------------------------- |
+| Runtime             | Node.js ≥ 24                        |
+| Language            | TypeScript 5.9                      |
+| MCP SDK             | `@modelcontextprotocol/sdk` ^1.26.0 |
+| Content Extraction  | `@mozilla/readability` ^0.6.0       |
+| DOM Parsing         | `linkedom` ^0.18.12                 |
+| Markdown Conversion | `node-html-markdown` ^2.0.0         |
+| Schema Validation   | `zod` ^4.3.6                        |
+| Package Manager     | npm                                 |
 
 ## Architecture
 
-Fetch pipeline (simplified):
+```text
+URL → Validate → DNS Preflight → HTTP Fetch → Decompress
+  → Truncate HTML → Readability Extract → Noise Removal
+  → Markdown Convert → Cleanup Pipeline → Cache → Response
+```
 
-1. Validate and normalize the URL (http/https only, max length 2048).
-2. Block internal hosts and private IP ranges.
-3. Rewrite supported repo URLs to raw content.
-4. Fetch HTML with undici (15s timeout, 10 MB max, 5 redirects).
-5. Extract main content with Readability + DOM cleanup.
-6. Convert to Markdown, inject metadata, and return via MCP.
-7. Cache the result and expose it as a resource or download.
+1. **URL Validation** — Normalize, block private hosts, transform raw-content URLs (GitHub, GitLab, Bitbucket)
+2. **Fetch** — HTTP request via `undici` with redirect following, DNS preflight SSRF checks, and size limits
+3. **Transform** — Offloaded to worker threads: parse HTML with `linkedom`, extract with Readability, remove DOM noise, convert to Markdown
+4. **Cleanup** — Multi-pass Markdown normalization (heading promotion, spacing, skip-link removal, TypeDoc comment stripping)
+5. **Cache + Respond** — Store result, apply inline content limits, return structured content with optional resource links
 
 ## Repository Structure
 
 ```text
-.
-├── assets/               # Logo and static assets copied to dist
-├── scripts/              # Build and validation utilities
-├── src/                  # MCP server implementation (TS)
-│   ├── workers/          # Worker-thread transform implementation
-│   ├── http-native.ts    # Streamable HTTP server
-│   ├── mcp.ts            # MCP server wiring
-│   ├── tools.ts          # fetch-url tool implementation
-│   └── ...
-├── tests/                # Node test runner tests (import dist)
-├── CONFIGURATION.md      # Full configuration reference
-├── AGENTS.md             # Agent guidance
+superFetch/
+├── assets/
+│   └── logo.svg
+├── scripts/
+│   ├── tasks.mjs
+│   └── validate-fetch.mjs
+├── src/
+│   ├── workers/
+│   │   ├── transform-child.ts
+│   │   └── transform-worker.ts
+│   ├── cache.ts
+│   ├── config.ts
+│   ├── crypto.ts
+│   ├── dom-noise-removal.ts
+│   ├── errors.ts
+│   ├── fetch.ts
+│   ├── host-normalization.ts
+│   ├── http-native.ts
+│   ├── index.ts
+│   ├── instructions.md
+│   ├── ip-blocklist.ts
+│   ├── json.ts
+│   ├── language-detection.ts
+│   ├── markdown-cleanup.ts
+│   ├── mcp-validator.ts
+│   ├── mcp.ts
+│   ├── observability.ts
+│   ├── resources.ts
+│   ├── server-tuning.ts
+│   ├── session.ts
+│   ├── tasks.ts
+│   ├── timer-utils.ts
+│   ├── tools.ts
+│   ├── transform-types.ts
+│   ├── transform.ts
+│   └── type-guards.ts
+├── tests/
+│   └── *.test.ts
 ├── package.json
-└── tsconfig.json
+├── tsconfig.json
+└── AGENTS.md
 ```
 
 ## Requirements
 
-- Node.js >= 20.18.1
-- npm (uses package-lock.json)
+- **Node.js** ≥ 24
 
-## Quickstart (stdio)
+## Quickstart
 
 ```bash
 npx -y @j0hanz/superfetch@latest --stdio
 ```
 
-Example MCP client configuration:
+Add to your MCP client configuration:
 
 ```json
 {
   "mcpServers": {
-    "superFetch": {
+    "superfetch": {
       "command": "npx",
       "args": ["-y", "@j0hanz/superfetch@latest", "--stdio"]
     }
@@ -99,20 +126,22 @@ Example MCP client configuration:
 
 ## Installation
 
-### NPX (recommended)
+### NPX (Recommended)
+
+No installation required — runs directly:
 
 ```bash
 npx -y @j0hanz/superfetch@latest --stdio
 ```
 
-### Global install
+### Global Install
 
 ```bash
 npm install -g @j0hanz/superfetch
 superfetch --stdio
 ```
 
-### From source
+### From Source
 
 ```bash
 git clone https://github.com/j0hanz/super-fetch-mcp-server.git
@@ -124,87 +153,110 @@ node dist/index.js --stdio
 
 ## Configuration
 
-SuperFetch is configured entirely via environment variables. Set them in your
-MCP client configuration (the `env` field) or in the shell before starting the
-server. For the full reference, see `CONFIGURATION.md`.
+### Runtime Modes
 
-### Runtime modes
+| Flag        | Description                                 |
+| ----------- | ------------------------------------------- |
+| `--stdio`   | Run in stdio mode (for desktop MCP clients) |
+| `--help`    | Show usage help                             |
+| `--version` | Print server version                        |
 
-| Mode  | Flag      | Description                                                         |
-| ----- | --------- | ------------------------------------------------------------------- |
-| Stdio | `--stdio` | Communicates via stdin/stdout. No HTTP server.                      |
-| HTTP  | (default) | Starts an HTTP server. Requires static token(s) or OAuth to be set. |
+When no `--stdio` flag is passed, the server starts in **HTTP mode** (Streamable HTTP on port 3000 by default).
 
-### CLI arguments
+### Environment Variables
 
-| Argument  | Type    | Default | Description                         |
-| --------- | ------- | ------- | ----------------------------------- |
-| `--stdio` | boolean | false   | Run in stdio mode (no HTTP server). |
+#### Core Settings
 
-### Core server settings
+| Variable           | Default                    | Description                                            |
+| ------------------ | -------------------------- | ------------------------------------------------------ |
+| `HOST`             | `127.0.0.1`                | HTTP server bind address                               |
+| `PORT`             | `3000`                     | HTTP server port (1024–65535)                          |
+| `LOG_LEVEL`        | `info`                     | Log level: `debug`, `info`, `warn`, `error`            |
+| `FETCH_TIMEOUT_MS` | `15000`                    | HTTP fetch timeout in ms (1000–60000)                  |
+| `CACHE_ENABLED`    | `true`                     | Enable/disable in-memory content cache                 |
+| `USER_AGENT`       | `superFetch-MCP/{version}` | Custom User-Agent header                               |
+| `ALLOW_REMOTE`     | `false`                    | Allow remote connections in HTTP mode                  |
+| `ALLOWED_HOSTS`    | _(empty)_                  | Comma-separated hostnames allowed to bypass block list |
 
-| Variable                           | Default              | Description                                                    |
-| ---------------------------------- | -------------------- | -------------------------------------------------------------- |
-| `HOST`                             | `127.0.0.1`          | HTTP bind address.                                             |
-| `PORT`                             | `3000`               | HTTP port (1024-65535, `0` for ephemeral).                     |
-| `USER_AGENT`                       | `superFetch-MCP/2.0` | User-Agent for outbound requests.                              |
-| `CACHE_ENABLED`                    | `true`               | Enable in-memory cache.                                        |
-| `LOG_LEVEL`                        | `info`               | Logging level (`debug`, `info`, `warn`, `error`).              |
-| `ALLOW_REMOTE`                     | `false`              | Allow non-loopback binds (OAuth required).                     |
-| `ALLOWED_HOSTS`                    | (empty)              | Additional allowed Host/Origin values (comma/space separated). |
-| `FETCH_TIMEOUT_MS`                 | `15000`              | Outgoing fetch timeout in milliseconds (1000-60000).           |
-| `SUPERFETCH_EXTRA_NOISE_TOKENS`    | (empty)              | Extra noise tokens for DOM noise removal.                      |
-| `SUPERFETCH_EXTRA_NOISE_SELECTORS` | (empty)              | Extra CSS selectors for DOM noise removal.                     |
+#### Authentication (HTTP Mode)
 
-All other settings (transform timeouts, noise weights, markdown cleanup, rate limits, etc.) use sensible hardcoded defaults. See `CONFIGURATION.md` for the full list.
+| Variable                  | Default   | Description                             |
+| ------------------------- | --------- | --------------------------------------- |
+| `ACCESS_TOKENS`           | _(empty)_ | Comma-separated static bearer tokens    |
+| `API_KEY`                 | _(empty)_ | Single API key (added to static tokens) |
+| `OAUTH_ISSUER_URL`        | _(empty)_ | OAuth issuer URL (enables OAuth mode)   |
+| `OAUTH_AUTHORIZATION_URL` | _(empty)_ | OAuth authorization endpoint            |
+| `OAUTH_TOKEN_URL`         | _(empty)_ | OAuth token endpoint                    |
+| `OAUTH_INTROSPECTION_URL` | _(empty)_ | OAuth token introspection endpoint      |
+| `OAUTH_REVOCATION_URL`    | _(empty)_ | OAuth token revocation endpoint         |
+| `OAUTH_REGISTRATION_URL`  | _(empty)_ | OAuth dynamic client registration       |
+| `OAUTH_REQUIRED_SCOPES`   | _(empty)_ | Required OAuth scopes                   |
+| `OAUTH_CLIENT_ID`         | _(empty)_ | OAuth client ID                         |
+| `OAUTH_CLIENT_SECRET`     | _(empty)_ | OAuth client secret                     |
 
-### Auth (HTTP mode)
+#### Transform & Workers
 
-| Variable        | Default | Description                                         |
-| --------------- | ------- | --------------------------------------------------- |
-| `ACCESS_TOKENS` | (empty) | Comma/space-separated static bearer tokens.         |
-| `API_KEY`       | (empty) | Adds a static bearer token and enables `X-API-Key`. |
+| Variable                                   | Default   | Description                               |
+| ------------------------------------------ | --------- | ----------------------------------------- |
+| `TRANSFORM_WORKER_MODE`                    | `threads` | Worker mode: `threads` or `process`       |
+| `TRANSFORM_WORKER_MAX_OLD_GENERATION_MB`   | _(unset)_ | V8 old generation heap limit per worker   |
+| `TRANSFORM_WORKER_MAX_YOUNG_GENERATION_MB` | _(unset)_ | V8 young generation heap limit per worker |
+| `TRANSFORM_WORKER_CODE_RANGE_MB`           | _(unset)_ | V8 code range limit per worker            |
+| `TRANSFORM_WORKER_STACK_MB`                | _(unset)_ | Stack size limit per worker               |
 
-Static mode requires at least one token (`ACCESS_TOKENS` or `API_KEY`). OAuth is auto-selected when any OAuth URL is set.
+#### Content Tuning
 
-### OAuth (HTTP mode)
+| Variable                           | Default           | Description                                      |
+| ---------------------------------- | ----------------- | ------------------------------------------------ |
+| `SUPERFETCH_EXTRA_NOISE_TOKENS`    | _(empty)_         | Additional CSS class/id tokens for noise removal |
+| `SUPERFETCH_EXTRA_NOISE_SELECTORS` | _(empty)_         | Additional CSS selectors for noise removal       |
+| `MARKDOWN_HEADING_KEYWORDS`        | _(built-in list)_ | Keywords triggering heading promotion            |
+| `SUPERFETCH_LOCALE`                | _(system)_        | Locale for content processing                    |
 
-Required when `AUTH_MODE=oauth` (or auto-selected by OAuth URLs):
+#### Server Tuning
 
-| Variable                  | Default | Description             |
-| ------------------------- | ------- | ----------------------- |
-| `OAUTH_ISSUER_URL`        | -       | OAuth issuer.           |
-| `OAUTH_AUTHORIZATION_URL` | -       | Authorization endpoint. |
-| `OAUTH_TOKEN_URL`         | -       | Token endpoint.         |
-| `OAUTH_INTROSPECTION_URL` | -       | Introspection endpoint. |
+| Variable                           | Default         | Description                              |
+| ---------------------------------- | --------------- | ---------------------------------------- |
+| `SERVER_MAX_CONNECTIONS`           | `0` (unlimited) | Maximum concurrent HTTP connections      |
+| `SERVER_BLOCK_PRIVATE_CONNECTIONS` | `false`         | Block connections from private IP ranges |
 
-Optional:
+### Hardcoded Defaults
 
-| Variable                 | Default | Description                              |
-| ------------------------ | ------- | ---------------------------------------- |
-| `OAUTH_REVOCATION_URL`   | -       | Revocation endpoint.                     |
-| `OAUTH_REGISTRATION_URL` | -       | Dynamic client registration endpoint.    |
-| `OAUTH_REQUIRED_SCOPES`  | (empty) | Required scopes (comma/space separated). |
-| `OAUTH_CLIENT_ID`        | -       | Client ID for introspection.             |
-| `OAUTH_CLIENT_SECRET`    | -       | Client secret for introspection.         |
+| Setting                  | Value                           |
+| ------------------------ | ------------------------------- |
+| Max HTML size            | 10 MB                           |
+| Max inline content chars | 0 (unlimited)                   |
+| Fetch timeout            | 15 s                            |
+| Transform timeout        | 30 s                            |
+| Tool timeout             | Fetch + Transform + 5 s padding |
+| Max redirects            | 5                               |
+| Cache TTL                | 86400 s (24 h)                  |
+| Cache max keys           | 100                             |
+| Rate limit               | 100 requests / 60 s             |
+| Max sessions             | 200                             |
+| Session TTL              | 30 min                          |
+| Max URL length           | 2048 chars                      |
+| Worker pool max scale    | 4                               |
 
 ## Usage
 
-### Stdio (local MCP clients)
+### Stdio Mode
 
 ```bash
-npx -y @j0hanz/superfetch@latest --stdio
+superfetch --stdio
 ```
 
-### HTTP server (local only, static token)
+The server communicates via JSON-RPC over stdin/stdout. All MCP clients that support stdio transport can connect directly.
+
+### HTTP Mode
 
 ```bash
-API_KEY=YOUR_TOKEN_HERE npm start
+superfetch
+# or
+PORT=8080 HOST=0.0.0.0 ALLOW_REMOTE=true superfetch
 ```
 
-Requires `npm run build` before `npm start` when running from source.
-
-Remote bindings require `ALLOW_REMOTE=true` and OAuth configuration.
+The server starts a Streamable HTTP endpoint at `/mcp`. Authenticate with bearer tokens via the `ACCESS_TOKENS` or `API_KEY` environment variables.
 
 ## MCP Surface
 
@@ -212,80 +264,130 @@ Remote bindings require `ALLOW_REMOTE=true` and OAuth configuration.
 
 #### `fetch-url`
 
-Fetches a webpage and converts it to clean Markdown.
+Fetches a webpage and converts it to clean Markdown format optimized for LLM context.
 
-Parameters:
+**Useful for:**
 
-| Name  | Type   | Required | Description                          |
-| ----- | ------ | -------- | ------------------------------------ |
-| `url` | string | Yes      | Public http(s) URL, max length 2048. |
+- Reading documentation, blog posts, or articles
+- Extracting main content while removing navigation and ads
+- Caching content to speed up repeated queries
 
-Structured response fields:
+**Limitations:**
 
-- `url` (string): fetched URL
-- `inputUrl` (string, optional): original input URL
-- `resolvedUrl` (string, optional): normalized or raw-content URL
-- `title` (string, optional): page title
-- `markdown` (string, optional): inline markdown (may be truncated when `MAX_INLINE_CONTENT_CHARS` is set)
-- `error` (string, optional): error message on failure
+- Does not execute complex client-side JavaScript interactions
 
-Limitations:
+##### Parameters
 
-- Only http/https URLs are accepted; URLs with embedded credentials are rejected.
-- Client-side JavaScript is not executed.
-- Content extraction quality depends on the source HTML structure. Works best
-  with standard article and documentation layouts. Always verify output meets
-  expectations.
+| Parameter          | Type           | Required | Default | Description                                                        |
+| ------------------ | -------------- | -------- | ------- | ------------------------------------------------------------------ |
+| `url`              | `string` (URL) | Yes      | —       | The URL of the webpage to fetch (http/https, max 2048 chars)       |
+| `skipNoiseRemoval` | `boolean`      | No       | `false` | Preserve navigation, footers, and other elements normally filtered |
+| `forceRefresh`     | `boolean`      | No       | `false` | Bypass cache and fetch fresh content                               |
 
-Large content handling:
+##### Returns
 
-- HTML response size is unlimited by default. Set `MAX_HTML_BYTES` to cap downloads.
-- Inline markdown is unlimited by default. Set `MAX_INLINE_CONTENT_CHARS` to cap output.
-- If a cap is set and cache is enabled, the tool response includes a `resource_link`
-  pointing to `superfetch://cache/markdown/{urlHash}`.
-- If a cap is set and cache is disabled, inline markdown is truncated with `...[truncated]`.
-- In stdio mode, the tool also embeds a `resource` block containing full markdown content when available.
+```json
+{
+  "url": "https://example.com",
+  "resolvedUrl": "https://example.com",
+  "inputUrl": "https://example.com",
+  "title": "Example Domain",
+  "markdown": "# Example Domain\n\nThis domain is for use in illustrative examples...",
+  "truncated": false
+}
+```
+
+| Field         | Type       | Description                                     |
+| ------------- | ---------- | ----------------------------------------------- |
+| `url`         | `string`   | The canonical URL (pre-raw-transform)           |
+| `inputUrl`    | `string`   | The original URL provided by the caller         |
+| `resolvedUrl` | `string`   | The normalized/transformed URL that was fetched |
+| `title`       | `string?`  | Extracted page title                            |
+| `markdown`    | `string?`  | Extracted content in Markdown format            |
+| `truncated`   | `boolean?` | Whether inline markdown was truncated           |
+| `error`       | `string?`  | Error message if the request failed             |
+| `statusCode`  | `number?`  | HTTP status code for failed requests            |
+| `details`     | `object?`  | Additional error details                        |
+
+##### Annotations
+
+| Annotation        | Value   |
+| ----------------- | ------- |
+| `readOnlyHint`    | `true`  |
+| `destructiveHint` | `false` |
+| `idempotentHint`  | `true`  |
+| `openWorldHint`   | `true`  |
+
+##### Async Task Execution
+
+The `fetch-url` tool supports optional async task execution. Include a `task` field in the tool call to run the fetch in the background:
+
+```json
+{
+  "method": "tools/call",
+  "params": {
+    "name": "fetch-url",
+    "arguments": { "url": "https://example.com" },
+    "task": { "ttl": 300 }
+  }
+}
+```
+
+Then poll `tasks/get` until the task status is `completed` or `failed`, and retrieve the result via `tasks/result`.
 
 ### Resources
 
-| URI pattern                             | Description                                | MIME type          |
-| --------------------------------------- | ------------------------------------------ | ------------------ |
-| `superfetch://cache/markdown/{urlHash}` | Cached markdown content entry.             | `text/markdown`    |
-| `internal://instructions`               | Server usage instructions.                 | `text/markdown`    |
-| `internal://config`                     | Current runtime config (secrets redacted). | `application/json` |
+| URI Pattern                                | MIME Type          | Description                                      |
+| ------------------------------------------ | ------------------ | ------------------------------------------------ |
+| `internal://instructions`                  | `text/markdown`    | Server instructions and usage guidance           |
+| `internal://config`                        | `application/json` | Current runtime configuration (secrets redacted) |
+| `superfetch://cache/{namespace}/{urlHash}` | `text/markdown`    | Cached web content snapshots (subscribable)      |
+
+The `superfetch://cache/...` resource supports subscriptions — clients receive notifications when cached content is updated.
 
 ### Tasks
 
-`fetch-url` supports async execution via MCP tasks. Call `tools/call` with a
-`task` payload to start a background fetch, then use `tasks/get`,
-`tasks/result`, or `tasks/cancel` to manage it.
+The server declares full MCP task support:
+
+| Endpoint       | Description                          |
+| -------------- | ------------------------------------ |
+| `tasks/list`   | List tasks (scoped to session/owner) |
+| `tasks/get`    | Get task status by ID                |
+| `tasks/result` | Retrieve completed task result       |
+| `tasks/cancel` | Cancel an in-flight task             |
 
 ## HTTP Mode Endpoints
 
-| Method | Path                              | Auth | Notes                                              |
-| ------ | --------------------------------- | ---- | -------------------------------------------------- |
-| GET    | `/health`                         | No   | Health check.                                      |
-| POST   | `/mcp`                            | Yes  | Streamable HTTP JSON-RPC requests.                 |
-| GET    | `/mcp`                            | Yes  | SSE stream (requires `Accept: text/event-stream`). |
-| DELETE | `/mcp`                            | Yes  | Close the session.                                 |
-| GET    | `/mcp/downloads/:namespace/:hash` | Yes  | Download cached markdown.                          |
+| Method   | Path                                | Auth | Description                              |
+| -------- | ----------------------------------- | ---- | ---------------------------------------- |
+| `GET`    | `/health`                           | No   | Health check with server stats           |
+| `POST`   | `/mcp`                              | Yes  | MCP JSON-RPC (Streamable HTTP)           |
+| `GET`    | `/mcp`                              | Yes  | SSE stream for server-initiated messages |
+| `DELETE` | `/mcp`                              | Yes  | Terminate MCP session                    |
+| `GET`    | `/mcp/downloads/{namespace}/{hash}` | Yes  | Download cached content                  |
 
-Notes:
+### Session Behavior
 
-- HTTP requests must include `MCP-Protocol-Version: 2025-11-25`.
-- Sessions are managed via the `mcp-session-id` header.
+- Sessions are created on the first `POST /mcp` request with an `initialize` message
+- Session ID is returned in the `mcp-session-id` response header
+- Sessions expire after 30 minutes of inactivity (max 200 concurrent)
+
+### Authentication
+
+- **Static tokens**: Set `ACCESS_TOKENS` or `API_KEY` environment variables; pass as `Authorization: Bearer <token>`
+- **OAuth**: Configure `OAUTH_*` environment variables to enable OAuth 2.0 token introspection
 
 ## Client Configuration Examples
 
 <details>
-<summary><strong>VS Code</strong></summary>
+<summary>VS Code / VS Code Insiders</summary>
 
-Add to .vscode/mcp.json:
+Add to your VS Code settings (`.vscode/mcp.json` or User Settings):
 
 ```json
 {
   "servers": {
-    "superFetch": {
+    "superfetch": {
       "command": "npx",
       "args": ["-y", "@j0hanz/superfetch@latest", "--stdio"]
     }
@@ -296,14 +398,14 @@ Add to .vscode/mcp.json:
 </details>
 
 <details>
-<summary><strong>Claude Desktop</strong></summary>
+<summary>Claude Desktop</summary>
 
-Add to claude_desktop_config.json:
+Add to `claude_desktop_config.json`:
 
 ```json
 {
   "mcpServers": {
-    "superFetch": {
+    "superfetch": {
       "command": "npx",
       "args": ["-y", "@j0hanz/superfetch@latest", "--stdio"]
     }
@@ -314,12 +416,16 @@ Add to claude_desktop_config.json:
 </details>
 
 <details>
-<summary><strong>Cursor</strong></summary>
+<summary>Cursor</summary>
+
+[![Install in Cursor](https://img.shields.io/badge/Cursor-Install-f97316?logo=cursor&logoColor=white)](https://cursor.com/install-mcp?name=superfetch&config=eyJjb21tYW5kIjoibnB4IiwiYXJncyI6WyIteSIsIkBqMGhhbnovc3VwZXJmZXRjaEBsYXRlc3QiLCItLXN0ZGlvIl19)
+
+Or manually add to Cursor MCP settings:
 
 ```json
 {
   "mcpServers": {
-    "superFetch": {
+    "superfetch": {
       "command": "npx",
       "args": ["-y", "@j0hanz/superfetch@latest", "--stdio"]
     }
@@ -330,12 +436,14 @@ Add to claude_desktop_config.json:
 </details>
 
 <details>
-<summary><strong>Windsurf</strong></summary>
+<summary>Windsurf</summary>
+
+Add to your Windsurf MCP configuration:
 
 ```json
 {
   "mcpServers": {
-    "superFetch": {
+    "superfetch": {
       "command": "npx",
       "args": ["-y", "@j0hanz/superfetch@latest", "--stdio"]
     }
@@ -344,59 +452,93 @@ Add to claude_desktop_config.json:
 ```
 
 </details>
+
+## Security
+
+### SSRF Protection
+
+superFetch blocks requests to private and internal network addresses:
+
+- **Blocked hosts**: `localhost`, `127.0.0.0/8`, `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`, `169.254.0.0/16`, `100.64.0.0/10`
+- **Blocked IPv6**: `::1`, `fc00::/7`, `fe80::/10`, IPv4-mapped private addresses (`::ffff:10.*`, etc.)
+- **Cloud metadata**: `169.254.169.254` (AWS), `metadata.google.internal`, `metadata.azure.com`, `100.100.100.200` (Azure IMDS)
+
+DNS preflight checks run on every redirect hop to prevent DNS rebinding attacks.
+
+### Stdio Transport Safety
+
+The server never writes non-protocol data to stdout. All logs and diagnostics go to stderr.
+
+### Rate Limiting
+
+HTTP mode enforces a rate limit of 100 requests per 60-second window per client.
+
+### Content Safety
+
+- HTML downloads are capped at 10 MB
+- Worker threads run in isolation with configurable resource limits
+- Auth tokens are stored in-memory only and compared using timing-safe equality
 
 ## Development Workflow
 
-### Install dependencies
+### Install Dependencies
 
 ```bash
 npm install
 ```
 
-Use `npm ci` for clean, reproducible installs.
+### Scripts
 
-### Common scripts
-
-| Script                 | Command                                                                                                             | Purpose                               |
-| ---------------------- | ------------------------------------------------------------------------------------------------------------------- | ------------------------------------- |
-| clean                  | `node scripts/build.mjs clean`                                                                                      | Remove dist and TS build info.        |
-| validate:instructions  | `node scripts/build.mjs validate:instructions`                                                                      | Validate `src/instructions.md`.       |
-| build                  | `node scripts/build.mjs`                                                                                            | Compile TS, copy assets, set exec bit |
-| copy:assets            | `node scripts/build.mjs copy:assets`                                                                                | Copy assets/instructions to dist.     |
-| prepare                | `npm run build`                                                                                                     | Prepare package for publishing.       |
-| dev                    | `tsc --watch --preserveWatchOutput`                                                                                 | TypeScript watch mode.                |
-| dev:run                | `node --env-file=.env --watch dist/index.js`                                                                        | Run compiled server in watch mode.    |
-| start                  | `node dist/index.js`                                                                                                | Start HTTP server (default).          |
-| format                 | `prettier --write .`                                                                                                | Format codebase.                      |
-| type-check             | `tsc --noEmit`                                                                                                      | Type checking.                        |
-| type-check:diagnostics | `tsc --noEmit --extendedDiagnostics`                                                                                | Type check diagnostics.               |
-| type-check:trace       | `node -e "require('fs').rmSync('.ts-trace',{recursive:true,force:true})" && tsc --noEmit --generateTrace .ts-trace` | Generate TS trace.                    |
-| lint                   | `eslint .`                                                                                                          | Lint.                                 |
-| lint:fix               | `eslint . --fix`                                                                                                    | Lint and fix.                         |
-| test                   | `npm run build --silent && node --test --experimental-transform-types`                                              | Run tests (builds first).             |
-| test:coverage          | `npm run build --silent && node --test --experimental-transform-types --experimental-test-coverage`                 | Test with coverage.                   |
-| knip                   | `knip`                                                                                                              | Dead code analysis.                   |
-| knip:fix               | `knip --fix`                                                                                                        | Fix knip issues.                      |
-| inspector              | `npx @modelcontextprotocol/inspector`                                                                               | MCP Inspector.                        |
-| prepublishOnly         | `npm run lint && npm run type-check && npm run build`                                                               | Prepublish checks.                    |
+| Script          | Command                 | Description                                  |
+| --------------- | ----------------------- | -------------------------------------------- |
+| `dev`           | `npm run dev`           | TypeScript watch mode                        |
+| `dev:run`       | `npm run dev:run`       | Run compiled output with watch + `.env`      |
+| `build`         | `npm run build`         | Clean, compile, copy assets, make executable |
+| `start`         | `npm start`             | Run compiled server                          |
+| `test`          | `npm test`              | Run test suite (Node.js native test runner)  |
+| `test:coverage` | `npm run test:coverage` | Run tests with coverage                      |
+| `lint`          | `npm run lint`          | ESLint                                       |
+| `lint:fix`      | `npm run lint:fix`      | ESLint with auto-fix                         |
+| `format`        | `npm run format`        | Prettier                                     |
+| `type-check`    | `npm run type-check`    | TypeScript type checking                     |
+| `inspector`     | `npm run inspector`     | Build and launch MCP Inspector               |
 
 ## Build and Release
 
-- `npm run build` runs `scripts/build.mjs`, compiling TS with
-  `tsconfig.build.json`, copying `assets/` and `src/instructions.md` to `dist/`,
-  and making `dist/index.js` executable.
-- GitHub Releases trigger the publish workflow (lint, type-check, build,
-  version sync, then `npm publish`).
+```bash
+npm run build        # Clean → Compile → Copy Assets → chmod
+npm run prepublishOnly  # Lint → Type-Check → Build
+npm publish          # Publish to npm
+```
+
+The `prepare` script runs `npm run build` automatically on `npm install` from source.
 
 ## Troubleshooting
 
-- Tests import from `dist/`. Run `npm test` (builds first) or `npm run build`
-  before running individual test files.
-- HTTP mode requires auth. Set `API_KEY` or `ACCESS_TOKENS` (or configure OAuth).
-- Non-loopback bindings require `ALLOW_REMOTE=true` and OAuth configuration.
-- Missing `MCP-Protocol-Version: 2025-11-25` yields a 400 error.
-- Large pages may return a `resource_link` to cached content instead of inline
-  markdown.
-- Requests to private IPs, localhost, or `.local`/`.internal` hosts are blocked.
+### MCP Inspector
 
-<!-- markdownlint-enable MD033 -->
+Use the built-in inspector to test the server interactively:
+
+```bash
+npm run inspector
+```
+
+This builds the project and launches `@modelcontextprotocol/inspector` pointing to the compiled server.
+
+### Common Issues
+
+| Issue                     | Solution                                                                              |
+| ------------------------- | ------------------------------------------------------------------------------------- |
+| `VALIDATION_ERROR` on URL | URL is blocked (private IP/localhost) or malformed. Do not retry.                     |
+| `queue_full` error        | Worker pool is saturated. Wait briefly, then retry or use async task mode.            |
+| Garbled output            | Binary content (images, PDFs) cannot be converted. Ensure the URL serves HTML.        |
+| No output in stdio mode   | Ensure `--stdio` flag is passed. Without it, the server starts in HTTP mode.          |
+| Auth errors in HTTP mode  | Set `ACCESS_TOKENS` or `API_KEY` env var and pass as `Authorization: Bearer <token>`. |
+
+### Stdout / Stderr Guidance
+
+In stdio mode, **stdout** is reserved exclusively for MCP JSON-RPC messages. Logs and diagnostics are written to **stderr**. Never pipe stdout to a log file when using stdio transport.
+
+## License
+
+[MIT](https://opensource.org/licenses/MIT)
