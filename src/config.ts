@@ -4,22 +4,23 @@ import { isIP } from 'node:net';
 import process from 'node:process';
 import { domainToASCII } from 'node:url';
 
-const packageJsonPath = findPackageJSON(import.meta.url);
-if (!packageJsonPath) {
-  throw new Error('package.json not found');
-}
-const packageJson = JSON.parse(readFileSync(packageJsonPath, 'utf-8')) as {
-  version?: string;
-};
-if (typeof packageJson.version !== 'string') {
-  throw new Error('package.json version is missing');
+function readServerVersion(moduleUrl: string): string {
+  const packageJsonPath = findPackageJSON(moduleUrl);
+  if (!packageJsonPath) throw new Error('package.json not found');
+  const packageJson = JSON.parse(readFileSync(packageJsonPath, 'utf-8')) as {
+    version?: string;
+  };
+  if (typeof packageJson.version !== 'string') {
+    throw new Error('package.json version is missing');
+  }
+  return packageJson.version;
 }
 
-export const serverVersion: string = packageJson.version;
+export const serverVersion: string = readServerVersion(import.meta.url);
 
 export type LogLevel = 'debug' | 'info' | 'warn' | 'error';
-
 const LOG_LEVELS: readonly LogLevel[] = ['debug', 'info', 'warn', 'error'];
+const ALLOWED_LOG_LEVELS: ReadonlySet<string> = new Set(LOG_LEVELS);
 
 const DEFAULT_HEADING_KEYWORDS = [
   'overview',
@@ -49,6 +50,10 @@ export type TransformWorkerMode = 'threads' | 'process';
 
 type AuthMode = 'oauth' | 'static';
 
+class ConfigError extends Error {
+  override name = 'ConfigError';
+}
+
 function isMissingEnvFileError(error: unknown): boolean {
   if (!error || typeof error !== 'object') return false;
   const { code } = error as { code?: string };
@@ -66,27 +71,22 @@ function loadEnvFileIfAvailable(): void {
 }
 
 loadEnvFileIfAvailable();
-
 const { env } = process;
-
-class ConfigError extends Error {
-  override name = 'ConfigError';
-}
 
 function buildIpv4(parts: readonly [number, number, number, number]): string {
   return parts.join('.');
-}
-
-function formatHostForUrl(hostname: string): string {
-  if (hostname.includes(':') && !hostname.startsWith('['))
-    return `[${hostname}]`;
-  return hostname;
 }
 
 function stripTrailingDots(value: string): string {
   let result = value;
   while (result.endsWith('.')) result = result.slice(0, -1);
   return result;
+}
+
+function formatHostForUrl(hostname: string): string {
+  if (hostname.includes(':') && !hostname.startsWith('['))
+    return `[${hostname}]`;
+  return hostname;
 }
 
 function normalizeHostname(value: string): string | null {
@@ -105,11 +105,13 @@ function normalizeHostValue(value: string): string | null {
   const raw = value.trim();
   if (!raw) return null;
 
+  // Full URL
   if (raw.includes('://')) {
     if (!URL.canParse(raw)) return null;
     return normalizeHostname(new URL(raw).hostname);
   }
 
+  // host[:port]
   const candidateUrl = `http://${raw}`;
   if (URL.canParse(candidateUrl)) {
     return normalizeHostname(new URL(candidateUrl).hostname);
@@ -117,14 +119,17 @@ function normalizeHostValue(value: string): string | null {
 
   const lowered = raw.toLowerCase();
 
+  // [::1]:port
   if (lowered.startsWith('[')) {
     const end = lowered.indexOf(']');
     if (end === -1) return null;
     return normalizeHostname(lowered.slice(1, end));
   }
 
+  // Bare IPv6
   if (isIP(lowered) === 6) return stripTrailingDots(lowered);
 
+  // Split host:port (single colon only)
   const firstColon = lowered.indexOf(':');
   if (firstColon === -1) return normalizeHostname(lowered);
   if (lowered.includes(':', firstColon + 1)) return null;
@@ -169,7 +174,6 @@ function parseBoolean(
   defaultValue: boolean
 ): boolean {
   if (!envValue) return defaultValue;
-
   return envValue.trim().toLowerCase() !== 'false';
 }
 
@@ -198,6 +202,30 @@ function normalizeLocale(value: string | undefined): string | undefined {
   return trimmed;
 }
 
+function isLogLevel(value: string): value is LogLevel {
+  return ALLOWED_LOG_LEVELS.has(value);
+}
+
+function parseLogLevel(envValue: string | undefined): LogLevel {
+  if (!envValue) return 'info';
+  const level = envValue.toLowerCase();
+  return isLogLevel(level) ? level : 'info';
+}
+
+function parseTransformWorkerMode(
+  envValue: string | undefined
+): TransformWorkerMode {
+  if (!envValue) return 'threads';
+  const normalized = envValue.trim().toLowerCase();
+  if (normalized === 'process' || normalized === 'fork') return 'process';
+  return 'threads';
+}
+
+function parsePort(envValue: string | undefined): number {
+  if (envValue?.trim() === '0') return 0;
+  return parseInteger(envValue, 3000, 1024, 65535);
+}
+
 function parseUrlEnv(value: string | undefined, name: string): URL | undefined {
   if (!value) return undefined;
   if (!URL.canParse(value)) {
@@ -217,33 +245,6 @@ function parseAllowedHosts(envValue: string | undefined): Set<string> {
     if (normalized) hosts.add(normalized);
   }
   return hosts;
-}
-
-const ALLOWED_LOG_LEVELS: ReadonlySet<string> = new Set(LOG_LEVELS);
-
-function isLogLevel(value: string): value is LogLevel {
-  return ALLOWED_LOG_LEVELS.has(value);
-}
-
-function parseLogLevel(envValue: string | undefined): LogLevel {
-  if (!envValue) return 'info';
-  const level = envValue.toLowerCase();
-  return isLogLevel(level) ? level : 'info';
-}
-
-function parseTransformWorkerMode(
-  envValue: string | undefined
-): TransformWorkerMode {
-  if (!envValue) return 'threads';
-
-  const normalized = envValue.trim().toLowerCase();
-  if (normalized === 'process' || normalized === 'fork') return 'process';
-  return 'threads';
-}
-
-function parsePort(envValue: string | undefined): number {
-  if (envValue?.trim() === '0') return 0;
-  return parseInteger(envValue, 3000, 1024, 65535);
 }
 
 const MAX_HTML_BYTES = 10 * 1024 * 1024; // 10 MB
@@ -275,6 +276,7 @@ interface WorkerResourceLimits {
 
 function resolveWorkerResourceLimits(): WorkerResourceLimits | undefined {
   const limits: WorkerResourceLimits = {};
+  let hasAny = false;
   const maxOldGenerationSizeMb = parseOptionalInteger(
     env.TRANSFORM_WORKER_MAX_OLD_GENERATION_MB,
     1
@@ -291,18 +293,22 @@ function resolveWorkerResourceLimits(): WorkerResourceLimits | undefined {
 
   if (maxOldGenerationSizeMb !== undefined) {
     limits.maxOldGenerationSizeMb = maxOldGenerationSizeMb;
+    hasAny = true;
   }
   if (maxYoungGenerationSizeMb !== undefined) {
     limits.maxYoungGenerationSizeMb = maxYoungGenerationSizeMb;
+    hasAny = true;
   }
   if (codeRangeSizeMb !== undefined) {
     limits.codeRangeSizeMb = codeRangeSizeMb;
+    hasAny = true;
   }
   if (stackSizeMb !== undefined) {
     limits.stackSizeMb = stackSizeMb;
+    hasAny = true;
   }
 
-  return Object.keys(limits).length > 0 ? limits : undefined;
+  return hasAny ? limits : undefined;
 }
 
 interface AuthConfig {
@@ -435,10 +441,9 @@ const blockPrivateConnections = parseBoolean(
   env.SERVER_BLOCK_PRIVATE_CONNECTIONS,
   false
 );
+const allowRemote = parseBoolean(env.ALLOW_REMOTE, false);
 
 const baseUrl = new URL(`http://${formatHostForUrl(host)}:${port}`);
-
-const allowRemote = parseBoolean(env.ALLOW_REMOTE, false);
 
 interface RuntimeState {
   httpMode: boolean;
