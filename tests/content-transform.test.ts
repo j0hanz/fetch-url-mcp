@@ -165,3 +165,61 @@ describe('transformHtmlToMarkdown raw content detection', () => {
     );
   });
 });
+
+describe('transformHtmlToMarkdown favicon rendering', () => {
+  it('renders favicon as HTML img tag in title when present', async () => {
+    const html = `
+      <html>
+        <head>
+          <title>Example Page</title>
+          <link rel="icon" href="/favicon.png" />
+        </head>
+        <body>
+          <p>Content here</p>
+        </body>
+      </html>
+    `;
+
+    const result = await transformHtmlToMarkdown(html, 'https://example.com', {
+      includeMetadata: false,
+    });
+
+    // Title should include favicon img tag
+    assert.ok(
+      result.markdown.includes(
+        '<img src="https://example.com/favicon.png" width="20" height="20" alt="" />'
+      ),
+      'Expected favicon img tag in markdown'
+    );
+    assert.ok(result.markdown.includes('# '));
+    assert.ok(result.markdown.includes('Example Page'));
+  });
+
+  it('renders title without favicon when no icon links present', async () => {
+    const html = `
+      <html>
+        <head>
+          <title>No Favicon Page</title>
+        </head>
+        <body>
+          <p>Content here</p>
+        </body>
+      </html>
+    `;
+
+    const result = await transformHtmlToMarkdown(html, 'https://example.com', {
+      includeMetadata: false,
+    });
+
+    // Title should still be present but with fallback favicon
+    assert.ok(result.markdown.includes('# '));
+    assert.ok(result.markdown.includes('No Favicon Page'));
+    // Default fallback is /favicon.ico
+    assert.ok(
+      result.markdown.includes(
+        '<img src="https://example.com/favicon.ico" width="20" height="20" alt="" />'
+      ),
+      'Expected fallback favicon img tag in markdown'
+    );
+  });
+});

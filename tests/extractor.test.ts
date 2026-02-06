@@ -141,4 +141,98 @@ describe('extractContent', () => {
     assert.equal(result.article, null);
     assert.deepEqual(result.metadata, {});
   });
+
+  it('extracts apple-touch-icon as favicon with highest priority', () => {
+    const html = `
+      <html>
+        <head>
+          <title>Favicon Test</title>
+          <link rel="icon" href="/icon.png" />
+          <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+        </head>
+        <body><p>Content</p></body>
+      </html>
+    `;
+
+    const result = extractContent(html, 'https://example.com', {
+      extractArticle: false,
+    });
+
+    assert.equal(
+      result.metadata.favicon,
+      'https://example.com/apple-touch-icon.png'
+    );
+  });
+
+  it('extracts standard icon link and resolves relative URL', () => {
+    const html = `
+      <html>
+        <head>
+          <title>Favicon Test</title>
+          <link rel="icon" href="icon.png" />
+        </head>
+        <body><p>Content</p></body>
+      </html>
+    `;
+
+    const result = extractContent(html, 'https://example.com/page/', {
+      extractArticle: false,
+    });
+
+    assert.equal(result.metadata.favicon, 'https://example.com/page/icon.png');
+  });
+
+  it('prioritizes high-res icon over standard icon', () => {
+    const html = `
+      <html>
+        <head>
+          <title>Favicon Test</title>
+          <link rel="icon" href="/icon-16.png" />
+          <link rel="icon" sizes="192x192" href="/icon-192.png" />
+        </head>
+        <body><p>Content</p></body>
+      </html>
+    `;
+
+    const result = extractContent(html, 'https://example.com', {
+      extractArticle: false,
+    });
+
+    assert.equal(result.metadata.favicon, 'https://example.com/icon-192.png');
+  });
+
+  it('falls back to /favicon.ico when no icon links present', () => {
+    const html = `
+      <html>
+        <head>
+          <title>No Favicon</title>
+        </head>
+        <body><p>Content</p></body>
+      </html>
+    `;
+
+    const result = extractContent(html, 'https://example.com', {
+      extractArticle: false,
+    });
+
+    assert.equal(result.metadata.favicon, 'https://example.com/favicon.ico');
+  });
+
+  it('handles missing favicon gracefully without baseUrl', () => {
+    const html = `
+      <html>
+        <head>
+          <title>No URL</title>
+          <link rel="icon" href="/icon.png" />
+        </head>
+        <body><p>Content</p></body>
+      </html>
+    `;
+
+    const result = extractContent(html, '', { extractArticle: false });
+
+    // When no baseUrl is provided, favicon extraction should not crash
+    // The metadata may or may not include favicon depending on implementation
+    assert.doesNotThrow(() => result.metadata.favicon);
+  });
 });

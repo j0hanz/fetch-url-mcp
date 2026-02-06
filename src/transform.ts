@@ -451,18 +451,22 @@ const META_NAME_HANDLERS = new Map<
   ],
 ]);
 
-function extractMetadata(document: Document): ExtractedMetadata {
+function processMetaTag(ctx: MetaContext, tag: Element): void {
+  const content = tag.getAttribute('content')?.trim();
+  if (!content) return;
+
+  const property = tag.getAttribute('property');
+  if (property) META_PROPERTY_HANDLERS.get(property)?.(ctx, content);
+
+  const name = tag.getAttribute('name');
+  if (name) META_NAME_HANDLERS.get(name)?.(ctx, content);
+}
+
+function buildMetaContext(document: Document): MetaContext {
   const ctx: MetaContext = { title: {}, description: {} };
 
   for (const tag of document.querySelectorAll('meta')) {
-    const content = tag.getAttribute('content')?.trim();
-    if (!content) continue;
-
-    const property = tag.getAttribute('property');
-    if (property) META_PROPERTY_HANDLERS.get(property)?.(ctx, content);
-
-    const name = tag.getAttribute('name');
-    if (name) META_NAME_HANDLERS.get(name)?.(ctx, content);
+    processMetaTag(ctx, tag);
   }
 
   const titleEl = document.querySelector('title');
@@ -470,11 +474,16 @@ function extractMetadata(document: Document): ExtractedMetadata {
     ctx.title.standard = titleEl.textContent.trim();
   }
 
+  return ctx;
+}
+
+function resolveMetadataFromContext(ctx: MetaContext): ExtractedMetadata {
+  const metadata: ExtractedMetadata = {};
+
   const resolvedTitle = ctx.title.og ?? ctx.title.twitter ?? ctx.title.standard;
   const resolvedDesc =
     ctx.description.og ?? ctx.description.twitter ?? ctx.description.standard;
 
-  const metadata: ExtractedMetadata = {};
   if (resolvedTitle) metadata.title = resolvedTitle;
   if (resolvedDesc) metadata.description = resolvedDesc;
   if (ctx.author) metadata.author = ctx.author;
@@ -483,6 +492,63 @@ function extractMetadata(document: Document): ExtractedMetadata {
   if (ctx.modifiedAt) metadata.modifiedAt = ctx.modifiedAt;
 
   return metadata;
+}
+
+function extractMetadata(
+  document: Document,
+  baseUrl?: string
+): ExtractedMetadata {
+  const ctx = buildMetaContext(document);
+  const metadata = resolveMetadataFromContext(ctx);
+
+  if (baseUrl) {
+    const favicon = extractFavicon(document, baseUrl);
+    if (favicon) metadata.favicon = favicon;
+  }
+
+  return metadata;
+}
+
+/**
+ * Extracts favicon URL from HTML document with priority-based fallback.
+ * Queries link elements in order of preference and resolves relative URLs.
+ */
+function extractFavicon(
+  document: Document,
+  baseUrl: string
+): string | undefined {
+  // Priority order for favicon selection
+  const selectors = [
+    'link[rel~="apple-touch-icon"]',
+    'link[rel="icon"][sizes~="192x192"]',
+    'link[rel="icon"][sizes~="96x96"]',
+    'link[rel="icon"][type="image/svg+xml"]',
+    'link[rel="icon"]',
+    'link[rel="shortcut icon"]',
+  ];
+
+  for (const selector of selectors) {
+    const link = document.querySelector<HTMLLinkElement>(selector);
+    const href = link?.getAttribute('href');
+    if (href) {
+      try {
+        // Resolve relative URLs against baseUrl
+        const resolved = new URL(href, baseUrl);
+        return resolved.toString();
+      } catch {
+        // Invalid URL, try next selector
+        continue;
+      }
+    }
+  }
+
+  // Fallback to /favicon.ico
+  try {
+    const fallback = new URL('/favicon.ico', baseUrl);
+    return fallback.toString();
+  } catch {
+    return undefined;
+  }
 }
 
 function isReadabilityCompatible(doc: unknown): doc is Document {
@@ -635,7 +701,7 @@ function extractContentContext(
     applyBaseUri(document, url);
 
     const lateMetadata = stageTracker.run(url, 'extract:metadata', () =>
-      extractMetadata(document)
+      extractMetadata(document, url)
     );
     abortPolicy.throwIfAborted(options.signal, url, 'extract:metadata');
 
@@ -1616,12 +1682,18 @@ export function createContentMetadataBlock(
       metadata.author = extractedMeta.author;
   }
 
+  // Favicon is always from extractedMeta, not from article
+  if (extractedMeta.favicon !== undefined) {
+    metadata.favicon = extractedMeta.favicon;
+  }
+
   return metadata;
 }
 
 interface ContentSource {
   readonly sourceHtml: string;
   readonly title: string | undefined;
+  readonly favicon: string | undefined;
   readonly metadata: ReturnType<typeof createContentMetadataBlock>;
   readonly document?: Document;
   readonly skipNoiseRemoval?: boolean;
@@ -1732,6 +1804,7 @@ function buildContentSource(params: {
     return {
       sourceHtml: cleanedArticleHtml,
       title: article.title,
+      favicon: extractedMeta.favicon,
       metadata,
       skipNoiseRemoval: true,
       truncated,
@@ -1748,6 +1821,7 @@ function buildContentSource(params: {
       return {
         sourceHtml: contentRoot,
         title: extractedMeta.title,
+        favicon: extractedMeta.favicon,
         metadata,
         skipNoiseRemoval: true,
         document,
@@ -1758,6 +1832,7 @@ function buildContentSource(params: {
     return {
       sourceHtml: cleanedHtml,
       title: extractedMeta.title,
+      favicon: extractedMeta.favicon,
       metadata,
       skipNoiseRemoval: true,
       document,
@@ -1768,6 +1843,7 @@ function buildContentSource(params: {
   return {
     sourceHtml: html,
     title: extractedMeta.title,
+    favicon: extractedMeta.favicon,
     metadata,
     truncated,
   };
@@ -1821,7 +1897,11 @@ function buildMarkdownFromContext(
     })
   );
   if (context.title && !content.trim().startsWith('# ')) {
-    content = `# ${context.title}\n\n${content}`;
+    let faviconPrefix = '';
+    if (context.favicon && typeof context.favicon === 'string') {
+      faviconPrefix = `<img src="${context.favicon}" width="20" height="20" alt="" /> `;
+    }
+    content = `# ${faviconPrefix}${context.title}\n\n${content}`;
   }
 
   return {

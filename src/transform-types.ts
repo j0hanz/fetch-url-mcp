@@ -11,6 +11,7 @@ export interface MetadataBlock {
   title?: string;
   description?: string;
   author?: string;
+  favicon?: string;
   url: string;
   fetchedAt: string;
 }
@@ -35,6 +36,7 @@ export interface ExtractedMetadata {
   description?: string;
   author?: string;
   image?: string;
+  favicon?: string;
   publishedAt?: string;
   modifiedAt?: string;
 }
