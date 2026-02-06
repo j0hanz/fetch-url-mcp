@@ -297,10 +297,9 @@ function shouldPreserve(element: Element, tagName: string): boolean {
 }
 
 function removeNodes(nodes: ArrayLike<Element>): void {
-  // Iterate backwards to safely remove
   for (let i = nodes.length - 1; i >= 0; i--) {
     const node = nodes[i];
-    if (node && !shouldPreserve(node, node.tagName.toLowerCase())) {
+    if (node?.parentNode && !shouldPreserve(node, node.tagName.toLowerCase())) {
       node.remove();
     }
   }
@@ -396,7 +395,7 @@ function cleanHeadingWrapperDivs(h: Element): void {
   const divs = h.querySelectorAll('div');
   for (let j = divs.length - 1; j >= 0; j--) {
     const d = divs[j];
-    if (!d) continue;
+    if (!d?.parentNode) continue;
     const cls = d.getAttribute('class') ?? '';
     const stl = d.getAttribute('style') ?? '';
     if (
@@ -413,7 +412,7 @@ function cleanHeadingAnchors(h: Element): void {
   const anchors = h.querySelectorAll('a');
   for (let j = anchors.length - 1; j >= 0; j--) {
     const a = anchors[j];
-    if (!a) continue;
+    if (!a?.parentNode) continue;
     const href = a.getAttribute('href') ?? '';
     const txt = (a.textContent || '').replace(/[\u200B\s]/g, '');
     if (href.startsWith('#') && txt.length === 0) {
@@ -436,6 +435,7 @@ function cleanHeadings(document: Document): void {
   // Clean Heading Anchors
   const headings = document.querySelectorAll('h1,h2,h3,h4,h5,h6');
   for (const h of headings) {
+    if (!h.parentNode) continue;
     cleanHeadingWrapperDivs(h);
     cleanHeadingAnchors(h);
     cleanHeadingZeroWidth(h, document);
@@ -464,6 +464,8 @@ function stripNoise(document: Document, context: NoiseContext): void {
   for (let i = candidates.length - 1; i >= 0; i--) {
     const node = candidates[i];
     if (!node) continue;
+    if (!node.parentNode) continue;
+
     if (shouldPreserve(node, node.tagName.toLowerCase())) continue;
     if (isNoiseElement(node, context)) {
       node.remove();
@@ -477,6 +479,7 @@ function processUrlElement(
   base: URL,
   isSrcset: boolean
 ): void {
+  if (!el.parentNode) return;
   if (isSrcset) {
     const val = el.getAttribute(attr);
     if (val) {

@@ -6,46 +6,31 @@ import type { MetadataBlock } from './transform-types.js';
 const MAX_LINE_LENGTH = 80;
 
 const REGEX = {
-  // Pre-compiled regexes for performance
   HEADING_MARKER: /^#{1,6}\s/m,
   HEADING_STRICT: /^#{1,6}\s+/m,
   EMPTY_HEADING_LINE: /^#{1,6}[ \t\u00A0]*$/,
-
   FENCE_START: /^\s*(`{3,}|~{3,})/,
-
   LIST_MARKER: /^(?:[-*+])\s/m,
   TOC_LINK: /^- \[[^\]]+\]\(#[^)]+\)\s*$/,
   TOC_HEADING: /^(?:#{1,6}\s+)?(?:table of contents|contents)\s*$/i,
-
   HTML_DOC_START: /^(<!doctype|<html)/i,
-
-  // Global replacements
+  COMBINED_LINE_REMOVALS:
+    /^(?:\[Skip to (?:main )?(?:content|navigation)\]\(#[^)]*\)|\[Skip link\]\(#[^)]*\)|Was this page helpful\??)\s*$/gim,
   ZERO_WIDTH_ANCHOR: /\[(?:\s|\u200B)*\]\(#[^)]*\)[ \t]*/g,
-  SKIP_LINKS: /^\[Skip to (?:main )?(?:content|navigation)\]\(#[^)]*\)\s*$/gim,
-  SKIP_LINK_SIMPLE: /^\[Skip link\]\(#[^)]*\)\s*$/gim,
-  HELPFUL_PROMPT: /^Was this page helpful\??\s*$/gim,
-
   CONCATENATED_PROPS:
     /([a-z_][a-z0-9_]{0,30}\??:\s+)([\u0022\u201C][^\u0022\u201C\u201D]*[\u0022\u201D])([a-z_][a-z0-9_]{0,30}\??:)/g,
-
   DOUBLE_NEWLINE_REDUCER: /\n{3,}/g,
-
   SOURCE_KEY: /^source:\s/im,
-
-  // Pipeline-specific
   HEADING_SPACING: /(^#{1,6}\s[^\n]*)\n([^\n])/gm,
   HEADING_CODE_BLOCK: /(^#{1,6}\s+\w+)```/gm,
   HEADING_CAMEL_CASE: /(^#{1,6}\s+\w*[A-Z])([A-Z][a-z])/gm,
-
   SPACING_LINK_FIX: /\]\(([^)]+)\)\[/g,
-  SPACING_LINK_ADJ: /\]\([^)]+\)(?=[A-Za-z0-9])/g,
-  SPACING_CODE_ADJ: /`[^`]+`(?=[A-Za-z0-9])/g,
+  SPACING_ADJ_COMBINED: /(?:\]\([^)]+\)|`[^`]+`)(?=[A-Za-z0-9])/g,
   SPACING_CODE_DASH: /(`[^`]+`)\s*\\-\s*/g,
   SPACING_ESCAPES: /\\([[\].])/g,
   SPACING_URL_ENC: /\]\([^)]*%5[Ff][^)]*\)/g,
-  SPACING_LIST_FIX: /^((?![-*+] |\d+\. |[ \t]).+)\n([-*+] )/gm,
-  SPACING_NUM_FIX: /^((?![-*+] |\d+\. |[ \t]).+)\n(\d+\. )/gm,
-
+  SPACING_LIST_NUM_COMBINED:
+    /^((?![-*+] |\d+\. |[ \t]).+)\n((?:[-*+]|\d+\.) )/gm,
   TYPEDOC: /(`+)(?:(?!\1)[\s\S])*?\1|\s?\/\\?\*[\s\S]*?\\?\*\//g,
 } as const;
 
@@ -249,26 +234,20 @@ function applyGlobalRegexes(text: string): string {
       match.startsWith('`') ? match : ''
     );
   }
-
-  // removeSkipLinks
   if (config.markdownCleanup.removeSkipLinks) {
     result = result
       .replace(REGEX.ZERO_WIDTH_ANCHOR, '')
-      .replace(REGEX.SKIP_LINKS, '')
-      .replace(REGEX.SKIP_LINK_SIMPLE, '');
+      .replace(REGEX.COMBINED_LINE_REMOVALS, '');
   }
 
   // normalizeSpacing
   result = result
     .replace(REGEX.SPACING_LINK_FIX, ']($1)\n\n[')
-    .replace(REGEX.HELPFUL_PROMPT, '')
-    .replace(REGEX.SPACING_LINK_ADJ, '$& ')
-    .replace(REGEX.SPACING_CODE_ADJ, '$& ')
+    .replace(REGEX.SPACING_ADJ_COMBINED, '$& ')
     .replace(REGEX.SPACING_CODE_DASH, '$1 - ')
     .replace(REGEX.SPACING_ESCAPES, '$1')
     .replace(REGEX.SPACING_URL_ENC, (m) => m.replace(/%5[Ff]/g, '_'))
-    .replace(REGEX.SPACING_LIST_FIX, '$1\n\n$2')
-    .replace(REGEX.SPACING_NUM_FIX, '$1\n\n$2')
+    .replace(REGEX.SPACING_LIST_NUM_COMBINED, '$1\n\n$2')
     .replace(REGEX.DOUBLE_NEWLINE_REDUCER, '\n\n');
 
   // fixProperties
