@@ -4,6 +4,8 @@ import { randomUUID } from 'node:crypto';
 
 import { ErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js';
 
+import { type CancellableTimeout, createUnrefTimeout } from './timer-utils.js';
+
 export type TaskStatus =
   | 'working'
   | 'input_required'
@@ -209,19 +211,31 @@ class TaskManager {
         });
       };
 
-      let timeoutId: NodeJS.Timeout | undefined;
+      let settled = false;
       let waiter: ((updated: TaskState) => void) | null = null;
+      let deadlineTimeout: CancellableTimeout<{ timeout: true }> | undefined;
+
+      const settle = (fn: () => void): void => {
+        if (settled) return;
+        settled = true;
+        fn();
+      };
 
       const onAbort = (): void => {
-        cleanup();
-        removeWaiter();
-        rejectInContext(
-          new McpError(ErrorCode.ConnectionClosed, 'Request was cancelled')
-        );
+        settle(() => {
+          cleanup();
+          removeWaiter();
+          rejectInContext(
+            new McpError(ErrorCode.ConnectionClosed, 'Request was cancelled')
+          );
+        });
       };
 
       const cleanup = (): void => {
-        if (timeoutId) clearTimeout(timeoutId);
+        if (deadlineTimeout) {
+          deadlineTimeout.cancel();
+          deadlineTimeout = undefined;
+        }
         if (signal) {
           signal.removeEventListener('abort', onAbort);
         }
@@ -235,8 +249,10 @@ class TaskManager {
       };
 
       waiter = (updated: TaskState): void => {
-        cleanup();
-        resolveInContext(updated);
+        settle(() => {
+          cleanup();
+          resolveInContext(updated);
+        });
       };
 
       if (signal?.aborted) {
@@ -255,20 +271,26 @@ class TaskManager {
       if (Number.isFinite(deadlineMs)) {
         const timeoutMs = Math.max(0, deadlineMs - Date.now());
         if (timeoutMs === 0) {
-          cleanup();
-          removeWaiter();
-          this.tasks.delete(taskId);
-          resolveInContext(undefined);
+          settle(() => {
+            cleanup();
+            removeWaiter();
+            this.tasks.delete(taskId);
+            resolveInContext(undefined);
+          });
           return;
         }
 
-        timeoutId = setTimeout(() => {
-          cleanup();
-          removeWaiter();
-          this.tasks.delete(taskId);
-          resolveInContext(undefined);
-        }, timeoutMs);
-        timeoutId.unref();
+        deadlineTimeout = createUnrefTimeout(timeoutMs, { timeout: true });
+        void deadlineTimeout.promise
+          .then(() => {
+            settle(() => {
+              cleanup();
+              removeWaiter();
+              this.tasks.delete(taskId);
+              resolveInContext(undefined);
+            });
+          })
+          .catch(rejectInContext);
       }
     });
   }

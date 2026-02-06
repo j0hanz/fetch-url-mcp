@@ -45,6 +45,7 @@ import {
   logWarn,
   redactUrl,
 } from './observability.js';
+import { type CancellableTimeout, createUnrefTimeout } from './timer-utils.js';
 import type {
   ExtractedArticle,
   ExtractedMetadata,
@@ -1888,7 +1889,7 @@ interface PendingTask {
 interface InflightTask {
   resolve: PendingTask['resolve'];
   reject: PendingTask['reject'];
-  timer: NodeJS.Timeout;
+  timeout: CancellableTimeout<null>;
   signal: AbortSignal | undefined;
   abortListener: (() => void) | undefined;
   workerIndex: number;
@@ -2425,7 +2426,7 @@ class WorkerPool implements TransformWorkerPool {
     const inflight = this.inflight.get(id);
     if (!inflight) return null;
 
-    clearTimeout(inflight.timer);
+    inflight.timeout.cancel();
     this.clearAbortListener(inflight.signal, inflight.abortListener);
     this.inflight.delete(id);
 
@@ -2525,33 +2526,37 @@ class WorkerPool implements TransformWorkerPool {
     slot.busy = true;
     slot.currentTaskId = task.id;
 
-    const timer = setTimeout(() => {
-      try {
-        slot.host.postMessage({ type: 'cancel', id: task.id });
-      } catch {
-        /* ignore */
-      }
+    const timeout = createUnrefTimeout(this.timeoutMs, null);
+    void timeout.promise
+      .then(() => {
+        try {
+          slot.host.postMessage({ type: 'cancel', id: task.id });
+        } catch {
+          /* ignore */
+        }
 
-      const inflight = this.takeInflight(task.id);
-      if (!inflight) return;
+        const inflight = this.takeInflight(task.id);
+        if (!inflight) return;
 
-      this.finalizeTask(inflight.context, () => {
-        inflight.reject(
-          new FetchError('Request timeout', task.url, 504, {
-            reason: 'timeout',
-            stage: 'transform:worker-timeout',
-          })
-        );
+        this.finalizeTask(inflight.context, () => {
+          inflight.reject(
+            new FetchError('Request timeout', task.url, 504, {
+              reason: 'timeout',
+              stage: 'transform:worker-timeout',
+            })
+          );
+        });
+
+        this.restartWorker(workerIndex, slot);
+      })
+      .catch((error: unknown) => {
+        this.failTask(task.id, error);
       });
-
-      this.restartWorker(workerIndex, slot);
-    }, this.timeoutMs);
-    timer.unref();
 
     this.inflight.set(task.id, {
       resolve: task.resolve,
       reject: task.reject,
-      timer,
+      timeout,
       signal: task.signal,
       abortListener: task.abortListener,
       workerIndex,
@@ -2584,7 +2589,7 @@ class WorkerPool implements TransformWorkerPool {
 
       slot.host.postMessage(message, transferList);
     } catch (error: unknown) {
-      clearTimeout(timer);
+      timeout.cancel();
       this.clearAbortListener(task.signal, task.abortListener);
       this.inflight.delete(task.id);
       this.markIdle(workerIndex);

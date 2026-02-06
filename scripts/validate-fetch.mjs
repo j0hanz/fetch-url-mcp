@@ -36,7 +36,7 @@
  * }
  */
 import { access, mkdir, readFile, writeFile } from 'node:fs/promises';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 import { pathToFileURL } from 'node:url';
@@ -45,6 +45,42 @@ import { parseArgs } from 'node:util';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const projectRoot = resolve(__dirname, '..');
+
+function resolveProjectFilePath(inputPath, label) {
+  if (typeof inputPath !== 'string') {
+    throw new Error(`${label} must be a string`);
+  }
+
+  const trimmed = inputPath.trim();
+  if (trimmed.length === 0) {
+    throw new Error(`${label} must not be empty`);
+  }
+
+  if (trimmed.includes('\0')) {
+    throw new Error(`${label} contains an invalid character`);
+  }
+
+  if (isAbsolute(trimmed)) {
+    throw new Error(
+      `${label} must be a relative path within the project root: ${trimmed}`
+    );
+  }
+
+  const absolutePath = resolve(projectRoot, trimmed);
+  const relativePath = relative(projectRoot, absolutePath);
+
+  if (
+    relativePath.length === 0 ||
+    relativePath === '..' ||
+    relativePath.startsWith(`..${sep}`)
+  ) {
+    throw new Error(
+      `${label} must be a relative path within the project root: ${trimmed}`
+    );
+  }
+
+  return absolutePath;
+}
 
 // Import the transform function from built dist
 const distPath = join(projectRoot, 'dist', 'transform.js');
@@ -241,7 +277,7 @@ const validators = {
     name: 'Reference Comparison',
     validate: async (markdown, referencePath) => {
       try {
-        const refPath = resolve(projectRoot, referencePath);
+        const refPath = resolveProjectFilePath(referencePath, 'reference');
         const reference = await readFile(refPath, 'utf-8');
 
         const currentLength = markdown.length;
@@ -293,10 +329,11 @@ const validators = {
           },
         };
       } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
         return {
           passed: false,
-          message: `✗ Reference file error: ${error.message}`,
-          details: { error: error.message },
+          message: `✗ Reference file error: ${message}`,
+          details: { error: message },
         };
       }
     },
@@ -426,7 +463,7 @@ async function runTest(test, options = {}) {
 
   // Save output if requested
   if (test.saveOutput) {
-    const outputPath = resolve(projectRoot, test.saveOutput);
+    const outputPath = resolveProjectFilePath(test.saveOutput, 'saveOutput');
     await mkdir(dirname(outputPath), { recursive: true });
     await writeFile(outputPath, fetchResult.markdown, 'utf-8');
     console.log(`\n💾 Saved output to: ${test.saveOutput}`);
@@ -600,13 +637,19 @@ async function main() {
 
   // Load from config file
   if (parsed.config) {
-    const configPath = resolve(projectRoot, parsed.config);
-    const configContent = await readFile(configPath, 'utf-8');
-    const config = JSON.parse(configContent);
-    tests = config.tests || [];
-    console.log(
-      `📁 Loaded ${tests.length} tests from config: ${parsed.config}`
-    );
+    try {
+      const configPath = resolveProjectFilePath(parsed.config, 'config');
+      const configContent = await readFile(configPath, 'utf-8');
+      const config = JSON.parse(configContent);
+      tests = config.tests || [];
+      console.log(
+        `📁 Loaded ${tests.length} tests from config: ${parsed.config}`
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error(`❌ Error: ${message}`);
+      return 1;
+    }
   }
   // Create test from CLI args
   else if (parsed.url) {

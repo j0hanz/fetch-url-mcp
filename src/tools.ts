@@ -28,6 +28,7 @@ import {
   logWarn,
   runWithRequestContext,
 } from './observability.js';
+import { createUnrefTimeout } from './timer-utils.js';
 import type { MarkdownTransformResult } from './transform-types.js';
 import { transformBufferToMarkdown } from './transform.js';
 import { isObject } from './type-guards.js';
@@ -341,37 +342,34 @@ class ToolProgressReporter implements ProgressReporter {
       },
     };
 
-    let timeoutId: NodeJS.Timeout | undefined;
-    const timeout = new Promise<{ timeout: true }>((resolve) => {
-      timeoutId = setTimeout(() => {
-        resolve({ timeout: true });
-      }, PROGRESS_NOTIFICATION_TIMEOUT_MS);
-      timeoutId.unref();
+    const timeout = createUnrefTimeout(PROGRESS_NOTIFICATION_TIMEOUT_MS, {
+      timeout: true as const,
     });
 
-    const sendOutcome = this.sendNotification(notification)
-      .then(() => ({ ok: true as const }))
-      .catch((error: unknown) => ({ ok: false as const, error }))
-      .finally(() => {
-        if (timeoutId) clearTimeout(timeoutId);
-      });
+    try {
+      const sendOutcome = this.sendNotification(notification)
+        .then(() => ({ ok: true as const }))
+        .catch((error: unknown) => ({ ok: false as const, error }));
 
-    const outcome = await Promise.race([sendOutcome, timeout]);
+      const outcome = await Promise.race([sendOutcome, timeout.promise]);
 
-    if ('timeout' in outcome) {
-      logWarn('Progress notification timed out', {
-        progress,
-        message,
-      });
-      return;
-    }
+      if ('timeout' in outcome) {
+        logWarn('Progress notification timed out', {
+          progress,
+          message,
+        });
+        return;
+      }
 
-    if (!outcome.ok) {
-      logWarn('Failed to send progress notification', {
-        error: getErrorMessage(outcome.error),
-        progress,
-        message,
-      });
+      if (!outcome.ok) {
+        logWarn('Failed to send progress notification', {
+          error: getErrorMessage(outcome.error),
+          progress,
+          message,
+        });
+      }
+    } finally {
+      timeout.cancel();
     }
   }
 }
