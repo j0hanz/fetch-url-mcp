@@ -1,3 +1,4 @@
+import { EventEmitter } from 'node:events';
 import type { ServerResponse } from 'node:http';
 
 import { ResourceTemplate } from '@modelcontextprotocol/sdk/server/mcp.js';
@@ -236,7 +237,20 @@ interface CacheUpdateEvent {
   namespace: string;
   urlHash: string;
 }
-type CacheUpdateListener = (event: CacheUpdateEvent) => void;
+type CacheUpdateListener = (event: CacheUpdateEvent) => unknown;
+
+interface PromiseLikeLike<T> {
+  then: (onfulfilled: (value: T) => unknown) => unknown;
+}
+
+function isPromiseLikeLike<T = unknown>(
+  value: unknown
+): value is PromiseLikeLike<T> {
+  if (typeof value !== 'object' || value === null) return false;
+  return (
+    'then' in value && typeof (value as { then?: unknown }).then === 'function'
+  );
+}
 
 interface CacheEntryMetadata {
   url: string;
@@ -249,7 +263,7 @@ class InMemoryCacheStore {
     ttlMs: config.cache.ttl * 1000,
   });
 
-  private readonly listeners = new Set<CacheUpdateListener>();
+  private readonly updateEmitter = new EventEmitter();
 
   isEnabled(): boolean {
     return config.cache.enabled;
@@ -261,8 +275,33 @@ class InMemoryCacheStore {
   }
 
   onUpdate(listener: CacheUpdateListener): () => void {
-    this.listeners.add(listener);
-    return () => this.listeners.delete(listener);
+    const wrapped: CacheUpdateListener = (event) => {
+      try {
+        const result = listener(event);
+        if (isPromiseLikeLike(result)) {
+          Promise.resolve(result).catch((error: unknown) => {
+            logWarn('Cache update listener failed', {
+              key:
+                event.cacheKey.length > 100
+                  ? event.cacheKey.slice(0, 100)
+                  : event.cacheKey,
+              error: getErrorMessage(error),
+            });
+          });
+        }
+      } catch (error: unknown) {
+        logWarn('Cache update listener failed', {
+          key:
+            event.cacheKey.length > 100
+              ? event.cacheKey.slice(0, 100)
+              : event.cacheKey,
+          error: getErrorMessage(error),
+        });
+      }
+    };
+
+    this.updateEmitter.on('update', wrapped);
+    return () => this.updateEmitter.off('update', wrapped);
   }
 
   get(
@@ -337,22 +376,13 @@ class InMemoryCacheStore {
   }
 
   private notify(cacheKey: string): void {
-    if (this.listeners.size === 0) return;
+    if (this.updateEmitter.listenerCount('update') === 0) return;
 
     const parts = parseCacheKey(cacheKey);
     if (!parts) return;
 
     const event: CacheUpdateEvent = { cacheKey, ...parts };
-    for (const listener of this.listeners) {
-      try {
-        listener(event);
-      } catch (error: unknown) {
-        logWarn('Cache update listener failed', {
-          key: cacheKey.length > 100 ? cacheKey.slice(0, 100) : cacheKey,
-          error: getErrorMessage(error),
-        });
-      }
-    }
+    this.updateEmitter.emit('update', event);
   }
 
   private logError(message: string, cacheKey: string, error: unknown): void {

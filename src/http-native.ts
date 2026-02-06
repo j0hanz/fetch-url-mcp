@@ -1,5 +1,6 @@
 import { Buffer } from 'node:buffer';
 import { randomUUID } from 'node:crypto';
+import { once } from 'node:events';
 import {
   createServer,
   type IncomingMessage,
@@ -175,20 +176,34 @@ function createRequestAbortSignal(req: IncomingMessage): {
 } {
   const controller = new AbortController();
 
-  const handleAbort = (): void => {
+  const listenerController = new AbortController();
+  let cleanedUp = false;
+
+  const abortRequest = (): void => {
+    if (cleanedUp) return;
     if (!controller.signal.aborted) controller.abort();
   };
 
-  req.on('aborted', handleAbort);
-  req.on('close', handleAbort);
-  req.on('error', handleAbort);
+  void (async () => {
+    try {
+      await Promise.race([
+        once(req, 'aborted', { signal: listenerController.signal }),
+        once(req, 'close', { signal: listenerController.signal }),
+        once(req, 'error', { signal: listenerController.signal }),
+      ]);
+      abortRequest();
+    } catch {
+      abortRequest();
+    } finally {
+      listenerController.abort();
+    }
+  })();
 
   return {
     signal: controller.signal,
     cleanup: () => {
-      req.off('aborted', handleAbort);
-      req.off('close', handleAbort);
-      req.off('error', handleAbort);
+      cleanedUp = true;
+      listenerController.abort();
     },
   };
 }
