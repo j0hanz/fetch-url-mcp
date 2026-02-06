@@ -201,6 +201,10 @@ class StageTracker {
   }
 
   run<T>(url: string, stage: string, fn: () => T, budget?: StageBudget): T {
+    if (!this.channel.hasSubscribers && !budget) {
+      return fn();
+    }
+
     if (budget && budget.elapsedMs >= budget.totalBudgetMs) {
       throw new FetchError('Transform budget exhausted', url, 504, {
         reason: 'timeout',
@@ -1440,6 +1444,14 @@ function countDomSelector(
   return resolveHtmlDocument(htmlOrDocument).querySelectorAll(selector).length;
 }
 
+function countTagsInString(html: string, regex: RegExp): number {
+  let count = 0;
+  while (regex.exec(html) !== null) {
+    count++;
+  }
+  return count;
+}
+
 function countHeadingsDom(htmlOrDocument: string | Document): number {
   return countDomSelector(htmlOrDocument, 'h1,h2,h3,h4,h5,h6');
 }
@@ -1458,21 +1470,38 @@ function resolveNodeText(node: Node): string {
   return node.textContent ?? '';
 }
 
-function getVisibleTextLength(htmlOrDocument: string | Document): number {
-  const doc = resolveHtmlDocument(htmlOrDocument);
-  const root = doc.body;
-
-  if (typeof htmlOrDocument === 'string') {
-    stripNonVisibleNodes(root);
-    const text = resolveNodeText(root);
-    return text.replace(/\s+/g, ' ').trim().length;
+function getTextContentSkippingHidden(node: Node, parts: string[]): void {
+  const { nodeType } = node;
+  if (nodeType === 3) {
+    const { textContent } = node;
+    if (textContent) parts.push(textContent);
+    return;
   }
+  if (nodeType !== 1) return;
 
-  const workRoot = root.cloneNode(true) as HTMLElement;
-  stripNonVisibleNodes(workRoot);
-  const text = resolveNodeText(workRoot);
+  const { tagName } = node as Element;
+  if (tagName === 'SCRIPT' || tagName === 'STYLE' || tagName === 'NOSCRIPT')
+    return;
 
-  return text.replace(/\s+/g, ' ').trim().length;
+  const { childNodes } = node;
+  const { length } = childNodes;
+  for (let i = 0; i < length; i++) {
+    const child = childNodes[i];
+    if (child) {
+      getTextContentSkippingHidden(child, parts);
+    }
+  }
+}
+
+function getVisibleTextLength(htmlOrDocument: string | Document): number {
+  if (typeof htmlOrDocument === 'string') {
+    const doc = resolveHtmlDocument(htmlOrDocument);
+    stripNonVisibleNodes(doc.body);
+    return resolveNodeText(doc.body).replace(/\s+/g, ' ').trim().length;
+  }
+  const parts: string[] = [];
+  getTextContentSkippingHidden(htmlOrDocument.body, parts);
+  return parts.join('').replace(/\s+/g, ' ').trim().length;
 }
 
 export function isExtractionSufficient(
@@ -1630,13 +1659,6 @@ function shouldUseArticleContent(
   const articleLength = article.textContent.length;
   const originalLength = getVisibleTextLength(originalHtmlOrDocument);
 
-  let articleDocument: Document | null = null;
-  const getArticleDocument = (): Document => {
-    if (articleDocument) return articleDocument;
-    articleDocument = resolveHtmlDocument(article.content);
-    return articleDocument;
-  };
-
   if (originalLength >= MIN_HTML_LENGTH_FOR_GATE) {
     const ratio = articleLength / originalLength;
     if (ratio < MIN_CONTENT_RATIO) return false;
@@ -1644,7 +1666,8 @@ function shouldUseArticleContent(
 
   const originalHeadings = countHeadingsDom(originalHtmlOrDocument);
   if (originalHeadings > 0) {
-    const articleHeadings = countHeadingsDom(getArticleDocument());
+    // Optimization: Use regex on article content string instead of parsing it to DOM
+    const articleHeadings = countTagsInString(article.content, /<h[1-6]\b/gi);
     const retentionRatio = articleHeadings / originalHeadings;
 
     if (retentionRatio < MIN_HEADING_RETENTION_RATIO) return false;
@@ -1652,7 +1675,8 @@ function shouldUseArticleContent(
 
   const originalCodeBlocks = countCodeBlocksDom(originalHtmlOrDocument);
   if (originalCodeBlocks > 0) {
-    const articleCodeBlocks = countCodeBlocksDom(getArticleDocument());
+    // Optimization: Use regex on article content string
+    const articleCodeBlocks = countTagsInString(article.content, /<pre\b/gi);
     const codeRetentionRatio = articleCodeBlocks / originalCodeBlocks;
 
     if (codeRetentionRatio < MIN_CODE_BLOCK_RETENTION_RATIO) return false;
