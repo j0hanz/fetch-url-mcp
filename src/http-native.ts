@@ -478,6 +478,18 @@ const corsPolicy = new CorsPolicy();
 const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '::1']);
 const WILDCARD_HOSTS = new Set(['0.0.0.0', '::']);
 
+function hasConstantTimeMatch(
+  candidates: readonly string[],
+  input: string
+): boolean {
+  // Avoid leaking match index via early-return.
+  let matched = 0;
+  for (const candidate of candidates) {
+    matched |= timingSafeEqualUtf8(candidate, input) ? 1 : 0;
+  }
+  return matched === 1;
+}
+
 function isWildcardHost(host: string): boolean {
   return WILDCARD_HOSTS.has(host);
 }
@@ -673,6 +685,10 @@ function createRateLimitManagerImpl(
 const STATIC_TOKEN_TTL_SECONDS = 60 * 60 * 24;
 
 class AuthService {
+  private readonly staticTokenDigests = config.auth.staticTokens.map((token) =>
+    sha256Hex(token)
+  );
+
   async authenticate(
     req: IncomingMessage,
     signal?: AbortSignal
@@ -727,13 +743,12 @@ class AuthService {
   }
 
   private verifyStaticToken(token: string): AuthInfo {
-    if (config.auth.staticTokens.length === 0) {
+    if (this.staticTokenDigests.length === 0) {
       throw new InvalidTokenError('No static tokens configured');
     }
 
-    const matched = config.auth.staticTokens.some((candidate) =>
-      timingSafeEqualUtf8(candidate, token)
-    );
+    const tokenDigest = sha256Hex(token);
+    const matched = hasConstantTimeMatch(this.staticTokenDigests, tokenDigest);
 
     if (!matched) throw new InvalidTokenError('Invalid token');
     return this.buildStaticAuthInfo(token);
@@ -953,9 +968,12 @@ function ensureMcpProtocolVersion(
 
 function buildAuthFingerprint(auth: AuthInfo | undefined): string | null {
   if (!auth) return null;
-  const { token, clientId } = auth;
-  if (!token && !clientId) return null;
-  return sha256Hex(`${clientId}:${token}`);
+
+  const safeClientId = typeof auth.clientId === 'string' ? auth.clientId : '';
+  const safeToken = typeof auth.token === 'string' ? auth.token : '';
+
+  if (!safeClientId && !safeToken) return null;
+  return sha256Hex(`${safeClientId}:${safeToken}`);
 }
 
 class McpSessionGateway {
