@@ -1,4 +1,3 @@
-import { AsyncLocalStorage } from 'node:async_hooks';
 import { randomUUID } from 'node:crypto';
 
 import { z } from 'zod';
@@ -28,7 +27,6 @@ import {
   logWarn,
   runWithRequestContext,
 } from './observability.js';
-import { createUnrefTimeout } from './timer-utils.js';
 import type { MarkdownTransformResult } from './transform-types.js';
 import { transformBufferToMarkdown } from './transform.js';
 import { isObject } from './type-guards.js';
@@ -217,8 +215,6 @@ interface ProgressReporter {
   report: (progress: number, message: string) => Promise<void>;
 }
 
-type RunInContext = ReturnType<typeof AsyncLocalStorage.snapshot>;
-
 /* -------------------------------------------------------------------------------------------------
  * Small runtime helpers
  * ------------------------------------------------------------------------------------------------- */
@@ -295,8 +291,7 @@ class ToolProgressReporter implements ProgressReporter {
     private readonly sendNotification: (
       notification: ProgressNotification
     ) => Promise<void>,
-    private readonly relatedTaskMeta: { taskId: string } | undefined,
-    private readonly runInContext: RunInContext
+    private readonly relatedTaskMeta: { taskId: string } | undefined
   ) {}
 
   static create(extra?: ToolHandlerExtra): ProgressReporter {
@@ -307,24 +302,9 @@ class ToolProgressReporter implements ProgressReporter {
     if (token === null || !sendNotification) {
       return { report: async () => {} };
     }
-
-    const runInContext = AsyncLocalStorage.snapshot();
-    return new ToolProgressReporter(
-      token,
-      sendNotification,
-      relatedTaskMeta,
-      runInContext
-    );
+    return new ToolProgressReporter(token, sendNotification, relatedTaskMeta);
   }
-
   async report(progress: number, message: string): Promise<void> {
-    return this.runInContext(() => this.reportInContext(progress, message));
-  }
-
-  private async reportInContext(
-    progress: number,
-    message: string
-  ): Promise<void> {
     const notification: ProgressNotification = {
       method: 'notifications/progress',
       params: {
@@ -341,35 +321,30 @@ class ToolProgressReporter implements ProgressReporter {
           : {}),
       },
     };
-
-    const timeout = createUnrefTimeout(PROGRESS_NOTIFICATION_TIMEOUT_MS, {
-      timeout: true as const,
+    let timeoutId: NodeJS.Timeout | undefined;
+    const timeoutPromise = new Promise<{ timeout: true }>((resolve) => {
+      timeoutId = setTimeout(() => {
+        resolve({ timeout: true });
+      }, PROGRESS_NOTIFICATION_TIMEOUT_MS);
+      timeoutId.unref();
     });
-
     try {
-      const sendOutcome = this.sendNotification(notification)
-        .then(() => ({ ok: true as const }))
-        .catch((error: unknown) => ({ ok: false as const, error }));
-
-      const outcome = await Promise.race([sendOutcome, timeout.promise]);
+      const outcome = await Promise.race([
+        this.sendNotification(notification).then(() => ({ ok: true as const })),
+        timeoutPromise,
+      ]);
 
       if ('timeout' in outcome) {
-        logWarn('Progress notification timed out', {
-          progress,
-          message,
-        });
-        return;
+        logWarn('Progress notification timed out', { progress, message });
       }
-
-      if (!outcome.ok) {
-        logWarn('Failed to send progress notification', {
-          error: getErrorMessage(outcome.error),
-          progress,
-          message,
-        });
-      }
+    } catch (error) {
+      logWarn('Failed to send progress notification', {
+        error: getErrorMessage(error),
+        progress,
+        message,
+      });
     } finally {
-      timeout.cancel();
+      if (timeoutId) clearTimeout(timeoutId);
     }
   }
 }
@@ -398,46 +373,43 @@ export type InlineResult = ReturnType<InlineContentLimiter['apply']>;
 function getOpenCodeFence(
   content: string
 ): { fenceChar: string; fenceLength: number } | null {
-  const lines = content.split('\n');
+  const FENCE_PATTERN = /^([ \t]*)(`{3,}|~{3,})/gm;
+  let match;
   let inFence = false;
-  let fenceChar: string | null | undefined = null;
+  let fenceChar: string | null = null;
   let fenceLength = 0;
 
-  for (const line of lines) {
-    const trimmed = line.trimStart();
+  while ((match = FENCE_PATTERN.exec(content)) !== null) {
+    const marker = match[2];
+    if (!marker) continue;
 
-    // Check for fence markers (``` or ~~~)
-    const match = /^(`{3,}|~{3,})/.exec(trimmed);
+    const [char] = marker;
+    if (!char) continue;
+    const { length } = marker;
 
-    if (match) {
-      const marker = match[0];
-      const char = marker[0];
-      const { length } = marker;
-
-      if (!inFence) {
-        // Opening fence
-        inFence = true;
-        fenceChar = char;
-        fenceLength = length;
-      } else if (char === fenceChar && length >= fenceLength) {
-        // Closing fence (same character, at least as many repetitions)
-        inFence = false;
-        fenceChar = null;
-        fenceLength = 0;
-      }
+    if (!inFence) {
+      inFence = true;
+      fenceChar = char;
+      fenceLength = length;
+    } else if (char === fenceChar && length >= fenceLength) {
+      inFence = false;
+      fenceChar = null;
+      fenceLength = 0;
     }
   }
 
-  if (!inFence || !fenceChar) return null;
-  return { fenceChar, fenceLength };
+  if (inFence && fenceChar) {
+    return { fenceChar, fenceLength };
+  }
+  return null;
 }
 
-function findSafeLinkBoundary(content: string): number {
-  const lastBracket = content.lastIndexOf('[');
-  if (lastBracket === -1) return content.length;
-  const afterBracket = content.substring(lastBracket);
+function findSafeLinkBoundary(content: string, limit: number): number {
+  const lastBracket = content.lastIndexOf('[', limit);
+  if (lastBracket === -1) return limit;
+  const afterBracket = content.substring(lastBracket, limit);
   const closedPattern = /^\[[^\]]*\]\([^)]*\)/;
-  if (closedPattern.test(afterBracket)) return content.length;
+  if (closedPattern.test(afterBracket)) return limit;
   const start =
     lastBracket > 0 && content[lastBracket - 1] === '!'
       ? lastBracket - 1
@@ -451,14 +423,10 @@ function truncateWithMarker(
   marker: string
 ): string {
   if (content.length <= limit) return content;
-
   const maxContentLength = Math.max(0, limit - marker.length);
-  let truncatedContent = content.substring(0, maxContentLength);
-
-  // Check if we're inside an open code fence
-  const openFence = getOpenCodeFence(truncatedContent);
+  const tentativeContent = content.substring(0, maxContentLength);
+  const openFence = getOpenCodeFence(tentativeContent);
   if (openFence) {
-    // Add a matching closing fence before the marker
     const fenceCloser = `\n${openFence.fenceChar.repeat(openFence.fenceLength)}\n`;
     const adjustedLength = Math.max(
       0,
@@ -467,12 +435,12 @@ function truncateWithMarker(
     return `${content.substring(0, adjustedLength)}${fenceCloser}${marker}`;
   }
 
-  const safeBoundary = findSafeLinkBoundary(truncatedContent);
-  if (safeBoundary < truncatedContent.length) {
-    truncatedContent = truncatedContent.substring(0, safeBoundary);
+  const safeBoundary = findSafeLinkBoundary(content, maxContentLength);
+  if (safeBoundary < maxContentLength) {
+    return `${content.substring(0, safeBoundary)}${marker}`;
   }
 
-  return `${truncatedContent}${marker}`;
+  return `${tentativeContent}${marker}`;
 }
 
 class InlineContentLimiter {
