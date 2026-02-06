@@ -55,23 +55,32 @@ function isDebugEnabled(): boolean {
   return config.logging.level === 'debug';
 }
 
-function buildContextMetadata(): LogMetadata {
-  const ctx = getRequestContext();
-  if (!ctx) return {};
+function buildContextMetadata(): LogMetadata | undefined {
+  const ctx = requestContext.getStore();
+  if (!ctx) return undefined;
+
+  const { requestId, operationId, sessionId } = ctx;
+  const includeSession = sessionId && isDebugEnabled();
+
+  if (!requestId && !operationId && !includeSession) return undefined;
 
   const meta: LogMetadata = {};
-
-  // Preserve existing behavior: only include truthy IDs.
-  if (ctx.requestId) meta.requestId = ctx.requestId;
-  if (ctx.operationId) meta.operationId = ctx.operationId;
-  if (ctx.sessionId && isDebugEnabled()) meta.sessionId = ctx.sessionId;
+  if (requestId) meta.requestId = requestId;
+  if (operationId) meta.operationId = operationId;
+  if (includeSession) meta.sessionId = sessionId;
 
   return meta;
 }
 
 function mergeMetadata(meta?: LogMetadata): LogMetadata | undefined {
-  const merged: LogMetadata = { ...buildContextMetadata(), ...(meta ?? {}) };
-  return Object.keys(merged).length > 0 ? merged : undefined;
+  const contextMeta = buildContextMetadata();
+  const hasMeta = meta && Object.keys(meta).length > 0;
+
+  if (!contextMeta && !hasMeta) return undefined;
+  if (!contextMeta) return meta;
+  if (!hasMeta) return contextMeta;
+
+  return { ...contextMeta, ...meta };
 }
 
 function formatMetadata(meta?: LogMetadata): string {
@@ -198,11 +207,14 @@ export function logError(message: string, error?: Error | LogMetadata): void {
 }
 
 export function redactUrl(rawUrl: string): string {
-  if (!URL.canParse(rawUrl)) return rawUrl;
-  const url = new URL(rawUrl);
-  url.username = '';
-  url.password = '';
-  url.hash = '';
-  url.search = '';
-  return url.toString();
+  try {
+    const url = new URL(rawUrl);
+    url.username = '';
+    url.password = '';
+    url.hash = '';
+    url.search = '';
+    return url.toString();
+  } catch {
+    return rawUrl;
+  }
 }
