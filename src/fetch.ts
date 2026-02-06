@@ -117,10 +117,12 @@ class UrlNormalizer {
         `URL exceeds maximum length of ${this.constants.maxUrlLength} characters`
       );
     }
-    if (!URL.canParse(trimmedUrl)) {
+    let url: URL;
+    try {
+      url = new URL(trimmedUrl);
+    } catch {
       throw createValidationError('Invalid URL format');
     }
-    const url = new URL(trimmedUrl);
     if (url.protocol !== 'http:' && url.protocol !== 'https:') {
       throw createValidationError(
         `Invalid protocol: ${url.protocol}. Only http: and https: are allowed`
@@ -1063,6 +1065,12 @@ function cancelResponseBody(response: Response): void {
   void cancelPromise.catch(() => undefined);
 }
 
+class MaxBytesError extends Error {
+  constructor() {
+    super('max-bytes-reached');
+  }
+}
+
 type NormalizeUrl = (urlString: string) => string;
 
 type RedirectPreflight = (url: string, signal?: AbortSignal) => Promise<void>;
@@ -1158,11 +1166,12 @@ class RedirectFollower {
   }
 
   private resolveRedirectTarget(baseUrl: string, location: string): string {
-    if (!URL.canParse(location, baseUrl)) {
+    let resolved: URL;
+    try {
+      resolved = new URL(location, baseUrl);
+    } catch {
       throw createErrorWithCode('Invalid redirect target', 'EBADREDIRECT');
     }
-
-    const resolved = new URL(location, baseUrl);
     if (resolved.username || resolved.password) {
       throw createErrorWithCode(
         'Redirect target includes credentials',
@@ -1216,46 +1225,8 @@ function createDecoder(encoding: string | undefined): TextDecoder {
   }
 }
 
-async function decodeWithTextDecoderStream(
-  buffer: Uint8Array,
-  encoding: string
-): Promise<string> {
-  if (typeof TextDecoderStream === 'undefined') {
-    const decoder = createDecoder(encoding);
-    return decoder.decode(buffer);
-  }
-
-  let decoderStream: ReadableWritablePair<string, Uint8Array>;
-  try {
-    decoderStream = new TextDecoderStream(
-      encoding
-    ) as unknown as ReadableWritablePair<string, Uint8Array>;
-  } catch {
-    const decoder = createDecoder(encoding);
-    return decoder.decode(buffer);
-  }
-
-  const stream = new ReadableStream<Uint8Array>({
-    start(controller) {
-      controller.enqueue(buffer);
-      controller.close();
-    },
-  }).pipeThrough(decoderStream);
-
-  const reader = stream.getReader();
-  let text = '';
-
-  try {
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      text += value;
-    }
-  } finally {
-    reader.releaseLock();
-  }
-
-  return text;
+function decodeBuffer(buffer: Uint8Array, encoding: string): string {
+  return createDecoder(encoding).decode(buffer);
 }
 
 function normalizeEncodingLabel(encoding: string | undefined): string {
@@ -1440,7 +1411,7 @@ class ResponseTextReader {
       encoding
     );
 
-    const text = await decodeWithTextDecoderStream(buffer, effectiveEncoding);
+    const text = decodeBuffer(buffer, effectiveEncoding);
     return { text, size: buffer.byteLength };
   }
 
@@ -1496,12 +1467,6 @@ class ResponseTextReader {
     signal?: AbortSignal,
     encoding?: string
   ): Promise<{ buffer: Uint8Array; encoding: string; size: number }> {
-    class MaxBytesError extends Error {
-      constructor() {
-        super('max-bytes-reached');
-      }
-    }
-
     const byteLimit = maxBytes <= 0 ? Number.POSITIVE_INFINITY : maxBytes;
     const captureChunks = byteLimit !== Number.POSITIVE_INFINITY;
     let effectiveEncoding = encoding ?? 'utf-8';
@@ -2007,10 +1972,11 @@ type FetcherConfig = typeof config.fetcher;
 type HostnamePreflight = (url: string, signal?: AbortSignal) => Promise<void>;
 
 function extractHostname(url: string): string {
-  if (!URL.canParse(url)) {
+  try {
+    return new URL(url).hostname;
+  } catch {
     throw createErrorWithCode('Invalid URL', 'EINVAL');
   }
-  return new URL(url).hostname;
 }
 
 function createDnsPreflight(dnsResolver: SafeDnsResolver): HostnamePreflight {

@@ -29,6 +29,7 @@ const HashString = z
   .regex(/^[a-f0-9.]+$/i)
   .min(8)
   .max(64);
+
 const CachedPayloadSchema = z.strictObject({
   content: z.string().optional(),
   markdown: z.string().optional(),
@@ -173,6 +174,7 @@ export function toResourceUri(cacheKey: string): string | null {
 class InMemoryCacheStore {
   private readonly max = config.cache.maxKeys;
   private readonly ttlMs = config.cache.ttl * 1000;
+
   private readonly entries = new Map<string, StoredCacheEntry>();
   private readonly updateEmitter = new EventEmitter();
 
@@ -183,9 +185,12 @@ class InMemoryCacheStore {
   keys(): readonly string[] {
     if (!this.isEnabled()) return [];
     const now = Date.now();
-    return Array.from(this.entries.entries())
-      .filter(([, entry]) => entry.expiresAtMs > now)
-      .map(([key]) => key);
+
+    const result: string[] = [];
+    for (const [key, entry] of this.entries) {
+      if (entry.expiresAtMs > now) result.push(key);
+    }
+    return result;
   }
 
   onUpdate(listener: CacheUpdateListener): () => void {
@@ -221,7 +226,8 @@ class InMemoryCacheStore {
     const entry = this.entries.get(cacheKey);
     if (!entry) return undefined;
 
-    if (entry.expiresAtMs <= Date.now()) {
+    const now = Date.now();
+    if (entry.expiresAtMs <= now) {
       this.entries.delete(cacheKey);
       return undefined;
     }
@@ -257,12 +263,10 @@ class InMemoryCacheStore {
     this.entries.delete(cacheKey);
     this.entries.set(cacheKey, entry);
 
-    // Eviction
+    // Eviction (LRU: first insertion-order key)
     if (this.entries.size > this.max) {
       const firstKey = this.entries.keys().next();
-      if (!firstKey.done) {
-        this.entries.delete(firstKey.value);
-      }
+      if (!firstKey.done) this.entries.delete(firstKey.value);
     }
 
     this.notify(cacheKey);
@@ -271,9 +275,8 @@ class InMemoryCacheStore {
   private notify(cacheKey: string): void {
     if (this.updateEmitter.listenerCount('update') === 0) return;
     const parts = parseCacheKey(cacheKey);
-    if (parts) {
-      this.updateEmitter.emit('update', { cacheKey, ...parts });
-    }
+    if (!parts) return;
+    this.updateEmitter.emit('update', { cacheKey, ...parts });
   }
 
   private logError(message: string, cacheKey: string, error: unknown): void {
@@ -352,11 +355,13 @@ function listCachedResources(): {
 
 function resolveCachedMarkdownText(raw: string): string | null {
   if (!raw) return null;
+
   const payload = parseCachedPayload(raw);
   if (payload) return resolveCachedPayloadContent(payload);
 
   const trimmed = raw.trimStart();
   if (trimmed.startsWith('{') || trimmed.startsWith('[')) return null;
+
   return raw;
 }
 
@@ -364,7 +369,6 @@ export function registerCachedContentResource(
   server: McpServer,
   serverIcons?: McpIcon[]
 ): void {
-  // Resource Registration
   server.registerResource(
     'cached-content',
     new ResourceTemplate('superfetch://cache/{namespace}/{urlHash}', {
@@ -384,6 +388,7 @@ export function registerCachedContentResource(
           'Invalid resource parameters'
         );
       }
+
       const { namespace, urlHash } = parsed.data;
       const cacheKey = `${namespace}:${urlHash}`;
 
@@ -435,11 +440,9 @@ export function registerCachedContentResource(
   store.onUpdate(({ cacheKey }) => {
     if (!server.isConnected() || !initialized) return;
 
-    // Check capabilities via unsafe cast or helper (SDK limitation)
+    // Check capabilities via unsafe cast (SDK limitation)
     const capabilities = server.server.getClientCapabilities() as
-      | {
-          resources?: { listChanged?: boolean; subscribe?: boolean };
-        }
+      | { resources?: { listChanged?: boolean; subscribe?: boolean } }
       | undefined;
 
     const uri = toResourceUri(cacheKey);
@@ -506,6 +509,7 @@ export function generateSafeFilename(
       const parsed = new URL(url);
       if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:')
         return null;
+
       const { pathname } = parsed;
       const basename = pathPosix.basename(pathname);
       if (!basename || basename === 'index') return null;
@@ -514,7 +518,6 @@ export function generateSafeFilename(
       const sanitized = sanitizeString(cleaned);
 
       if (sanitized === 'index') return null;
-
       return sanitized || null;
     } catch {
       return null;
