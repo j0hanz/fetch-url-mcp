@@ -1,6 +1,5 @@
 import { Buffer } from 'node:buffer';
 import { randomUUID } from 'node:crypto';
-import { once } from 'node:events';
 import {
   createServer,
   type IncomingMessage,
@@ -176,7 +175,6 @@ function createRequestAbortSignal(req: IncomingMessage): {
 } {
   const controller = new AbortController();
 
-  const listenerController = new AbortController();
   let cleanedUp = false;
 
   const abortRequest = (): void => {
@@ -184,26 +182,37 @@ function createRequestAbortSignal(req: IncomingMessage): {
     if (!controller.signal.aborted) controller.abort();
   };
 
-  void (async () => {
-    try {
-      await Promise.race([
-        once(req, 'aborted', { signal: listenerController.signal }),
-        once(req, 'close', { signal: listenerController.signal }),
-        once(req, 'error', { signal: listenerController.signal }),
-      ]);
-      abortRequest();
-    } catch {
-      abortRequest();
-    } finally {
-      listenerController.abort();
-    }
-  })();
+  if (req.destroyed) {
+    abortRequest();
+    return {
+      signal: controller.signal,
+      cleanup: () => {
+        cleanedUp = true;
+      },
+    };
+  }
+
+  const onAborted = (): void => {
+    abortRequest();
+  };
+  const onClose = (): void => {
+    abortRequest();
+  };
+  const onError = (): void => {
+    abortRequest();
+  };
+
+  req.once('aborted', onAborted);
+  req.once('close', onClose);
+  req.once('error', onError);
 
   return {
     signal: controller.signal,
     cleanup: () => {
       cleanedUp = true;
-      listenerController.abort();
+      req.removeListener('aborted', onAborted);
+      req.removeListener('close', onClose);
+      req.removeListener('error', onError);
     },
   };
 }

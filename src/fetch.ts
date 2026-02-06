@@ -205,74 +205,51 @@ class UrlNormalizer {
   }
 }
 
-interface TransformRule {
-  readonly name: string;
-  readonly pattern: RegExp;
-  readonly transform: (match: RegExpExecArray) => string;
+type UrlPatternGroups = Record<string, string | undefined>;
+
+function getPatternGroup(groups: UrlPatternGroups, key: string): string | null {
+  const value = groups[key];
+  if (value === undefined) return null;
+  if (value === '') return null;
+  return value;
 }
 
-function getMatchGroup(match: RegExpExecArray, index: number): string {
-  return match[index] ?? '';
-}
+const GITHUB_BLOB_PATTERN = new URLPattern({
+  protocol: 'http{s}?',
+  hostname: '{:sub.}?github.com',
+  pathname: '/:owner/:repo/blob/:branch/:path+',
+});
 
-const GITHUB_BLOB_RULE: TransformRule = {
-  name: 'github',
-  pattern:
-    /^https?:\/\/(?:www\.)?github\.com\/([^/]+)\/([^/]+)\/blob\/([^/]+)\/(.+)$/i,
-  transform: (match) => {
-    const owner = getMatchGroup(match, 1);
-    const repo = getMatchGroup(match, 2);
-    const branch = getMatchGroup(match, 3);
-    const path = getMatchGroup(match, 4);
-    return `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/${path}`;
-  },
-};
+const GITHUB_GIST_PATTERN = new URLPattern({
+  protocol: 'http{s}?',
+  hostname: 'gist.github.com',
+  pathname: '/:user/:gistId',
+});
 
-const GITHUB_GIST_RULE: TransformRule = {
-  name: 'github-gist',
-  pattern:
-    /^https?:\/\/gist\.github\.com\/([^/]+)\/([a-f0-9]+)(?:#file-(.+)|\/raw\/([^/]+))?$/i,
-  transform: (match) => {
-    const user = getMatchGroup(match, 1);
-    const gistId = getMatchGroup(match, 2);
-    const hashFile = match[3];
-    const rawFile = match[4];
-    const filename = rawFile ?? hashFile?.replace(/-/g, '.');
-    const filePath = filename ? `/${filename}` : '';
-    return `https://gist.githubusercontent.com/${user}/${gistId}/raw${filePath}`;
-  },
-};
+const GITHUB_GIST_RAW_PATTERN = new URLPattern({
+  protocol: 'http{s}?',
+  hostname: 'gist.github.com',
+  pathname: '/:user/:gistId/raw/:filePath+',
+});
 
-const GITLAB_BLOB_RULE: TransformRule = {
-  name: 'gitlab',
-  pattern:
-    /^(https?:\/\/(?:[^/]+\.)?gitlab\.com\/[^/]+\/[^/]+)\/-\/blob\/([^/]+)\/(.+)$/i,
-  transform: (match) => {
-    const baseUrl = getMatchGroup(match, 1);
-    const branch = getMatchGroup(match, 2);
-    const path = getMatchGroup(match, 3);
-    return `${baseUrl}/-/raw/${branch}/${path}`;
-  },
-};
-
-const BITBUCKET_SRC_RULE: TransformRule = {
-  name: 'bitbucket',
-  pattern:
-    /^(https?:\/\/(?:www\.)?bitbucket\.org\/[^/]+\/[^/]+)\/src\/([^/]+)\/(.+)$/i,
-  transform: (match) => {
-    const baseUrl = getMatchGroup(match, 1);
-    const branch = getMatchGroup(match, 2);
-    const path = getMatchGroup(match, 3);
-    return `${baseUrl}/raw/${branch}/${path}`;
-  },
-};
-
-const TRANSFORM_RULES: readonly TransformRule[] = [
-  GITHUB_BLOB_RULE,
-  GITHUB_GIST_RULE,
-  GITLAB_BLOB_RULE,
-  BITBUCKET_SRC_RULE,
+const GITLAB_BLOB_PATTERNS: readonly URLPattern[] = [
+  new URLPattern({
+    protocol: 'http{s}?',
+    hostname: 'gitlab.com',
+    pathname: '/:base+/-/blob/:branch/:path+',
+  }),
+  new URLPattern({
+    protocol: 'http{s}?',
+    hostname: '*:sub.gitlab.com',
+    pathname: '/:base+/-/blob/:branch/:path+',
+  }),
 ];
+
+const BITBUCKET_SRC_PATTERN = new URLPattern({
+  protocol: 'http{s}?',
+  hostname: '{:sub.}?bitbucket.org',
+  pathname: '/:owner/:repo/src/:branch/:path+',
+});
 
 const BITBUCKET_RAW_RE = /bitbucket\.org\/[^/]+\/[^/]+\/raw\//;
 
@@ -367,17 +344,6 @@ class RawUrlTransformer {
   ): { url: string; platform: string } | null {
     const parsedMatch = this.tryTransformWithUrl(base, hash);
     if (parsedMatch) return parsedMatch;
-
-    for (const rule of TRANSFORM_RULES) {
-      const urlToMatch =
-        rule.name === 'github-gist' && hash.startsWith('#file-')
-          ? base + hash
-          : base;
-
-      const match = rule.pattern.exec(urlToMatch);
-      if (match) return { url: rule.transform(match), platform: rule.name };
-    }
-
     return null;
   }
 
@@ -391,42 +357,32 @@ class RawUrlTransformer {
     if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:')
       return null;
 
-    const hostname = parsed.hostname.toLowerCase();
-    const segments = parsed.pathname.split('/').filter(Boolean);
+    const gist = this.transformGithubGist(base, hash);
+    if (gist) return gist;
 
-    if (hostname === 'github.com' || hostname === 'www.github.com') {
-      const github = this.transformGithubBlob(segments);
-      if (github) return github;
-    }
+    const github = this.transformGithubBlob(base);
+    if (github) return github;
 
-    if (hostname === 'gist.github.com') {
-      const gist = this.transformGithubGist(segments, hash);
-      if (gist) return gist;
-    }
+    const gitlab = this.transformGitLab(base, parsed.origin);
+    if (gitlab) return gitlab;
 
-    if (hostname === 'gitlab.com' || hostname.endsWith('.gitlab.com')) {
-      const gitlab = this.transformGitLab(segments, parsed.origin);
-      if (gitlab) return gitlab;
-    }
-
-    if (hostname === 'bitbucket.org' || hostname === 'www.bitbucket.org') {
-      const bitbucket = this.transformBitbucket(segments, parsed.origin);
-      if (bitbucket) return bitbucket;
-    }
+    const bitbucket = this.transformBitbucket(base, parsed.origin);
+    if (bitbucket) return bitbucket;
 
     return null;
   }
 
   private transformGithubBlob(
-    segments: string[]
+    url: string
   ): { url: string; platform: string } | null {
-    if (segments.length < 5 || segments[2] !== 'blob') return null;
+    const match = GITHUB_BLOB_PATTERN.exec(url);
+    if (!match) return null;
 
-    const owner = segments[0];
-    const repo = segments[1];
-    const branch = segments[3];
-    const path = segments.slice(4).join('/');
-
+    const groups = match.pathname.groups as UrlPatternGroups;
+    const owner = getPatternGroup(groups, 'owner');
+    const repo = getPatternGroup(groups, 'repo');
+    const branch = getPatternGroup(groups, 'branch');
+    const path = getPatternGroup(groups, 'path');
     if (!owner || !repo || !branch || !path) return null;
 
     return {
@@ -436,20 +392,35 @@ class RawUrlTransformer {
   }
 
   private transformGithubGist(
-    segments: string[],
+    url: string,
     hash: string
   ): { url: string; platform: string } | null {
-    if (segments.length < 2) return null;
+    const rawMatch = GITHUB_GIST_RAW_PATTERN.exec(url);
+    if (rawMatch) {
+      const groups = rawMatch.pathname.groups as UrlPatternGroups;
+      const user = getPatternGroup(groups, 'user');
+      const gistId = getPatternGroup(groups, 'gistId');
+      const filePath = getPatternGroup(groups, 'filePath');
+      if (!user || !gistId) return null;
 
-    const user = segments[0];
-    const gistId = segments[1];
+      const resolvedFilePath = filePath ? `/${filePath}` : '';
+
+      return {
+        url: `https://gist.githubusercontent.com/${user}/${gistId}/raw${resolvedFilePath}`,
+        platform: 'github-gist',
+      };
+    }
+
+    const match = GITHUB_GIST_PATTERN.exec(url);
+    if (!match) return null;
+
+    const groups = match.pathname.groups as UrlPatternGroups;
+    const user = getPatternGroup(groups, 'user');
+    const gistId = getPatternGroup(groups, 'gistId');
     if (!user || !gistId) return null;
 
     let filePath = '';
-    if (segments[2] === 'raw' && segments.length >= 4) {
-      const rawPath = segments.slice(3).join('/');
-      if (rawPath) filePath = `/${rawPath}`;
-    } else if (hash.startsWith('#file-')) {
+    if (hash.startsWith('#file-')) {
       const filename = hash.slice('#file-'.length).replace(/-/g, '.');
       if (filename) filePath = `/${filename}`;
     }
@@ -461,40 +432,40 @@ class RawUrlTransformer {
   }
 
   private transformGitLab(
-    segments: string[],
+    url: string,
     origin: string
   ): { url: string; platform: string } | null {
-    const markerIndex = segments.findIndex(
-      (segment, index) => segment === '-' && segments[index + 1] === 'blob'
-    );
+    for (const pattern of GITLAB_BLOB_PATTERNS) {
+      const match = pattern.exec(url);
+      if (!match) continue;
 
-    if (markerIndex === -1) return null;
+      const groups = match.pathname.groups as UrlPatternGroups;
+      const base = getPatternGroup(groups, 'base');
+      const branch = getPatternGroup(groups, 'branch');
+      const path = getPatternGroup(groups, 'path');
+      if (!base || !branch || !path) return null;
 
-    const baseSegments = segments.slice(0, markerIndex);
-    if (baseSegments.length < 2) return null;
+      return {
+        url: `${origin}/${base}/-/raw/${branch}/${path}`,
+        platform: 'gitlab',
+      };
+    }
 
-    const branch = segments[markerIndex + 2];
-    const path = segments.slice(markerIndex + 3).join('/');
-
-    if (!branch || !path) return null;
-
-    return {
-      url: `${origin}/${baseSegments.join('/')}/-/raw/${branch}/${path}`,
-      platform: 'gitlab',
-    };
+    return null;
   }
 
   private transformBitbucket(
-    segments: string[],
+    url: string,
     origin: string
   ): { url: string; platform: string } | null {
-    if (segments.length < 5 || segments[2] !== 'src') return null;
+    const match = BITBUCKET_SRC_PATTERN.exec(url);
+    if (!match) return null;
 
-    const owner = segments[0];
-    const repo = segments[1];
-    const branch = segments[3];
-    const path = segments.slice(4).join('/');
-
+    const groups = match.pathname.groups as UrlPatternGroups;
+    const owner = getPatternGroup(groups, 'owner');
+    const repo = getPatternGroup(groups, 'repo');
+    const branch = getPatternGroup(groups, 'branch');
+    const path = getPatternGroup(groups, 'path');
     if (!owner || !repo || !branch || !path) return null;
 
     return {

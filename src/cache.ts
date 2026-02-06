@@ -1,5 +1,6 @@
 import { EventEmitter } from 'node:events';
 import type { ServerResponse } from 'node:http';
+import { posix as pathPosix } from 'node:path';
 
 import { ResourceTemplate } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
@@ -756,9 +757,8 @@ function normalizeUrlFilenameSegment(segment: string): string | null {
 }
 
 function getLastPathSegment(url: URL): string | null {
-  const segments = url.pathname.split('/').filter(Boolean);
-  if (segments.length === 0) return null;
-  return segments[segments.length - 1] ?? null;
+  const segment = pathPosix.basename(url.pathname);
+  return segment || null;
 }
 
 function extractFilenameFromUrl(url: string): string | null {
