@@ -107,14 +107,11 @@ function createTransportAdapter(
   };
 }
 
-type QueryParams = Record<string, string | string[]>;
-
 interface RequestContext {
   req: IncomingMessage;
   res: ServerResponse;
   url: URL;
   method: string | undefined;
-  query: QueryParams;
   ip: string | null;
   body: unknown;
   signal?: AbortSignal;
@@ -144,20 +141,6 @@ function sendEmpty(res: ServerResponse, status: number): void {
   res.statusCode = status;
   res.setHeader('Content-Length', '0');
   res.end();
-}
-
-function parseQuery(url: URL): QueryParams {
-  const query: QueryParams = {};
-  for (const [key, value] of url.searchParams) {
-    const existing = query[key];
-    if (existing) {
-      if (Array.isArray(existing)) existing.push(value);
-      else query[key] = [existing, value];
-    } else {
-      query[key] = value;
-    }
-  }
-  return query;
 }
 
 function drainRequest(req: IncomingMessage): void {
@@ -259,7 +242,7 @@ function registerInboundBlockList(server: Server): void {
 }
 
 function getHeaderValue(req: IncomingMessage, name: string): string | null {
-  const val = req.headers[name.toLowerCase()];
+  const val = req.headers[name];
   if (!val) return null;
   if (Array.isArray(val)) return val[0] ?? null;
   return val;
@@ -290,7 +273,6 @@ function buildRequestContext(
     res,
     url,
     method: req.method,
-    query: parseQuery(url),
     ip: normalizeRemoteAddress(req.socket.remoteAddress),
     body: undefined,
     ...(signal ? { signal } : {}),
@@ -658,16 +640,22 @@ class RateLimiter implements RateLimitManagerImpl {
     const now = Date.now();
     let entry = this.store.get(key);
 
-    if (!entry || now > entry.resetTime) {
+    if (entry) {
+      if (now > entry.resetTime) {
+        entry.count = 1;
+        entry.resetTime = now + this.options.windowMs;
+        entry.lastAccessed = now;
+      } else {
+        entry.count += 1;
+        entry.lastAccessed = now;
+      }
+    } else {
       entry = {
         count: 1,
         resetTime: now + this.options.windowMs,
         lastAccessed: now,
       };
       this.store.set(key, entry);
-    } else {
-      entry.count += 1;
-      entry.lastAccessed = now;
     }
 
     if (entry.count > this.options.maxRequests) {
@@ -734,8 +722,11 @@ class AuthService {
   }
 
   private resolveBearerToken(authHeader: string): string {
-    const [type, token] = authHeader.split(' ');
-    if (type !== 'Bearer' || !token) {
+    if (!authHeader.startsWith('Bearer ')) {
+      throw new InvalidTokenError('Invalid Authorization header format');
+    }
+    const token = authHeader.substring(7);
+    if (!token) {
       throw new InvalidTokenError('Invalid Authorization header format');
     }
     return token;
