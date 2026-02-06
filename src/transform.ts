@@ -1899,7 +1899,7 @@ function buildMarkdownFromContext(
   if (context.title && !content.trim().startsWith('# ')) {
     let faviconPrefix = '';
     if (context.favicon && typeof context.favicon === 'string') {
-      faviconPrefix = `<img src="${context.favicon}" width="20" height="20" alt="" /> `;
+      faviconPrefix = `<img src="${context.favicon}" width="32" height="32" alt="" /> `;
     }
     content = `# ${faviconPrefix}${context.title}\n\n${content}`;
   }
