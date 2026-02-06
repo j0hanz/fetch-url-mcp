@@ -279,7 +279,7 @@ class RawUrlTransformer {
     if (this.isRawUrl(url)) return { url, transformed: false };
 
     const { base, hash } = this.splitParams(url);
-    const match = this.applyRules(base, hash);
+    const match = this.tryTransformWithUrl(base, hash);
     if (!match) return { url, transformed: false };
 
     this.logger.debug('URL transformed to raw content URL', {
@@ -303,7 +303,6 @@ class RawUrlTransformer {
 
       return RAW_TEXT_EXTENSIONS.has(pathname.slice(lastDot));
     } catch {
-      // Fallback for invalid URLs or relative paths
       const { base } = this.splitParams(urlString);
       const lowerBase = base.toLowerCase();
       const lastDot = lowerBase.lastIndexOf('.');
@@ -339,15 +338,6 @@ class RawUrlTransformer {
       const hash = hashIndex !== -1 ? urlString.slice(hashIndex) : '';
       return { base: urlString.slice(0, endIndex), hash };
     }
-  }
-
-  private applyRules(
-    base: string,
-    hash: string
-  ): { url: string; platform: string } | null {
-    const parsedMatch = this.tryTransformWithUrl(base, hash);
-    if (parsedMatch) return parsedMatch;
-    return null;
   }
 
   private tryTransformWithUrl(
@@ -521,7 +511,7 @@ function createAbortRace(
     try {
       signal.removeEventListener('abort', abortListener);
     } catch {
-      // Best-effort cleanup.
+      // Ignore listener cleanup failures; they are non-fatal by design.
     }
     abortListener = null;
   };
@@ -1062,7 +1052,7 @@ function cancelResponseBody(response: Response): void {
   const cancelPromise = response.body?.cancel();
   if (!cancelPromise) return;
 
-  cancelPromise.catch(() => undefined);
+  void cancelPromise.catch(() => undefined);
 }
 
 type NormalizeUrl = (urlString: string) => string;
@@ -1549,7 +1539,7 @@ class ResponseTextReader {
     try {
       await reader.cancel();
     } catch {
-      // Best-effort cleanup.
+      // Ignore cancellation failures; stream teardown must proceed.
     }
   }
 }
@@ -1803,15 +1793,29 @@ function decodeResponseIfNeeded(
   });
 }
 
-async function handleFetchResponse(
+type ReadDecodedResponseResult =
+  | {
+      kind: 'text';
+      text: string;
+      size: number;
+    }
+  | {
+      kind: 'buffer';
+      buffer: Uint8Array;
+      encoding: string;
+      size: number;
+    };
+
+async function readAndRecordDecodedResponse(
   response: Response,
   finalUrl: string,
   ctx: FetchTelemetryContext,
   telemetry: FetchTelemetry,
   reader: ResponseTextReader,
   maxBytes: number,
+  mode: 'text' | 'buffer',
   signal?: AbortSignal
-): Promise<string> {
+): Promise<ReadDecodedResponseResult> {
   const responseError = resolveResponseError(response, finalUrl);
   if (responseError) {
     cancelResponseBody(response);
@@ -1822,53 +1826,30 @@ async function handleFetchResponse(
 
   const contentType = decodedResponse.headers.get('content-type');
   assertSupportedContentType(contentType, finalUrl);
-  const encoding = getCharsetFromContentType(contentType ?? null);
 
-  const { text, size } = await reader.read(
-    decodedResponse,
-    finalUrl,
-    maxBytes,
-    signal,
-    encoding
-  );
-  telemetry.recordResponse(ctx, decodedResponse, size);
-  return text;
-}
+  const declaredEncoding = getCharsetFromContentType(contentType ?? null);
 
-async function handleFetchResponseBuffer(
-  response: Response,
-  finalUrl: string,
-  ctx: FetchTelemetryContext,
-  telemetry: FetchTelemetry,
-  reader: ResponseTextReader,
-  maxBytes: number,
-  signal?: AbortSignal
-): Promise<{ buffer: Uint8Array; encoding: string }> {
-  const responseError = resolveResponseError(response, finalUrl);
-  if (responseError) {
-    cancelResponseBody(response);
-    throw responseError;
+  if (mode === 'text') {
+    const { text, size } = await reader.read(
+      decodedResponse,
+      finalUrl,
+      maxBytes,
+      signal,
+      declaredEncoding
+    );
+    telemetry.recordResponse(ctx, decodedResponse, size);
+    return { kind: 'text', text, size };
   }
 
-  const decodedResponse = decodeResponseIfNeeded(response, finalUrl, signal);
-
-  const contentType = decodedResponse.headers.get('content-type');
-  assertSupportedContentType(contentType, finalUrl);
-  const encoding = getCharsetFromContentType(contentType ?? null);
-
-  const {
-    buffer,
-    encoding: detectedEncoding,
-    size,
-  } = await reader.readBuffer(
+  const { buffer, encoding, size } = await reader.readBuffer(
     decodedResponse,
     finalUrl,
     maxBytes,
     signal,
-    encoding
+    declaredEncoding
   );
   telemetry.recordResponse(ctx, decodedResponse, size);
-  return { buffer, encoding: detectedEncoding };
+  return { kind: 'buffer', buffer, encoding, size };
 }
 
 type FetcherConfig = typeof config.fetcher;
@@ -1902,48 +1883,31 @@ class HttpFetcher {
     normalizedUrl: string,
     options?: FetchOptions
   ): Promise<string> {
-    const hostname = extractHostname(normalizedUrl);
-
-    const timeoutMs = this.fetcherConfig.timeout;
-    const headers = buildHeaders();
-    const signal = buildRequestSignal(timeoutMs, options?.signal);
-    const init = buildRequestInit(headers, signal);
-
-    const ctx = this.telemetry.start(normalizedUrl, 'GET');
-
-    try {
-      await this.dnsResolver.assertSafeHostname(hostname, signal ?? undefined);
-
-      const { response, url: finalUrl } =
-        await this.redirectFollower.fetchWithRedirects(
-          normalizedUrl,
-          init,
-          this.fetcherConfig.maxRedirects
-        );
-
-      ctx.url = this.telemetry.redact(finalUrl);
-
-      return await handleFetchResponse(
-        response,
-        finalUrl,
-        ctx,
-        this.telemetry,
-        this.reader,
-        this.fetcherConfig.maxContentLength,
-        init.signal ?? undefined
-      );
-    } catch (error: unknown) {
-      const mapped = mapFetchError(error, normalizedUrl, timeoutMs);
-      ctx.url = this.telemetry.redact(mapped.url);
-      this.telemetry.recordError(ctx, mapped, mapped.statusCode);
-      throw mapped;
-    }
+    return this.fetchNormalized(normalizedUrl, 'text', options);
   }
 
   async fetchNormalizedUrlBuffer(
     normalizedUrl: string,
     options?: FetchOptions
   ): Promise<{ buffer: Uint8Array; encoding: string }> {
+    return this.fetchNormalized(normalizedUrl, 'buffer', options);
+  }
+
+  private async fetchNormalized(
+    normalizedUrl: string,
+    mode: 'text',
+    options?: FetchOptions
+  ): Promise<string>;
+  private async fetchNormalized(
+    normalizedUrl: string,
+    mode: 'buffer',
+    options?: FetchOptions
+  ): Promise<{ buffer: Uint8Array; encoding: string }>;
+  private async fetchNormalized(
+    normalizedUrl: string,
+    mode: 'text' | 'buffer',
+    options?: FetchOptions
+  ): Promise<string | { buffer: Uint8Array; encoding: string }> {
     const hostname = extractHostname(normalizedUrl);
 
     const timeoutMs = this.fetcherConfig.timeout;
@@ -1965,15 +1929,20 @@ class HttpFetcher {
 
       ctx.url = this.telemetry.redact(finalUrl);
 
-      return await handleFetchResponseBuffer(
+      const payload = await readAndRecordDecodedResponse(
         response,
         finalUrl,
         ctx,
         this.telemetry,
         this.reader,
         this.fetcherConfig.maxContentLength,
+        mode,
         init.signal ?? undefined
       );
+
+      if (payload.kind === 'text') return payload.text;
+
+      return { buffer: payload.buffer, encoding: payload.encoding };
     } catch (error: unknown) {
       const mapped = mapFetchError(error, normalizedUrl, timeoutMs);
       ctx.url = this.telemetry.redact(mapped.url);
