@@ -1,173 +1,150 @@
-import { types as utilTypes } from 'node:util';
 import { parentPort } from 'node:worker_threads';
 
-import { z } from 'zod';
-
 import { FetchError, getErrorMessage } from '../errors.js';
-import type {
-  MarkdownTransformResult,
-  TransformWorkerCancelMessage,
-  TransformWorkerErrorMessage,
-  TransformWorkerOutgoingMessage,
-  TransformWorkerTransformMessage,
-} from '../transform-types.js';
 import { transformHtmlToMarkdownInProcess } from '../transform.js';
 
-const port =
-  parentPort ??
-  (() => {
-    throw new Error('transform-worker started without parentPort');
-  })();
+if (!parentPort) throw new Error('transform-worker started without parentPort');
+const port = parentPort;
 
 const controllersById = new Map<string, AbortController>();
+const decoder = new TextDecoder('utf-8');
 
-function post(message: TransformWorkerOutgoingMessage): void {
-  port.postMessage(message);
+function postError(id: string, url: string, error: unknown): void {
+  if (error instanceof FetchError) {
+    port.postMessage({
+      type: 'error',
+      id,
+      error: {
+        name: error.name,
+        message: error.message,
+        url: error.url,
+        statusCode: error.statusCode,
+        details: { ...error.details },
+      },
+    });
+    return;
+  }
+
+  port.postMessage({
+    type: 'error',
+    id,
+    error: {
+      name: error instanceof Error ? error.name : 'Error',
+      message: getErrorMessage(error),
+      url,
+    },
+  });
 }
 
-function postError(
-  id: string,
-  error: TransformWorkerErrorMessage['error']
-): void {
-  post({ type: 'error', id, error });
-}
-
-function validateTransformMessage(
-  message: TransformWorkerTransformMessage
-): string | null {
-  if (!message.id.trim()) return 'Missing transform message id';
-  if (!message.url.trim()) return 'Missing transform URL';
-  return null;
-}
-
-function toValidationWorkerError(
-  message: TransformWorkerTransformMessage,
-  reason: string
-): TransformWorkerErrorMessage['error'] {
-  return {
-    name: 'ValidationError',
-    message: reason,
-    url: message.url,
-  };
-}
-
-function toFetchWorkerError(
-  error: FetchError
-): TransformWorkerErrorMessage['error'] {
-  return {
-    name: error.name,
-    message: error.message,
-    url: error.url,
-    statusCode: error.statusCode,
-    details: { ...error.details },
-  };
-}
-
-function toUnknownWorkerError(
-  message: TransformWorkerTransformMessage,
-  error: unknown
-): TransformWorkerErrorMessage['error'] {
-  return {
-    name: error instanceof Error ? error.name : 'Error',
-    message: getErrorMessage(error),
-    url: message.url,
-  };
-}
-
-function toOutgoingResult(result: MarkdownTransformResult): {
-  markdown: string;
-  title?: string;
-  truncated: boolean;
+function isValidMessage(msg: Record<string, unknown>): msg is {
+  id: string;
+  url: string;
+  html?: string;
+  htmlBuffer?: Uint8Array;
+  encoding?: string;
+  includeMetadata: boolean;
+  skipNoiseRemoval?: boolean;
 } {
-  const { markdown, title, truncated } = result;
-  return title === undefined
-    ? { markdown, truncated }
-    : { markdown, title, truncated };
+  const {
+    id,
+    url,
+    html,
+    htmlBuffer,
+    encoding,
+    includeMetadata,
+    skipNoiseRemoval,
+  } = msg;
+  return (
+    typeof id === 'string' &&
+    typeof url === 'string' &&
+    typeof includeMetadata === 'boolean' &&
+    (html === undefined || typeof html === 'string') &&
+    (htmlBuffer === undefined || htmlBuffer instanceof Uint8Array) &&
+    (encoding === undefined || typeof encoding === 'string') &&
+    (skipNoiseRemoval === undefined || typeof skipNoiseRemoval === 'boolean')
+  );
 }
 
-function handleTransform(message: TransformWorkerTransformMessage): void {
-  const validationError = validateTransformMessage(message);
-  if (validationError) {
-    postError(message.id, toValidationWorkerError(message, validationError));
+function postValidationError(id: string, message: string, url: string): void {
+  port.postMessage({
+    type: 'error',
+    id,
+    error: { name: 'ValidationError', message, url },
+  });
+}
+
+function decodeHtmlBuffer(htmlBuffer: Uint8Array, encoding?: string): string {
+  if (!encoding || encoding === 'utf-8') {
+    return decoder.decode(htmlBuffer);
+  }
+  return new TextDecoder(encoding).decode(htmlBuffer);
+}
+
+function handleTransform(msg: Record<string, unknown>): void {
+  if (!isValidMessage(msg)) return;
+
+  const {
+    id,
+    url,
+    html,
+    htmlBuffer,
+    encoding,
+    includeMetadata,
+    skipNoiseRemoval,
+  } = msg;
+
+  if (!id.trim()) {
+    postValidationError(id, 'Missing transform message id', url || '');
+    return;
+  }
+
+  if (!url.trim()) {
+    postValidationError(id, 'Missing transform URL', url);
     return;
   }
 
   const controller = new AbortController();
-  controllersById.set(message.id, controller);
+  controllersById.set(id, controller);
 
   try {
-    let html = message.html ?? '';
-    if (message.htmlBuffer) {
-      const decoder = new TextDecoder(message.encoding ?? 'utf-8');
-      html = decoder.decode(message.htmlBuffer);
-    }
+    const content = htmlBuffer
+      ? decodeHtmlBuffer(htmlBuffer, encoding)
+      : (html ?? '');
 
-    const result = transformHtmlToMarkdownInProcess(html, message.url, {
-      includeMetadata: message.includeMetadata,
+    const result = transformHtmlToMarkdownInProcess(content, url, {
+      includeMetadata,
       signal: controller.signal,
-      ...(message.skipNoiseRemoval ? { skipNoiseRemoval: true } : {}),
+      ...(skipNoiseRemoval ? { skipNoiseRemoval: true } : {}),
     });
 
-    post({
+    const { markdown, title, truncated } = result;
+    port.postMessage({
       type: 'result',
-      id: message.id,
-      result: toOutgoingResult(result),
+      id,
+      result:
+        title === undefined
+          ? { markdown, truncated }
+          : { markdown, title, truncated },
     });
   } catch (error: unknown) {
-    if (error instanceof FetchError) {
-      postError(message.id, toFetchWorkerError(error));
-      return;
-    }
-
-    postError(message.id, toUnknownWorkerError(message, error));
+    postError(id, url, error);
   } finally {
-    controllersById.delete(message.id);
+    controllersById.delete(id);
   }
 }
 
-function handleCancel(message: TransformWorkerCancelMessage): void {
-  const controller = controllersById.get(message.id);
-  if (!controller) return;
-
-  // Note: cancellation only interrupts work if the transform function yields and respects AbortSignal.
-  controller.abort(new Error('Canceled'));
-}
-
-const HtmlBufferSchema = z.custom<Uint8Array>((value) =>
-  utilTypes.isUint8Array(value)
-);
-
-const TransformMessageSchema = z.object({
-  type: z.literal('transform'),
-  id: z.string(),
-  html: z.string().optional(),
-  htmlBuffer: HtmlBufferSchema.optional(),
-  encoding: z.string().optional(),
-  url: z.string(),
-  includeMetadata: z.boolean(),
-  skipNoiseRemoval: z.boolean().optional(),
-});
-
-const CancelMessageSchema = z.object({
-  type: z.literal('cancel'),
-  id: z.string(),
-});
-
-const IncomingMessageSchema = z.discriminatedUnion('type', [
-  TransformMessageSchema,
-  CancelMessageSchema,
-]);
-
 port.on('message', (raw: unknown) => {
-  const parsed = IncomingMessageSchema.safeParse(raw);
-  if (!parsed.success) return;
+  if (!raw || typeof raw !== 'object') return;
+  const msg = raw as Record<string, unknown>;
 
-  const message = parsed.data;
-
-  if (message.type === 'cancel') {
-    handleCancel(message);
+  if (msg.type === 'cancel') {
+    if (typeof msg.id !== 'string') return;
+    const controller = controllersById.get(msg.id);
+    if (controller) controller.abort(new Error('Canceled'));
     return;
   }
 
-  handleTransform(message);
+  if (msg.type === 'transform') {
+    handleTransform(msg);
+  }
 });

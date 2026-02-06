@@ -1,168 +1,152 @@
 import process from 'node:process';
 
-import { z } from 'zod';
-
 import { FetchError, getErrorMessage } from '../errors.js';
-import type {
-  MarkdownTransformResult,
-  TransformWorkerCancelMessage,
-  TransformWorkerErrorMessage,
-  TransformWorkerOutgoingMessage,
-  TransformWorkerTransformMessage,
-} from '../transform-types.js';
 import { transformHtmlToMarkdownInProcess } from '../transform.js';
 
-const send =
-  process.send?.bind(process) ??
-  (() => {
-    throw new Error('transform-child started without IPC channel');
-  });
+const send = process.send?.bind(process);
+if (!send) throw new Error('transform-child started without IPC channel');
 
 const controllersById = new Map<string, AbortController>();
+const decoder = new TextDecoder('utf-8');
 
-function post(message: TransformWorkerOutgoingMessage): void {
-  send(message);
+function postError(id: string, url: string, error: unknown): void {
+  if (error instanceof FetchError) {
+    send?.({
+      type: 'error',
+      id,
+      error: {
+        name: error.name,
+        message: error.message,
+        url: error.url,
+        statusCode: error.statusCode,
+        details: { ...error.details },
+      },
+    });
+    return;
+  }
+
+  send?.({
+    type: 'error',
+    id,
+    error: {
+      name: error instanceof Error ? error.name : 'Error',
+      message: getErrorMessage(error),
+      url,
+    },
+  });
 }
 
-function postError(
-  id: string,
-  error: TransformWorkerErrorMessage['error']
-): void {
-  post({ type: 'error', id, error });
-}
-
-function validateTransformMessage(
-  message: TransformWorkerTransformMessage
-): string | null {
-  if (!message.id.trim()) return 'Missing transform message id';
-  if (!message.url.trim()) return 'Missing transform URL';
-  return null;
-}
-
-function toValidationWorkerError(
-  message: TransformWorkerTransformMessage,
-  reason: string
-): TransformWorkerErrorMessage['error'] {
-  return {
-    name: 'ValidationError',
-    message: reason,
-    url: message.url,
-  };
-}
-
-function toFetchWorkerError(
-  error: FetchError
-): TransformWorkerErrorMessage['error'] {
-  return {
-    name: error.name,
-    message: error.message,
-    url: error.url,
-    statusCode: error.statusCode,
-    details: { ...error.details },
-  };
-}
-
-function toUnknownWorkerError(
-  message: TransformWorkerTransformMessage,
-  error: unknown
-): TransformWorkerErrorMessage['error'] {
-  return {
-    name: error instanceof Error ? error.name : 'Error',
-    message: getErrorMessage(error),
-    url: message.url,
-  };
-}
-
-function toOutgoingResult(result: MarkdownTransformResult): {
-  markdown: string;
-  title?: string;
-  truncated: boolean;
+function isValidMessage(msg: Record<string, unknown>): msg is {
+  id: string;
+  url: string;
+  html?: string;
+  htmlBuffer?: Uint8Array;
+  encoding?: string;
+  includeMetadata: boolean;
+  skipNoiseRemoval?: boolean;
 } {
-  const { markdown, title, truncated } = result;
-  return title === undefined
-    ? { markdown, truncated }
-    : { markdown, title, truncated };
+  const {
+    id,
+    url,
+    html,
+    htmlBuffer,
+    encoding,
+    includeMetadata,
+    skipNoiseRemoval,
+  } = msg;
+  if (typeof id !== 'string') return false;
+  if (typeof url !== 'string') return false;
+  if (typeof includeMetadata !== 'boolean') return false;
+  if (html !== undefined && typeof html !== 'string') return false;
+  if (htmlBuffer !== undefined && !(htmlBuffer instanceof Uint8Array))
+    return false;
+  if (encoding !== undefined && typeof encoding !== 'string') return false;
+  if (skipNoiseRemoval !== undefined && typeof skipNoiseRemoval !== 'boolean')
+    return false;
+  return true;
 }
 
-function handleTransform(message: TransformWorkerTransformMessage): void {
-  const validationError = validateTransformMessage(message);
-  if (validationError) {
-    postError(message.id, toValidationWorkerError(message, validationError));
+function postValidationError(id: string, url: string, message: string): void {
+  send?.({
+    type: 'error',
+    id,
+    error: { name: 'ValidationError', message, url },
+  });
+}
+
+function decodeHtml(
+  html: string | undefined,
+  htmlBuffer: Uint8Array | undefined,
+  encoding: string | undefined
+): string {
+  if (!htmlBuffer) return html ?? '';
+  if (!encoding || encoding === 'utf-8') return decoder.decode(htmlBuffer);
+  return new TextDecoder(encoding).decode(htmlBuffer);
+}
+
+function handleTransform(msg: Record<string, unknown>): void {
+  if (!isValidMessage(msg)) return;
+
+  const {
+    id,
+    url,
+    html,
+    htmlBuffer,
+    encoding,
+    includeMetadata,
+    skipNoiseRemoval,
+  } = msg;
+
+  if (!id.trim()) {
+    postValidationError(id, url || '', 'Missing transform message id');
+    return;
+  }
+
+  if (!url.trim()) {
+    postValidationError(id, url, 'Missing transform URL');
     return;
   }
 
   const controller = new AbortController();
-  controllersById.set(message.id, controller);
+  controllersById.set(id, controller);
 
   try {
-    let html = message.html ?? '';
-    if (message.htmlBuffer) {
-      const decoder = new TextDecoder(message.encoding ?? 'utf-8');
-      html = decoder.decode(message.htmlBuffer);
-    }
+    const content = decodeHtml(html, htmlBuffer, encoding);
 
-    const result = transformHtmlToMarkdownInProcess(html, message.url, {
-      includeMetadata: message.includeMetadata,
+    const result = transformHtmlToMarkdownInProcess(content, url, {
+      includeMetadata,
       signal: controller.signal,
-      ...(message.skipNoiseRemoval ? { skipNoiseRemoval: true } : {}),
+      ...(skipNoiseRemoval ? { skipNoiseRemoval: true } : {}),
     });
 
-    post({
+    const { markdown, title, truncated } = result;
+    send?.({
       type: 'result',
-      id: message.id,
-      result: toOutgoingResult(result),
+      id,
+      result:
+        title === undefined
+          ? { markdown, truncated }
+          : { markdown, title, truncated },
     });
   } catch (error: unknown) {
-    if (error instanceof FetchError) {
-      postError(message.id, toFetchWorkerError(error));
-      return;
-    }
-
-    postError(message.id, toUnknownWorkerError(message, error));
+    postError(id, url, error);
   } finally {
-    controllersById.delete(message.id);
+    controllersById.delete(id);
   }
 }
 
-function handleCancel(message: TransformWorkerCancelMessage): void {
-  const controller = controllersById.get(message.id);
-  if (!controller) return;
-
-  // Note: cancellation only interrupts work if the transform function yields and respects AbortSignal.
-  controller.abort(new Error('Canceled'));
-}
-
-const TransformMessageSchema = z.object({
-  type: z.literal('transform'),
-  id: z.string(),
-  html: z.string().optional(),
-  htmlBuffer: z.instanceof(Uint8Array).optional(),
-  encoding: z.string().optional(),
-  url: z.string(),
-  includeMetadata: z.boolean(),
-  skipNoiseRemoval: z.boolean().optional(),
-});
-
-const CancelMessageSchema = z.object({
-  type: z.literal('cancel'),
-  id: z.string(),
-});
-
-const IncomingMessageSchema = z.discriminatedUnion('type', [
-  TransformMessageSchema,
-  CancelMessageSchema,
-]);
-
 process.on('message', (raw: unknown) => {
-  const parsed = IncomingMessageSchema.safeParse(raw);
-  if (!parsed.success) return;
+  if (!raw || typeof raw !== 'object') return;
+  const msg = raw as Record<string, unknown>;
 
-  const message = parsed.data;
-
-  if (message.type === 'cancel') {
-    handleCancel(message);
+  if (msg.type === 'cancel') {
+    if (typeof msg.id !== 'string') return;
+    const controller = controllersById.get(msg.id);
+    if (controller) controller.abort(new Error('Canceled'));
     return;
   }
 
-  handleTransform(message);
+  if (msg.type === 'transform') {
+    handleTransform(msg);
+  }
 });
