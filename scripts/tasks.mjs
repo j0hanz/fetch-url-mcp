@@ -9,7 +9,7 @@ import { parseArgs } from 'node:util';
 
 const require = createRequire(import.meta.url);
 
-// --- Configuration (Single Source of Truth) ---
+// --- Configuration Layer (Constants & Settings) ---
 const BIN = {
   tsc: require.resolve('typescript/bin/tsc'),
 };
