@@ -500,55 +500,21 @@ function extractMetadata(
 ): ExtractedMetadata {
   const ctx = buildMetaContext(document);
   const metadata = resolveMetadataFromContext(ctx);
-
   if (baseUrl) {
-    const favicon = extractFavicon(document, baseUrl);
-    if (favicon) metadata.favicon = favicon;
-  }
-
-  return metadata;
-}
-
-/**
- * Extracts favicon URL from HTML document with priority-based fallback.
- * Queries link elements in order of preference and resolves relative URLs.
- */
-function extractFavicon(
-  document: Document,
-  baseUrl: string
-): string | undefined {
-  // Priority order for favicon selection
-  const selectors = [
-    'link[rel~="apple-touch-icon"]',
-    'link[rel="icon"][sizes~="192x192"]',
-    'link[rel="icon"][sizes~="96x96"]',
-    'link[rel="icon"][type="image/svg+xml"]',
-    'link[rel="icon"]',
-    'link[rel="shortcut icon"]',
-  ];
-
-  for (const selector of selectors) {
-    const link = document.querySelector<HTMLLinkElement>(selector);
-    const href = link?.getAttribute('href');
+    const icon32 = document.querySelector<HTMLLinkElement>(
+      'link[rel="icon"][sizes="32x32"]'
+    );
+    const href = icon32?.getAttribute('href');
     if (href) {
       try {
-        // Resolve relative URLs against baseUrl
-        const resolved = new URL(href, baseUrl);
-        return resolved.toString();
+        metadata.favicon = new URL(href, baseUrl).toString();
       } catch {
-        // Invalid URL, try next selector
-        continue;
+        // Invalid URL, skip favicon
       }
     }
   }
 
-  // Fallback to /favicon.ico
-  try {
-    const fallback = new URL('/favicon.ico', baseUrl);
-    return fallback.toString();
-  } catch {
-    return undefined;
-  }
+  return metadata;
 }
 
 function isReadabilityCompatible(doc: unknown): doc is Document {
@@ -1086,12 +1052,12 @@ function createCustomTranslators(): TranslatorConfigObject {
       postprocess: ({ content }: { content: string }) => {
         const trimmed = content.trim();
         if (!trimmed) return '';
-        return `\n\n<details>\n${trimmed}\n</details>\n\n`;
+        return `\n\n${trimmed}\n\n`;
       },
     }),
     summary: () => ({
       postprocess: ({ content }: { content: string }) =>
-        `<summary>${content.trim()}</summary>\n\n`,
+        `${content.trim()}\n\n`,
     }),
     span: (ctx: unknown) => {
       if (!isObject(ctx) || !isObject((ctx as { node?: unknown }).node))
@@ -1682,11 +1648,6 @@ export function createContentMetadataBlock(
       metadata.author = extractedMeta.author;
   }
 
-  // Favicon is always from extractedMeta, not from article
-  if (extractedMeta.favicon !== undefined) {
-    metadata.favicon = extractedMeta.favicon;
-  }
-
   return metadata;
 }
 
@@ -1897,11 +1858,18 @@ function buildMarkdownFromContext(
     })
   );
   if (context.title && !content.trim().startsWith('# ')) {
-    let faviconPrefix = '';
-    if (context.favicon && typeof context.favicon === 'string') {
-      faviconPrefix = `<img src="${context.favicon}" width="32" height="32" alt="" /> `;
+    const icon = context.favicon;
+    let prefix = ' ';
+    if (icon) {
+      let alt = '';
+      try {
+        alt = new URL(url).hostname;
+      } catch {
+        /* skip */
+      }
+      prefix = ` ![${alt}](${icon}) `;
     }
-    content = `# ${faviconPrefix}${context.title}\n\n${content}`;
+    content = `#${prefix}${context.title}\n\n${content}`;
   }
 
   return {

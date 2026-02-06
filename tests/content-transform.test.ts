@@ -167,12 +167,12 @@ describe('transformHtmlToMarkdown raw content detection', () => {
 });
 
 describe('transformHtmlToMarkdown favicon rendering', () => {
-  it('renders favicon as HTML img tag in title when present', async () => {
+  it('renders 32x32 favicon before title when declared', async () => {
     const html = `
       <html>
         <head>
           <title>Example Page</title>
-          <link rel="icon" href="/favicon.png" />
+          <link rel="icon" sizes="32x32" href="/favicon-32x32.png" />
         </head>
         <body>
           <p>Content here</p>
@@ -184,14 +184,12 @@ describe('transformHtmlToMarkdown favicon rendering', () => {
       includeMetadata: false,
     });
 
-    // Title should include favicon img tag
     assert.ok(
       result.markdown.includes(
-        '<img src="https://example.com/favicon.png" width="32" height="32" alt="" />'
+        '![example.com](https://example.com/favicon-32x32.png)'
       ),
-      'Expected favicon img tag in markdown'
+      'Expected 32x32 favicon img tag in markdown'
     );
-    assert.ok(result.markdown.includes('# '));
     assert.ok(result.markdown.includes('Example Page'));
   });
 
@@ -211,15 +209,9 @@ describe('transformHtmlToMarkdown favicon rendering', () => {
       includeMetadata: false,
     });
 
-    // Title should still be present but with fallback favicon
+    // Title should be present without favicon
     assert.ok(result.markdown.includes('# '));
     assert.ok(result.markdown.includes('No Favicon Page'));
-    // Default fallback is /favicon.ico
-    assert.ok(
-      result.markdown.includes(
-        '<img src="https://example.com/favicon.ico" width="32" height="32" alt="" />'
-      ),
-      'Expected fallback favicon img tag in markdown'
-    );
+    assert.ok(!result.markdown.includes('<img'));
   });
 });

@@ -142,12 +142,13 @@ describe('extractContent', () => {
     assert.deepEqual(result.metadata, {});
   });
 
-  it('extracts apple-touch-icon as favicon with highest priority', () => {
+  it('extracts 32x32 favicon when declared', () => {
     const html = `
       <html>
         <head>
           <title>Favicon Test</title>
-          <link rel="icon" href="/icon.png" />
+          <link rel="icon" sizes="16x16" href="/icon-16.png" />
+          <link rel="icon" sizes="32x32" href="/icon-32.png" />
           <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
         </head>
         <body><p>Content</p></body>
@@ -158,18 +159,15 @@ describe('extractContent', () => {
       extractArticle: false,
     });
 
-    assert.equal(
-      result.metadata.favicon,
-      'https://example.com/apple-touch-icon.png'
-    );
+    assert.equal(result.metadata.favicon, 'https://example.com/icon-32.png');
   });
 
-  it('extracts standard icon link and resolves relative URL', () => {
+  it('resolves relative favicon URL against baseUrl', () => {
     const html = `
       <html>
         <head>
           <title>Favicon Test</title>
-          <link rel="icon" href="icon.png" />
+          <link rel="icon" sizes="32x32" href="assets/icon.png" />
         </head>
         <body><p>Content</p></body>
       </html>
@@ -179,33 +177,19 @@ describe('extractContent', () => {
       extractArticle: false,
     });
 
-    assert.equal(result.metadata.favicon, 'https://example.com/page/icon.png');
+    assert.equal(
+      result.metadata.favicon,
+      'https://example.com/page/assets/icon.png'
+    );
   });
 
-  it('prioritizes high-res icon over standard icon', () => {
-    const html = `
-      <html>
-        <head>
-          <title>Favicon Test</title>
-          <link rel="icon" href="/icon-16.png" />
-          <link rel="icon" sizes="192x192" href="/icon-192.png" />
-        </head>
-        <body><p>Content</p></body>
-      </html>
-    `;
-
-    const result = extractContent(html, 'https://example.com', {
-      extractArticle: false,
-    });
-
-    assert.equal(result.metadata.favicon, 'https://example.com/icon-192.png');
-  });
-
-  it('falls back to /favicon.ico when no icon links present', () => {
+  it('returns undefined favicon when no 32x32 icon is present', () => {
     const html = `
       <html>
         <head>
           <title>No Favicon</title>
+          <link rel="icon" href="/icon.png" />
+          <link rel="apple-touch-icon" href="/apple.png" />
         </head>
         <body><p>Content</p></body>
       </html>
@@ -215,7 +199,7 @@ describe('extractContent', () => {
       extractArticle: false,
     });
 
-    assert.equal(result.metadata.favicon, 'https://example.com/favicon.ico');
+    assert.equal(result.metadata.favicon, undefined);
   });
 
   it('handles missing favicon gracefully without baseUrl', () => {
