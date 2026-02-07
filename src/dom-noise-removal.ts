@@ -12,6 +12,8 @@ const NAV_FOOTER_MIN_CHARS_FOR_PRESERVATION = 500;
 
 // Merged markers for fast rejection
 const HTML_DOCUMENT_MARKERS = /<\s*(?:!doctype|html|head|body)\b/i;
+const HTML_FRAGMENT_MARKERS =
+  /<\s*(?:article|main|section|div|nav|footer|header|aside|table|ul|ol)\b/i;
 
 // Split into smaller regexes to stay within sonarjs/regex-complexity limit
 const NOISE_PATTERNS: readonly RegExp[] = [
@@ -558,7 +560,10 @@ export function removeNoiseFromHtml(
   document?: Document,
   baseUrl?: string
 ): string {
-  const shouldParse = isFullDocumentHtml(html) || mayContainNoise(html);
+  const shouldParse =
+    isFullDocumentHtml(html) ||
+    mayContainNoise(html) ||
+    HTML_FRAGMENT_MARKERS.test(html);
   if (!shouldParse) return html;
 
   try {

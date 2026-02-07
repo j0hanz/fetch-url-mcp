@@ -79,8 +79,12 @@ const HTML_TAGS = [
 const RUST_REGEX = /\b(?:fn|impl|struct|enum)\b/;
 const JS_REGEX =
   /\b(?:const|let|var|function|class|async|await|export|import)\b/;
-const PYTHON_REGEX = /\b(?:def|class|import|from)\b/;
+const PYTHON_UNIQUE_REGEX =
+  /\b(?:def |elif |except |finally:|yield |lambda |raise |pass$)/m;
+const JS_SIGNAL_REGEX =
+  /\b(?:const |let |var |function |require\(|=>|===|!==|console\.)/;
 const CSS_REGEX = /@media|@import|@keyframes/;
+const CSS_PROPERTY_REGEX = /^\s*[a-z][\w-]*\s*:/;
 
 function containsJsxTag(code: string): boolean {
   const len = code.length;
@@ -147,7 +151,12 @@ function detectCssStructure(lines: readonly string[]): boolean {
       (trimmed.startsWith('.') || trimmed.startsWith('#')) &&
       trimmed.includes('{');
 
-    if (hasSelector || (trimmed.includes(':') && trimmed.includes(';'))) {
+    if (hasSelector) return true;
+    if (
+      trimmed.includes(';') &&
+      CSS_PROPERTY_REGEX.test(trimmed) &&
+      !trimmed.includes('(')
+    ) {
       return true;
     }
   }
@@ -238,7 +247,27 @@ const LANGUAGES: LanguageDef[] = [
     match: (ctx) => {
       const l = ctx.lower;
       if (l.includes('print(') || l.includes('__name__')) return true;
-      return PYTHON_REGEX.test(l);
+      if (l.includes('self.') || l.includes('elif ')) return true;
+      // Check for Python's None/True/False using original case (they are capitalized in Python)
+      if (
+        ctx.code.includes('None') ||
+        ctx.code.includes('True') ||
+        ctx.code.includes('False')
+      ) {
+        return true;
+      }
+      // Python-unique keywords that JS doesn't have
+      if (PYTHON_UNIQUE_REGEX.test(l)) return true;
+      // Shared keywords (import, from, class) — only match if no JS signals present
+      if (
+        /\b(?:import|from|class)\b/.test(l) &&
+        !JS_SIGNAL_REGEX.test(l) &&
+        !l.includes('{') &&
+        !l.includes("from '")
+      ) {
+        return true;
+      }
+      return false;
     },
   },
   {
@@ -261,7 +290,7 @@ const LANGUAGES: LanguageDef[] = [
   },
   {
     lang: 'javascript',
-    weight: 12,
+    weight: 15,
     match: (ctx) => JS_REGEX.test(ctx.lower),
   },
   {

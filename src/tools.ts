@@ -81,7 +81,7 @@ export interface FetchPipelineOptions<T> {
   cacheVary?: Record<string, unknown> | string;
   forceRefresh?: boolean;
   transform: (
-    input: { buffer: Uint8Array; encoding: string },
+    input: { buffer: Uint8Array; encoding: string; truncated?: boolean },
     url: string
   ) => T | Promise<T>;
   serialize?: (result: T) => string;
@@ -746,12 +746,12 @@ export async function executeFetchPipeline<T>(
 
   logDebug('Fetching URL', { url: resolvedUrl.normalizedUrl });
 
-  const { buffer, encoding } = await fetchNormalizedUrlBuffer(
+  const { buffer, encoding, truncated } = await fetchNormalizedUrlBuffer(
     resolvedUrl.normalizedUrl,
     withSignal(options.signal)
   );
   const data = await options.transform(
-    { buffer, encoding },
+    { buffer, encoding, ...(truncated ? { truncated: true } : {}) },
     resolvedUrl.normalizedUrl
   );
 
@@ -785,7 +785,7 @@ interface SharedFetchOptions<T extends { content: string }> {
   readonly cacheVary?: Record<string, unknown> | string;
   readonly forceRefresh?: boolean;
   readonly transform: (
-    input: { buffer: Uint8Array; encoding: string },
+    input: { buffer: Uint8Array; encoding: string; truncated?: boolean },
     normalizedUrl: string
   ) => T | Promise<T>;
   readonly serialize?: (result: T) => string;
@@ -938,7 +938,7 @@ export function parseCachedMarkdownResult(
 }
 
 const markdownTransform = async (
-  input: { buffer: Uint8Array; encoding: string },
+  input: { buffer: Uint8Array; encoding: string; truncated?: boolean },
   url: string,
   signal?: AbortSignal,
   skipNoiseRemoval?: boolean
@@ -949,7 +949,8 @@ const markdownTransform = async (
     ...withSignal(signal),
     ...(skipNoiseRemoval ? { skipNoiseRemoval: true } : {}),
   });
-  return { ...result, content: result.markdown };
+  const truncated = Boolean(result.truncated || input.truncated);
+  return { ...result, content: result.markdown, truncated };
 };
 
 function serializeMarkdownResult(result: MarkdownPipelineResult): string {

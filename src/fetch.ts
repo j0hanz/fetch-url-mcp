@@ -1402,17 +1402,15 @@ class ResponseTextReader {
     maxBytes: number,
     signal?: AbortSignal,
     encoding?: string
-  ): Promise<{ text: string; size: number }> {
-    const { buffer, encoding: effectiveEncoding } = await this.readBuffer(
-      response,
-      url,
-      maxBytes,
-      signal,
-      encoding
-    );
+  ): Promise<{ text: string; size: number; truncated: boolean }> {
+    const {
+      buffer,
+      encoding: effectiveEncoding,
+      truncated,
+    } = await this.readBuffer(response, url, maxBytes, signal, encoding);
 
     const text = decodeBuffer(buffer, effectiveEncoding);
-    return { text, size: buffer.byteLength };
+    return { text, size: buffer.byteLength, truncated };
   }
 
   async readBuffer(
@@ -1421,34 +1419,25 @@ class ResponseTextReader {
     maxBytes: number,
     signal?: AbortSignal,
     encoding?: string
-  ): Promise<{ buffer: Uint8Array; encoding: string; size: number }> {
+  ): Promise<{
+    buffer: Uint8Array;
+    encoding: string;
+    size: number;
+    truncated: boolean;
+  }> {
     if (signal?.aborted) {
       cancelResponseBody(response);
       throw createAbortedFetchError(url);
     }
 
-    const limit = maxBytes <= 0 ? Number.POSITIVE_INFINITY : maxBytes;
-
     if (!response.body) {
-      if (signal?.aborted) throw createCanceledFetchError(url);
-
-      const arrayBuffer = await response.arrayBuffer();
-      const length = Math.min(arrayBuffer.byteLength, limit);
-      const buffer = new Uint8Array(arrayBuffer, 0, length);
-
-      const effectiveEncoding =
-        resolveEncoding(encoding, buffer) ?? encoding ?? 'utf-8';
-
-      if (isBinaryContent(buffer, effectiveEncoding)) {
-        throw new FetchError(
-          'Detailed content type check failed: binary content detected',
-          url,
-          500,
-          { reason: 'binary_content_detected' }
-        );
-      }
-
-      return { buffer, encoding: effectiveEncoding, size: buffer.byteLength };
+      return this.readNonStreamBuffer(
+        response,
+        url,
+        maxBytes,
+        signal,
+        encoding
+      );
     }
 
     return this.readStreamToBuffer(
@@ -1460,13 +1449,79 @@ class ResponseTextReader {
     );
   }
 
+  private async readNonStreamBuffer(
+    response: Response,
+    url: string,
+    maxBytes: number,
+    signal?: AbortSignal,
+    encoding?: string
+  ): Promise<{
+    buffer: Uint8Array;
+    encoding: string;
+    size: number;
+    truncated: boolean;
+  }> {
+    if (signal?.aborted) throw createCanceledFetchError(url);
+
+    const limit = maxBytes <= 0 ? Number.POSITIVE_INFINITY : maxBytes;
+
+    const contentLengthHeader = response.headers.get('content-length');
+    if (contentLengthHeader && Number.isFinite(limit)) {
+      const declared = Number.parseInt(contentLengthHeader, 10);
+      if (!Number.isNaN(declared) && declared > limit) {
+        throw new FetchError(
+          `Response exceeds maximum size (${limit} bytes)`,
+          url,
+          413,
+          {
+            reason: 'max_content_length',
+            contentLength: declared,
+            maxBytes: limit,
+          }
+        );
+      }
+    }
+
+    const arrayBuffer = await response.arrayBuffer();
+    const length = Math.min(arrayBuffer.byteLength, limit);
+    const buffer = new Uint8Array(arrayBuffer, 0, length);
+
+    const effectiveEncoding =
+      resolveEncoding(encoding, buffer) ?? encoding ?? 'utf-8';
+
+    if (isBinaryContent(buffer, effectiveEncoding)) {
+      throw new FetchError(
+        'Detailed content type check failed: binary content detected',
+        url,
+        500,
+        { reason: 'binary_content_detected' }
+      );
+    }
+
+    const truncated = Number.isFinite(limit)
+      ? arrayBuffer.byteLength > limit
+      : false;
+
+    return {
+      buffer,
+      encoding: effectiveEncoding,
+      size: buffer.byteLength,
+      truncated,
+    };
+  }
+
   private async readStreamToBuffer(
     stream: ReadableStream<Uint8Array>,
     url: string,
     maxBytes: number,
     signal?: AbortSignal,
     encoding?: string
-  ): Promise<{ buffer: Uint8Array; encoding: string; size: number }> {
+  ): Promise<{
+    buffer: Uint8Array;
+    encoding: string;
+    size: number;
+    truncated: boolean;
+  }> {
     const byteLimit = maxBytes <= 0 ? Number.POSITIVE_INFINITY : maxBytes;
     const captureChunks = byteLimit !== Number.POSITIVE_INFINITY;
     let effectiveEncoding = encoding ?? 'utf-8';
@@ -1540,7 +1595,12 @@ class ResponseTextReader {
 
     try {
       const buffer = await consumeBuffer(guarded);
-      return { buffer, encoding: effectiveEncoding, size: total };
+      return {
+        buffer,
+        encoding: effectiveEncoding,
+        size: total,
+        truncated: false,
+      };
     } catch (error: unknown) {
       if (signal?.aborted) throw createAbortedFetchError(url);
       if (error instanceof FetchError) throw error;
@@ -1551,6 +1611,7 @@ class ResponseTextReader {
           buffer: Buffer.concat(chunks, total),
           encoding: effectiveEncoding,
           size: total,
+          truncated: true,
         };
       }
       throw error;
@@ -1909,12 +1970,14 @@ type ReadDecodedResponseResult =
       kind: 'text';
       text: string;
       size: number;
+      truncated: boolean;
     }
   | {
       kind: 'buffer';
       buffer: Uint8Array;
       encoding: string;
       size: number;
+      truncated: boolean;
     };
 
 async function readAndRecordDecodedResponse(
@@ -1945,7 +2008,7 @@ async function readAndRecordDecodedResponse(
   const declaredEncoding = getCharsetFromContentType(contentType ?? null);
 
   if (mode === 'text') {
-    const { text, size } = await reader.read(
+    const { text, size, truncated } = await reader.read(
       decodedResponse,
       finalUrl,
       maxBytes,
@@ -1953,10 +2016,10 @@ async function readAndRecordDecodedResponse(
       declaredEncoding
     );
     telemetry.recordResponse(ctx, decodedResponse, size);
-    return { kind: 'text', text, size };
+    return { kind: 'text', text, size, truncated };
   }
 
-  const { buffer, encoding, size } = await reader.readBuffer(
+  const { buffer, encoding, size, truncated } = await reader.readBuffer(
     decodedResponse,
     finalUrl,
     maxBytes,
@@ -1964,7 +2027,7 @@ async function readAndRecordDecodedResponse(
     declaredEncoding
   );
   telemetry.recordResponse(ctx, decodedResponse, size);
-  return { kind: 'buffer', buffer, encoding, size };
+  return { kind: 'buffer', buffer, encoding, size, truncated };
 }
 
 type FetcherConfig = typeof config.fetcher;
@@ -2005,7 +2068,7 @@ class HttpFetcher {
   async fetchNormalizedUrlBuffer(
     normalizedUrl: string,
     options?: FetchOptions
-  ): Promise<{ buffer: Uint8Array; encoding: string }> {
+  ): Promise<{ buffer: Uint8Array; encoding: string; truncated: boolean }> {
     return this.fetchNormalized(normalizedUrl, 'buffer', options);
   }
 
@@ -2018,12 +2081,14 @@ class HttpFetcher {
     normalizedUrl: string,
     mode: 'buffer',
     options?: FetchOptions
-  ): Promise<{ buffer: Uint8Array; encoding: string }>;
+  ): Promise<{ buffer: Uint8Array; encoding: string; truncated: boolean }>;
   private async fetchNormalized(
     normalizedUrl: string,
     mode: 'text' | 'buffer',
     options?: FetchOptions
-  ): Promise<string | { buffer: Uint8Array; encoding: string }> {
+  ): Promise<
+    string | { buffer: Uint8Array; encoding: string; truncated: boolean }
+  > {
     const hostname = extractHostname(normalizedUrl);
 
     const timeoutMs = this.fetcherConfig.timeout;
@@ -2058,7 +2123,11 @@ class HttpFetcher {
 
       if (payload.kind === 'text') return payload.text;
 
-      return { buffer: payload.buffer, encoding: payload.encoding };
+      return {
+        buffer: payload.buffer,
+        encoding: payload.encoding,
+        truncated: payload.truncated,
+      };
     } catch (error: unknown) {
       const mapped = mapFetchError(error, normalizedUrl, timeoutMs);
       ctx.url = this.telemetry.redact(mapped.url);
@@ -2168,7 +2237,14 @@ export async function readResponseText(
   encoding?: string
 ): Promise<{ text: string; size: number }> {
   const decodedResponse = await decodeResponseIfNeeded(response, url, signal);
-  return responseReader.read(decodedResponse, url, maxBytes, signal, encoding);
+  const { text, size } = await responseReader.read(
+    decodedResponse,
+    url,
+    maxBytes,
+    signal,
+    encoding
+  );
+  return { text, size };
 }
 
 export async function readResponseBuffer(
@@ -2179,13 +2255,18 @@ export async function readResponseBuffer(
   encoding?: string
 ): Promise<{ buffer: Uint8Array; encoding: string; size: number }> {
   const decodedResponse = await decodeResponseIfNeeded(response, url, signal);
-  return responseReader.readBuffer(
+  const {
+    buffer,
+    encoding: resolvedEncoding,
+    size,
+  } = await responseReader.readBuffer(
     decodedResponse,
     url,
     maxBytes,
     signal,
     encoding
   );
+  return { buffer, encoding: resolvedEncoding, size };
 }
 
 export async function fetchNormalizedUrl(
@@ -2198,6 +2279,6 @@ export async function fetchNormalizedUrl(
 export async function fetchNormalizedUrlBuffer(
   normalizedUrl: string,
   options?: FetchOptions
-): Promise<{ buffer: Uint8Array; encoding: string }> {
+): Promise<{ buffer: Uint8Array; encoding: string; truncated: boolean }> {
   return httpFetcher.fetchNormalizedUrlBuffer(normalizedUrl, options);
 }

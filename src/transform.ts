@@ -506,15 +506,28 @@ function extractMetadata(
     );
     const href = icon32?.getAttribute('href');
     if (href) {
-      try {
-        metadata.favicon = new URL(href, baseUrl).toString();
-      } catch {
-        // Invalid URL, skip favicon
-      }
+      const resolved = resolveFaviconUrl(href, baseUrl);
+      if (resolved) metadata.favicon = resolved;
     }
   }
 
   return metadata;
+}
+
+function resolveFaviconUrl(href: string, baseUrl: string): string | undefined {
+  const trimmed = href.trim();
+  if (!trimmed) return undefined;
+  if (trimmed.toLowerCase().startsWith('data:')) return undefined;
+
+  try {
+    const resolved = new URL(trimmed, baseUrl);
+    if (resolved.protocol !== 'http:' && resolved.protocol !== 'https:') {
+      return undefined;
+    }
+    return resolved.toString();
+  } catch {
+    return undefined;
+  }
 }
 
 function isReadabilityCompatible(doc: unknown): doc is Document {
