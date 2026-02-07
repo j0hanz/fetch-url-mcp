@@ -13,36 +13,18 @@ const CONFIG_RESOURCE_NAME = 'config' as const;
 const CONFIG_RESOURCE_URI = 'internal://config' as const;
 const JSON_MIME = 'application/json' as const;
 
-function redactIfPresent(value: string | undefined): string | undefined {
-  return value ? REDACTED : undefined;
-}
-
-function redactArray(values: readonly string[]): string[] {
-  return values.map(() => REDACTED);
-}
-
-function scrubAuth(auth: typeof config.auth): typeof config.auth {
-  return {
-    ...auth,
-    clientSecret: redactIfPresent(auth.clientSecret),
-    staticTokens: redactArray(auth.staticTokens),
-  };
-}
-
-function scrubSecurity(
-  security: typeof config.security
-): typeof config.security {
-  return {
-    ...security,
-    apiKey: redactIfPresent(security.apiKey),
-  };
-}
-
 function scrubConfig(source: typeof config): typeof config {
   return {
     ...source,
-    auth: scrubAuth(source.auth),
-    security: scrubSecurity(source.security),
+    auth: {
+      ...source.auth,
+      clientSecret: source.auth.clientSecret ? REDACTED : undefined,
+      staticTokens: source.auth.staticTokens.map(() => REDACTED),
+    },
+    security: {
+      ...source.security,
+      apiKey: source.security.apiKey ? REDACTED : undefined,
+    },
   };
 }
 

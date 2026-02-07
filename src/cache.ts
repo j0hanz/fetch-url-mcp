@@ -106,14 +106,6 @@ export function resolveCachedPayloadContent(
   return payload.markdown ?? payload.content ?? null;
 }
 
-function stableStringify(value: unknown): string | null {
-  try {
-    return stableJsonStringify(value);
-  } catch {
-    return null;
-  }
-}
-
 function createHashFragment(input: string, length: number): string {
   return sha256Hex(input).substring(0, length);
 }
@@ -140,8 +132,16 @@ export function createCacheKey(
   let varyHash: string | undefined;
 
   if (vary) {
-    const varyString = typeof vary === 'string' ? vary : stableStringify(vary);
-    if (varyString === null) return null;
+    let varyString: string | null;
+    if (typeof vary === 'string') {
+      varyString = vary;
+    } else {
+      try {
+        varyString = stableJsonStringify(vary);
+      } catch {
+        return null;
+      }
+    }
     if (varyString) {
       varyHash = createHashFragment(
         varyString,
