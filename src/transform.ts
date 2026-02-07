@@ -1,7 +1,6 @@
 import { AsyncLocalStorage, AsyncResource } from 'node:async_hooks';
 import { Buffer } from 'node:buffer';
 import { fork } from 'node:child_process';
-import { randomUUID } from 'node:crypto';
 import diagnosticsChannel from 'node:diagnostics_channel';
 import { availableParallelism } from 'node:os';
 import { performance } from 'node:perf_hooks';
@@ -301,7 +300,12 @@ function truncateHtml(html: string): { html: string; truncated: boolean } {
   const byteLength = Buffer.byteLength(html, 'utf8');
   if (byteLength <= maxSize) return { html, truncated: false };
 
-  const htmlBuffer = Buffer.from(html, 'utf8');
+  const sliced = html.slice(0, maxSize);
+  if (Buffer.byteLength(sliced, 'utf8') <= maxSize) {
+    return { html: sliced, truncated: true };
+  }
+
+  const htmlBuffer = Buffer.from(sliced, 'utf8');
   let content = trimUtf8Buffer(htmlBuffer, maxSize).toString('utf8');
 
   // Avoid truncating inside tags.
@@ -329,8 +333,12 @@ const HEAD_END_PATTERN = /<\/head\s*>|<body\b/i;
 const MAX_HEAD_SCAN_LENGTH = 50_000;
 
 function extractHeadSection(html: string): string | null {
-  const searchLimit = Math.min(html.length, MAX_HEAD_SCAN_LENGTH);
-  const searchText = html.substring(0, searchLimit);
+  if (html.length <= MAX_HEAD_SCAN_LENGTH) {
+    const match = HEAD_END_PATTERN.exec(html);
+    return match ? html.substring(0, match.index) : null;
+  }
+
+  const searchText = html.substring(0, MAX_HEAD_SCAN_LENGTH);
 
   const match = HEAD_END_PATTERN.exec(searchText);
   if (!match) return null;
@@ -1118,9 +1126,25 @@ function createCustomTranslators(): TranslatorConfigObject {
     sup: () => ({
       postprocess: ({ content }: { content: string }) => `^${content}^`,
     }),
-    section: () => ({
-      postprocess: ({ content }: { content: string }) => `\n\n${content}\n\n`,
-    }),
+    section: (ctx: unknown) => {
+      if (isObject(ctx) && isObject((ctx as { node?: unknown }).node)) {
+        const { node } = ctx as { node: unknown };
+        const getAttribute = hasGetAttribute(node)
+          ? (
+              node as { getAttribute: (n: string) => string | null }
+            ).getAttribute.bind(node)
+          : undefined;
+        if (getAttribute?.('class')?.includes('tsd-member')) {
+          return {
+            postprocess: ({ content }: { content: string }) =>
+              `\n\n&nbsp;\n\n${content}\n\n`,
+          };
+        }
+      }
+      return {
+        postprocess: ({ content }: { content: string }) => `\n\n${content}\n\n`,
+      };
+    },
     details: () => ({
       postprocess: ({ content }: { content: string }) => {
         const trimmed = content.trim();
@@ -1206,48 +1230,6 @@ function containsWhitespace(value: string): boolean {
   return false;
 }
 
-function extractClassAttribute(openTag: string): string | null {
-  const lower = openTag.toLowerCase();
-  const classIndex = lower.indexOf('class');
-  if (classIndex === -1) return null;
-
-  let i = classIndex + 5;
-  while (i < lower.length && isWhitespaceChar(lower.charCodeAt(i))) i += 1;
-  if (lower[i] !== '=') return null;
-  i += 1;
-  while (i < lower.length && isWhitespaceChar(lower.charCodeAt(i))) i += 1;
-
-  const quote = openTag[i];
-  if (quote !== '"' && quote !== "'") return null;
-  i += 1;
-  const end = openTag.indexOf(quote, i);
-  if (end === -1) return null;
-  return openTag.slice(i, end);
-}
-
-function skipWhitespace(text: string, start: number): number {
-  let index = start;
-  while (index < text.length && isWhitespaceChar(text.charCodeAt(index))) {
-    index += 1;
-  }
-  return index;
-}
-
-function isTsdMemberSectionTag(openTag: string): boolean {
-  const classValue = extractClassAttribute(openTag);
-  return classValue ? classValue.toLowerCase().includes('tsd-member') : false;
-}
-
-function findTsdMemberSectionStart(html: string, scan: number): number | null {
-  if (scan >= html.length || !html.startsWith('<section', scan)) return null;
-
-  const tagEnd = html.indexOf('>', scan);
-  if (tagEnd === -1) return null;
-
-  const openTag = html.slice(scan, tagEnd + 1);
-  return isTsdMemberSectionTag(openTag) ? scan : null;
-}
-
 function resolveRelativeHref(
   href: string,
   baseUrl: string,
@@ -1318,35 +1300,6 @@ function findInlineLink(
   return null;
 }
 
-function preprocessPropertySections(html: string): string {
-  const closeTag = '</section>';
-  let cursor = 0;
-  let output = '';
-
-  for (
-    let closeIndex = html.indexOf(closeTag, cursor);
-    closeIndex !== -1;
-    closeIndex = html.indexOf(closeTag, cursor)
-  ) {
-    const afterClose = closeIndex + closeTag.length;
-    output += html.slice(cursor, afterClose);
-
-    const scan = skipWhitespace(html, afterClose);
-    const sectionStart = findTsdMemberSectionStart(html, scan);
-    if (sectionStart !== null) {
-      output += '<p>&nbsp;</p>';
-      cursor = sectionStart;
-      continue;
-    }
-
-    output += html.slice(afterClose, scan);
-    cursor = scan;
-  }
-
-  output += html.slice(cursor);
-  return output;
-}
-
 function isAbsoluteOrSpecialUrl(href: string): boolean {
   const trimmedHref = href.trim();
   if (!trimmedHref) return false;
@@ -1404,12 +1357,8 @@ function translateHtmlToMarkdown(params: {
 
   abortPolicy.throwIfAborted(signal, url, 'markdown:cleaned');
 
-  const preprocessedHtml = stageTracker.run(url, 'markdown:preprocess', () =>
-    preprocessPropertySections(cleanedHtml)
-  );
-
   const content = stageTracker.run(url, 'markdown:translate', () =>
-    translateHtmlFragmentToMarkdown(preprocessedHtml)
+    translateHtmlFragmentToMarkdown(cleanedHtml)
   );
 
   abortPolicy.throwIfAborted(signal, url, 'markdown:translated');
@@ -2260,6 +2209,7 @@ class WorkerPool implements TransformWorkerPool {
   private readonly spawnWorkerImpl: WorkerSpawner;
 
   private closed = false;
+  private taskIdSeq = 0;
 
   constructor(size: number, timeoutMs: number, spawnWorker: WorkerSpawner) {
     if (size === 0) {
@@ -2401,7 +2351,7 @@ class WorkerPool implements TransformWorkerPool {
     resolve: (result: MarkdownTransformResult) => void,
     reject: (error: unknown) => void
   ): PendingTask {
-    const id = randomUUID();
+    const id = (this.taskIdSeq++).toString(36);
 
     // Preserve request context for resolve/reject even when callbacks fire
     // from worker thread events.
