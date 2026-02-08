@@ -292,13 +292,17 @@ function trimUtf8Buffer(buffer: Buffer, maxBytes: number): Buffer {
   return buffer.subarray(0, end);
 }
 
-function truncateHtml(html: string): { html: string; truncated: boolean } {
+function truncateHtml(
+  html: string,
+  inputTruncated = false
+): { html: string; truncated: boolean } {
   const maxSize = config.constants.maxHtmlSize;
   if (maxSize <= 0) return { html, truncated: false };
 
   // Fast path: V8 optimized byte length check (no allocation)
   const byteLength = Buffer.byteLength(html, 'utf8');
-  if (byteLength <= maxSize) return { html, truncated: false };
+  if (byteLength <= maxSize && !inputTruncated)
+    return { html, truncated: false };
 
   const sliced = html.slice(0, maxSize);
   if (Buffer.byteLength(sliced, 'utf8') <= maxSize) {
@@ -346,7 +350,10 @@ function extractHeadSection(html: string): string | null {
   return html.substring(0, match.index);
 }
 
-function extractMetadataFromHead(html: string): ExtractedMetadata | null {
+function extractMetadataFromHead(
+  html: string,
+  baseUrl?: string
+): ExtractedMetadata | null {
   const headSection = extractHeadSection(html);
   if (!headSection) return null;
 
@@ -354,7 +361,7 @@ function extractMetadataFromHead(html: string): ExtractedMetadata | null {
     const { document } = parseHTML(
       `<!DOCTYPE html><html>${headSection}</head><body></body></html>`
     );
-    return extractMetadata(document);
+    return extractMetadata(document, baseUrl);
   } catch {
     return null;
   }
@@ -661,7 +668,11 @@ function applyBaseUri(document: Document, url: string): void {
 function extractContentContext(
   html: string,
   url: string,
-  options: { extractArticle?: boolean; signal?: AbortSignal }
+  options: {
+    extractArticle?: boolean;
+    signal?: AbortSignal;
+    inputTruncated?: boolean;
+  }
 ): ExtractionContext {
   if (!isValidInput(html, url)) {
     const { document } = parseHTML('<html></html>');
@@ -674,11 +685,14 @@ function extractContentContext(
     // F2: Extract metadata from <head> BEFORE truncation to preserve it
     const earlyMetadata = willTruncate(html)
       ? stageTracker.run(url, 'extract:early-metadata', () =>
-          extractMetadataFromHead(html)
+          extractMetadataFromHead(html, url)
         )
       : null;
 
-    const { html: limitedHtml, truncated } = truncateHtml(html);
+    const { html: limitedHtml, truncated } = truncateHtml(
+      html,
+      options.inputTruncated
+    );
 
     const { document } = stageTracker.run(url, 'extract:parse', () =>
       parseHTML(limitedHtml)
@@ -2006,6 +2020,7 @@ interface PendingTask {
   url: string;
   includeMetadata: boolean;
   skipNoiseRemoval?: boolean;
+  inputTruncated?: boolean;
   signal: AbortSignal | undefined;
   abortListener: (() => void) | undefined;
   context: TaskContext;
@@ -2263,6 +2278,7 @@ class WorkerPool implements TransformWorkerPool {
       includeMetadata: boolean;
       signal?: AbortSignal;
       skipNoiseRemoval?: boolean;
+      inputTruncated?: boolean;
     }
   ): Promise<MarkdownTransformResult>;
   async transform(
@@ -2272,6 +2288,7 @@ class WorkerPool implements TransformWorkerPool {
       includeMetadata: boolean;
       signal?: AbortSignal;
       skipNoiseRemoval?: boolean;
+      inputTruncated?: boolean;
       encoding?: string;
     }
   ): Promise<MarkdownTransformResult>;
@@ -2282,6 +2299,7 @@ class WorkerPool implements TransformWorkerPool {
       includeMetadata: boolean;
       signal?: AbortSignal;
       skipNoiseRemoval?: boolean;
+      inputTruncated?: boolean;
       encoding?: string;
     }
   ): Promise<MarkdownTransformResult> {
@@ -2377,6 +2395,7 @@ class WorkerPool implements TransformWorkerPool {
       includeMetadata: boolean;
       signal?: AbortSignal;
       skipNoiseRemoval?: boolean;
+      inputTruncated?: boolean;
       encoding?: string;
     },
     resolve: (result: MarkdownTransformResult) => void,
@@ -2401,6 +2420,7 @@ class WorkerPool implements TransformWorkerPool {
       url,
       includeMetadata: options.includeMetadata,
       ...(options.skipNoiseRemoval ? { skipNoiseRemoval: true } : {}),
+      ...(options.inputTruncated ? { inputTruncated: true } : {}),
       signal: options.signal,
       abortListener,
       context,
@@ -2733,6 +2753,7 @@ class WorkerPool implements TransformWorkerPool {
         url: task.url,
         includeMetadata: task.includeMetadata,
         ...(task.skipNoiseRemoval ? { skipNoiseRemoval: true } : {}),
+        ...(task.inputTruncated ? { inputTruncated: true } : {}),
       };
 
       const transferList: NodeTransferable[] = [];

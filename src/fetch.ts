@@ -1469,26 +1469,26 @@ class ResponseTextReader {
 
     const limit = maxBytes <= 0 ? Number.POSITIVE_INFINITY : maxBytes;
 
-    const contentLengthHeader = response.headers.get('content-length');
-    if (contentLengthHeader && Number.isFinite(limit)) {
-      const declared = Number.parseInt(contentLengthHeader, 10);
-      if (!Number.isNaN(declared) && declared > limit) {
-        throw new FetchError(
-          `Response exceeds maximum size (${limit} bytes)`,
-          url,
-          413,
-          {
-            reason: 'max_content_length',
-            contentLength: declared,
-            maxBytes: limit,
-          }
-        );
-      }
-    }
+    let buffer: Uint8Array;
+    let truncated = false;
 
-    const arrayBuffer = await response.arrayBuffer();
-    const length = Math.min(arrayBuffer.byteLength, limit);
-    const buffer = new Uint8Array(arrayBuffer, 0, length);
+    try {
+      // Try safe blob slicing if available (Node 18+) to avoid OOM
+      const blob = await response.blob();
+      if (Number.isFinite(limit) && blob.size > limit) {
+        const sliced = blob.slice(0, limit);
+        buffer = new Uint8Array(await sliced.arrayBuffer());
+        truncated = true;
+      } else {
+        buffer = new Uint8Array(await blob.arrayBuffer());
+      }
+    } catch {
+      // Fallback if blob() fails
+      const arrayBuffer = await response.arrayBuffer();
+      const length = Math.min(arrayBuffer.byteLength, limit);
+      buffer = new Uint8Array(arrayBuffer, 0, length);
+      truncated = Number.isFinite(limit) && arrayBuffer.byteLength > limit;
+    }
 
     const effectiveEncoding =
       resolveEncoding(encoding, buffer) ?? encoding ?? 'utf-8';
@@ -1501,10 +1501,6 @@ class ResponseTextReader {
         { reason: 'binary_content_detected' }
       );
     }
-
-    const truncated = Number.isFinite(limit)
-      ? arrayBuffer.byteLength > limit
-      : false;
 
     return {
       buffer,

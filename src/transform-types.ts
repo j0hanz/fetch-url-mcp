@@ -64,6 +64,7 @@ export interface TransformOptions {
   includeMetadata: boolean;
   signal?: AbortSignal;
   skipNoiseRemoval?: boolean;
+  inputTruncated?: boolean;
 }
 
 /**
@@ -103,6 +104,7 @@ export interface TransformWorkerTransformMessage {
   url: string;
   includeMetadata: boolean;
   skipNoiseRemoval?: boolean | undefined;
+  inputTruncated?: boolean | undefined;
 }
 
 export interface TransformWorkerCancelMessage {

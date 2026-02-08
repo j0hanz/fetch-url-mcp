@@ -948,6 +948,7 @@ const markdownTransform = async (
     encoding: input.encoding,
     ...withSignal(signal),
     ...(skipNoiseRemoval ? { skipNoiseRemoval: true } : {}),
+    ...(input.truncated ? { inputTruncated: true } : {}),
   });
   const truncated = Boolean(result.truncated || input.truncated);
   return { ...result, content: result.markdown, truncated };
@@ -1043,12 +1044,12 @@ async function fetchPipeline(
     ...withSignal(signal),
     ...(skipNoiseRemoval ? { cacheVary: { skipNoiseRemoval: true } } : {}),
     ...(forceRefresh ? { forceRefresh: true } : {}),
-    transform: async ({ buffer, encoding }, normalizedUrl) => {
+    transform: async ({ buffer, encoding, truncated }, normalizedUrl) => {
       if (progress) {
         void progress.report(3, 'Transforming content');
       }
       return markdownTransform(
-        { buffer, encoding },
+        { buffer, encoding, ...(truncated ? { truncated } : {}) },
         normalizedUrl,
         signal,
         skipNoiseRemoval
