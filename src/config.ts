@@ -44,8 +44,6 @@ const DEFAULT_HEADING_KEYWORDS = [
   'appendix',
 ] as const;
 
-/** Hardcoded to 'markdown'. Type retained for consumer compatibility. */
-export type TransformMetadataFormat = 'markdown';
 export type TransformWorkerMode = 'threads' | 'process';
 
 type AuthMode = 'oauth' | 'static';

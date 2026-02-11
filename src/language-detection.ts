@@ -314,9 +314,7 @@ const LANGUAGES: LanguageDef[] = [
   },
 ];
 
-export function extractLanguageFromClassName(
-  className: string
-): string | undefined {
+function extractLanguageFromClassName(className: string): string | undefined {
   if (!className) return undefined;
 
   // Split by whitespace and check for language indicators

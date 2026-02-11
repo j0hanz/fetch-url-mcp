@@ -130,10 +130,6 @@ export interface TransformWorkerErrorMessage {
   };
 }
 
-export type TransformWorkerIncomingMessage =
-  | TransformWorkerTransformMessage
-  | TransformWorkerCancelMessage;
-
 export type TransformWorkerOutgoingMessage =
   | TransformWorkerResultMessage
   | TransformWorkerErrorMessage;

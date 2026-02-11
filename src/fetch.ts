@@ -2235,28 +2235,6 @@ export async function readResponseText(
   return { text, size };
 }
 
-export async function readResponseBuffer(
-  response: Response,
-  url: string,
-  maxBytes: number,
-  signal?: AbortSignal,
-  encoding?: string
-): Promise<{ buffer: Uint8Array; encoding: string; size: number }> {
-  const decodedResponse = await decodeResponseIfNeeded(response, url, signal);
-  const {
-    buffer,
-    encoding: resolvedEncoding,
-    size,
-  } = await responseReader.readBuffer(
-    decodedResponse,
-    url,
-    maxBytes,
-    signal,
-    encoding
-  );
-  return { buffer, encoding: resolvedEncoding, size };
-}
-
 export async function fetchNormalizedUrl(
   normalizedUrl: string,
   options?: FetchOptions
