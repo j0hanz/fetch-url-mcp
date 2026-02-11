@@ -5,6 +5,7 @@ import { setInterval } from 'node:timers';
 
 import { ErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js';
 
+import { config } from './config.js';
 import { type CancellableTimeout, createUnrefTimeout } from './timer-utils.js';
 
 export type TaskStatus =
@@ -88,15 +89,46 @@ class TaskManager {
 
   private startCleanupLoop(): void {
     const interval = setInterval(() => {
-      const now = Date.now();
-      for (const [id, task] of this.tasks) {
-        if (now - task._createdAtMs > task.ttl) {
-          this.tasks.delete(id);
-        }
-      }
+      this.removeExpiredTasks();
     }, CLEANUP_INTERVAL_MS);
 
     interval.unref();
+  }
+
+  private removeExpiredTasks(): void {
+    const now = Date.now();
+    for (const [id, task] of this.tasks) {
+      if (now - task._createdAtMs > task.ttl) {
+        this.tasks.delete(id);
+      }
+    }
+  }
+
+  private countTasksForOwner(ownerKey: string): number {
+    let count = 0;
+    for (const task of this.tasks.values()) {
+      if (task.ownerKey === ownerKey) count += 1;
+    }
+    return count;
+  }
+
+  private assertTaskCapacity(ownerKey: string): void {
+    const { maxPerOwner, maxTotal } = config.tasks;
+
+    if (this.tasks.size >= maxTotal) {
+      throw new McpError(
+        ErrorCode.InvalidRequest,
+        `Task capacity reached (${maxTotal} total tasks)`
+      );
+    }
+
+    const ownerCount = this.countTasksForOwner(ownerKey);
+    if (ownerCount >= maxPerOwner) {
+      throw new McpError(
+        ErrorCode.InvalidRequest,
+        `Task capacity reached for owner (${maxPerOwner} tasks)`
+      );
+    }
   }
 
   createTask(
@@ -104,6 +136,9 @@ class TaskManager {
     statusMessage = 'Task started',
     ownerKey: string = DEFAULT_OWNER_KEY
   ): TaskState {
+    this.removeExpiredTasks();
+    this.assertTaskCapacity(ownerKey);
+
     const now = new Date();
     const createdAt = now.toISOString();
 
@@ -144,9 +179,7 @@ class TaskManager {
     const task = this.tasks.get(taskId);
     if (!task) return;
 
-    if (updates.status && task.status !== updates.status) {
-      if (isTerminalStatus(task.status)) return;
-    }
+    if (isTerminalStatus(task.status)) return;
 
     Object.assign(task, {
       ...updates,

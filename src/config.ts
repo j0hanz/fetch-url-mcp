@@ -275,6 +275,16 @@ const DEFAULT_TOOL_TIMEOUT_MS =
   DEFAULT_FETCH_TIMEOUT_MS +
   DEFAULT_TRANSFORM_TIMEOUT_MS +
   DEFAULT_TOOL_TIMEOUT_PADDING_MS;
+const DEFAULT_TASKS_MAX_TOTAL = parseInteger(env.TASKS_MAX_TOTAL, 5000, 1);
+const DEFAULT_TASKS_MAX_PER_OWNER = parseInteger(
+  env.TASKS_MAX_PER_OWNER,
+  1000,
+  1
+);
+const RESOLVED_TASKS_MAX_PER_OWNER = Math.min(
+  DEFAULT_TASKS_MAX_PER_OWNER,
+  DEFAULT_TASKS_MAX_TOTAL
+);
 
 interface WorkerResourceLimits {
   maxOldGenerationSizeMb?: number;
@@ -541,6 +551,10 @@ export const config = {
   tools: {
     enabled: ['fetch-url'],
     timeoutMs: DEFAULT_TOOL_TIMEOUT_MS,
+  },
+  tasks: {
+    maxTotal: DEFAULT_TASKS_MAX_TOTAL,
+    maxPerOwner: RESOLVED_TASKS_MAX_PER_OWNER,
   },
   cache: {
     enabled: parseBoolean(env.CACHE_ENABLED, true),

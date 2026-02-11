@@ -7,13 +7,15 @@ import {
 } from '@modelcontextprotocol/sdk/experimental/tasks/stores/in-memory.js';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
-import { CompleteRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 
 import { config } from './config.js';
 import { abortAllTaskExecutions, registerTaskHandlers } from './mcp.js';
 import { logError, logInfo, setMcpServer } from './observability.js';
 import { registerGetHelpPrompt } from './prompts.js';
-import { registerInstructionResource } from './resources.js';
+import {
+  registerCacheResourceTemplate,
+  registerInstructionResource,
+} from './resources.js';
 import { registerTools } from './tools.js';
 import { shutdownTransformWorkerPool } from './transform.js';
 
@@ -57,7 +59,7 @@ function createServerCapabilities(): McpServerCapabilities {
     logging: {},
     resources: {},
     tools: {},
-    prompts: { listChanged: true },
+    prompts: {},
     completions: {},
     tasks: {
       list: {},
@@ -69,29 +71,6 @@ function createServerCapabilities(): McpServerCapabilities {
       },
     },
   };
-}
-
-/* -------------------------------------------------------------------------------------------------
- * Completion support (completion/complete)
- * ------------------------------------------------------------------------------------------------- */
-
-interface CompletionResult {
-  completion: {
-    values: string[];
-    total: number;
-    hasMore: boolean;
-  };
-  [key: string]: unknown;
-}
-
-function emptyCompletion(): CompletionResult {
-  return { completion: { values: [], total: 0, hasMore: false } };
-}
-
-function registerCompletionHandlers(server: McpServer): void {
-  server.server.setRequestHandler(CompleteRequestSchema, () =>
-    Promise.resolve(emptyCompletion())
-  );
 }
 
 async function createServerInstructions(
@@ -171,7 +150,7 @@ async function createMcpServerWithOptions(
   registerTools(server);
   registerGetHelpPrompt(server, instructions, localIcons?.[0]);
   registerInstructionResource(server, instructions, localIcons?.[0]);
-  registerCompletionHandlers(server);
+  registerCacheResourceTemplate(server, localIcons?.[0]);
   registerTaskHandlers(server);
 
   return server;

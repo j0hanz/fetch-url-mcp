@@ -1,9 +1,235 @@
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import type { ReadResourceResult } from '@modelcontextprotocol/sdk/types.js';
+import {
+  type McpServer,
+  ResourceTemplate,
+} from '@modelcontextprotocol/sdk/server/mcp.js';
+import {
+  ErrorCode,
+  McpError,
+  type ReadResourceResult,
+} from '@modelcontextprotocol/sdk/types.js';
+
+import {
+  get as getCacheEntry,
+  keys as listCacheKeys,
+  parseCachedPayload,
+  parseCacheKey,
+  resolveCachedPayloadContent,
+} from './cache.js';
 
 interface IconInfo {
   src: string;
   mimeType: string;
+}
+
+interface CompletionContext {
+  arguments?: Record<string, string> | undefined;
+}
+
+interface CacheResourceParts {
+  namespace: string;
+  hash: string;
+}
+
+type TemplateVariableValue = string | string[] | undefined;
+
+const CACHE_RESOURCE_TEMPLATE_URI = 'internal://cache/{namespace}/{hash}';
+const CACHE_RESOURCE_PREFIX = 'internal://cache/';
+const CACHE_NAMESPACE_PATTERN = /^[a-z0-9_-]{1,64}$/i;
+const CACHE_HASH_PATTERN = /^[a-f0-9.]{8,64}$/i;
+const RESOURCE_NOT_FOUND_ERROR_CODE = -32002;
+const MAX_COMPLETION_VALUES = 100;
+
+function isValidCacheResourceParts(parts: CacheResourceParts): boolean {
+  return (
+    CACHE_NAMESPACE_PATTERN.test(parts.namespace) &&
+    CACHE_HASH_PATTERN.test(parts.hash)
+  );
+}
+
+function decodeSegment(value: string): string {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
+}
+
+function firstVariableValue(value: TemplateVariableValue): string | undefined {
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    return trimmed.length > 0 ? trimmed : undefined;
+  }
+
+  if (Array.isArray(value)) {
+    const first = value[0];
+    if (typeof first !== 'string') return undefined;
+    const trimmed = first.trim();
+    return trimmed.length > 0 ? trimmed : undefined;
+  }
+
+  return undefined;
+}
+
+function parseCacheResourceFromVariables(
+  variables: Record<string, TemplateVariableValue>
+): CacheResourceParts | null {
+  const namespace = firstVariableValue(variables.namespace);
+  const hash = firstVariableValue(variables.hash);
+  if (!namespace || !hash) return null;
+
+  const decoded = {
+    namespace: decodeSegment(namespace),
+    hash: decodeSegment(hash),
+  };
+
+  return isValidCacheResourceParts(decoded) ? decoded : null;
+}
+
+function parseCacheResourceFromUri(uri: URL): CacheResourceParts | null {
+  if (!uri.href.startsWith(CACHE_RESOURCE_PREFIX)) return null;
+
+  const rawPath = uri.pathname.startsWith('/')
+    ? uri.pathname.slice(1)
+    : uri.pathname;
+  const segments = rawPath.split('/');
+  if (segments.length !== 2) return null;
+
+  const namespace = segments[0];
+  const hash = segments[1];
+  if (!namespace || !hash) return null;
+
+  const decoded = {
+    namespace: decodeSegment(namespace),
+    hash: decodeSegment(hash),
+  };
+
+  return isValidCacheResourceParts(decoded) ? decoded : null;
+}
+
+function toCacheResourceUri(parts: CacheResourceParts): string {
+  const namespace = encodeURIComponent(parts.namespace);
+  const hash = encodeURIComponent(parts.hash);
+  return `${CACHE_RESOURCE_PREFIX}${namespace}/${hash}`;
+}
+
+function listCacheNamespaces(): string[] {
+  const namespaces = new Set<string>();
+  for (const key of listCacheKeys()) {
+    const parsed = parseCacheKey(key);
+    if (!parsed) continue;
+    namespaces.add(parsed.namespace);
+  }
+
+  return [...namespaces].sort((left, right) => left.localeCompare(right));
+}
+
+function completeCacheNamespaces(value: string): string[] {
+  const normalized = value.trim().toLowerCase();
+  return listCacheNamespaces()
+    .filter((namespace) => namespace.toLowerCase().startsWith(normalized))
+    .slice(0, MAX_COMPLETION_VALUES);
+}
+
+function completeCacheHashes(
+  value: string,
+  context?: CompletionContext
+): string[] {
+  const normalized = value.trim().toLowerCase();
+  const namespace = context?.arguments?.namespace?.trim();
+  const hashes = new Set<string>();
+
+  for (const key of listCacheKeys()) {
+    const parsed = parseCacheKey(key);
+    if (!parsed) continue;
+
+    if (namespace && parsed.namespace !== namespace) continue;
+    if (!parsed.urlHash.toLowerCase().startsWith(normalized)) continue;
+
+    hashes.add(parsed.urlHash);
+  }
+
+  return [...hashes]
+    .sort((left, right) => left.localeCompare(right))
+    .slice(0, MAX_COMPLETION_VALUES);
+}
+
+function listCacheResources(): {
+  resources: {
+    uri: string;
+    name: string;
+    title: string;
+    description: string;
+    mimeType: string;
+    annotations: { audience: ['assistant']; priority: number };
+  }[];
+} {
+  const resources = listCacheKeys()
+    .map((key) => parseCacheKey(key))
+    .filter((parts): parts is NonNullable<typeof parts> => Boolean(parts))
+    .slice(0, MAX_COMPLETION_VALUES)
+    .map((parts) => {
+      const cacheParts: CacheResourceParts = {
+        namespace: parts.namespace,
+        hash: parts.urlHash,
+      };
+      return {
+        uri: toCacheResourceUri(cacheParts),
+        name: `${parts.namespace}:${parts.urlHash}`,
+        title: 'Cached Markdown',
+        description: 'Cached markdown output generated by fetch-url',
+        mimeType: 'text/markdown',
+        annotations: {
+          audience: ['assistant'] as ['assistant'],
+          priority: 0.6,
+        },
+      };
+    });
+
+  return { resources };
+}
+
+function resolveCacheResourceParts(
+  uri: URL,
+  variables: Record<string, TemplateVariableValue>
+): CacheResourceParts {
+  const fromVariables = parseCacheResourceFromVariables(variables);
+  if (fromVariables) return fromVariables;
+
+  const fromUri = parseCacheResourceFromUri(uri);
+  if (fromUri) return fromUri;
+
+  throw new McpError(
+    ErrorCode.InvalidParams,
+    'Invalid cache resource URI or template arguments'
+  );
+}
+
+function readCacheResource(
+  uri: URL,
+  variables: Record<string, TemplateVariableValue>
+): ReadResourceResult {
+  const parts = resolveCacheResourceParts(uri, variables);
+  const cacheKey = `${parts.namespace}:${parts.hash}`;
+  const entry = getCacheEntry(cacheKey);
+  if (!entry) {
+    throw new McpError(RESOURCE_NOT_FOUND_ERROR_CODE, 'Resource not found', {
+      uri: uri.href,
+    });
+  }
+
+  const payload = parseCachedPayload(entry.content);
+  const markdown = payload ? resolveCachedPayloadContent(payload) : null;
+  const text = markdown ?? entry.content;
+
+  return {
+    contents: [
+      {
+        uri: uri.href,
+        mimeType: 'text/markdown',
+        text,
+      },
+    ],
+  };
 }
 
 export function registerInstructionResource(
@@ -42,5 +268,45 @@ export function registerInstructionResource(
         },
       ],
     })
+  );
+}
+
+export function registerCacheResourceTemplate(
+  server: McpServer,
+  iconInfo?: IconInfo
+): void {
+  const template = new ResourceTemplate(CACHE_RESOURCE_TEMPLATE_URI, {
+    list: () => listCacheResources(),
+    complete: {
+      namespace: (value) => completeCacheNamespaces(value),
+      hash: (value, context) => completeCacheHashes(value, context),
+    },
+  });
+
+  server.registerResource(
+    'superfetch-cache-entry',
+    template,
+    {
+      title: 'Cached Fetch Output',
+      description:
+        'Read cached markdown generated by previous fetch-url calls.',
+      mimeType: 'text/markdown',
+      annotations: {
+        audience: ['assistant'],
+        priority: 0.6,
+      },
+      ...(iconInfo
+        ? {
+            icons: [
+              {
+                src: iconInfo.src,
+                mimeType: iconInfo.mimeType,
+              },
+            ],
+          }
+        : {}),
+    },
+    (uri, variables): ReadResourceResult =>
+      readCacheResource(uri, variables as Record<string, TemplateVariableValue>)
   );
 }

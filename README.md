@@ -166,16 +166,18 @@ When no `--stdio` flag is passed, the server starts in **HTTP mode** (Streamable
 
 #### Core Settings
 
-| Variable           | Default                    | Description                                            |
-| ------------------ | -------------------------- | ------------------------------------------------------ |
-| `HOST`             | `127.0.0.1`                | HTTP server bind address                               |
-| `PORT`             | `3000`                     | HTTP server port (1024–65535)                          |
-| `LOG_LEVEL`        | `info`                     | Log level: `debug`, `info`, `warn`, `error`            |
-| `FETCH_TIMEOUT_MS` | `15000`                    | HTTP fetch timeout in ms (1000–60000)                  |
-| `CACHE_ENABLED`    | `true`                     | Enable/disable in-memory content cache                 |
-| `USER_AGENT`       | `superFetch-MCP/{version}` | Custom User-Agent header                               |
-| `ALLOW_REMOTE`     | `false`                    | Allow remote connections in HTTP mode                  |
-| `ALLOWED_HOSTS`    | _(empty)_                  | Comma-separated hostnames allowed to bypass block list |
+| Variable              | Default                    | Description                                            |
+| --------------------- | -------------------------- | ------------------------------------------------------ |
+| `HOST`                | `127.0.0.1`                | HTTP server bind address                               |
+| `PORT`                | `3000`                     | HTTP server port (1024–65535)                          |
+| `LOG_LEVEL`           | `info`                     | Log level: `debug`, `info`, `warn`, `error`            |
+| `FETCH_TIMEOUT_MS`    | `15000`                    | HTTP fetch timeout in ms (1000–60000)                  |
+| `CACHE_ENABLED`       | `true`                     | Enable/disable in-memory content cache                 |
+| `USER_AGENT`          | `superFetch-MCP/{version}` | Custom User-Agent header                               |
+| `ALLOW_REMOTE`        | `false`                    | Allow remote connections in HTTP mode                  |
+| `ALLOWED_HOSTS`       | _(empty)_                  | Comma-separated host/origin allowlist for HTTP mode    |
+| `TASKS_MAX_TOTAL`     | `5000`                     | Maximum retained task records across all owners        |
+| `TASKS_MAX_PER_OWNER` | `1000`                     | Maximum retained task records per session/client/token |
 
 #### Authentication (HTTP Mode)
 
@@ -355,9 +357,16 @@ Then poll `tasks/get` until the task status is `completed` or `failed`, and retr
 
 ### Resources
 
-| URI Pattern               | MIME Type       | Description                            |
-| ------------------------- | --------------- | -------------------------------------- |
-| `internal://instructions` | `text/markdown` | Server instructions and usage guidance |
+| URI Pattern                           | MIME Type       | Description                                          |
+| ------------------------------------- | --------------- | ---------------------------------------------------- |
+| `internal://instructions`             | `text/markdown` | Server instructions and usage guidance               |
+| `internal://cache/{namespace}/{hash}` | `text/markdown` | Cached markdown entries from prior `fetch-url` calls |
+
+### Completions
+
+- `completion/complete` supports `internal://cache/{namespace}/{hash}` template variables:
+  - `namespace`
+  - `hash` (optionally filtered by `context.arguments.namespace`)
 
 ### Tasks
 
@@ -544,13 +553,13 @@ This builds the project and launches `@modelcontextprotocol/inspector` pointing 
 
 ### Common Issues
 
-| Issue                     | Solution                                                                              |
-| ------------------------- | ------------------------------------------------------------------------------------- |
-| `VALIDATION_ERROR` on URL | URL is blocked (private IP/localhost) or malformed. Do not retry.                     |
-| `queue_full` error        | Worker pool is saturated. Wait briefly, then retry or use async task mode.            |
-| Garbled output            | Binary content (images, PDFs) cannot be converted. Ensure the URL serves HTML.        |
-| No output in stdio mode   | Ensure `--stdio` flag is passed. Without it, the server starts in HTTP mode.          |
-| Auth errors in HTTP mode  | Set `ACCESS_TOKENS` or `API_KEY` env var and pass as `Authorization: Bearer <token>`. |
+| Issue                     | Solution                                                                                                    |
+| ------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| `VALIDATION_ERROR` on URL | URL is blocked (private IP/localhost) or malformed. Do not retry.                                           |
+| `queue_full` error        | Usually auto-handled by worker fallback to in-process transform; if surfaced, retry or use async task mode. |
+| Garbled output            | Binary content (images, PDFs) cannot be converted. Ensure the URL serves HTML.                              |
+| No output in stdio mode   | Ensure `--stdio` flag is passed. Without it, the server starts in HTTP mode.                                |
+| Auth errors in HTTP mode  | Set `ACCESS_TOKENS` or `API_KEY` env var and pass as `Authorization: Bearer <token>`.                       |
 
 ### Stdout / Stderr Guidance
 

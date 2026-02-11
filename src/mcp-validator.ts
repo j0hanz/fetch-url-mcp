@@ -22,7 +22,7 @@ const paramsSchema = z.looseObject({});
 const mcpRequestSchema = z.strictObject({
   jsonrpc: z.literal('2.0'),
   method: z.string().min(1),
-  id: z.union([z.string(), z.number(), z.null()]).optional(),
+  id: z.union([z.string(), z.number()]).optional(),
   params: paramsSchema.optional(),
 });
 

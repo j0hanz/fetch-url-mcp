@@ -300,6 +300,21 @@ function emitTaskStatusNotification(server: McpServer, task: TaskState): void {
     });
 }
 
+function updateWorkingTaskStatus(
+  server: McpServer,
+  taskId: string,
+  statusMessage: string
+): void {
+  const current = taskManager.getTask(taskId);
+  if (current?.status !== 'working') return;
+  if (current.statusMessage === statusMessage) return;
+
+  taskManager.updateTask(taskId, { statusMessage });
+
+  const updated = taskManager.getTask(taskId);
+  if (updated) emitTaskStatusNotification(server, updated);
+}
+
 async function runFetchTaskExecution(params: {
   server: McpServer;
   taskId: string;
@@ -322,6 +337,9 @@ async function runFetchTaskExecution(params: {
           requestId: taskId, // Correlation
           _meta: relatedMeta,
           ...(sendNotification ? { sendNotification } : {}),
+          onProgress: (_progress, message) => {
+            updateWorkingTaskStatus(server, taskId, message);
+          },
         });
 
         const isToolError =
@@ -331,13 +349,10 @@ async function runFetchTaskExecution(params: {
 
         taskManager.updateTask(taskId, {
           status: isToolError ? 'failed' : 'completed',
-          ...(isToolError
-            ? {
-                statusMessage:
-                  (result as { structuredContent?: { error?: string } })
-                    .structuredContent?.error ?? 'Tool execution failed',
-              }
-            : {}),
+          statusMessage: isToolError
+            ? ((result as { structuredContent?: { error?: string } })
+                .structuredContent?.error ?? 'Tool execution failed')
+            : 'Task completed successfully.',
           result,
         });
 

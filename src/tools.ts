@@ -110,6 +110,7 @@ export interface ToolHandlerExtra {
   requestInfo?: unknown;
   _meta?: RequestMeta;
   sendNotification?: (notification: ProgressNotification) => Promise<void>;
+  onProgress?: (progress: number, message: string) => void;
 }
 
 const TRUNCATION_MARKER = '...[truncated]';
@@ -336,25 +337,53 @@ function resolveRelatedTaskMeta(
 }
 
 class ToolProgressReporter implements ProgressReporter {
+  private reportQueue: Promise<void> = Promise.resolve();
+
   private constructor(
-    private readonly token: ProgressToken,
-    private readonly sendNotification: (
-      notification: ProgressNotification
-    ) => Promise<void>,
-    private readonly relatedTaskMeta: { taskId: string } | undefined
+    private readonly token: ProgressToken | null,
+    private readonly sendNotification:
+      | ((notification: ProgressNotification) => Promise<void>)
+      | undefined,
+    private readonly relatedTaskMeta: { taskId: string } | undefined,
+    private readonly onProgress:
+      | ((progress: number, message: string) => void)
+      | undefined
   ) {}
 
   static create(extra?: ToolHandlerExtra): ProgressReporter {
     const token = extra?._meta?.progressToken ?? null;
     const sendNotification = extra?.sendNotification;
     const relatedTaskMeta = resolveRelatedTaskMeta(extra?._meta);
+    const onProgress = extra?.onProgress;
 
-    if (token === null || !sendNotification) {
+    if (token === null && !onProgress) {
       return { report: async () => {} };
     }
-    return new ToolProgressReporter(token, sendNotification, relatedTaskMeta);
+
+    return new ToolProgressReporter(
+      token,
+      sendNotification,
+      relatedTaskMeta,
+      onProgress
+    );
   }
+
   async report(progress: number, message: string): Promise<void> {
+    if (this.onProgress) {
+      try {
+        this.onProgress(progress, message);
+      } catch (error: unknown) {
+        logWarn('Progress callback failed', {
+          error: getErrorMessage(error),
+          progress,
+          message,
+        });
+      }
+    }
+
+    if (this.token === null || !this.sendNotification) return;
+    const { sendNotification } = this;
+
     const notification: ProgressNotification = {
       method: 'notifications/progress',
       params: {
@@ -371,31 +400,37 @@ class ToolProgressReporter implements ProgressReporter {
           : {}),
       },
     };
-    let timeoutId: NodeJS.Timeout | undefined;
-    const timeoutPromise = new Promise<{ timeout: true }>((resolve) => {
-      timeoutId = setTimeout(() => {
-        resolve({ timeout: true });
-      }, PROGRESS_NOTIFICATION_TIMEOUT_MS);
-      timeoutId.unref();
-    });
-    try {
-      const outcome = await Promise.race([
-        this.sendNotification(notification).then(() => ({ ok: true as const })),
-        timeoutPromise,
-      ]);
 
-      if ('timeout' in outcome) {
-        logWarn('Progress notification timed out', { progress, message });
-      }
-    } catch (error) {
-      logWarn('Failed to send progress notification', {
-        error: getErrorMessage(error),
-        progress,
-        message,
+    this.reportQueue = this.reportQueue.then(async () => {
+      let timeoutId: NodeJS.Timeout | undefined;
+      const timeoutPromise = new Promise<{ timeout: true }>((resolve) => {
+        timeoutId = setTimeout(() => {
+          resolve({ timeout: true });
+        }, PROGRESS_NOTIFICATION_TIMEOUT_MS);
+        timeoutId.unref();
       });
-    } finally {
-      if (timeoutId) clearTimeout(timeoutId);
-    }
+
+      try {
+        const outcome = await Promise.race([
+          sendNotification(notification).then(() => ({ ok: true as const })),
+          timeoutPromise,
+        ]);
+
+        if ('timeout' in outcome) {
+          logWarn('Progress notification timed out', { progress, message });
+        }
+      } catch (error) {
+        logWarn('Failed to send progress notification', {
+          error: getErrorMessage(error),
+          progress,
+          message,
+        });
+      } finally {
+        if (timeoutId) clearTimeout(timeoutId);
+      }
+    });
+
+    await this.reportQueue;
   }
 }
 

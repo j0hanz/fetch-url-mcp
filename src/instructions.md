@@ -47,10 +47,11 @@ fetch-url
 
 - VALIDATION_ERROR: URL invalid or blocked. Do not retry.
 - FETCH_ERROR: Network/upstream failure. Retry once with backoff.
-- queue_full: Worker pool busy. Wait briefly, then retry or use Task interface.
+- queue_full: Usually handled internally by automatic fallback to in-process transform. If surfaced, retry or use Task interface.
 
 ---
 
 ## RESOURCES
 
 - internal://instructions — This document.
+- internal://cache/{namespace}/{hash} — Read cached markdown entries (typically namespace=`markdown`).

@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
+import { config } from '../dist/config.js';
 import { cancelTasksForOwner } from '../dist/mcp.js';
 import { getRequestId, runWithRequestContext } from '../dist/observability.js';
 import { taskManager } from '../dist/tasks.js';
@@ -121,6 +122,56 @@ describe('TaskManager.createTask ttl normalization', () => {
 
     assert.equal(belowMin.ttl, 1_000);
     assert.equal(aboveMax.ttl, 86_400_000);
+  });
+
+  it('enforces per-owner task capacity', () => {
+    const originalMaxPerOwner = config.tasks.maxPerOwner;
+    const originalMaxTotal = config.tasks.maxTotal;
+    const ownerKey = `capacity-owner-${Date.now()}`;
+
+    config.tasks.maxPerOwner = 1;
+    config.tasks.maxTotal = Math.max(originalMaxTotal, 2);
+
+    try {
+      taskManager.createTask(undefined, 'Task 1', ownerKey);
+
+      assert.throws(
+        () => taskManager.createTask(undefined, 'Task 2', ownerKey),
+        (error: unknown) =>
+          error instanceof Error &&
+          error.message.toLowerCase().includes('capacity')
+      );
+    } finally {
+      config.tasks.maxPerOwner = originalMaxPerOwner;
+      config.tasks.maxTotal = originalMaxTotal;
+    }
+  });
+});
+
+describe('TaskManager.updateTask terminal behavior', () => {
+  it('does not mutate terminal tasks', () => {
+    const ownerKey = `terminal-freeze-${Date.now()}`;
+    const task = taskManager.createTask(undefined, 'Task started', ownerKey);
+
+    taskManager.updateTask(task.taskId, {
+      status: 'completed',
+      statusMessage: 'Completed',
+      result: { ok: true },
+    });
+
+    taskManager.updateTask(task.taskId, {
+      statusMessage: 'Mutated',
+      error: { code: -1, message: 'Unexpected' },
+    });
+
+    const updated = taskManager.getTask(task.taskId, ownerKey);
+    assert.ok(updated);
+    assert.equal(updated.status, 'completed');
+    assert.equal(updated.statusMessage, 'Completed');
+    assert.equal(
+      (updated.error as { code?: number } | undefined)?.code,
+      undefined
+    );
   });
 });
 
