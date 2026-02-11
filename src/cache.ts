@@ -323,7 +323,7 @@ export function isEnabled(): boolean {
  * Adapter: MCP Cached Content Resource
  * ------------------------------------------------------------------------------------------------- */
 
-const CacheResourceParamsSchema = z.object({
+const CacheResourceParamsSchema = z.strictObject({
   namespace: CacheNamespace,
   urlHash: HashString,
 });
@@ -597,7 +597,7 @@ export function generateSafeFilename(
  * Adapter: Download Handler
  * ------------------------------------------------------------------------------------------------- */
 
-const DownloadParamsSchema = z.object({
+const DownloadParamsSchema = z.strictObject({
   namespace: CacheNamespace,
   hash: HashString,
 });

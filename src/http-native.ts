@@ -34,16 +34,18 @@ import {
 } from './ip-blocklist.js';
 import {
   acceptsEventStream,
+  acceptsJsonAndEventStream,
   isJsonRpcBatchRequest,
   isMcpRequestBody,
   type JsonRpcId,
 } from './mcp-validator.js';
-import { createMcpServerForHttpSession } from './mcp.js';
+import { cancelTasksForOwner, createMcpServerForHttpSession } from './mcp.js';
 import {
   logError,
   logInfo,
   logWarn,
   registerMcpSessionServer,
+  resolveMcpSessionIdByServer,
   runWithRequestContext,
   unregisterMcpSessionServer,
   unregisterMcpSessionServerByServer,
@@ -1182,6 +1184,13 @@ class McpSessionGateway {
 
   async handlePost(ctx: AuthenticatedContext): Promise<void> {
     if (!ensureMcpProtocolVersion(ctx.req, ctx.res)) return;
+    if (!acceptsJsonAndEventStream(getHeaderValue(ctx.req, 'accept'))) {
+      sendJson(ctx.res, 400, {
+        error:
+          'Accept header must include application/json and text/event-stream',
+      });
+      return;
+    }
 
     const { body } = ctx;
     if (isJsonRpcBatchRequest(body)) {
@@ -1367,6 +1376,12 @@ class McpSessionGateway {
   private cleanupSessionRecord(sessionId: string, context: string): void {
     const session = this.store.remove(sessionId);
     if (!session) return;
+
+    cancelTasksForOwner(
+      `session:${sessionId}`,
+      'The task was cancelled because the MCP session ended.'
+    );
+
     unregisterMcpSessionServer(sessionId);
     void closeMcpServerBestEffort(session.server, `${context}-server`);
   }
@@ -1378,6 +1393,15 @@ class McpSessionGateway {
       evictOldest: (store) => {
         const evicted = store.evictOldest();
         if (evicted) {
+          const sessionId = resolveMcpSessionIdByServer(evicted.server);
+          if (sessionId) {
+            cancelTasksForOwner(
+              `session:${sessionId}`,
+              'The task was cancelled because the MCP session was evicted.'
+            );
+            unregisterMcpSessionServer(sessionId);
+          }
+
           unregisterMcpSessionServerByServer(evicted.server);
           void closeTransportBestEffort(evicted.transport, 'session-eviction');
           void closeMcpServerBestEffort(evicted.server, 'session-eviction');
@@ -1627,6 +1651,15 @@ function createShutdownHandler(options: {
     const sessions = options.sessionStore.clear();
     await Promise.all(
       sessions.map(async (session) => {
+        const sessionId = resolveMcpSessionIdByServer(session.server);
+        if (sessionId) {
+          cancelTasksForOwner(
+            `session:${sessionId}`,
+            'The task was cancelled because the HTTP server is shutting down.'
+          );
+          unregisterMcpSessionServer(sessionId);
+        }
+
         unregisterMcpSessionServerByServer(session.server);
         await closeTransportBestEffort(
           session.transport,

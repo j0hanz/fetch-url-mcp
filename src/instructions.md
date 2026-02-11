@@ -9,6 +9,7 @@ Available as resource (internal://instructions) or prompt (get-help). Load when 
 - Domain: Fetch public web pages and convert HTML to clean, LLM-readable Markdown.
 - Primary Resources: Markdown content, cached snapshots (superfetch://cache/...).
 - Tools: fetch-url (READ-ONLY; no write tools exist).
+- Prompts: get-help, summarize-page, extract-data.
 
 ---
 
@@ -35,9 +36,9 @@ fetch-url
 
 - Purpose: Fetch a URL and return Markdown.
 - Input: { "url": "https://..." }
-- Optional: skipNoiseRemoval (bool, keeps nav/footers), forceRefresh (bool, bypasses cache).
+- Optional: skipNoiseRemoval (bool, keeps nav/footers), forceRefresh (bool, bypasses cache), maxInlineChars (int, per-call inline limit).
 - Side effects: None (read-only, idempotent). Populates cache automatically.
-- Limits: HTML capped at 10 MB (MAX_HTML_BYTES). Inline content unlimited by default; set MAX_INLINE_CONTENT_CHARS to cap.
+- Limits: HTML capped at 10 MB (MAX_HTML_BYTES). Inline content unlimited by default; set MAX_INLINE_CONTENT_CHARS globally or maxInlineChars per call.
 - Blocked: localhost, private IPs (10.x, 172.16–31.x, 192.168.x), cloud metadata endpoints.
 - Quality: Varies by HTML structure. Best with articles/docs. Always verify output.
 

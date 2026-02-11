@@ -49,6 +49,15 @@ export function unregisterMcpSessionServerByServer(server: McpServer): void {
   }
 }
 
+export function resolveMcpSessionIdByServer(
+  server: McpServer
+): string | undefined {
+  for (const [sessionId, mappedServer] of sessionServers.entries()) {
+    if (mappedServer === server) return sessionId;
+  }
+  return undefined;
+}
+
 export function runWithRequestContext<T>(
   context: RequestContext,
   fn: () => T

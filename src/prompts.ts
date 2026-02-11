@@ -4,10 +4,14 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 
 import { FETCH_URL_TOOL_NAME } from './tools.js';
 
+export const GET_HELP_PROMPT_NAME = 'get-help';
+export const SUMMARIZE_PAGE_PROMPT_NAME = 'summarize-page';
+export const EXTRACT_DATA_PROMPT_NAME = 'extract-data';
+
 export function registerPrompts(server: McpServer, instructions: string): void {
   // Get Help Prompt
   server.registerPrompt(
-    'get-help',
+    GET_HELP_PROMPT_NAME,
     {
       title: 'Get Help',
       description: 'Returns usage guidance for the superFetch MCP server.',
@@ -28,7 +32,7 @@ export function registerPrompts(server: McpServer, instructions: string): void {
 
   // Summarize Page Prompt
   server.registerPrompt(
-    'summarize-page',
+    SUMMARIZE_PAGE_PROMPT_NAME,
     {
       title: 'Summarize Page',
       description: 'Creates a prompt to fetch and summarize a webpage.',
@@ -55,7 +59,7 @@ export function registerPrompts(server: McpServer, instructions: string): void {
 
   // Extract Data Prompt
   server.registerPrompt(
-    'extract-data',
+    EXTRACT_DATA_PROMPT_NAME,
     {
       title: 'Extract Data',
       description:

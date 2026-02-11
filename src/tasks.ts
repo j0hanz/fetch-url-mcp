@@ -190,6 +190,30 @@ class TaskManager {
     return this.tasks.get(taskId);
   }
 
+  cancelTasksByOwner(
+    ownerKey: string,
+    statusMessage = 'The task was cancelled because its owner is no longer active.'
+  ): TaskState[] {
+    if (!ownerKey) return [];
+
+    const cancelled: TaskState[] = [];
+
+    for (const task of this.tasks.values()) {
+      if (task.ownerKey !== ownerKey) continue;
+      if (isTerminalStatus(task.status)) continue;
+
+      this.updateTask(task.taskId, {
+        status: 'cancelled',
+        statusMessage,
+      });
+
+      const updated = this.tasks.get(task.taskId);
+      if (updated) cancelled.push(updated);
+    }
+
+    return cancelled;
+  }
+
   private collectPage(
     ownerKey: string,
     startIndex: number,

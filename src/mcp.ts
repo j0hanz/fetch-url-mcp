@@ -11,12 +11,19 @@ import {
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import {
   CallToolRequestSchema,
+  CompleteRequestSchema,
   ErrorCode,
   McpError,
   type ServerResult,
 } from '@modelcontextprotocol/sdk/types.js';
 
-import { type McpIcon, registerCachedContentResource } from './cache.js';
+import {
+  get as getCachedEntry,
+  keys as getCacheKeys,
+  type McpIcon,
+  parseCacheKey,
+  registerCachedContentResource,
+} from './cache.js';
 import { config } from './config.js';
 import {
   logError,
@@ -25,11 +32,17 @@ import {
   runWithRequestContext,
   setMcpServer,
 } from './observability.js';
-import { registerPrompts } from './prompts.js';
+import {
+  EXTRACT_DATA_PROMPT_NAME,
+  GET_HELP_PROMPT_NAME,
+  registerPrompts,
+  SUMMARIZE_PAGE_PROMPT_NAME,
+} from './prompts.js';
 import { registerAgentsResource, registerConfigResource } from './resources.js';
 import { type CreateTaskResult, taskManager, type TaskState } from './tasks.js';
 import {
   FETCH_URL_TOOL_NAME,
+  type FetchUrlInput,
   fetchUrlInputSchema,
   fetchUrlToolHandler,
   type ProgressNotification,
@@ -74,6 +87,7 @@ function createServerCapabilities(): {
   prompts: { listChanged: boolean };
   tools: { listChanged: boolean };
   resources: { listChanged: boolean; subscribe: boolean };
+  completions: Record<string, never>;
   logging: Record<string, never>;
   tasks: {
     list: Record<string, never>;
@@ -89,6 +103,7 @@ function createServerCapabilities(): {
     prompts: { listChanged: true },
     tools: { listChanged: true },
     resources: { listChanged: true, subscribe: true },
+    completions: {},
     logging: {},
     tasks: {
       list: {},
@@ -100,6 +115,234 @@ function createServerCapabilities(): {
       },
     },
   };
+}
+
+/* -------------------------------------------------------------------------------------------------
+ * Completion support (completion/complete)
+ * ------------------------------------------------------------------------------------------------- */
+
+const MAX_COMPLETION_VALUES = 100;
+const CACHE_RESOURCE_TEMPLATE_URI = 'superfetch://cache/{namespace}/{urlHash}';
+const CACHE_NAMESPACE = 'markdown';
+
+const URL_PREFIX_COMPLETIONS = ['https://', 'http://'] as const;
+
+const EXTRACT_DATA_INSTRUCTION_COMPLETIONS = [
+  'Extract all pricing tiers and limits',
+  'Extract installation prerequisites and setup steps',
+  'Extract API authentication requirements',
+  'Extract all links and referenced resources',
+  'Extract release/version information',
+] as const;
+
+function normalizeCompletionValue(value: string): string {
+  return value.trim().toLowerCase();
+}
+
+function dedupeCompletions(values: readonly string[]): string[] {
+  const seen = new Set<string>();
+  const deduped: string[] = [];
+
+  for (const value of values) {
+    if (!value) continue;
+    if (seen.has(value)) continue;
+    seen.add(value);
+    deduped.push(value);
+  }
+
+  return deduped;
+}
+
+function filterCompletionCandidates(
+  values: readonly string[],
+  input: string
+): string[] {
+  const normalizedInput = normalizeCompletionValue(input);
+  const candidates = dedupeCompletions(values);
+
+  if (!normalizedInput) return candidates;
+
+  const startsWith: string[] = [];
+  const includes: string[] = [];
+
+  for (const value of candidates) {
+    const normalized = normalizeCompletionValue(value);
+    if (normalized.startsWith(normalizedInput)) {
+      startsWith.push(value);
+      continue;
+    }
+    if (normalized.includes(normalizedInput)) {
+      includes.push(value);
+    }
+  }
+
+  return [...startsWith, ...includes];
+}
+
+function buildCompletionResult(
+  values: readonly string[],
+  input: string
+): {
+  completion: {
+    values: string[];
+    total: number;
+    hasMore: boolean;
+  };
+} {
+  const filtered = filterCompletionCandidates(values, input);
+  const limited = filtered.slice(0, MAX_COMPLETION_VALUES);
+
+  return {
+    completion: {
+      values: limited,
+      total: filtered.length,
+      hasMore: filtered.length > limited.length,
+    },
+  };
+}
+
+function listCachedUrls(): string[] {
+  const urls: string[] = [];
+
+  for (const key of getCacheKeys()) {
+    const entry = getCachedEntry(key, { force: true });
+    if (!entry?.url) continue;
+    urls.push(entry.url);
+  }
+
+  return dedupeCompletions(urls);
+}
+
+function listCacheNamespaces(): string[] {
+  const namespaces = new Set<string>([CACHE_NAMESPACE]);
+
+  for (const key of getCacheKeys()) {
+    const parsed = parseCacheKey(key);
+    if (!parsed?.namespace) continue;
+    namespaces.add(parsed.namespace);
+  }
+
+  return [...namespaces].sort((left, right) => left.localeCompare(right));
+}
+
+function listCacheUrlHashes(namespace?: string): string[] {
+  const hashes: string[] = [];
+
+  for (const key of getCacheKeys()) {
+    const parsed = parseCacheKey(key);
+    if (!parsed) continue;
+    if (namespace && parsed.namespace !== namespace) continue;
+    hashes.push(parsed.urlHash);
+  }
+
+  return dedupeCompletions(hashes);
+}
+
+function handlePromptCompletion(request: {
+  name: string;
+  argumentName: string;
+  argumentValue: string;
+}): {
+  completion: {
+    values: string[];
+    total: number;
+    hasMore: boolean;
+  };
+} {
+  const { name, argumentName, argumentValue } = request;
+
+  switch (name) {
+    case GET_HELP_PROMPT_NAME:
+      return buildCompletionResult([], argumentValue);
+    case SUMMARIZE_PAGE_PROMPT_NAME: {
+      if (argumentName !== 'url') {
+        return buildCompletionResult([], argumentValue);
+      }
+      return buildCompletionResult(
+        [...URL_PREFIX_COMPLETIONS, ...listCachedUrls()],
+        argumentValue
+      );
+    }
+    case EXTRACT_DATA_PROMPT_NAME: {
+      if (argumentName === 'url') {
+        return buildCompletionResult(
+          [...URL_PREFIX_COMPLETIONS, ...listCachedUrls()],
+          argumentValue
+        );
+      }
+      if (argumentName === 'instruction') {
+        return buildCompletionResult(
+          EXTRACT_DATA_INSTRUCTION_COMPLETIONS,
+          argumentValue
+        );
+      }
+      return buildCompletionResult([], argumentValue);
+    }
+    default:
+      throw new McpError(ErrorCode.InvalidParams, `Prompt '${name}' not found`);
+  }
+}
+
+function handleResourceTemplateCompletion(request: {
+  uri: string;
+  argumentName: string;
+  argumentValue: string;
+  contextArguments?: Record<string, string>;
+}): {
+  completion: {
+    values: string[];
+    total: number;
+    hasMore: boolean;
+  };
+} {
+  const { uri, argumentName, argumentValue, contextArguments } = request;
+
+  if (uri !== CACHE_RESOURCE_TEMPLATE_URI) {
+    throw new McpError(
+      ErrorCode.InvalidParams,
+      `Resource template '${uri}' not found`
+    );
+  }
+
+  if (argumentName === 'namespace') {
+    return buildCompletionResult(listCacheNamespaces(), argumentValue);
+  }
+
+  if (argumentName === 'urlHash') {
+    const namespace = contextArguments?.namespace;
+    return buildCompletionResult(listCacheUrlHashes(namespace), argumentValue);
+  }
+
+  return buildCompletionResult([], argumentValue);
+}
+
+function registerCompletionHandlers(server: McpServer): void {
+  server.server.setRequestHandler(CompleteRequestSchema, async (request) => {
+    const {
+      ref,
+      argument: { name, value },
+      context,
+    } = request.params;
+
+    if (ref.type === 'ref/prompt') {
+      return Promise.resolve(
+        handlePromptCompletion({
+          name: ref.name,
+          argumentName: name,
+          argumentValue: value,
+        })
+      );
+    }
+
+    const resourceRequest = {
+      uri: ref.uri,
+      argumentName: name,
+      argumentValue: value,
+      ...(context?.arguments ? { contextArguments: context.arguments } : {}),
+    };
+
+    return Promise.resolve(handleResourceTemplateCompletion(resourceRequest));
+  });
 }
 
 async function createServerInstructions(
@@ -157,28 +400,28 @@ function registerInstructionsResource(
  * Tasks API schemas
  * ------------------------------------------------------------------------------------------------- */
 
-const TaskGetSchema = z.object({
+const TaskGetSchema = z.strictObject({
   method: z.literal('tasks/get'),
-  params: z.object({ taskId: z.string() }),
+  params: z.strictObject({ taskId: z.string() }),
 });
 
-const TaskListSchema = z.object({
+const TaskListSchema = z.strictObject({
   method: z.literal('tasks/list'),
   params: z
-    .object({
+    .strictObject({
       cursor: z.string().optional(),
     })
     .optional(),
 });
 
-const TaskCancelSchema = z.object({
+const TaskCancelSchema = z.strictObject({
   method: z.literal('tasks/cancel'),
-  params: z.object({ taskId: z.string() }),
+  params: z.strictObject({ taskId: z.string() }),
 });
 
-const TaskResultSchema = z.object({
+const TaskResultSchema = z.strictObject({
   method: z.literal('tasks/result'),
-  params: z.object({ taskId: z.string() }),
+  params: z.strictObject({ taskId: z.string() }),
 });
 
 /* -------------------------------------------------------------------------------------------------
@@ -219,7 +462,7 @@ const ExtendedCallToolRequestSchema: z.ZodType<ExtendedCallToolRequest> =
       name: z.string().min(1),
       arguments: z.record(z.string(), z.unknown()).optional(),
       task: z
-        .object({
+        .strictObject({
           ttl: z
             .number()
             .int()
@@ -232,7 +475,7 @@ const ExtendedCallToolRequestSchema: z.ZodType<ExtendedCallToolRequest> =
         .looseObject({
           progressToken: z.union([z.string(), z.number()]).optional(),
           'io.modelcontextprotocol/related-task': z
-            .object({
+            .strictObject({
               taskId: z.string(),
             })
             .optional(),
@@ -288,7 +531,7 @@ function resolveToolCallContext(extra?: HandlerExtra): ToolCallContext {
   return context;
 }
 
-function requireFetchUrlArgs(args: unknown): { url: string } {
+function requireFetchUrlArgs(args: unknown): FetchUrlInput {
   const parsed = fetchUrlInputSchema.safeParse(args);
   if (!parsed.success) {
     throw new McpError(
@@ -371,6 +614,20 @@ function clearTaskExecution(taskId: string): void {
   taskAbortControllers.delete(taskId);
 }
 
+export function cancelTasksForOwner(
+  ownerKey: string,
+  statusMessage = 'The task was cancelled because its owner session ended.'
+): number {
+  if (!ownerKey) return 0;
+
+  const cancelled = taskManager.cancelTasksByOwner(ownerKey, statusMessage);
+  for (const task of cancelled) {
+    abortTaskExecution(task.taskId);
+  }
+
+  return cancelled.length;
+}
+
 interface TaskStatusNotificationParams extends Record<string, unknown> {
   taskId: string;
   status: TaskState['status'];
@@ -413,7 +670,7 @@ function emitTaskStatusNotification(server: McpServer, task: TaskState): void {
 async function runFetchTaskExecution(params: {
   server: McpServer;
   taskId: string;
-  args: { url: string };
+  args: FetchUrlInput;
   meta?: ExtendedCallToolRequest['params']['_meta'];
   sendNotification?: (notification: ProgressNotification) => Promise<void>;
 }): Promise<void> {
@@ -740,6 +997,7 @@ async function createMcpServerWithOptions(
   registerInstructionsResource(server, instructions);
   registerAgentsResource(server);
   registerConfigResource(server);
+  registerCompletionHandlers(server);
   registerTaskHandlers(server);
 
   return server;

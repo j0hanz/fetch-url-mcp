@@ -35,6 +35,7 @@ export interface FetchUrlInput {
   url: string;
   skipNoiseRemoval?: boolean | undefined;
   forceRefresh?: boolean | undefined;
+  maxInlineChars?: number | undefined;
 }
 
 export interface ToolContentBlock {
@@ -147,6 +148,15 @@ export const fetchUrlInputSchema = z.strictObject({
     .optional()
     .describe(
       'When true, bypasses the cache and fetches fresh content from the URL'
+    ),
+  maxInlineChars: z
+    .number()
+    .int()
+    .min(0)
+    .max(config.constants.maxHtmlSize)
+    .optional()
+    .describe(
+      'Optional per-call inline markdown limit. 0 means unlimited. If a global inline limit is configured, the lower value is used.'
     ),
 });
 
@@ -364,6 +374,7 @@ export function createProgressReporter(
 interface InlineContentResult {
   content?: string;
   contentSize: number;
+  inlineLimit: number;
   resourceUri?: string;
   resourceMimeType?: string;
   error?: string;
@@ -446,16 +457,20 @@ function truncateWithMarker(
 }
 
 class InlineContentLimiter {
-  apply(content: string, cacheKey: string | null): InlineContentResult {
+  apply(
+    content: string,
+    cacheKey: string | null,
+    inlineLimitOverride?: number
+  ): InlineContentResult {
     const contentSize = content.length;
-    const inlineLimit = config.constants.maxInlineContentChars;
+    const inlineLimit = this.resolveInlineLimit(inlineLimitOverride);
 
     if (inlineLimit <= 0) {
-      return { content, contentSize };
+      return { content, contentSize, inlineLimit };
     }
 
     if (contentSize <= inlineLimit) {
-      return { content, contentSize };
+      return { content, contentSize, inlineLimit };
     }
 
     const isTruncated = contentSize > inlineLimit;
@@ -474,6 +489,7 @@ class InlineContentLimiter {
       return {
         content: truncatedContent,
         contentSize,
+        inlineLimit,
         resourceUri,
         resourceMimeType: 'text/markdown',
         truncated: true,
@@ -483,8 +499,21 @@ class InlineContentLimiter {
     return {
       content: truncatedContent,
       contentSize,
+      inlineLimit,
       truncated: true,
     };
+  }
+
+  private resolveInlineLimit(inlineLimitOverride?: number): number {
+    const globalLimit = config.constants.maxInlineContentChars;
+
+    if (inlineLimitOverride === undefined) return globalLimit;
+    if (globalLimit > 0 && inlineLimitOverride > 0) {
+      return Math.min(inlineLimitOverride, globalLimit);
+    }
+    if (globalLimit > 0 && inlineLimitOverride === 0) return globalLimit;
+
+    return inlineLimitOverride;
   }
 }
 
@@ -492,9 +521,10 @@ const inlineLimiter = new InlineContentLimiter();
 
 function applyInlineContentLimit(
   content: string,
-  cacheKey: string | null
+  cacheKey: string | null,
+  inlineLimitOverride?: number
 ): InlineContentResult {
-  return inlineLimiter.apply(content, cacheKey);
+  return inlineLimiter.apply(content, cacheKey, inlineLimitOverride);
 }
 
 /* -------------------------------------------------------------------------------------------------
@@ -515,12 +545,16 @@ function buildResourceLink(
   name: string
 ): ToolContentResourceLinkBlock | null {
   if (!inlineResult.resourceUri) return null;
+  const limitDescription =
+    inlineResult.inlineLimit > 0
+      ? `Content exceeds inline limit (${inlineResult.inlineLimit} chars)`
+      : 'Content exceeds inline output limit';
 
   const block: ToolContentResourceLinkBlock = {
     type: 'resource_link',
     uri: inlineResult.resourceUri,
     name,
-    description: `Content exceeds inline limit (${config.constants.maxInlineContentChars} chars)`,
+    description: limitDescription,
   };
 
   if (inlineResult.resourceMimeType !== undefined) {
@@ -784,6 +818,7 @@ interface SharedFetchOptions<T extends { content: string }> {
   readonly signal?: AbortSignal;
   readonly cacheVary?: Record<string, unknown> | string;
   readonly forceRefresh?: boolean;
+  readonly maxInlineChars?: number;
   readonly transform: (
     input: { buffer: Uint8Array; encoding: string; truncated?: boolean },
     normalizedUrl: string
@@ -819,7 +854,8 @@ export async function performSharedFetch<T extends { content: string }>(
   const pipeline = await executePipeline<T>(pipelineOptions);
   const inlineResult = applyInlineContentLimit(
     pipeline.data.content,
-    pipeline.cacheKey ?? null
+    pipeline.cacheKey ?? null,
+    options.maxInlineChars
   );
 
   if (inlineResult.truncated && !pipeline.fromCache && !cache.isEnabled()) {
@@ -1034,7 +1070,8 @@ async function fetchPipeline(
   signal?: AbortSignal,
   progress?: ProgressReporter,
   skipNoiseRemoval?: boolean,
-  forceRefresh?: boolean
+  forceRefresh?: boolean,
+  maxInlineChars?: number
 ): Promise<{
   pipeline: PipelineResult<MarkdownPipelineResult>;
   inlineResult: InlineResult;
@@ -1044,6 +1081,7 @@ async function fetchPipeline(
     ...withSignal(signal),
     ...(skipNoiseRemoval ? { cacheVary: { skipNoiseRemoval: true } } : {}),
     ...(forceRefresh ? { forceRefresh: true } : {}),
+    ...(maxInlineChars !== undefined ? { maxInlineChars } : {}),
     transform: async ({ buffer, encoding, truncated }, normalizedUrl) => {
       if (progress) {
         void progress.report(3, 'Transforming content');
@@ -1081,7 +1119,8 @@ async function executeFetch(
     signal,
     progress,
     input.skipNoiseRemoval,
-    input.forceRefresh
+    input.forceRefresh,
+    input.maxInlineChars
   );
 
   if (pipeline.fromCache) {

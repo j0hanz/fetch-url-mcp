@@ -147,4 +147,77 @@ describe('http session initialization', () => {
     assert.equal(typeof payload.missingHeader.sessionId, 'string');
     assert.equal(payload.missingHeader.hasInitializeResult, true);
   });
+
+  it('rejects POST /mcp initialize requests without required Accept media types', () => {
+    const script = `
+      import { startHttpServer } from './dist/http-native.js';
+      import { request } from 'node:http';
+
+      const server = await startHttpServer();
+      const port = server.port;
+
+      const body = JSON.stringify({
+        jsonrpc: '2.0',
+        id: 'init-no-accept',
+        method: 'initialize',
+        params: {
+          protocolVersion: '2025-11-25',
+          capabilities: {},
+          clientInfo: { name: 'test-client', version: '1.0.0' },
+        },
+      });
+
+      const result = await new Promise((resolve) => {
+        const req = request(
+          {
+            hostname: '127.0.0.1',
+            port,
+            path: '/mcp',
+            method: 'POST',
+            headers: {
+              'content-type': 'application/json',
+              accept: 'application/json',
+              authorization: 'Bearer test-token',
+              host: '127.0.0.1',
+              'mcp-protocol-version': '2025-11-25',
+            },
+          },
+          (res) => {
+            let raw = '';
+            res.on('data', (chunk) => { raw += chunk; });
+            res.on('end', () => {
+              resolve({
+                status: res.statusCode ?? 0,
+                body: raw,
+              });
+            });
+          }
+        );
+        req.on('error', (error) => resolve({ error: error.message }));
+        req.write(body);
+        req.end();
+      });
+
+      await server.shutdown('TEST');
+      console.error('${RESULT_MARKER}' + JSON.stringify(result));
+    `;
+
+    const result = runIsolatedNode(script, {
+      HOST: '127.0.0.1',
+      PORT: '0',
+      ACCESS_TOKENS: 'test-token',
+      ALLOW_REMOTE: 'false',
+    });
+
+    assert.equal(result.status, 0, result.stderr);
+    const payload = parseMarkedJson<{ status: number; body: string }>(
+      result.stderr
+    );
+
+    assert.equal(payload.status, 400);
+    assert.match(
+      payload.body,
+      /Accept header must include application\/json and text\/event-stream/
+    );
+  });
 });

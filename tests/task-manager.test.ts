@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
+import { cancelTasksForOwner } from '../dist/mcp.js';
 import { taskManager } from '../dist/tasks.js';
 
 describe('TaskManager.waitForTerminalTask', () => {
@@ -88,5 +89,53 @@ describe('TaskManager.createTask ttl normalization', () => {
 
     assert.equal(belowMin.ttl, 1_000);
     assert.equal(aboveMax.ttl, 86_400_000);
+  });
+});
+
+describe('cancelTasksForOwner', () => {
+  it('cancels only active tasks for the specified owner', () => {
+    const ownerKey = `session:test-owner-${Date.now()}`;
+    const otherOwnerKey = `${ownerKey}-other`;
+
+    const activeTask = taskManager.createTask(
+      undefined,
+      'Active task',
+      ownerKey
+    );
+    const completedTask = taskManager.createTask(
+      undefined,
+      'Completed task',
+      ownerKey
+    );
+    const otherOwnerTask = taskManager.createTask(
+      undefined,
+      'Other owner task',
+      otherOwnerKey
+    );
+
+    taskManager.updateTask(completedTask.taskId, {
+      status: 'completed',
+      result: { ok: true },
+    });
+
+    const cancelledCount = cancelTasksForOwner(ownerKey, 'The session ended.');
+
+    assert.equal(cancelledCount, 1);
+    assert.equal(
+      taskManager.getTask(activeTask.taskId, ownerKey)?.status,
+      'cancelled'
+    );
+    assert.equal(
+      taskManager.getTask(activeTask.taskId, ownerKey)?.statusMessage,
+      'The session ended.'
+    );
+    assert.equal(
+      taskManager.getTask(completedTask.taskId, ownerKey)?.status,
+      'completed'
+    );
+    assert.equal(
+      taskManager.getTask(otherOwnerTask.taskId, otherOwnerKey)?.status,
+      'working'
+    );
   });
 });

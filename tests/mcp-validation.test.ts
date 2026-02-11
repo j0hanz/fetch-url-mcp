@@ -3,6 +3,7 @@ import { describe, it } from 'node:test';
 
 import {
   acceptsEventStream,
+  acceptsJsonAndEventStream,
   isJsonRpcBatchRequest,
   isMcpRequestBody,
 } from '../dist/mcp-validator.js';
@@ -219,6 +220,36 @@ describe('mcp-validation', () => {
       assert.equal(acceptsEventStream(undefined), false);
       assert.equal(acceptsEventStream('application/json'), false);
       assert.equal(acceptsEventStream('*/*'), false);
+    });
+  });
+
+  describe('acceptsJsonAndEventStream', () => {
+    it('accepts headers containing both required media types', () => {
+      assert.equal(
+        acceptsJsonAndEventStream('application/json, text/event-stream'),
+        true
+      );
+      assert.equal(
+        acceptsJsonAndEventStream(
+          'application/json; charset=utf-8, text/event-stream; q=0.9'
+        ),
+        true
+      );
+    });
+
+    it('accepts wildcard combinations that imply both media types', () => {
+      assert.equal(acceptsJsonAndEventStream('*/*'), true);
+      assert.equal(acceptsJsonAndEventStream('application/*, text/*'), true);
+    });
+
+    it('rejects missing required media types', () => {
+      assert.equal(acceptsJsonAndEventStream(undefined), false);
+      assert.equal(acceptsJsonAndEventStream('application/json'), false);
+      assert.equal(acceptsJsonAndEventStream('text/event-stream'), false);
+      assert.equal(
+        acceptsJsonAndEventStream('text/event-stream, text/plain'),
+        false
+      );
     });
   });
 });

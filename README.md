@@ -258,6 +258,11 @@ PORT=8080 HOST=0.0.0.0 ALLOW_REMOTE=true superfetch
 
 The server starts a Streamable HTTP endpoint at `/mcp`. Authenticate with bearer tokens via the `ACCESS_TOKENS` or `API_KEY` environment variables.
 
+For `POST /mcp`, clients should send:
+
+- `Accept: application/json, text/event-stream`
+- `MCP-Protocol-Version: 2025-11-25` (or `2025-03-26` for legacy clients)
+
 ## MCP Surface
 
 ### Tools
@@ -278,11 +283,12 @@ Fetches a webpage and converts it to clean Markdown format optimized for LLM con
 
 ##### Parameters
 
-| Parameter          | Type           | Required | Default | Description                                                        |
-| ------------------ | -------------- | -------- | ------- | ------------------------------------------------------------------ |
-| `url`              | `string` (URL) | Yes      | —       | The URL of the webpage to fetch (http/https, max 2048 chars)       |
-| `skipNoiseRemoval` | `boolean`      | No       | `false` | Preserve navigation, footers, and other elements normally filtered |
-| `forceRefresh`     | `boolean`      | No       | `false` | Bypass cache and fetch fresh content                               |
+| Parameter          | Type           | Required | Default | Description                                                                |
+| ------------------ | -------------- | -------- | ------- | -------------------------------------------------------------------------- |
+| `url`              | `string` (URL) | Yes      | —       | The URL of the webpage to fetch (http/https, max 2048 chars)               |
+| `skipNoiseRemoval` | `boolean`      | No       | `false` | Preserve navigation, footers, and other elements normally filtered         |
+| `forceRefresh`     | `boolean`      | No       | `false` | Bypass cache and fetch fresh content                                       |
+| `maxInlineChars`   | `number`       | No       | `0`     | Per-call inline markdown limit (`0` = unlimited; global cap still applies) |
 
 ##### Returns
 
@@ -328,7 +334,7 @@ The `fetch-url` tool supports optional async task execution. Include a `task` fi
   "params": {
     "name": "fetch-url",
     "arguments": { "url": "https://example.com" },
-    "task": { "ttl": 300 }
+    "task": { "ttl": 30000 }
   }
 }
 ```
@@ -337,9 +343,18 @@ Then poll `tasks/get` until the task status is `completed` or `failed`, and retr
 
 ### Prompts
 
-| Name       | Description                                      |
-| ---------- | ------------------------------------------------ |
-| `get-help` | Returns server usage guidance and workflow hints |
+| Name             | Description                                                      |
+| ---------------- | ---------------------------------------------------------------- |
+| `get-help`       | Returns server usage guidance and workflow hints                 |
+| `summarize-page` | Generates a user prompt to fetch and summarize a URL             |
+| `extract-data`   | Generates a user prompt to fetch a URL and extract targeted data |
+
+### Completions
+
+The server supports `completion/complete` for:
+
+- Prompt arguments (`summarize-page.url`, `extract-data.url`, `extract-data.instruction`)
+- Cache resource template arguments (`superfetch://cache/{namespace}/{urlHash}`)
 
 ### Resources
 
