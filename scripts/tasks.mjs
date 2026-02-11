@@ -28,6 +28,7 @@ const CONFIG = {
     dist: 'dist',
     assets: 'assets',
     instructions: 'src/instructions.md',
+    agents: 'AGENTS.md',
     executable: 'dist/index.js',
     tsBuildInfo: [
       '.tsbuildinfo',
@@ -39,6 +40,9 @@ const CONFIG = {
     },
     get distInstructions() {
       return join(this.dist, 'instructions.md');
+    },
+    get distAgents() {
+      return join(this.dist, 'AGENTS.md');
     },
   },
   commands: {
@@ -218,6 +222,9 @@ const BuildTasks = {
   async assets() {
     await System.makeDir(CONFIG.paths.dist);
     await System.copy(CONFIG.paths.instructions, CONFIG.paths.distInstructions);
+    if (await System.exists(CONFIG.paths.agents)) {
+      await System.copy(CONFIG.paths.agents, CONFIG.paths.distAgents);
+    }
 
     if (await System.isDirectory(CONFIG.paths.assets)) {
       try {

@@ -1,3 +1,5 @@
+import { readFile } from 'node:fs/promises';
+
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { ResourceTemplate } from '@modelcontextprotocol/sdk/server/mcp.js';
 
@@ -48,6 +50,45 @@ export function registerConfigResource(server: McpServer): void {
           },
         ],
       };
+    }
+  );
+}
+
+export function registerAgentsResource(server: McpServer): void {
+  server.registerResource(
+    'agents',
+    new ResourceTemplate('internal://agents', { list: undefined }),
+    {
+      title: 'Agent Instructions',
+      description: 'Project context and guidelines for AI agents.',
+      mimeType: 'text/markdown',
+    },
+    async (uri) => {
+      try {
+        const text = await readFile(
+          new URL('./AGENTS.md', import.meta.url),
+          'utf-8'
+        );
+        return {
+          contents: [
+            {
+              uri: uri.href,
+              mimeType: 'text/markdown',
+              text,
+            },
+          ],
+        };
+      } catch {
+        return {
+          contents: [
+            {
+              uri: uri.href,
+              mimeType: 'text/markdown',
+              text: 'AGENTS.md unavailable',
+            },
+          ],
+        };
+      }
     }
   );
 }

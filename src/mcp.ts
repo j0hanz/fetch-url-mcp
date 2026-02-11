@@ -25,7 +25,8 @@ import {
   runWithRequestContext,
   setMcpServer,
 } from './observability.js';
-import { registerConfigResource } from './resources.js';
+import { registerPrompts } from './prompts.js';
+import { registerAgentsResource, registerConfigResource } from './resources.js';
 import { type CreateTaskResult, taskManager, type TaskState } from './tasks.js';
 import {
   FETCH_URL_TOOL_NAME,
@@ -146,28 +147,6 @@ function registerInstructionsResource(
           uri: uri.href,
           mimeType: 'text/markdown',
           text: instructions,
-        },
-      ],
-    })
-  );
-}
-
-function registerHelpPrompt(server: McpServer, instructions: string): void {
-  server.registerPrompt(
-    'get-help',
-    {
-      title: 'Get Help',
-      description: 'Returns usage guidance for the superFetch MCP server.',
-    },
-    () => ({
-      description: 'superFetch MCP usage guidance',
-      messages: [
-        {
-          role: 'assistant',
-          content: {
-            type: 'text',
-            text: instructions,
-          },
         },
       ],
     })
@@ -756,9 +735,10 @@ async function createMcpServerWithOptions(
   }
 
   registerTools(server);
-  registerHelpPrompt(server, instructions);
+  registerPrompts(server, instructions);
   registerCachedContentResource(server, localIcons);
   registerInstructionsResource(server, instructions);
+  registerAgentsResource(server);
   registerConfigResource(server);
   registerTaskHandlers(server);
 
