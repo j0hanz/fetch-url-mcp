@@ -4,112 +4,147 @@
 
 ## 1) Project Context
 
-- **Domain:** MCP (Model Context Protocol) server that fetches web pages and converts HTML to clean, AI-readable Markdown.
+- **Domain:** MCP (Model Context Protocol) server that fetches public web pages and converts HTML into clean, AI-readable Markdown — published as `@j0hanz/fetch-url-mcp` on npm and `io.github.j0hanz/fetch-url-mcp` on the MCP Registry (see `server.json`, `package.json`).
 - **Tech Stack (Verified):**
-  - **Languages:** TypeScript 5.9+ (`package.json` → `"typescript": "^5.9.3"`), ESM (`"type": "module"`)
-  - **Frameworks:** `@modelcontextprotocol/sdk` v1.x (`"^1.26.0"` in `package.json`), Node.js ≥24 (`engines`)
+  - **Language:** TypeScript 5.9+ (see `package.json` `devDependencies`, `tsconfig.json` strict config)
+  - **Runtime:** Node.js >= 24 (see `package.json` `engines`, `.github/workflows/release.yml`)
+  - **Framework:** `@modelcontextprotocol/sdk` ^1.26.0 — MCP server SDK v1.x (see `package.json` `dependencies`)
   - **Key Libraries:**
-    - `zod` v4 (`"^4.3.6"`) — input/output schema validation
-    - `@mozilla/readability` (`"^0.6.0"`) — article extraction
-    - `linkedom` (`"^0.18.12"`) — DOM parsing (no browser required)
-    - `node-html-markdown` (`"^2.0.0"`) — HTML→Markdown conversion
-- **Architecture:** Single-package MCP server with modular source files (one concern per file). Supports both **stdio** and **Streamable HTTP** transports. Features an in-memory cache, task API, worker pool for transforms, IP blocklist, session management, and OAuth/static-token auth.
+    - `zod` ^4.3.6 — input/output schema validation (see `package.json`)
+    - `@mozilla/readability` ^0.6.0 — content extraction (see `package.json`)
+    - `linkedom` ^0.18.12 — server-side DOM (see `package.json`)
+    - `node-html-markdown` ^2.0.0 — HTML-to-Markdown conversion (see `package.json`)
+- **Architecture:** Single-package MCP server exposing `fetch-url` tool via **stdio** (default) and **Streamable HTTP** transports. Entrypoint at `src/index.ts` wires CLI parsing, signal handlers, and transport selection. Server lifecycle managed in `src/server.ts` with tool registration in `src/tools.ts`. HTML fetching, URL normalization, and security (IP blocklist, SSRF protection) in `src/fetch.ts`. HTML → Markdown transformation optionally offloaded to a worker-thread pool (`src/workers/`). In-memory LRU caching in `src/cache.ts`.
 
 ## 2) Repository Map (High-Level)
 
-- `src/` — All production TypeScript source
-  - `index.ts` — CLI entrypoint (shebang, arg parsing, transport selection, shutdown)
-  - `mcp.ts` — McpServer creation, resource/tool registration, task handlers
-  - `tools.ts` — `fetch-url` tool definition, pipeline, error mapping, progress reporting
-  - `http-native.ts` — Streamable HTTP server (sessions, auth, health endpoint)
-  - `config.ts` — Centralized env-based configuration (all settings)
-  - `fetch.ts` — URL normalization, HTTP fetching
-  - `transform.ts` / `workers/` — HTML→Markdown transform with worker pool
-  - `cache.ts` — In-memory content cache
-  - `errors.ts` — `FetchError`, `getErrorMessage`, error helpers
-  - `session.ts` — HTTP session store and lifecycle
-  - `ip-blocklist.ts` — Private/metadata IP blocking
-  - `observability.ts` — Structured logging with request context
-- `tests/` — All test files (`*.test.ts`), run against compiled `dist/`
-- `scripts/` — Build orchestration (`tasks.mjs`), validation scripts
-- `assets/` — Static assets (logo SVG)
-- `.github/workflows/` — CI/CD (publish to npm on release)
-- `.github/instructions/` — Agent instruction files for MCP server conventions
+- `src/` — TypeScript source (compiled to `dist/`); flat module structure, no subdirectories except `workers/` (see `tsconfig.json` `rootDir`)
+  - `src/index.ts` — CLI entrypoint with shebang, transport wiring, shutdown handlers
+  - `src/server.ts` — `McpServer` lifecycle: capabilities, icons, instructions, registration
+  - `src/tools.ts` — `fetch-url` tool definition, input/output schemas, fetch pipeline, progress reporting, inline truncation
+  - `src/fetch.ts` — URL normalization, SSRF protection, DNS validation, streaming HTTP fetch, raw-URL transforms (GitHub/GitLab/Bitbucket)
+  - `src/transform.ts` — HTML-to-Markdown pipeline, worker-pool management
+  - `src/workers/` — Worker-thread child for off-main-thread HTML transforms
+  - `src/config.ts` — Centralized env-driven configuration
+  - `src/errors.ts` — Error helpers (`FetchError`, `getErrorMessage`)
+  - `src/mcp.ts` — MCP protocol handlers, task execution management
+  - `src/resources.ts` — MCP resource/template registration (cache snapshots, instructions)
+  - `src/prompts.ts` — MCP prompt registration (`get-help`)
+  - `src/instructions.md` — Server instructions embedded at runtime
+- `tests/` — Unit/integration tests (46+ test files) using Node.js built-in test runner
+- `scripts/` — Build & test orchestration (`tasks.mjs`)
+- `assets/` — Server icon (`logo.svg`)
+- `.github/workflows/` — CI/CD (`release.yml`: lint → type-check → test → build → publish to npm, MCP Registry, Docker)
 
-> Ignore: `dist/`, `node_modules/`, `.tsbuildinfo`
+> Ignore: `dist/`, `node_modules/`, `coverage/`, `.cache/`, `.tsbuildinfo`
 
 ## 3) Operational Commands (Verified)
 
-- **Environment:** Node.js ≥24, npm
-- **Install:** `npm ci` (CI from `publish.yml`) or `npm install`
-- **Dev:** `npm run dev` (tsc watch) / `npm run dev:run` (run with .env + watch)
-- **Build:** `npm run build` (clean → compile → validate instructions → copy assets → chmod; via `scripts/tasks.mjs`)
-- **Test:** `npm test` (builds first, then runs `node --test` on `tests/**/*.test.ts` against compiled `dist/`)
-- **Type-check:** `npm run type-check` (tsc --noEmit)
-- **Lint:** `npm run lint` (ESLint) / `npm run lint:fix`
-- **Format:** `npm run format` (Prettier)
-- **Dead code:** `npm run knip` / `npm run knip:fix`
-- **Inspector:** `npm run inspector` (build + launch MCP Inspector on stdio)
+All commands verified from `.github/workflows/release.yml` (CI) and `package.json` scripts.
+
+- **Environment:** Node.js >= 24 with npm; no additional runtime managers required (see `package.json` `engines`, `Dockerfile`)
+- **Install:** `npm ci` (see `.github/workflows/release.yml` "Install & validate" step)
+- **Dev:** `npm run dev` → `tsc --watch --preserveWatchOutput` (see `package.json`)
+- **Dev (run):** `npm run dev:run` → `node --env-file=.env --watch dist/index.js` (see `package.json`)
+- **Start:** `npm run start` → `node dist/index.js` (see `package.json`)
+- **Build:** `npm run build` → `node scripts/tasks.mjs build` — cleans `dist/`, compiles TS, validates `instructions.md`, copies assets, sets executable bit (see `scripts/tasks.mjs`, `package.json`)
+- **Type-check:** `npm run type-check` → `tsc -p tsconfig.json --noEmit` (see `scripts/tasks.mjs`, `.github/workflows/release.yml`)
+- **Lint:** `npm run lint` → `eslint .` (see `package.json`, `.github/workflows/release.yml`)
+- **Lint (fix):** `npm run lint:fix` → `eslint . --fix` (see `package.json`)
+- **Format:** `npm run format` → `prettier --write .` (see `package.json`)
+- **Test:** `npm run test` → `node scripts/tasks.mjs test` — builds first, then runs `node --test` on `tests/**/*.test.ts` (see `scripts/tasks.mjs`, `.github/workflows/release.yml`)
+- **Test (coverage):** `npm run test:coverage` (see `package.json`)
+- **Inspector:** `npm run inspector` → builds then launches MCP Inspector on stdio (see `package.json`)
+- **Dead code:** `npm run knip` / `npm run knip:fix` (see `package.json`)
+- **Docker:** `docker compose up --build` (see `docker-compose.yml`, `Dockerfile`)
 
 ## 4) Coding Standards (Style & Patterns)
 
-- **Naming:** `camelCase` for variables/functions, `PascalCase` for types/classes/enums, `UPPER_CASE` for constants. Enforced via `@typescript-eslint/naming-convention` in `eslint.config.mjs`.
-- **Imports:**
-  - **Type-only imports required:** `import type { X }` / `import { type X }` (ESLint `consistent-type-imports` rule: error)
-  - **Named exports only:** no default exports
-  - `.js` extensions in local imports (NodeNext module resolution)
-  - Sorted by `@trivago/prettier-plugin-sort-imports`
-  - Unused imports are errors (`eslint-plugin-unused-imports`)
-- **TypeScript Strictness** (all enabled in `tsconfig.json`):
-  - `strict`, `noUncheckedIndexedAccess`, `verbatimModuleSyntax`, `isolatedModules`
-  - `exactOptionalPropertyTypes`, `noImplicitOverride`, `noImplicitReturns`, `noFallthroughCasesInSwitch`
-- **Explicit return types** required on functions (`explicit-function-return-type`: error)
-- **No `any`:** `@typescript-eslint/no-explicit-any`: error
-- **Schemas:** Use `z.strictObject()` for all Zod schemas; add `.describe()` to every parameter; add bounds (`.min()`/`.max()`)
-- **Tool pattern:** One MCP tool per registration; return both `content` (JSON stringified text block) and `structuredContent`; use `isError: true` on failure (never throw uncaught)
-- **Error handling:** Prefer tool execution errors over protocol errors; centralized via `getErrorMessage()`, `createToolErrorResponse()`, `handleToolError()` in `errors.ts`/`tools.ts`
-- **Logging:** Never write to `stdout` in stdio mode; use `logInfo`/`logError`/`logWarn`/`logDebug` from `observability.ts` (writes to stderr)
-- **Patterns Observed:**
-  - Configuration via environment variables, parsed once at import in `config.ts`
-  - Worker pool pattern for CPU-bound transforms (`src/workers/`, `src/transform.ts`)
-  - Inline content truncation with safe code-fence closing (`tools.ts`)
-  - Session-scoped task ownership for async tool execution (`mcp.ts`)
+### Naming (see `eslint.config.mjs` `@typescript-eslint/naming-convention`)
+
+- **Default:** `camelCase` (leading `_` allowed)
+- **Variables:** `camelCase`, `UPPER_CASE`, or `PascalCase`
+- **Types/Interfaces:** `PascalCase`
+- **Enum members:** `PascalCase` or `UPPER_CASE`
+- **Properties:** unrestricted format
+- **Imports:** `camelCase` or `PascalCase`
+
+### Structure
+
+- **Module system:** ESM (`"type": "module"` in `package.json`); use `.js` extensions in local imports (see `tsconfig.json` `module: "NodeNext"`, `.github/instructions/typescript-mcp-server.instructions.md`)
+- **Exports:** Named exports only — no default exports (see `.github/instructions/typescript-mcp-server.instructions.md`)
+- **Imports:** Type-only imports required (`import type { X }` / `import { type X }`) — enforced by `@typescript-eslint/consistent-type-imports` (see `eslint.config.mjs`)
+- **Import order:** Automated via `@trivago/prettier-plugin-sort-imports` — `node:` → third-party → `@modelcontextprotocol` → `@mozilla` → local by layer (see `.prettierrc`)
+- **No unused imports:** Enforced by `eslint-plugin-unused-imports` (see `eslint.config.mjs`)
+
+### Typing/Strictness (see `tsconfig.json`)
+
+- `strict: true`
+- `noUncheckedIndexedAccess: true`
+- `exactOptionalPropertyTypes: true`
+- `verbatimModuleSyntax: true`
+- `isolatedModules: true`
+- `noImplicitReturns: true`
+- `noFallthroughCasesInSwitch: true`
+- `useUnknownInCatchVariables: true`
+- ESLint extends `tseslint.configs.strictTypeChecked` + `stylisticTypeChecked` (see `eslint.config.mjs`)
+
+### Formatting (see `.prettierrc`)
+
+- 2-space indent, no tabs
+- Single quotes, semicolons, trailing commas (`es5`)
+- Print width: 80
+- LF line endings
+- Arrow parens: always
+
+### Patterns Observed
+
+- **Zod v4 strict schemas** for all tool inputs/outputs with `.describe()`, `.min()`/`.max()`, `z.strictObject()` (observed in `src/tools.ts`)
+- **Structured + text content** responses: `structuredContent` always paired with `content: [{ type: 'text', text: JSON.stringify(structured) }]` for backward compatibility (observed in `src/tools.ts`)
+- **Error handling:** Tool errors return `isError: true` in result — never throw uncaught; `FetchError` class with error codes (observed in `src/tools.ts`, `src/errors.ts`)
+- **Class-based internal services** with injected dependencies (e.g., `IpBlocker`, `UrlNormalizer`, `RawUrlTransformer` in `src/fetch.ts`)
+- **AsyncLocalStorage** for request-scoped context/observability (`runWithRequestContext` in `src/observability.ts`, used in `src/tools.ts`)
+- **Worker-thread pool** for CPU-intensive HTML transforms with graceful scaling and shutdown (observed in `src/transform.ts`, `src/workers/`)
+- **Explicit return types** on exported functions — enforced by `@typescript-eslint/explicit-function-return-type` (see `eslint.config.mjs`)
+- **Shebang required:** `src/index.ts` must start with `#!/usr/bin/env node` (observed in `src/index.ts`, documented in `.github/instructions/typescript-mcp-server.instructions.md`)
+- **Prefer arrow callbacks, const, template literals, destructuring, optional chaining, nullish coalescing** — all enforced via ESLint rules (see `eslint.config.mjs`)
 
 ## 5) Agent Behavioral Rules (Do Nots)
 
-- Do not introduce new dependencies without updating manifests/lockfiles via the package manager.
-- Do not edit `package-lock.json` manually.
-- Do not commit secrets; never print `.env` values; use existing `config.ts` env parsing.
-- Do not change public APIs (tool schemas, MCP resource URIs) without updating docs/tests and noting migration impact.
-- Do not disable or bypass existing ESLint/TypeScript rules without explicit approval.
-- Do not use default exports; always use named exports.
-- Do not use `any`; use `unknown` and narrow with type guards (`type-guards.ts`).
-- Do not write to `stdout` in production code (corrupts JSON-RPC stdio transport); use `process.stderr` or observability helpers.
-- Do not add `.js` extension-less local imports — NodeNext resolution requires `.js` extensions.
-- Do not use Zod v3 APIs (`z.object()` → use `z.strictObject()`).
-- Do not throw uncaught exceptions from tool handlers — return `isError: true` responses.
+- Do not introduce new dependencies without updating `package.json` and `package-lock.json` via `npm install`. (see `package-lock.json` presence, `.github/workflows/release.yml` uses `npm ci`)
+- Do not edit `package-lock.json` manually. (see `package-lock.json`)
+- Do not commit secrets; never print `.env` values. Use environment variables via `config.ts`. (see `.gitignore` excludes `.env*`)
+- Do not write non-MCP output to **stdout** in server code — it corrupts JSON-RPC on stdio transport. Use `console.error()` or protocol logging. (see `.github/instructions/typescript-mcp-server.instructions.md`)
+- Do not use default exports. Use named exports only. (see `.github/instructions/typescript-mcp-server.instructions.md`)
+- Do not use `any` — enforced by `@typescript-eslint/no-explicit-any: 'error'`. (see `eslint.config.mjs`)
+- Do not disable or bypass existing lint/type rules without explicit approval. (see `eslint.config.mjs`, `tsconfig.json`)
+- Do not use `zod/v3` compat mode — standardize on Zod v4. (see `.github/instructions/typescript-mcp-server.instructions.md`, `package.json`)
+- Do not omit `.js` extensions in local imports. (see `tsconfig.json` `module: "NodeNext"`)
+- Do not remove the shebang line (`#!/usr/bin/env node`) from `src/index.ts`. (see `.github/instructions/typescript-mcp-server.instructions.md`)
+- Do not throw uncaught exceptions from tool handlers — return `isError: true` instead. (see `.github/instructions/typescript-mcp-server.instructions.md`)
 
 ## 6) Testing Strategy (Verified)
 
-- **Framework:** `node:test` (built-in Node.js test runner) + `node:assert/strict`
-- **Where tests live:** `tests/` directory (all `*.test.ts` files)
+- **Framework:** Node.js built-in test runner (`node:test`) with `node:assert/strict` (see `scripts/tasks.mjs`, `tests/fetch-url-tool.test.ts`)
+- **Where tests live:** `tests/` directory — 46+ `.test.ts` files (see repo tree)
+- **Test patterns scanned:** `src/__tests__/**/*.test.ts`, `tests/**/*.test.ts` (see `scripts/tasks.mjs` `CONFIG.test.patterns`)
 - **Approach:**
-  - Tests run against **compiled output** (`dist/`) — build is a prerequisite
-  - Unit tests with `t.mock.method()` for mocking (`globalThis.fetch`, library methods)
-  - No external test dependencies (no Jest, Vitest, etc.)
-  - Patterns: describe/it blocks, setUp/tearDown via `after()`, config mutations restored in `finally`
-  - ~45 test files covering tools, cache, transform, URL handling, HTTP server, sessions, errors, etc.
-  - Coverage available via `npm run test:coverage` (`--experimental-test-coverage`)
+  - Tests import from compiled `../dist/` — a full build runs before tests (see `scripts/tasks.mjs` `TestTasks.test`, `tests/fetch-url-tool.test.ts` imports)
+  - Unit tests with `globalThis.fetch` mocked via `t.mock.method()` (observed in `tests/fetch-url-tool.test.ts`)
+  - Config values temporarily overridden per test with `try/finally` cleanup (observed in `tests/fetch-url-tool.test.ts`)
+  - Worker pool shutdown in `after()` hooks for clean teardown (observed in `tests/fetch-url-tool.test.ts`)
+  - No external services (DB/containers) required for tests
+- **CI validation order:** `lint` → `type-check` → `test` → `build` (see `.github/workflows/release.yml`)
 
-## 7) Common Pitfalls (Verified)
+## 7) Common Pitfalls (Verified Only)
 
-- **Tests require build first** — `npm test` runs the build automatically, but if running `node --test` manually, ensure `dist/` is current.
-- **CI uses Node 20 but `engines` requires ≥24** — local dev/tests must use Node ≥24; the publish workflow pins Node 20 for npm compatibility.
-- **Config mutations in tests** — tests that modify `config.*` properties must restore original values in `finally` blocks to avoid leaking state across tests.
-- **Worker pool shutdown** — tests using the transform pipeline should call `shutdownTransformWorkerPool()` in `after()` hooks to prevent hanging processes.
-- **Shebang line** — `src/index.ts` must keep `#!/usr/bin/env node` as the exact first line (no BOM, no blank lines before it).
+- Tests run against compiled output (`dist/`), not source — always build before testing. The `npm run test` command handles this automatically. (see `scripts/tasks.mjs`)
+- `src/instructions.md` must exist — the build validates its presence and copies it to `dist/`. Missing it will fail the build. (see `scripts/tasks.mjs` `BuildTasks.validate`)
+- Worker pool state is process-global — tests that change `config.transform.maxWorkerScale` must call `shutdownTransformWorkerPool()` before and/or after to avoid stale pool state. (observed in `tests/fetch-url-tool.test.ts`)
+- Import sorting is enforced by Prettier plugin — manual import reordering will be overwritten by `npm run format`. (see `.prettierrc` `importOrder`)
 
 ## 8) Evolution Rules
 
 - If conventions change, include an `AGENTS.md` update in the same PR.
 - If a command is corrected after failures, record the final verified command here.
+- If a new critical path or pattern is discovered, add it to the relevant section with evidence.
