@@ -13,3 +13,19 @@ export function isError(value: unknown): value is Error {
   }
   return value instanceof Error;
 }
+
+export interface LikeNode {
+  readonly tagName?: string | undefined;
+  readonly nodeName?: string | undefined;
+  readonly nodeType?: number | undefined;
+  readonly textContent?: string | null | undefined;
+  readonly innerHTML?: string | undefined;
+  readonly parentNode?: unknown;
+  readonly childNodes?: ArrayLike<unknown>;
+  readonly rawTagName?: string | undefined;
+  getAttribute?(name: string): string | null;
+}
+
+export function isLikeNode(value: unknown): value is LikeNode {
+  return isObject(value);
+}

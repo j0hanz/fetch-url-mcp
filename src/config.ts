@@ -546,6 +546,7 @@ export const config = {
     enabled: parseBoolean(env.CACHE_ENABLED, true),
     ttl: 86400,
     maxKeys: 100,
+    maxSizeBytes: 50 * 1024 * 1024, // 50MB
   },
   extraction: {
     maxBlockLength: 5000,

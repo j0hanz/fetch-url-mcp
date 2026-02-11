@@ -109,13 +109,14 @@ function createServerCapabilities(): {
  * Completion support (completion/complete)
  * ------------------------------------------------------------------------------------------------- */
 
-type CompletionResult = {
+interface CompletionResult {
   completion: {
     values: string[];
     total: number;
     hasMore: boolean;
   };
-};
+  [key: string]: unknown;
+}
 
 function emptyCompletion(): CompletionResult {
   return { completion: { values: [], total: 0, hasMore: false } };

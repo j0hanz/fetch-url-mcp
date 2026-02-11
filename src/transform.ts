@@ -60,7 +60,7 @@ import type {
   TransformWorkerResultMessage,
   TransformWorkerTransformMessage,
 } from './transform-types.js';
-import { isObject } from './type-guards.js';
+import { isLikeNode, isObject } from './type-guards.js';
 
 const utf8Decoder = new TextDecoder('utf-8');
 
@@ -84,8 +84,8 @@ function decodeInput(input: string | Uint8Array, encoding?: string): string {
 }
 
 function getTagName(node: unknown): string {
-  if (!isObject(node)) return '';
-  const raw = node['tagName'];
+  if (!isLikeNode(node)) return '';
+  const raw = node.tagName;
   return typeof raw === 'string' ? raw.toUpperCase() : '';
 }
 
@@ -859,18 +859,14 @@ function resolveAttributeLanguage(node: unknown): string | undefined {
 }
 
 function findLanguageFromCodeChild(node: unknown): string | undefined {
-  if (!isObject(node)) return undefined;
+  if (!isLikeNode(node)) return undefined;
 
-  const childNodes = Array.isArray(
-    (node as { childNodes?: unknown }).childNodes
-  )
-    ? (node as { childNodes: unknown[] }).childNodes
-    : [];
+  const childNodes = Array.from(node.childNodes ?? []);
 
   for (const child of childNodes) {
-    if (!isObject(child)) continue;
+    if (!isLikeNode(child)) continue;
 
-    const raw = (child as { rawTagName?: unknown }).rawTagName;
+    const raw = child.rawTagName;
     const tagName = typeof raw === 'string' ? raw.toUpperCase() : '';
 
     if (tagName === 'CODE') return resolveAttributeLanguage(child);
@@ -1010,13 +1006,14 @@ function resolveGfmAlertType(className: string): string | undefined {
 }
 
 function resolveDlNodeName(child: unknown): string {
-  if (!isObject(child)) return '';
-  const raw = child['nodeName'];
+  if (!isLikeNode(child)) return '';
+  const raw = child.nodeName;
   return typeof raw === 'string' ? raw.toUpperCase() : '';
 }
 
 function resolveDlTextContent(child: unknown): string {
-  const raw = (child as { textContent?: unknown }).textContent;
+  if (!isLikeNode(child)) return '';
+  const raw = child.textContent;
   return typeof raw === 'string' ? raw.trim() : '';
 }
 
@@ -1028,11 +1025,8 @@ function buildDlChildFragment(child: unknown): string | null {
 }
 
 function hasComplexTableLayout(node: unknown): boolean {
-  if (!isObject(node)) return false;
-  const innerHTML =
-    typeof (node as { innerHTML?: unknown }).innerHTML === 'string'
-      ? (node as { innerHTML: string }).innerHTML
-      : '';
+  if (!isLikeNode(node)) return false;
+  const innerHTML = typeof node.innerHTML === 'string' ? node.innerHTML : '';
   return /(?:colspan|rowspan)=["']?[2-9]/i.test(innerHTML);
 }
 
@@ -1069,10 +1063,11 @@ function createCustomTranslators(): TranslatorConfigObject {
       return {};
     },
     dl: (ctx: unknown) => {
-      if (!isObject(ctx) || !isObject((ctx as { node?: unknown }).node))
-        return { content: '' };
-      const { node } = ctx as { node: { childNodes?: unknown[] } };
-      const childNodes = Array.isArray(node.childNodes) ? node.childNodes : [];
+      if (!isObject(ctx)) return { content: '' };
+      const { node } = ctx as { node?: unknown };
+      if (!isLikeNode(node)) return { content: '' };
+
+      const childNodes = Array.from(node.childNodes ?? []);
 
       let items = '';
       for (const child of childNodes) {
@@ -1083,14 +1078,14 @@ function createCustomTranslators(): TranslatorConfigObject {
       return { content: items ? `\n${items}\n` : '' };
     },
     div: (ctx: unknown) => {
-      if (!isObject(ctx) || !isObject((ctx as { node?: unknown }).node))
-        return {};
-      const { node } = ctx as { node: unknown };
-      const getAttribute = hasGetAttribute(node)
-        ? (
-            node as { getAttribute: (n: string) => string | null }
-          ).getAttribute.bind(node)
-        : undefined;
+      if (!isObject(ctx)) return {};
+      const { node } = ctx as { node?: unknown };
+      if (!isLikeNode(node)) return {};
+
+      const getAttribute =
+        typeof node.getAttribute === 'function'
+          ? node.getAttribute.bind(node)
+          : undefined;
       const className = getAttribute?.('class') ?? '';
       if (className.includes('mermaid')) {
         return {
@@ -1159,18 +1154,19 @@ function createCustomTranslators(): TranslatorConfigObject {
       postprocess: ({ content }: { content: string }) => `^${content}^`,
     }),
     section: (ctx: unknown) => {
-      if (isObject(ctx) && isObject((ctx as { node?: unknown }).node)) {
-        const { node } = ctx as { node: unknown };
-        const getAttribute = hasGetAttribute(node)
-          ? (
-              node as { getAttribute: (n: string) => string | null }
-            ).getAttribute.bind(node)
-          : undefined;
-        if (getAttribute?.('class')?.includes('tsd-member')) {
-          return {
-            postprocess: ({ content }: { content: string }) =>
-              `\n\n&nbsp;\n\n${content}\n\n`,
-          };
+      if (isObject(ctx)) {
+        const { node } = ctx as { node?: unknown };
+        if (isLikeNode(node)) {
+          const getAttribute =
+            typeof node.getAttribute === 'function'
+              ? node.getAttribute.bind(node)
+              : undefined;
+          if (getAttribute?.('class')?.includes('tsd-member')) {
+            return {
+              postprocess: ({ content }: { content: string }) =>
+                `\n\n&nbsp;\n\n${content}\n\n`,
+            };
+          }
         }
       }
       return {
@@ -1189,14 +1185,14 @@ function createCustomTranslators(): TranslatorConfigObject {
         `${content.trim()}\n\n`,
     }),
     span: (ctx: unknown) => {
-      if (!isObject(ctx) || !isObject((ctx as { node?: unknown }).node))
-        return {};
-      const { node } = ctx as { node: unknown };
-      const getAttribute = hasGetAttribute(node)
-        ? (
-            node as { getAttribute: (n: string) => string | null }
-          ).getAttribute.bind(node)
-        : undefined;
+      if (!isObject(ctx)) return {};
+      const { node } = ctx as { node?: unknown };
+      if (!isLikeNode(node)) return {};
+
+      const getAttribute =
+        typeof node.getAttribute === 'function'
+          ? node.getAttribute.bind(node)
+          : undefined;
       const dataAs = getAttribute?.('data-as') ?? '';
       if (dataAs === 'p') {
         return {
@@ -1207,15 +1203,16 @@ function createCustomTranslators(): TranslatorConfigObject {
       return {};
     },
     pre: (ctx: unknown) => {
-      if (!isObject(ctx) || !isObject((ctx as { node?: unknown }).node)) {
+      if (!isObject(ctx)) return buildPreTranslator(ctx);
+      const { node } = ctx as { node?: unknown };
+      if (!isLikeNode(node)) {
         return buildPreTranslator(ctx);
       }
-      const { node } = ctx as { node: unknown };
-      const getAttribute = hasGetAttribute(node)
-        ? (
-            node as { getAttribute: (n: string) => string | null }
-          ).getAttribute.bind(node)
-        : undefined;
+
+      const getAttribute =
+        typeof node.getAttribute === 'function'
+          ? node.getAttribute.bind(node)
+          : undefined;
       const className = getAttribute?.('class') ?? '';
       if (className.includes('mermaid')) {
         return {

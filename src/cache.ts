@@ -158,10 +158,13 @@ export function parseCacheKey(cacheKey: string): CacheKeyParts | null {
 
 class InMemoryCacheStore {
   private readonly max = config.cache.maxKeys;
+  private readonly maxBytes = config.cache.maxSizeBytes;
   private readonly ttlMs = config.cache.ttl * 1000;
 
   private readonly entries = new Map<string, StoredCacheEntry>();
   private readonly updateEmitter = new EventEmitter();
+
+  private currentBytes = 0;
 
   isEnabled(): boolean {
     return config.cache.enabled;
@@ -213,7 +216,7 @@ class InMemoryCacheStore {
 
     const now = Date.now();
     if (entry.expiresAtMs <= now) {
-      this.entries.delete(cacheKey);
+      this.delete(cacheKey);
       return undefined;
     }
 
@@ -222,6 +225,14 @@ class InMemoryCacheStore {
     this.entries.set(cacheKey, entry);
 
     return entry;
+  }
+
+  private delete(cacheKey: string): void {
+    const entry = this.entries.get(cacheKey);
+    if (entry) {
+      this.currentBytes -= entry.content.length;
+      this.entries.delete(cacheKey);
+    }
   }
 
   set(
@@ -236,6 +247,24 @@ class InMemoryCacheStore {
     const now = Date.now();
     const expiresAtMs = now + this.ttlMs;
 
+    // Check size limit before insertion
+    const entrySize = content.length;
+    if (entrySize > this.maxBytes) {
+      logWarn('Cache entry exceeds max size', {
+        key: cacheKey,
+        size: entrySize,
+        max: this.maxBytes,
+      });
+      return;
+    }
+
+    // Evict if needed (size-based)
+    while (this.currentBytes + entrySize > this.maxBytes) {
+      const firstKey = this.entries.keys().next();
+      if (firstKey.done) break;
+      this.delete(firstKey.value);
+    }
+
     const entry: StoredCacheEntry = {
       url: metadata.url,
       content,
@@ -245,13 +274,17 @@ class InMemoryCacheStore {
       ...(metadata.title ? { title: metadata.title } : {}),
     };
 
-    this.entries.delete(cacheKey);
-    this.entries.set(cacheKey, entry);
+    if (this.entries.has(cacheKey)) {
+      this.delete(cacheKey);
+    }
 
-    // Eviction (LRU: first insertion-order key)
+    this.entries.set(cacheKey, entry);
+    this.currentBytes += entrySize;
+
+    // Eviction (LRU: first insertion-order key) - Count based
     if (this.entries.size > this.max) {
       const firstKey = this.entries.keys().next();
-      if (!firstKey.done) this.entries.delete(firstKey.value);
+      if (!firstKey.done) this.delete(firstKey.value);
     }
 
     this.notify(cacheKey);
