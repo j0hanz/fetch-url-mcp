@@ -1,5 +1,7 @@
-import { readFile, stat } from 'node:fs/promises';
+import * as fs from 'node:fs/promises';
+import * as path from 'node:path';
 import process from 'node:process';
+import { fileURLToPath } from 'node:url';
 
 import {
   InMemoryTaskMessageQueue,
@@ -9,6 +11,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 
 import { config } from './config.js';
+import { getErrorMessage } from './errors.js';
 import { abortAllTaskExecutions, registerTaskHandlers } from './mcp.js';
 import { logError, logInfo, setMcpServer } from './observability.js';
 import { registerGetHelpPrompt } from './prompts.js';
@@ -23,31 +26,41 @@ import { shutdownTransformWorkerPool } from './transform.js';
  * Icons + server info
  * ------------------------------------------------------------------------------------------------- */
 
-async function getLocalIcons(
-  signal?: AbortSignal
-): Promise<{ src: string; mimeType: string }[] | undefined> {
-  const MAX_ICON_BYTES = 2 * 1024 * 1024;
+interface IconInfo {
+  src: string;
+  mimeType: string;
+}
 
+async function getLocalIconInfo(): Promise<IconInfo | undefined> {
+  const name = 'logo.svg';
+  const mime = 'image/svg+xml';
   try {
-    const iconPath = new URL('./assets/logo.svg', import.meta.url);
-
-    if (signal?.aborted) return undefined;
-    const { size } = await stat(iconPath);
-    if (size > MAX_ICON_BYTES) return undefined;
-
-    const base64 = await readFile(iconPath, {
-      encoding: 'base64',
-      ...(signal ? { signal } : {}),
-    });
-    return [
-      {
-        src: `data:image/svg+xml;base64,${base64}`,
-        mimeType: 'image/svg+xml',
-      },
-    ];
+    const iconPath = new URL(`../assets/${name}`, import.meta.url);
+    const buffer = await fs.readFile(iconPath);
+    return {
+      src: `data:${mime};base64,${buffer.toString('base64')}`,
+      mimeType: mime,
+    };
   } catch {
     return undefined;
   }
+}
+
+const currentDir = path.dirname(fileURLToPath(import.meta.url));
+let serverInstructions = `
+SuperFetch MCP Instructions
+(Detailed instructions failed to load - check logs)
+`;
+try {
+  serverInstructions = await fs.readFile(
+    path.join(currentDir, 'instructions.md'),
+    'utf-8'
+  );
+} catch (error) {
+  console.error(
+    '[WARNING] Failed to load instructions.md:',
+    getErrorMessage(error)
+  );
 }
 
 type McpServerCapabilities = NonNullable<
@@ -73,28 +86,13 @@ function createServerCapabilities(): McpServerCapabilities {
   };
 }
 
-async function createServerInstructions(
-  serverVersion: string,
-  signal?: AbortSignal
-): Promise<string> {
-  try {
-    const raw = await readFile(new URL('./instructions.md', import.meta.url), {
-      encoding: 'utf8',
-      ...(signal ? { signal } : {}),
-    });
-    return raw.replaceAll('{{SERVER_VERSION}}', serverVersion).trim();
-  } catch {
-    return `Instructions unavailable | ${serverVersion}`;
-  }
-}
-
-function createServerInfo(icons?: { src: string; mimeType: string }[]): {
+function createServerInfo(icons?: IconInfo[]): {
   name: string;
   title: string;
   description: string;
   version: string;
   websiteUrl: string;
-  icons?: { src: string; mimeType: string }[];
+  icons?: IconInfo[];
 } {
   return {
     name: config.server.name,
@@ -122,11 +120,7 @@ interface CreateMcpServerOptions {
 async function createMcpServerWithOptions(
   options?: CreateMcpServerOptions
 ): Promise<McpServer> {
-  const startupSignal = AbortSignal.timeout(5000);
-  const [instructions, localIcons] = await Promise.all([
-    createServerInstructions(config.server.version, startupSignal),
-    getLocalIcons(startupSignal),
-  ]);
+  const localIcon = await getLocalIconInfo();
 
   const taskStore = new InMemoryTaskStore();
   const taskMessageQueue = new InMemoryTaskMessageQueue();
@@ -136,11 +130,20 @@ async function createMcpServerWithOptions(
     taskStore,
     taskMessageQueue,
   };
-  if (instructions) {
-    serverConfig.instructions = instructions;
+  if (serverInstructions) {
+    serverConfig.instructions = serverInstructions;
   }
 
-  const serverInfo = createServerInfo(localIcons);
+  const serverInfo = createServerInfo(
+    localIcon
+      ? [
+          {
+            src: localIcon.src,
+            mimeType: localIcon.mimeType,
+          },
+        ]
+      : undefined
+  );
   const server = new McpServer(serverInfo, serverConfig);
 
   if (options?.registerObservabilityServer ?? true) {
@@ -148,9 +151,9 @@ async function createMcpServerWithOptions(
   }
 
   registerTools(server);
-  registerGetHelpPrompt(server, instructions, localIcons?.[0]);
-  registerInstructionResource(server, instructions, localIcons?.[0]);
-  registerCacheResourceTemplate(server, localIcons?.[0]);
+  registerGetHelpPrompt(server, serverInstructions, localIcon);
+  registerInstructionResource(server, serverInstructions, localIcon);
+  registerCacheResourceTemplate(server, localIcon);
   registerTaskHandlers(server);
 
   return server;
