@@ -6,7 +6,6 @@ import {
   type Server,
   type ServerResponse,
 } from 'node:http';
-import { isIP } from 'node:net';
 import { freemem, hostname, totalmem } from 'node:os';
 import { monitorEventLoopDelay, performance } from 'node:perf_hooks';
 import process from 'node:process';
@@ -214,17 +213,8 @@ function normalizeRemoteAddress(address: string | undefined): string | null {
   const trimmed = address.trim();
   if (!trimmed) return null;
 
-  const zoneIndex = trimmed.indexOf('%');
-  const withoutZone = zoneIndex > 0 ? trimmed.slice(0, zoneIndex) : trimmed;
-  const normalized = withoutZone.toLowerCase();
-
-  if (normalized.startsWith('::ffff:')) {
-    const mapped = normalized.slice('::ffff:'.length);
-    if (isIP(mapped) === 4) return mapped;
-  }
-
-  if (isIP(normalized)) return normalized;
-
+  const normalized = normalizeIpForBlockList(trimmed);
+  if (normalized) return normalized.ip;
   return trimmed;
 }
 

@@ -8,7 +8,6 @@ import { PassThrough, Readable, Transform } from 'node:stream';
 import { buffer as consumeBuffer } from 'node:stream/consumers';
 import { finished, pipeline } from 'node:stream/promises';
 import type { ReadableStream as NodeReadableStream } from 'node:stream/web';
-import { setTimeout as delay } from 'node:timers/promises';
 import { createBrotliDecompress, createGunzip, createInflate } from 'node:zlib';
 
 import { config } from './config.js';
@@ -488,32 +487,24 @@ function normalizeDnsName(value: string): string {
 }
 
 interface AbortRace {
-  abortPromise: Promise<never> | null;
+  abortPromise: Promise<never>;
   cleanup: () => void;
 }
 
-function createAbortRace(
-  signal: AbortSignal | undefined,
+function createSignalAbortRace(
+  signal: AbortSignal,
+  isAbort: () => boolean,
+  onTimeout: () => Error,
   onAbort: () => Error
 ): AbortRace {
-  if (!signal) {
-    return { abortPromise: null, cleanup: () => {} };
-  }
-
-  if (signal.aborted) {
-    return {
-      abortPromise: Promise.reject(onAbort()),
-      cleanup: () => {},
-    };
-  }
-
   let abortListener: (() => void) | null = null;
 
   const abortPromise = new Promise<never>((_, reject) => {
     abortListener = () => {
-      reject(onAbort());
+      reject(isAbort() ? onAbort() : onTimeout());
     };
     signal.addEventListener('abort', abortListener, { once: true });
+    if (signal.aborted) abortListener();
   });
 
   const cleanup = (): void => {
@@ -536,31 +527,24 @@ async function withTimeout<T>(
   signal?: AbortSignal,
   onAbort?: () => Error
 ): Promise<T> {
-  const controller = new AbortController();
-  const timeoutPromise = delay(timeoutMs, null, {
-    ref: false,
-    signal: controller.signal,
-  })
-    .then(() => Promise.reject(onTimeout()))
-    .catch((err: unknown) => {
-      if (isError(err) && err.name === 'AbortError')
-        return new Promise<never>(() => {});
-      throw err;
-    });
+  const timeoutSignal =
+    timeoutMs > 0 ? AbortSignal.timeout(timeoutMs) : undefined;
+  const raceSignal =
+    signal && timeoutSignal
+      ? AbortSignal.any([signal, timeoutSignal])
+      : (signal ?? timeoutSignal);
+  if (!raceSignal) return promise;
 
-  const abortRace = createAbortRace(
-    signal,
+  const abortRace = createSignalAbortRace(
+    raceSignal,
+    () => signal?.aborted === true,
+    onTimeout,
     onAbort ?? (() => new Error('Request was canceled'))
   );
 
   try {
-    return await Promise.race(
-      abortRace.abortPromise
-        ? [promise, timeoutPromise, abortRace.abortPromise]
-        : [promise, timeoutPromise]
-    );
+    return await Promise.race([promise, abortRace.abortPromise]);
   } finally {
-    controller.abort();
     abortRace.cleanup();
   }
 }
@@ -711,6 +695,10 @@ class SafeDnsResolver {
         return [];
       }
 
+      logDebug('DNS CNAME lookup failed; continuing with address lookup', {
+        hostname,
+        ...(isSystemError(error) ? { code: error.code } : {}),
+      });
       return [];
     }
   }

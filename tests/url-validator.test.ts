@@ -108,6 +108,10 @@ describe('isBlockedIp', () => {
     assert.equal(isBlockedIp('::ffff:192.168.1.1'), true);
   });
 
+  it('blocks scoped IPv6 link-local addresses', () => {
+    assert.equal(isBlockedIp('fe80::1%eth0'), true);
+  });
+
   it('allows public IPs', () => {
     assert.equal(isBlockedIp('8.8.8.8'), false);
   });

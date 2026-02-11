@@ -194,3 +194,41 @@ test('fetchNormalizedUrl aborts during redirect DNS preflight', async (t) => {
     }
   );
 });
+
+test('fetchNormalizedUrl ignores DNS CNAME timeout failures and continues', async (t) => {
+  t.mock.method(dns.promises, 'resolveCname', async () => {
+    throw Object.assign(new Error('DNS CNAME lookup timed out'), {
+      code: 'ETIMEOUT',
+    });
+  });
+  t.mock.method(dns.promises, 'lookup', async () => {
+    return [{ address: '93.184.216.34', family: 4 }];
+  });
+  t.mock.method(globalThis, 'fetch', async () => {
+    return new Response('ok', {
+      status: 200,
+      headers: { 'content-type': 'text/plain; charset=utf-8' },
+    });
+  });
+
+  const result = await fetchNormalizedUrl('https://example.com');
+  assert.equal(result, 'ok');
+});
+
+test('fetchNormalizedUrl ignores no-data CNAME errors and continues', async (t) => {
+  t.mock.method(dns.promises, 'resolveCname', async () => {
+    throw Object.assign(new Error('No CNAME records'), { code: 'ENODATA' });
+  });
+  t.mock.method(dns.promises, 'lookup', async () => {
+    return [{ address: '93.184.216.34', family: 4 }];
+  });
+  t.mock.method(globalThis, 'fetch', async () => {
+    return new Response('ok', {
+      status: 200,
+      headers: { 'content-type': 'text/plain; charset=utf-8' },
+    });
+  });
+
+  const result = await fetchNormalizedUrl('https://example.com');
+  assert.equal(result, 'ok');
+});

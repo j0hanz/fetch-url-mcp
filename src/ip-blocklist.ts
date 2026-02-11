@@ -63,18 +63,26 @@ function extractMappedIpv4(ip: string): string | null {
   return isIP(mapped) === 4 ? mapped : null;
 }
 
+function stripIpv6ZoneId(ip: string): string {
+  const zoneIndex = ip.indexOf('%');
+  if (zoneIndex <= 0) return ip;
+  return ip.slice(0, zoneIndex);
+}
+
 export function normalizeIpForBlockList(
   input: string
 ): { ip: string; family: IpFamily } | null {
-  const trimmed = input.trim().toLowerCase();
-  if (!trimmed) return null;
+  const lowered = input.trim().toLowerCase();
+  if (!lowered) return null;
+  const normalizedInput = stripIpv6ZoneId(lowered);
+  if (!normalizedInput) return null;
 
-  const ipType = isIP(trimmed);
-  if (ipType === 4) return { ip: trimmed, family: 'ipv4' };
+  const ipType = isIP(normalizedInput);
+  if (ipType === 4) return { ip: normalizedInput, family: 'ipv4' };
   if (ipType === 6) {
-    const mapped = extractMappedIpv4(trimmed);
+    const mapped = extractMappedIpv4(normalizedInput);
     if (mapped) return { ip: mapped, family: 'ipv4' };
-    return { ip: trimmed, family: 'ipv6' };
+    return { ip: normalizedInput, family: 'ipv6' };
   }
 
   return null;
