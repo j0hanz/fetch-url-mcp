@@ -1,28 +1,11 @@
 #!/usr/bin/env node
 import process from 'node:process';
-import { parseArgs } from 'node:util';
 
+import { parseCliArgs, renderCliUsage } from './cli.js';
 import { serverVersion } from './config.js';
 import { startHttpServer } from './http-native.js';
 import { logError } from './observability.js';
 import { startStdioServer } from './server.js';
-
-function printUsage(): void {
-  process.stdout.write(
-    [
-      'superfetch MCP server',
-      '',
-      'Usage:',
-      '  superfetch [--stdio] [--help] [--version]',
-      '',
-      'Options:',
-      '  --stdio    Run in stdio mode (no HTTP server).',
-      '  --help     Show this help message.',
-      '  --version  Show server version.',
-      '',
-    ].join('\n')
-  );
-}
 
 const FORCE_EXIT_TIMEOUT_MS = 10_000;
 let forcedExitTimer: NodeJS.Timeout | undefined;
@@ -36,24 +19,16 @@ function scheduleForcedExit(reason: string): void {
   forcedExitTimer.unref();
 }
 
-let values: { stdio: boolean; help: boolean; version: boolean };
-try {
-  ({ values } = parseArgs({
-    options: {
-      stdio: { type: 'boolean', default: false },
-      help: { type: 'boolean', default: false },
-      version: { type: 'boolean', default: false },
-    },
-  }));
-} catch (error: unknown) {
-  const message = error instanceof Error ? error.message : String(error);
-  process.stderr.write(`Invalid arguments: ${message}\n\n`);
-  printUsage();
+const parseResult = parseCliArgs(process.argv.slice(2));
+if (!parseResult.ok) {
+  process.stderr.write(`Invalid arguments: ${parseResult.message}\n\n`);
+  process.stderr.write(renderCliUsage());
   process.exit(1);
 }
+const { values } = parseResult;
 
 if (values.help) {
-  printUsage();
+  process.stdout.write(renderCliUsage());
   process.exit(0);
 }
 

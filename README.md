@@ -154,11 +154,11 @@ node dist/index.js --stdio
 
 ### Runtime Modes
 
-| Flag        | Description                                 |
-| ----------- | ------------------------------------------- |
-| `--stdio`   | Run in stdio mode (for desktop MCP clients) |
-| `--help`    | Show usage help                             |
-| `--version` | Print server version                        |
+| Flag              | Description                                 |
+| ----------------- | ------------------------------------------- |
+| `--stdio`, `-s`   | Run in stdio mode (for desktop MCP clients) |
+| `--help`, `-h`    | Show usage help                             |
+| `--version`, `-v` | Print server version                        |
 
 When no `--stdio` flag is passed, the server starts in **HTTP mode** (Streamable HTTP on port 3000 by default).
 
