@@ -1,6 +1,6 @@
 {
   "name": "@j0hanz/fetch-url-mcp",
-  "version": "0.0.2",
+  "version": "1.0.0",
   "mcpName": "io.github.j0hanz/fetch-url-mcp",
   "description": "Intelligent web content fetcher MCP server that converts HTML to clean, AI-readable Markdown",
   "type": "module",
