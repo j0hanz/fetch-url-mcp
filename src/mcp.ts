@@ -459,34 +459,38 @@ interface ExtendedCallToolRequest {
 const MIN_TASK_TTL_MS = 1_000;
 const MAX_TASK_TTL_MS = 86_400_000;
 
-const ExtendedCallToolRequestSchema: z.ZodType<ExtendedCallToolRequest> =
-  z.looseObject({
+const ExtendedCallToolRequestSchema: z.ZodType<ExtendedCallToolRequest> = z
+  .object({
     method: z.literal('tools/call'),
-    params: z.looseObject({
-      name: z.string().min(1),
-      arguments: z.record(z.string(), z.unknown()).optional(),
-      task: z
-        .strictObject({
-          ttl: z
-            .number()
-            .int()
-            .min(MIN_TASK_TTL_MS)
-            .max(MAX_TASK_TTL_MS)
-            .optional(),
-        })
-        .optional(),
-      _meta: z
-        .looseObject({
-          progressToken: z.union([z.string(), z.number()]).optional(),
-          'io.modelcontextprotocol/related-task': z
-            .strictObject({
-              taskId: z.string(),
-            })
-            .optional(),
-        })
-        .optional(),
-    }),
-  });
+    params: z
+      .object({
+        name: z.string().min(1),
+        arguments: z.record(z.string(), z.unknown()).optional(),
+        task: z
+          .strictObject({
+            ttl: z
+              .number()
+              .int()
+              .min(MIN_TASK_TTL_MS)
+              .max(MAX_TASK_TTL_MS)
+              .optional(),
+          })
+          .optional(),
+        _meta: z
+          .object({
+            progressToken: z.union([z.string(), z.number()]).optional(),
+            'io.modelcontextprotocol/related-task': z
+              .strictObject({
+                taskId: z.string(),
+              })
+              .optional(),
+          })
+          .loose()
+          .optional(),
+      })
+      .loose(),
+  })
+  .loose();
 
 function parseExtendedCallToolRequest(
   request: unknown

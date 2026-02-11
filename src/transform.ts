@@ -70,7 +70,7 @@ function decodeUtf8Input(input: string | Uint8Array): string {
 
 function getTagName(node: unknown): string {
   if (!isObject(node)) return '';
-  const raw = (node as { tagName?: unknown }).tagName;
+  const raw = node['tagName'];
   return typeof raw === 'string' ? raw.toUpperCase() : '';
 }
 
@@ -996,7 +996,7 @@ function resolveGfmAlertType(className: string): string | undefined {
 
 function resolveDlNodeName(child: unknown): string {
   if (!isObject(child)) return '';
-  const raw = (child as { nodeName?: unknown }).nodeName;
+  const raw = child['nodeName'];
   return typeof raw === 'string' ? raw.toUpperCase() : '';
 }
 
