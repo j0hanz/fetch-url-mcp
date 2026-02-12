@@ -853,7 +853,10 @@ class AuthService {
     };
 
     if (clientId) {
-      headers.authorization = this.buildBasicAuthHeader(clientId, clientSecret);
+      headers['authorization'] = this.buildBasicAuthHeader(
+        clientId,
+        clientSecret
+      );
     }
 
     return { body, headers };
@@ -891,14 +894,14 @@ class AuthService {
     token: string,
     payload: Record<string, unknown>
   ): AuthInfo {
-    const expiresAt = typeof payload.exp === 'number' ? payload.exp : undefined;
-    const clientId =
-      typeof payload.client_id === 'string' ? payload.client_id : 'unknown';
+    const { exp, client_id: clientIdRaw, scope: scopeRaw } = payload;
+    const expiresAt = typeof exp === 'number' ? exp : undefined;
+    const clientId = typeof clientIdRaw === 'string' ? clientIdRaw : 'unknown';
 
     const info: AuthInfo = {
       token,
       clientId,
-      scopes: typeof payload.scope === 'string' ? payload.scope.split(' ') : [],
+      scopes: typeof scopeRaw === 'string' ? scopeRaw.split(' ') : [],
       resource: config.auth.resourceUrl,
     };
 
@@ -928,7 +931,7 @@ class AuthService {
       signal
     );
 
-    if (!isObject(payload) || payload.active !== true) {
+    if (!isObject(payload) || payload['active'] !== true) {
       throw new InvalidTokenError('Token is inactive');
     }
 
@@ -1703,6 +1706,8 @@ function createShutdownHandler(options: {
   sessionCleanup: AbortController;
   sessionStore: SessionStore;
 }): (signal: string) => Promise<void> {
+  const closeBatchSize = 10;
+
   return async (signal: string): Promise<void> => {
     logInfo(`Stopping HTTP server (${signal})...`);
 
@@ -1712,28 +1717,31 @@ function createShutdownHandler(options: {
     eventLoopDelay.disable();
 
     const sessions = options.sessionStore.clear();
-    await Promise.all(
-      sessions.map(async (session) => {
-        const sessionId = resolveMcpSessionIdByServer(session.server);
-        if (sessionId) {
-          cancelTasksForOwner(
-            `session:${sessionId}`,
-            'The task was cancelled because the HTTP server is shutting down.'
-          );
-          unregisterMcpSessionServer(sessionId);
-        }
+    for (let i = 0; i < sessions.length; i += closeBatchSize) {
+      const batch = sessions.slice(i, i + closeBatchSize);
+      await Promise.all(
+        batch.map(async (session) => {
+          const sessionId = resolveMcpSessionIdByServer(session.server);
+          if (sessionId) {
+            cancelTasksForOwner(
+              `session:${sessionId}`,
+              'The task was cancelled because the HTTP server is shutting down.'
+            );
+            unregisterMcpSessionServer(sessionId);
+          }
 
-        unregisterMcpSessionServerByServer(session.server);
-        await closeTransportBestEffort(
-          session.transport,
-          'shutdown-session-close'
-        );
-        await closeMcpServerBestEffort(
-          session.server,
-          'shutdown-session-close'
-        );
-      })
-    );
+          unregisterMcpSessionServerByServer(session.server);
+          await closeTransportBestEffort(
+            session.transport,
+            'shutdown-session-close'
+          );
+          await closeMcpServerBestEffort(
+            session.server,
+            'shutdown-session-close'
+          );
+        })
+      );
+    }
 
     await new Promise<void>((resolve, reject): void => {
       options.server.close((err): void => {

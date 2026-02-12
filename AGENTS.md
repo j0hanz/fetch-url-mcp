@@ -81,6 +81,7 @@ All commands verified from `.github/workflows/release.yml` (CI) and `package.jso
 
 - `strict: true`
 - `noUncheckedIndexedAccess: true`
+- `noPropertyAccessFromIndexSignature: true`
 - `exactOptionalPropertyTypes: true`
 - `verbatimModuleSyntax: true`
 - `isolatedModules: true`

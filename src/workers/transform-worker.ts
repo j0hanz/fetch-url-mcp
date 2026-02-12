@@ -155,15 +155,16 @@ function handleTransform(msg: Record<string, unknown>): void {
 port.on('message', (raw: unknown) => {
   if (!raw || typeof raw !== 'object') return;
   const msg = raw as Record<string, unknown>;
+  const { type, id } = msg;
 
-  if (msg.type === 'cancel') {
-    if (typeof msg.id !== 'string') return;
-    const controller = controllersById.get(msg.id);
+  if (type === 'cancel') {
+    if (typeof id !== 'string') return;
+    const controller = controllersById.get(id);
     if (controller) controller.abort(new Error('Canceled'));
     return;
   }
 
-  if (msg.type === 'transform') {
+  if (type === 'transform') {
     handleTransform(msg);
   }
 });

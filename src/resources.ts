@@ -19,6 +19,7 @@ import {
   resolveCachedPayloadContent,
 } from './cache.js';
 import { logWarn } from './observability.js';
+import { isObject } from './type-guards.js';
 
 interface IconInfo {
   src: string;
@@ -77,8 +78,8 @@ function firstVariableValue(value: TemplateVariableValue): string | undefined {
 function parseCacheResourceFromVariables(
   variables: Record<string, TemplateVariableValue>
 ): CacheResourceParts | null {
-  const namespace = firstVariableValue(variables.namespace);
-  const hash = firstVariableValue(variables.hash);
+  const namespace = firstVariableValue(variables['namespace']);
+  const hash = firstVariableValue(variables['hash']);
   if (!namespace || !hash) return null;
 
   const decoded = {
@@ -139,7 +140,7 @@ function completeCacheHashes(
   context?: CompletionContext
 ): string[] {
   const normalized = value.trim().toLowerCase();
-  const namespace = context?.arguments?.namespace?.trim();
+  const namespace = context?.arguments?.['namespace']?.trim();
   const hashes = new Set<string>();
 
   for (const key of listCacheKeys()) {
@@ -191,12 +192,6 @@ function listCacheResources(): {
   return { resources };
 }
 
-function createCacheKeySignature(): string {
-  return [...listCacheKeys()]
-    .sort((left, right) => left.localeCompare(right))
-    .join('\n');
-}
-
 function normalizeSubscriptionUri(uri: string): string {
   if (!URL.canParse(uri)) {
     throw new McpError(ErrorCode.InvalidParams, 'Invalid resource URI');
@@ -222,8 +217,6 @@ function registerCacheResourceNotifications(server: McpServer): void {
     return Promise.resolve({});
   });
 
-  let previousSignature = createCacheKeySignature();
-
   const unsubscribe = onCacheUpdate((event) => {
     const changedUri = toCacheResourceUri({
       namespace: event.namespace,
@@ -241,9 +234,7 @@ function registerCacheResourceNotifications(server: McpServer): void {
         });
     }
 
-    const nextSignature = createCacheKeySignature();
-    if (nextSignature === previousSignature) return;
-    previousSignature = nextSignature;
+    if (!event.listChanged) return;
 
     if (!server.isConnected()) return;
 
@@ -272,6 +263,29 @@ function registerCacheResourceNotifications(server: McpServer): void {
     cleanup();
     await originalClose();
   };
+}
+
+function normalizeTemplateVariables(
+  variables: unknown
+): Record<string, TemplateVariableValue> {
+  if (!isObject(variables)) return {};
+
+  const normalized: Record<string, TemplateVariableValue> = {};
+
+  for (const [key, value] of Object.entries(variables)) {
+    if (typeof value === 'string' || value === undefined) {
+      normalized[key] = value;
+      continue;
+    }
+
+    if (Array.isArray(value)) {
+      normalized[key] = value.filter(
+        (item): item is string => typeof item === 'string'
+      );
+    }
+  }
+
+  return normalized;
 }
 
 function resolveCacheResourceParts(
@@ -393,7 +407,7 @@ export function registerCacheResourceTemplate(
         : {}),
     },
     (uri, variables): ReadResourceResult =>
-      readCacheResource(uri, variables as Record<string, TemplateVariableValue>)
+      readCacheResource(uri, normalizeTemplateVariables(variables))
   );
 
   registerCacheResourceNotifications(server);

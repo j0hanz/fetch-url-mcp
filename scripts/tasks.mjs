@@ -32,6 +32,7 @@ const CONFIG = {
     executable: 'dist/index.js',
     tsBuildInfo: [
       '.tsbuildinfo',
+      '.tsbuildinfo.build',
       'tsconfig.tsbuildinfo',
       'tsconfig.build.tsbuildinfo',
     ],

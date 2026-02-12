@@ -13,6 +13,7 @@
     "strict": true,
     "useUnknownInCatchVariables": true,
     "noUncheckedIndexedAccess": true,
+    "noPropertyAccessFromIndexSignature": true,
     "noImplicitOverride": true,
     "noImplicitReturns": true,
     "noFallthroughCasesInSwitch": true,
@@ -24,6 +25,7 @@
     "sourceMap": true,
     "composite": true,
     "incremental": true,
+    "tsBuildInfoFile": "./.tsbuildinfo",
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
     "types": ["node"]

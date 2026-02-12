@@ -101,7 +101,7 @@ export interface StageBudget {
 
 function getAbortReason(signal: AbortSignal): unknown {
   const record = isObject(signal) ? (signal as Record<string, unknown>) : null;
-  return record && 'reason' in record ? record.reason : undefined;
+  return record && 'reason' in record ? record['reason'] : undefined;
 }
 
 function isTimeoutAbortReason(reason: unknown): boolean {
@@ -2162,14 +2162,14 @@ function isWorkerErrorPayload(
 
 function isWorkerResponse(raw: unknown): raw is TransformWorkerOutgoingMessage {
   if (!isObject(raw)) return false;
-  if (typeof raw.id !== 'string') return false;
+  if (typeof raw['id'] !== 'string') return false;
 
-  if (raw.type === 'result') {
-    return isWorkerResultPayload(raw.result);
+  if (raw['type'] === 'result') {
+    return isWorkerResultPayload(raw['result']);
   }
 
-  if (raw.type === 'error') {
-    return isWorkerErrorPayload(raw.error);
+  if (raw['type'] === 'error') {
+    return isWorkerErrorPayload(raw['error']);
   }
 
   return false;
@@ -3152,7 +3152,7 @@ function resolveWorkerFallback(
   options: TransformExecutionOptions
 ): MarkdownTransformResult {
   const isQueueFull =
-    error instanceof FetchError && error.details.reason === 'queue_full';
+    error instanceof FetchError && error.details['reason'] === 'queue_full';
 
   if (isQueueFull) {
     logWarn('Transform worker queue full; falling back to in-process', {

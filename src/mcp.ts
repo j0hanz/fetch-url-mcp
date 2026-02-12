@@ -140,6 +140,41 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return isObject(value);
 }
 
+function parseHandlerExtra(extra: unknown): HandlerExtra | undefined {
+  if (!isObject(extra)) return undefined;
+
+  const parsed: HandlerExtra = {};
+  const { sessionId, authInfo, signal, requestId, sendNotification } = extra;
+  if (typeof sessionId === 'string') parsed.sessionId = sessionId;
+
+  if (isObject(authInfo)) {
+    const { clientId, token } = authInfo;
+    const normalized: NonNullable<HandlerExtra['authInfo']> = {};
+    if (typeof clientId === 'string') normalized.clientId = clientId;
+    if (typeof token === 'string') normalized.token = token;
+    if (normalized.clientId || normalized.token) parsed.authInfo = normalized;
+  }
+
+  if (signal instanceof AbortSignal) parsed.signal = signal;
+
+  if (typeof requestId === 'string' || typeof requestId === 'number') {
+    parsed.requestId = requestId;
+  }
+
+  if (typeof sendNotification === 'function') {
+    const notify = sendNotification as (
+      notification: ProgressNotification
+    ) => Promise<void> | void;
+    parsed.sendNotification = async (
+      notification: ProgressNotification
+    ): Promise<void> => {
+      await Promise.resolve(notify(notification));
+    };
+  }
+
+  return parsed;
+}
+
 function isServerResult(value: unknown): value is ServerResult {
   return (
     isObject(value) && Array.isArray((value as { content?: unknown }).content)
@@ -358,8 +393,8 @@ async function runFetchTaskExecution(params: {
 
         const isToolError =
           isRecord(result) &&
-          typeof result.isError === 'boolean' &&
-          result.isError;
+          typeof result['isError'] === 'boolean' &&
+          result['isError'];
 
         taskManager.updateTask(taskId, {
           status: isToolError ? 'failed' : 'completed',
@@ -482,13 +517,14 @@ export function registerTaskHandlers(server: McpServer): void {
   server.server.setRequestHandler(
     CallToolRequestSchema,
     async (request, extra) => {
-      const context = resolveToolCallContext(extra as HandlerExtra | undefined);
+      const parsedExtra = parseHandlerExtra(extra);
+      const context = resolveToolCallContext(parsedExtra);
       const requestId =
         context.requestId !== undefined
           ? String(context.requestId)
           : randomUUID();
 
-      const sessionId = (extra as HandlerExtra | undefined)?.sessionId;
+      const sessionId = parsedExtra?.sessionId;
 
       return runWithRequestContext(
         {
@@ -506,7 +542,8 @@ export function registerTaskHandlers(server: McpServer): void {
 
   server.server.setRequestHandler(TaskGetSchema, async (request, extra) => {
     const { taskId } = request.params;
-    const ownerKey = resolveTaskOwnerKey(extra as HandlerExtra | undefined);
+    const parsedExtra = parseHandlerExtra(extra);
+    const ownerKey = resolveTaskOwnerKey(parsedExtra);
     const task = taskManager.getTask(taskId, ownerKey);
 
     if (!task) throwTaskNotFound();
@@ -524,12 +561,13 @@ export function registerTaskHandlers(server: McpServer): void {
 
   server.server.setRequestHandler(TaskResultSchema, async (request, extra) => {
     const { taskId } = request.params;
-    const ownerKey = resolveTaskOwnerKey(extra as HandlerExtra | undefined);
+    const parsedExtra = parseHandlerExtra(extra);
+    const ownerKey = resolveTaskOwnerKey(parsedExtra);
 
     const task = await taskManager.waitForTerminalTask(
       taskId,
       ownerKey,
-      (extra as HandlerExtra | undefined)?.signal
+      parsedExtra?.signal
     );
 
     if (!task) throwTaskNotFound();
@@ -581,7 +619,8 @@ export function registerTaskHandlers(server: McpServer): void {
   });
 
   server.server.setRequestHandler(TaskListSchema, async (request, extra) => {
-    const ownerKey = resolveTaskOwnerKey(extra as HandlerExtra | undefined);
+    const parsedExtra = parseHandlerExtra(extra);
+    const ownerKey = resolveTaskOwnerKey(parsedExtra);
     const cursor = request.params?.cursor;
 
     const { tasks, nextCursor } = taskManager.listTasks(
@@ -603,7 +642,8 @@ export function registerTaskHandlers(server: McpServer): void {
 
   server.server.setRequestHandler(TaskCancelSchema, async (request, extra) => {
     const { taskId } = request.params;
-    const ownerKey = resolveTaskOwnerKey(extra as HandlerExtra | undefined);
+    const parsedExtra = parseHandlerExtra(extra);
+    const ownerKey = resolveTaskOwnerKey(parsedExtra);
 
     const task = taskManager.cancelTask(taskId, ownerKey);
     if (!task) throwTaskNotFound();

@@ -63,6 +63,7 @@ interface CacheUpdateEvent {
   cacheKey: string;
   namespace: string;
   urlHash: string;
+  listChanged: boolean;
 }
 
 type CacheUpdateListener = (event: CacheUpdateEvent) => unknown;
@@ -211,6 +212,7 @@ class InMemoryCacheStore {
     const now = Date.now();
     if (entry.expiresAtMs <= now) {
       this.delete(cacheKey);
+      this.notify(cacheKey, true);
       return undefined;
     }
 
@@ -221,12 +223,14 @@ class InMemoryCacheStore {
     return entry;
   }
 
-  private delete(cacheKey: string): void {
+  private delete(cacheKey: string): boolean {
     const entry = this.entries.get(cacheKey);
     if (entry) {
       this.currentBytes -= entry.content.length;
       this.entries.delete(cacheKey);
+      return true;
     }
+    return false;
   }
 
   set(
@@ -252,11 +256,15 @@ class InMemoryCacheStore {
       return;
     }
 
+    let listChanged = !this.entries.has(cacheKey);
+
     // Evict if needed (size-based)
     while (this.currentBytes + entrySize > this.maxBytes) {
       const firstKey = this.entries.keys().next();
       if (firstKey.done) break;
-      this.delete(firstKey.value);
+      if (this.delete(firstKey.value)) {
+        listChanged = true;
+      }
     }
 
     const entry: StoredCacheEntry = {
@@ -278,17 +286,19 @@ class InMemoryCacheStore {
     // Eviction (LRU: first insertion-order key) - Count based
     if (this.entries.size > this.max) {
       const firstKey = this.entries.keys().next();
-      if (!firstKey.done) this.delete(firstKey.value);
+      if (!firstKey.done && this.delete(firstKey.value)) {
+        listChanged = true;
+      }
     }
 
-    this.notify(cacheKey);
+    this.notify(cacheKey, listChanged);
   }
 
-  private notify(cacheKey: string): void {
+  private notify(cacheKey: string, listChanged: boolean): void {
     if (this.updateEmitter.listenerCount('update') === 0) return;
     const parts = parseCacheKey(cacheKey);
     if (!parts) return;
-    this.updateEmitter.emit('update', { cacheKey, ...parts });
+    this.updateEmitter.emit('update', { cacheKey, ...parts, listChanged });
   }
 
   private logError(message: string, cacheKey: string, error: unknown): void {

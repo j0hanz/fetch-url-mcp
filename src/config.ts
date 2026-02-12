@@ -253,7 +253,7 @@ function readOptionalFilePath(value: string | undefined): string | undefined {
 
 const MAX_HTML_BYTES = 10 * 1024 * 1024; // 10 MB
 const MAX_INLINE_CONTENT_CHARS = parseInteger(
-  env.MAX_INLINE_CONTENT_CHARS,
+  env['MAX_INLINE_CONTENT_CHARS'],
   0,
   0,
   MAX_HTML_BYTES
@@ -266,7 +266,7 @@ const DEFAULT_TOOL_TIMEOUT_PADDING_MS = 5000;
 const DEFAULT_TRANSFORM_TIMEOUT_MS = 30000;
 
 const DEFAULT_FETCH_TIMEOUT_MS = parseInteger(
-  env.FETCH_TIMEOUT_MS,
+  env['FETCH_TIMEOUT_MS'],
   15000,
   1000,
   60000
@@ -275,9 +275,9 @@ const DEFAULT_TOOL_TIMEOUT_MS =
   DEFAULT_FETCH_TIMEOUT_MS +
   DEFAULT_TRANSFORM_TIMEOUT_MS +
   DEFAULT_TOOL_TIMEOUT_PADDING_MS;
-const DEFAULT_TASKS_MAX_TOTAL = parseInteger(env.TASKS_MAX_TOTAL, 5000, 1);
+const DEFAULT_TASKS_MAX_TOTAL = parseInteger(env['TASKS_MAX_TOTAL'], 5000, 1);
 const DEFAULT_TASKS_MAX_PER_OWNER = parseInteger(
-  env.TASKS_MAX_PER_OWNER,
+  env['TASKS_MAX_PER_OWNER'],
   1000,
   1
 );
@@ -297,18 +297,18 @@ function resolveWorkerResourceLimits(): WorkerResourceLimits | undefined {
   const limits: WorkerResourceLimits = {};
   let hasAny = false;
   const maxOldGenerationSizeMb = parseOptionalInteger(
-    env.TRANSFORM_WORKER_MAX_OLD_GENERATION_MB,
+    env['TRANSFORM_WORKER_MAX_OLD_GENERATION_MB'],
     1
   );
   const maxYoungGenerationSizeMb = parseOptionalInteger(
-    env.TRANSFORM_WORKER_MAX_YOUNG_GENERATION_MB,
+    env['TRANSFORM_WORKER_MAX_YOUNG_GENERATION_MB'],
     1
   );
   const codeRangeSizeMb = parseOptionalInteger(
-    env.TRANSFORM_WORKER_CODE_RANGE_MB,
+    env['TRANSFORM_WORKER_CODE_RANGE_MB'],
     1
   );
-  const stackSizeMb = parseOptionalInteger(env.TRANSFORM_WORKER_STACK_MB, 1);
+  const stackSizeMb = parseOptionalInteger(env['TRANSFORM_WORKER_STACK_MB'], 1);
 
   if (maxOldGenerationSizeMb !== undefined) {
     limits.maxOldGenerationSizeMb = maxOldGenerationSizeMb;
@@ -400,8 +400,8 @@ function resolveAuthMode(urls: OAuthModeInputs): AuthMode {
 }
 
 function collectStaticTokens(): string[] {
-  const staticTokens = new Set<string>(parseList(env.ACCESS_TOKENS));
-  if (env.API_KEY) staticTokens.add(env.API_KEY);
+  const staticTokens = new Set<string>(parseList(env['ACCESS_TOKENS']));
+  if (env['API_KEY']) staticTokens.add(env['API_KEY']);
   return [...staticTokens];
 }
 
@@ -412,18 +412,18 @@ function buildAuthConfig(baseUrl: URL): AuthConfig {
   return {
     mode,
     ...urls,
-    requiredScopes: parseList(env.OAUTH_REQUIRED_SCOPES),
-    clientId: env.OAUTH_CLIENT_ID,
-    clientSecret: env.OAUTH_CLIENT_SECRET,
+    requiredScopes: parseList(env['OAUTH_REQUIRED_SCOPES']),
+    clientId: env['OAUTH_CLIENT_ID'],
+    clientSecret: env['OAUTH_CLIENT_SECRET'],
     introspectionTimeoutMs: 5000,
     staticTokens: collectStaticTokens(),
   };
 }
 
 function buildHttpsConfig(): HttpsConfig {
-  const keyFile = readOptionalFilePath(env.SERVER_TLS_KEY_FILE);
-  const certFile = readOptionalFilePath(env.SERVER_TLS_CERT_FILE);
-  const caFile = readOptionalFilePath(env.SERVER_TLS_CA_FILE);
+  const keyFile = readOptionalFilePath(env['SERVER_TLS_KEY_FILE']);
+  const certFile = readOptionalFilePath(env['SERVER_TLS_CERT_FILE']);
+  const caFile = readOptionalFilePath(env['SERVER_TLS_CA_FILE']);
 
   if ((keyFile && !certFile) || (!keyFile && certFile)) {
     throw new ConfigError(
@@ -479,26 +479,35 @@ const BLOCKED_IP_PATTERN =
 const BLOCKED_IPV4_MAPPED_PATTERN =
   /^::ffff:(?:127\.|10\.|172\.(?:1[6-9]|2\d|3[01])\.|192\.168\.|169\.254\.)/i;
 
-const host = (env.HOST ?? LOOPBACK_V4).trim();
-const port = parsePort(env.PORT);
+const host = (env['HOST'] ?? LOOPBACK_V4).trim();
+const port = parsePort(env['PORT']);
 const httpsConfig = buildHttpsConfig();
-const maxConnections = parseInteger(env.SERVER_MAX_CONNECTIONS, 0, 0);
-const headersTimeoutMs = parseOptionalInteger(env.SERVER_HEADERS_TIMEOUT_MS, 1);
-const requestTimeoutMs = parseOptionalInteger(env.SERVER_REQUEST_TIMEOUT_MS, 0);
+const maxConnections = parseInteger(env['SERVER_MAX_CONNECTIONS'], 0, 0);
+const headersTimeoutMs = parseOptionalInteger(
+  env['SERVER_HEADERS_TIMEOUT_MS'],
+  1
+);
+const requestTimeoutMs = parseOptionalInteger(
+  env['SERVER_REQUEST_TIMEOUT_MS'],
+  0
+);
 const keepAliveTimeoutMs = parseOptionalInteger(
-  env.SERVER_KEEP_ALIVE_TIMEOUT_MS,
+  env['SERVER_KEEP_ALIVE_TIMEOUT_MS'],
   1
 );
 const keepAliveTimeoutBufferMs = parseOptionalInteger(
-  env.SERVER_KEEP_ALIVE_TIMEOUT_BUFFER_MS,
+  env['SERVER_KEEP_ALIVE_TIMEOUT_BUFFER_MS'],
   0
 );
-const maxHeadersCount = parseOptionalInteger(env.SERVER_MAX_HEADERS_COUNT, 1);
+const maxHeadersCount = parseOptionalInteger(
+  env['SERVER_MAX_HEADERS_COUNT'],
+  1
+);
 const blockPrivateConnections = parseBoolean(
-  env.SERVER_BLOCK_PRIVATE_CONNECTIONS,
+  env['SERVER_BLOCK_PRIVATE_CONNECTIONS'],
   false
 );
-const allowRemote = parseBoolean(env.ALLOW_REMOTE, false);
+const allowRemote = parseBoolean(env['ALLOW_REMOTE'], false);
 
 const baseUrl = new URL(
   `${httpsConfig.enabled ? 'https' : 'http'}://${formatHostForUrl(host)}:${port}`
@@ -537,7 +546,7 @@ export const config = {
   fetcher: {
     timeout: DEFAULT_FETCH_TIMEOUT_MS,
     maxRedirects: 5,
-    userAgent: env.USER_AGENT ?? DEFAULT_USER_AGENT,
+    userAgent: env['USER_AGENT'] ?? DEFAULT_USER_AGENT,
     maxContentLength: MAX_HTML_BYTES,
   },
   transform: {
@@ -545,7 +554,7 @@ export const config = {
     stageWarnRatio: 0.5,
     metadataFormat: 'markdown',
     maxWorkerScale: 4,
-    workerMode: parseTransformWorkerMode(env.TRANSFORM_WORKER_MODE),
+    workerMode: parseTransformWorkerMode(env['TRANSFORM_WORKER_MODE']),
     workerResourceLimits: resolveWorkerResourceLimits(),
   },
   tools: {
@@ -557,7 +566,7 @@ export const config = {
     maxPerOwner: RESOLVED_TASKS_MAX_PER_OWNER,
   },
   cache: {
-    enabled: parseBoolean(env.CACHE_ENABLED, true),
+    enabled: parseBoolean(env['CACHE_ENABLED'], true),
     ttl: 86400,
     maxKeys: 100,
     maxSizeBytes: 50 * 1024 * 1024, // 50MB
@@ -567,8 +576,8 @@ export const config = {
     minParagraphLength: 10,
   },
   noiseRemoval: {
-    extraTokens: parseList(env.FETCH_URL_MCP_EXTRA_NOISE_TOKENS),
-    extraSelectors: parseList(env.FETCH_URL_MCP_EXTRA_NOISE_SELECTORS),
+    extraTokens: parseList(env['FETCH_URL_MCP_EXTRA_NOISE_TOKENS']),
+    extraSelectors: parseList(env['FETCH_URL_MCP_EXTRA_NOISE_SELECTORS']),
     enabledCategories: [
       'cookie-banners',
       'newsletters',
@@ -592,16 +601,16 @@ export const config = {
     removeTocBlocks: true,
     removeTypeDocComments: true,
     headingKeywords: parseListOrDefault(
-      env.MARKDOWN_HEADING_KEYWORDS,
+      env['MARKDOWN_HEADING_KEYWORDS'],
       DEFAULT_HEADING_KEYWORDS
     ),
   },
   i18n: {
-    locale: normalizeLocale(env.FETCH_URL_MCP_LOCALE),
+    locale: normalizeLocale(env['FETCH_URL_MCP_LOCALE']),
   },
   logging: {
-    level: parseLogLevel(env.LOG_LEVEL),
-    format: env.LOG_FORMAT?.toLowerCase() === 'json' ? 'json' : 'text',
+    level: parseLogLevel(env['LOG_LEVEL']),
+    format: env['LOG_FORMAT']?.toLowerCase() === 'json' ? 'json' : 'text',
   },
   constants: {
     maxHtmlSize: MAX_HTML_BYTES,
@@ -613,8 +622,8 @@ export const config = {
     blockedIpPatterns: BLOCKED_IP_PATTERNS,
     blockedIpPattern: BLOCKED_IP_PATTERN,
     blockedIpv4MappedPattern: BLOCKED_IPV4_MAPPED_PATTERN,
-    allowedHosts: parseAllowedHosts(env.ALLOWED_HOSTS),
-    apiKey: env.API_KEY,
+    allowedHosts: parseAllowedHosts(env['ALLOWED_HOSTS']),
+    apiKey: env['API_KEY'],
     allowRemote,
   },
   auth: buildAuthConfig(baseUrl),

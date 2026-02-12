@@ -75,6 +75,37 @@ const defaultFetch: FetchLike = (input, init) => globalThis.fetch(input, init);
 
 type SecurityConfig = typeof config.security;
 
+function assertReadableStreamLike(
+  stream: unknown,
+  url: string,
+  stage: string
+): asserts stream is { getReader: (...args: unknown[]) => unknown } {
+  if (isObject(stream) && typeof stream['getReader'] === 'function') return;
+  throw new FetchError('Invalid response stream', url, 500, {
+    reason: 'invalid_stream',
+    stage,
+  });
+}
+
+function toNodeReadableStream(
+  stream: ReadableStream<Uint8Array>,
+  url: string,
+  stage: string
+): NodeReadableStream<Uint8Array> {
+  assertReadableStreamLike(stream, url, stage);
+  return stream as unknown as NodeReadableStream<Uint8Array>;
+}
+
+function toWebReadableStream(
+  stream: Readable,
+  url: string,
+  stage: string
+): ReadableStream<Uint8Array> {
+  const converted = Readable.toWeb(stream);
+  assertReadableStreamLike(converted, url, stage);
+  return converted as unknown as ReadableStream<Uint8Array>;
+}
+
 class IpBlocker {
   private readonly blockList = createDefaultBlockList();
 
@@ -929,8 +960,9 @@ class FetchTelemetry {
       method: ctx.method,
       url: ctx.url,
     };
-    if (ctx.contextRequestId) logData.contextRequestId = ctx.contextRequestId;
-    if (ctx.operationId) logData.operationId = ctx.operationId;
+    if (ctx.contextRequestId)
+      logData['contextRequestId'] = ctx.contextRequestId;
+    if (ctx.operationId) logData['operationId'] = ctx.operationId;
     this.logger.debug('HTTP Request', logData);
 
     return ctx;
@@ -969,10 +1001,10 @@ class FetchTelemetry {
       duration: durationLabel,
     };
     if (context.contextRequestId)
-      logData.contextRequestId = context.contextRequestId;
-    if (context.operationId) logData.operationId = context.operationId;
-    if (contentType) logData.contentType = contentType;
-    if (size) logData.size = size;
+      logData['contextRequestId'] = context.contextRequestId;
+    if (context.operationId) logData['operationId'] = context.operationId;
+    if (contentType) logData['contentType'] = contentType;
+    if (size) logData['size'] = size;
 
     this.logger.debug('HTTP Response', logData);
 
@@ -983,8 +1015,8 @@ class FetchTelemetry {
         duration: durationLabel,
       };
       if (context.contextRequestId)
-        warnData.contextRequestId = context.contextRequestId;
-      if (context.operationId) warnData.operationId = context.operationId;
+        warnData['contextRequestId'] = context.contextRequestId;
+      if (context.operationId) warnData['operationId'] = context.operationId;
 
       this.logger.warn('Slow HTTP request detected', warnData);
     }
@@ -1022,8 +1054,8 @@ class FetchTelemetry {
       error: err.message,
     };
     if (context.contextRequestId)
-      logData.contextRequestId = context.contextRequestId;
-    if (context.operationId) logData.operationId = context.operationId;
+      logData['contextRequestId'] = context.contextRequestId;
+    if (context.operationId) logData['operationId'] = context.operationId;
 
     if (status === 429) {
       this.logger.warn('HTTP Request Error', logData);
@@ -1176,7 +1208,7 @@ class RedirectFollower {
 
   private annotateRedirectError(error: unknown, url: string): void {
     if (!isObject(error)) return;
-    (error as Record<string, unknown>).requestUrl = url;
+    (error as Record<string, unknown>)['requestUrl'] = url;
   }
 
   private async withRedirectErrorContext<T>(
@@ -1518,7 +1550,7 @@ class ResponseTextReader {
     const chunks: Buffer[] = [];
 
     const source = Readable.fromWeb(
-      stream as unknown as NodeReadableStream<Uint8Array>
+      toNodeReadableStream(stream, url, 'response:read-stream-buffer')
     );
 
     const guard = new Transform({
@@ -1912,10 +1944,11 @@ async function decodeResponseIfNeeded(
   );
 
   const sourceStream = Readable.fromWeb(
-    createPumpedStream(
-      initialChunk,
-      reader
-    ) as unknown as NodeReadableStream<Uint8Array>
+    toNodeReadableStream(
+      createPumpedStream(initialChunk, reader),
+      url,
+      'response:decode-content-encoding'
+    )
   );
   const decodedNodeStream = new PassThrough();
   const pipelinePromise = pipeline([
@@ -1942,9 +1975,11 @@ async function decodeResponseIfNeeded(
     );
   });
 
-  const decodedBody = Readable.toWeb(
-    decodedNodeStream
-  ) as unknown as ReadableStream<Uint8Array>;
+  const decodedBody = toWebReadableStream(
+    decodedNodeStream,
+    url,
+    'response:decode-content-encoding'
+  );
 
   const headers = new Headers(response.headers);
   headers.delete('content-encoding');

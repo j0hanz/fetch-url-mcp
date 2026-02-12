@@ -95,9 +95,9 @@ function buildContextMetadata(): LogMetadata | undefined {
   if (!requestId && !operationId && !includeSession) return undefined;
 
   const meta: LogMetadata = {};
-  if (requestId) meta.requestId = requestId;
-  if (operationId) meta.operationId = operationId;
-  if (includeSession) meta.sessionId = sessionId;
+  if (requestId) meta['requestId'] = requestId;
+  if (operationId) meta['operationId'] = operationId;
+  if (includeSession) meta['sessionId'] = sessionId;
 
   return meta;
 }

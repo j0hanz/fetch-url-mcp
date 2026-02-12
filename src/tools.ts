@@ -701,7 +701,7 @@ function logRawUrlTransformation(resolvedUrl: UrlResolution): void {
 
 function extractTitle(value: unknown): string | undefined {
   const record = asRecord(value);
-  const title = record ? record.title : undefined;
+  const title = record ? record['title'] : undefined;
   return typeof title === 'string' ? title : undefined;
 }
 
