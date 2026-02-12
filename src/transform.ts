@@ -1476,7 +1476,10 @@ function translateHtmlToMarkdown(params: {
 
   abortPolicy.throwIfAborted(signal, url, 'markdown:translated');
 
-  const cleaned = cleanupMarkdownArtifacts(content);
+  const cleaned = cleanupMarkdownArtifacts(
+    content,
+    signal ? { signal, url } : { url }
+  );
   return url ? resolveRelativeUrls(cleaned, url) : cleaned;
 }
 
@@ -2172,6 +2175,10 @@ function isWorkerResponse(raw: unknown): raw is TransformWorkerOutgoingMessage {
     return isWorkerErrorPayload(raw['error']);
   }
 
+  if (raw['type'] === 'cancelled') {
+    return true;
+  }
+
   return false;
 }
 
@@ -2262,6 +2269,7 @@ interface InflightTask {
   abortListener: (() => void) | undefined;
   workerIndex: number;
   context: TaskContext;
+  cancelPending: boolean;
 }
 
 type TransformWorkerMessage =
@@ -2479,6 +2487,14 @@ class WorkerPool implements TransformWorkerPool {
   private readonly queue: PendingTask[] = [];
   private queueHead = 0;
   private readonly inflight = new Map<string, InflightTask>();
+  private readonly cancelAcks = new Map<
+    string,
+    {
+      promise: Promise<void>;
+      resolve: () => void;
+      timeout: CancellableTimeout<void>;
+    }
+  >();
 
   private readonly timeoutMs: number;
   private readonly queueMax: number;
@@ -2685,7 +2701,7 @@ class WorkerPool implements TransformWorkerPool {
 
     const inflight = this.inflight.get(id);
     if (inflight) {
-      this.abortInflight(id, url, inflight.workerIndex);
+      void this.abortInflight(id, url, inflight.workerIndex);
       return;
     }
 
@@ -2710,8 +2726,45 @@ class WorkerPool implements TransformWorkerPool {
     }
   }
 
-  private abortInflight(id: string, url: string, workerIndex: number): void {
+  private resolveCancelAck(id: string): void {
+    const pending = this.cancelAcks.get(id);
+    if (!pending) return;
+    pending.timeout.cancel();
+    pending.resolve();
+  }
+
+  private waitForCancelAck(id: string): Promise<void> {
+    const existing = this.cancelAcks.get(id);
+    if (existing) {
+      return existing.promise;
+    }
+
+    let resolve: () => void = () => {};
+    const timeout = createUnrefTimeout(200, undefined);
+    const racePromise = new Promise<void>((finish) => {
+      resolve = finish;
+    });
+
+    const promise = Promise.race([racePromise, timeout.promise]).finally(() => {
+      this.cancelAcks.delete(id);
+      timeout.cancel();
+    });
+
+    this.cancelAcks.set(id, { promise, resolve, timeout });
+
+    return promise;
+  }
+
+  private async abortInflight(
+    id: string,
+    url: string,
+    workerIndex: number
+  ): Promise<void> {
     const slot = this.workers[workerIndex];
+    const inflight = this.inflight.get(id);
+    if (inflight) {
+      inflight.cancelPending = true;
+    }
     if (slot) {
       try {
         slot.host.postMessage({ type: 'cancel', id });
@@ -2719,6 +2772,9 @@ class WorkerPool implements TransformWorkerPool {
         // Worker may be unavailable; failure is acceptable during abort
       }
     }
+
+    await this.waitForCancelAck(id);
+
     this.failTask(
       id,
       abortPolicy.createAbortError(url, 'transform:signal-abort')
@@ -2799,6 +2855,18 @@ class WorkerPool implements TransformWorkerPool {
     if (!isWorkerResponse(raw)) return;
 
     const message = raw;
+
+    if (message.type === 'cancelled') {
+      this.resolveCancelAck(message.id);
+      return;
+    }
+
+    const inflightPeek = this.inflight.get(message.id);
+    if (inflightPeek?.cancelPending) {
+      this.resolveCancelAck(message.id);
+      return;
+    }
+
     const inflight = this.takeInflight(message.id);
     if (!inflight) return;
 
@@ -2977,6 +3045,7 @@ class WorkerPool implements TransformWorkerPool {
       abortListener: task.abortListener,
       workerIndex,
       context: task.context,
+      cancelPending: false,
     });
 
     try {

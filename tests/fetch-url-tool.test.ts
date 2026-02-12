@@ -284,6 +284,42 @@ describe('fetchUrlToolHandler', () => {
     }
   });
 
+  it('includes truncation marker when fetch stage truncates', async (t) => {
+    const originalCacheEnabled = config.cache.enabled;
+    const originalInlineLimit = config.constants.maxInlineContentChars;
+    const originalMaxHtmlSize = config.constants.maxHtmlSize;
+    const originalFetchMax = config.fetcher.maxContentLength;
+    config.cache.enabled = false;
+    config.constants.maxInlineContentChars = 10000;
+    config.constants.maxHtmlSize = 1000;
+    config.fetcher.maxContentLength = 200;
+
+    const html = `<html><body><p>${'a'.repeat(2000)}</p></body></html>`;
+
+    try {
+      t.mock.method(globalThis, 'fetch', async () => {
+        return new Response(html, {
+          status: 200,
+          headers: { 'content-type': 'text/html' },
+        });
+      });
+
+      const response = await fetchUrlToolHandler({
+        url: 'https://example.com/fetch-size-truncate',
+      });
+
+      const structured = response.structuredContent;
+      assert.ok(structured);
+      assert.equal(structured.truncated, true);
+      assert.ok(String(structured.markdown).includes('[truncated]'));
+    } finally {
+      config.cache.enabled = originalCacheEnabled;
+      config.constants.maxInlineContentChars = originalInlineLimit;
+      config.constants.maxHtmlSize = originalMaxHtmlSize;
+      config.fetcher.maxContentLength = originalFetchMax;
+    }
+  });
+
   it('returns truncated markdown even when cache + http mode are enabled', async (t) => {
     const originalHttpMode = config.runtime.httpMode;
     const originalCacheEnabled = config.cache.enabled;
@@ -434,6 +470,40 @@ describe('fetchUrlToolHandler', () => {
       assert.match(String(structured.error), /convert|markdown/i);
     } finally {
       config.transform.maxWorkerScale = originalMaxWorkerScale;
+    }
+  });
+
+  it('returns an error response when markdown conversion fails in worker pool', async (t) => {
+    const originalMaxWorkerScale = config.transform.maxWorkerScale;
+    const originalCacheEnabled = config.cache.enabled;
+    config.transform.maxWorkerScale = 1;
+    config.cache.enabled = false;
+
+    await shutdownTransformWorkerPool();
+
+    const binary = new Uint8Array([0x3c, 0x00, 0x3e, 0x00, 0x2f, 0x00]);
+
+    try {
+      t.mock.method(globalThis, 'fetch', async () => {
+        return new Response(binary, {
+          status: 200,
+          headers: { 'content-type': 'text/html' },
+        });
+      });
+
+      const response = await fetchUrlToolHandler({
+        url: 'https://example.com/worker-convert-fail',
+      });
+
+      assert.equal(response.isError, true);
+      const structured = response.structuredContent;
+      assert.ok(structured);
+      assert.equal(structured.statusCode, 500);
+      assert.match(String(structured.error), /binary/i);
+    } finally {
+      await shutdownTransformWorkerPool();
+      config.transform.maxWorkerScale = originalMaxWorkerScale;
+      config.cache.enabled = originalCacheEnabled;
     }
   });
 

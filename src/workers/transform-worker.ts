@@ -161,6 +161,7 @@ port.on('message', (raw: unknown) => {
     if (typeof id !== 'string') return;
     const controller = controllersById.get(id);
     if (controller) controller.abort(new Error('Canceled'));
+    port.postMessage({ type: 'cancelled', id });
     return;
   }
 

@@ -113,6 +113,11 @@ export interface TransformWorkerCancelMessage {
   id: string;
 }
 
+export interface TransformWorkerCancelledMessage {
+  type: 'cancelled';
+  id: string;
+}
+
 export interface TransformWorkerResultMessage {
   type: 'result';
   id: string;
@@ -138,4 +143,5 @@ export interface TransformWorkerErrorMessage {
 
 export type TransformWorkerOutgoingMessage =
   | TransformWorkerResultMessage
-  | TransformWorkerErrorMessage;
+  | TransformWorkerErrorMessage
+  | TransformWorkerCancelledMessage;

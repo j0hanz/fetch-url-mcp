@@ -1,4 +1,5 @@
 import { config } from './config.js';
+import { FetchError } from './errors.js';
 import type { MetadataBlock } from './transform-types.js';
 
 // --- Constants & Regex ---
@@ -31,7 +32,7 @@ const REGEX = {
   SPACING_LIST_NUM_COMBINED:
     /^((?![-*+] |\d+\. |[ \t]).+)\n((?:[-*+]|\d+\.) )/gm,
   NESTED_LIST_INDENT: /^( +)((?:[-*+])|\d+\.)\s/gm,
-  TYPEDOC: /(`+)(?:(?!\1)[\s\S])*?\1|\s?\/\\?\*[\s\S]*?\\?\*\//g,
+  TYPEDOC_COMMENT: /(`+)(?:(?!\1)[\s\S])*?\1|\s?\/\\?\*[\s\S]*?\\?\*\//g,
 } as const;
 
 const HEADING_KEYWORDS = new Set(
@@ -42,6 +43,33 @@ const HEADING_KEYWORDS = new Set(
 
 const SPECIAL_PREFIXES =
   /^(?:example|note|tip|warning|important|caution):\s+\S/i;
+
+const TOC_SCAN_LIMIT = 20;
+const TOC_MAX_NON_EMPTY = 12;
+const TOC_LINK_RATIO_THRESHOLD = 0.8;
+const TYPEDOC_PREFIXES = [
+  'Defined in:',
+  'Returns:',
+  'Since:',
+  'See also:',
+] as const;
+
+interface CleanupOptions {
+  signal?: AbortSignal;
+  url?: string;
+}
+
+function throwIfAborted(
+  signal: AbortSignal | undefined,
+  url: string,
+  stage: string
+): void {
+  if (!signal?.aborted) return;
+  throw new FetchError('Request was canceled', url, 499, {
+    reason: 'aborted',
+    stage,
+  });
+}
 
 // --- Helper Functions ---
 
@@ -123,14 +151,30 @@ function getHeadingPrefix(trimmed: string): string | null {
 }
 
 // Optimized TOC detection
-function hasTocBlock(lines: string[], headingIndex: number): boolean {
-  const lookaheadMax = Math.min(lines.length, headingIndex + 8);
+function getTocBlockStats(
+  lines: string[],
+  headingIndex: number
+): { total: number; linkCount: number; nonLinkCount: number } {
+  let total = 0;
+  let linkCount = 0;
+  let nonLinkCount = 0;
+  const lookaheadMax = Math.min(lines.length, headingIndex + TOC_SCAN_LIMIT);
+
   for (let i = headingIndex + 1; i < lookaheadMax; i++) {
     const line = lines[i];
-    if (!line || line.trim().length === 0) continue;
-    if (REGEX.TOC_LINK.test(line)) return true;
+    if (!line) continue;
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    if (REGEX.HEADING_MARKER.test(trimmed)) break;
+
+    total += 1;
+    if (REGEX.TOC_LINK.test(trimmed)) linkCount += 1;
+    else nonLinkCount += 1;
+
+    if (total >= TOC_MAX_NON_EMPTY) break;
   }
-  return false;
+
+  return { total, linkCount, nonLinkCount };
 }
 
 function skipTocLines(lines: string[], startIndex: number): number {
@@ -141,6 +185,17 @@ function skipTocLines(lines: string[], startIndex: number): number {
     if (!REGEX.TOC_LINK.test(line)) return i;
   }
   return lines.length;
+}
+
+function isTypeDocArtifactLine(line: string): boolean {
+  const trimmed = line.trim();
+  for (const prefix of TYPEDOC_PREFIXES) {
+    if (!trimmed.startsWith(prefix)) continue;
+    const rest = trimmed.slice(prefix.length).trimStart();
+    if (!rest.startsWith('**`')) return false;
+    return rest.includes('`**');
+  }
+  return false;
 }
 
 // --- Main Processing Logic ---
@@ -167,15 +222,22 @@ function shouldSkipAsToc(
   lines: string[],
   i: number,
   trimmed: string,
-  removeToc: boolean
+  removeToc: boolean,
+  options?: CleanupOptions
 ): number | null {
-  if (removeToc && REGEX.TOC_HEADING.test(trimmed) && hasTocBlock(lines, i)) {
-    return skipTocLines(lines, i + 1);
-  }
-  return null;
+  if (!removeToc || !REGEX.TOC_HEADING.test(trimmed)) return null;
+
+  const { total, linkCount, nonLinkCount } = getTocBlockStats(lines, i);
+  if (total === 0 || nonLinkCount > 0) return null;
+
+  const ratio = linkCount / total;
+  if (ratio <= TOC_LINK_RATIO_THRESHOLD) return null;
+
+  throwIfAborted(options?.signal, options?.url ?? '', 'markdown:cleanup:toc');
+  return skipTocLines(lines, i + 1);
 }
 
-function preprocessLines(lines: string[]): string {
+function preprocessLines(lines: string[], options?: CleanupOptions): string {
   const processedLines: string[] = [];
   const len = lines.length;
   const promote = config.markdownCleanup.promoteOrphanHeadings;
@@ -192,13 +254,18 @@ function preprocessLines(lines: string[]): string {
     const trimmed = line.trim();
     if (REGEX.EMPTY_HEADING_LINE.test(trimmed)) continue;
 
-    const tocSkip = shouldSkipAsToc(lines, i, trimmed, removeToc);
+    const tocSkip = shouldSkipAsToc(lines, i, trimmed, removeToc, options);
     if (tocSkip !== null) {
       skipUntil = tocSkip;
       continue;
     }
 
     if (promote && trimmed.length > 0) {
+      throwIfAborted(
+        options?.signal,
+        options?.url ?? '',
+        'markdown:cleanup:promote'
+      );
       const promoted = tryPromoteOrphan(lines, i, trimmed);
       if (promoted) line = promoted;
     }
@@ -209,14 +276,20 @@ function preprocessLines(lines: string[]): string {
 }
 
 // Process a block of non-fence lines
-function processTextBuffer(lines: string[]): string {
+function processTextBuffer(lines: string[], options?: CleanupOptions): string {
   if (lines.length === 0) return '';
-  const text = preprocessLines(lines);
-  return applyGlobalRegexes(text);
+  const text = preprocessLines(lines, options);
+  return applyGlobalRegexes(text, options);
 }
 
-function applyGlobalRegexes(text: string): string {
+function applyGlobalRegexes(text: string, options?: CleanupOptions): string {
   let result = text;
+
+  throwIfAborted(
+    options?.signal,
+    options?.url ?? '',
+    'markdown:cleanup:headings'
+  );
 
   // fixAndSpaceHeadings
   result = result
@@ -224,17 +297,36 @@ function applyGlobalRegexes(text: string): string {
     .replace(REGEX.HEADING_CODE_BLOCK, '$1\n\n```')
     .replace(REGEX.HEADING_CAMEL_CASE, '$1\n\n$2');
 
-  // removeTypeDocComments
   if (config.markdownCleanup.removeTypeDocComments) {
-    result = result.replace(REGEX.TYPEDOC, (match) =>
+    throwIfAborted(
+      options?.signal,
+      options?.url ?? '',
+      'markdown:cleanup:typedoc'
+    );
+    result = result
+      .split('\n')
+      .filter((line) => !isTypeDocArtifactLine(line))
+      .join('\n');
+    result = result.replace(REGEX.TYPEDOC_COMMENT, (match) =>
       match.startsWith('`') ? match : ''
     );
   }
   if (config.markdownCleanup.removeSkipLinks) {
+    throwIfAborted(
+      options?.signal,
+      options?.url ?? '',
+      'markdown:cleanup:skip-links'
+    );
     result = result
       .replace(REGEX.ZERO_WIDTH_ANCHOR, '')
       .replace(REGEX.COMBINED_LINE_REMOVALS, '');
   }
+
+  throwIfAborted(
+    options?.signal,
+    options?.url ?? '',
+    'markdown:cleanup:spacing'
+  );
 
   // normalizeSpacing
   result = result
@@ -246,6 +338,12 @@ function applyGlobalRegexes(text: string): string {
     .replace(REGEX.DOUBLE_NEWLINE_REDUCER, '\n\n');
 
   result = normalizeNestedListIndentation(result);
+
+  throwIfAborted(
+    options?.signal,
+    options?.url ?? '',
+    'markdown:cleanup:properties'
+  );
 
   // fixProperties
   for (let k = 0; k < 3; k++) {
@@ -315,7 +413,8 @@ function handleFencedLine(
 function handleUnfencedLine(
   line: string,
   segments: string[],
-  buffer: string[]
+  buffer: string[],
+  options?: CleanupOptions
 ): { fenceMarker: string | null; buffer: string[] } {
   const newMarker = checkFenceStart(line);
   if (!newMarker) {
@@ -323,15 +422,20 @@ function handleUnfencedLine(
     return { fenceMarker: null, buffer };
   }
   if (buffer.length > 0) {
-    segments.push(processTextBuffer(buffer));
+    segments.push(processTextBuffer(buffer, options));
     buffer = [];
   }
   segments.push(line);
   return { fenceMarker: newMarker, buffer };
 }
 
-export function cleanupMarkdownArtifacts(content: string): string {
+export function cleanupMarkdownArtifacts(
+  content: string,
+  options?: CleanupOptions
+): string {
   if (!content) return '';
+
+  throwIfAborted(options?.signal, options?.url ?? '', 'markdown:cleanup:begin');
 
   const len = content.length;
   let lastIndex = 0;
@@ -346,14 +450,19 @@ export function cleanupMarkdownArtifacts(content: string): string {
     if (fenceMarker) {
       fenceMarker = handleFencedLine(line, trimmed, fenceMarker, segments);
     } else {
-      ({ fenceMarker, buffer } = handleUnfencedLine(line, segments, buffer));
+      ({ fenceMarker, buffer } = handleUnfencedLine(
+        line,
+        segments,
+        buffer,
+        options
+      ));
     }
 
     lastIndex = nextIndex;
   }
 
   if (buffer.length > 0) {
-    segments.push(processTextBuffer(buffer));
+    segments.push(processTextBuffer(buffer, options));
   }
 
   return segments.join('\n').trim();

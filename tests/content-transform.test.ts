@@ -2,8 +2,11 @@ import assert from 'node:assert/strict';
 import { after, describe, it } from 'node:test';
 
 import { FetchError } from '../dist/errors.js';
-import { shutdownTransformWorkerPool } from '../dist/transform.js';
-import { transformHtmlToMarkdown } from '../dist/transform.js';
+import { cleanupMarkdownArtifacts } from '../dist/markdown-cleanup.js';
+import {
+  shutdownTransformWorkerPool,
+  transformHtmlToMarkdown,
+} from '../dist/transform.js';
 
 after(async () => {
   await shutdownTransformWorkerPool();
@@ -13,6 +16,19 @@ async function withWorkerPoolDisabled<T>(fn: () => Promise<T>): Promise<T> {
   const { config } = await import('../dist/config.js');
   const original = config.transform.maxWorkerScale;
   config.transform.maxWorkerScale = 0;
+  await shutdownTransformWorkerPool();
+  try {
+    return await fn();
+  } finally {
+    await shutdownTransformWorkerPool();
+    config.transform.maxWorkerScale = original;
+  }
+}
+
+async function withWorkerPoolEnabled<T>(fn: () => Promise<T>): Promise<T> {
+  const { config } = await import('../dist/config.js');
+  const original = config.transform.maxWorkerScale;
+  config.transform.maxWorkerScale = 1;
   await shutdownTransformWorkerPool();
   try {
     return await fn();
@@ -157,6 +173,53 @@ describe('transformHtmlToMarkdown raw content detection', () => {
     assert.equal(result.type, 'rejected');
     assert.ok(result.error instanceof FetchError);
     assert.equal(result.error.statusCode, 499);
+  });
+
+  it('worker stops processing when task is cancelled', async () => {
+    await withWorkerPoolEnabled(async () => {
+      const controller = new AbortController();
+
+      const html = `<html><body>${'<p>hello</p>'.repeat(100000)}</body></html>`;
+      const promise = transformHtmlToMarkdown(html, 'https://example.com', {
+        includeMetadata: false,
+        signal: controller.signal,
+      });
+
+      await new Promise<void>((resolve) => {
+        setTimeout(resolve, 50).unref();
+      });
+      controller.abort();
+
+      const result = await Promise.race([
+        promise.then(
+          () => ({ type: 'resolved' as const }),
+          (error) => ({ type: 'rejected' as const, error })
+        ),
+        new Promise<{ type: 'timeout' }>((resolve) => {
+          setTimeout(() => resolve({ type: 'timeout' }), 200).unref();
+        }),
+      ]);
+
+      assert.notEqual(result.type, 'timeout');
+      assert.equal(result.type, 'rejected');
+      assert.ok(result.error instanceof FetchError);
+      assert.equal(result.error.statusCode, 499);
+    });
+  });
+
+  it('aborts during cleanup stage when signal fires', () => {
+    const controller = new AbortController();
+    controller.abort();
+
+    assert.throws(
+      () =>
+        cleanupMarkdownArtifacts('Some cleanup text', {
+          signal: controller.signal,
+          url: 'https://example.com',
+        }),
+      (error: unknown) =>
+        error instanceof FetchError && error.statusCode === 499
+    );
   });
 
   it('removes dangling tag fragments when input is already truncated', async () => {

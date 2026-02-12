@@ -1103,11 +1103,7 @@ function buildStructuredContent(
   const cacheResourceUri = resolveCacheResourceUri(pipeline.cacheKey);
   const truncated = inlineResult.truncated ?? pipeline.data.truncated;
   let markdown = inlineResult.content;
-  if (
-    pipeline.data.truncated &&
-    !inlineResult.truncated &&
-    typeof markdown === 'string'
-  ) {
+  if (pipeline.data.truncated && typeof markdown === 'string') {
     markdown = appendTruncationMarker(markdown, TRUNCATION_MARKER);
   }
   const { metadata } = pipeline.data;
