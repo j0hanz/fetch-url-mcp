@@ -117,7 +117,9 @@ export const fetchUrlInputSchema = z.strictObject({
     .url({ protocol: /^https?$/i })
     .min(1)
     .max(config.constants.maxUrlLength)
-    .describe('The URL of the webpage to fetch and convert to Markdown'),
+    .describe(
+      `The URL of the webpage to fetch and convert to Markdown. Max ${config.constants.maxUrlLength} characters.`
+    ),
   skipNoiseRemoval: z
     .boolean()
     .optional()
@@ -137,11 +139,11 @@ export const fetchUrlInputSchema = z.strictObject({
     .max(config.constants.maxHtmlSize)
     .optional()
     .describe(
-      'Optional per-call inline markdown limit. 0 means unlimited. If a global inline limit is configured, the lower value is used.'
+      `Optional per-call inline markdown limit (0 to ${config.constants.maxHtmlSize}). 0 means unlimited. If a global inline limit is configured, the lower value is used.`
     ),
 });
 
-const fetchUrlOutputSchema = z.strictObject({
+export const fetchUrlOutputSchema = z.strictObject({
   url: z
     .string()
     .min(1)

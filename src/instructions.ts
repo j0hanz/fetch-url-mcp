@@ -1,7 +1,34 @@
+import { z } from 'zod';
+
 import { config } from './config.js';
-import { FETCH_URL_TOOL_NAME } from './tools.js';
+import {
+  FETCH_URL_TOOL_NAME,
+  fetchUrlInputSchema,
+  fetchUrlOutputSchema,
+} from './tools.js';
+
+function formatSchemaProperties(schema: z.ZodType): string {
+  const jsonSchema = z.toJSONSchema(schema) as {
+    properties?: Record<string, { type?: string; description?: string }>;
+    required?: string[];
+  };
+  const properties = jsonSchema.properties ?? {};
+  const required = jsonSchema.required ?? [];
+
+  return Object.entries(properties)
+    .map(([key, prop]) => {
+      const isRequired = required.includes(key);
+      const type = prop.type ?? 'unknown';
+      const desc = prop.description ?? '';
+      return `  - \`${key}\` (${type}, ${isRequired ? 'required' : 'optional'}): ${desc}`;
+    })
+    .join('\n');
+}
 
 export function buildServerInstructions(): string {
+  const inputSchemaStr = formatSchemaProperties(fetchUrlInputSchema);
+  const outputSchemaStr = formatSchemaProperties(fetchUrlOutputSchema);
+
   return `# FETCH-URL INSTRUCTIONS
 
 Available as resource (\`internal://instructions\`) or prompt (\`get-help\`). Load when unsure about tool usage.
@@ -78,17 +105,10 @@ Available as resource (\`internal://instructions\`) or prompt (\`get-help\`). Lo
 \`${FETCH_URL_TOOL_NAME}\`
 
 - Purpose: Fetch a URL and return Markdown.
-- Input: \`{ url, skipNoiseRemoval?, forceRefresh?, maxInlineChars? }\`
-  - \`url\` (required): Must be \`http://\` or \`https://\`. Max ${config.constants.maxUrlLength} chars.
-  - \`skipNoiseRemoval\` (bool): Keeps navigation, footers, and other elements normally filtered.
-  - \`forceRefresh\` (bool): Bypasses the cache and fetches live.
-  - \`maxInlineChars\` (int, 0–${config.constants.maxHtmlSize}): Per-call inline limit. \`0\` means unlimited. If a global limit is configured, the lower value wins.
-- Output: \`{ url, inputUrl, resolvedUrl, finalUrl, cacheResourceUri, title, metadata, markdown, fromCache, fetchedAt, contentSize, truncated }\`
-  - \`metadata\`: Extracted page metadata — \`title\`, \`description\`, \`author\`, \`image\`, \`favicon\`, \`publishedAt\`, \`modifiedAt\`.
-  - \`markdown\`: The extracted content. May be absent on error.
-  - \`truncated\`: \`true\` when inline content was cut. Full content stored in cache.
-  - \`resolvedUrl\`: The normalized/raw-transformed URL actually fetched (GitHub/GitLab/Bitbucket URLs auto-convert to raw content URLs).
-  - \`finalUrl\`: The URL after following redirects.
+- Input:
+${inputSchemaStr}
+- Output:
+${outputSchemaStr}
 - Side effects: None (read-only, idempotent). Populates the in-memory cache automatically.
 - \`cacheResourceUri\`: Present when cache key generation succeeds; use with \`resources/read\` for full content retrieval.
 - Gotcha: Inline Markdown may be truncated when \`MAX_INLINE_CONTENT_CHARS\` is configured. Check the \`truncated\` field and use the cache resource for full content.
