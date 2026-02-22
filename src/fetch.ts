@@ -357,7 +357,7 @@ class RawUrlTransformer {
       try {
         parsed = new URL(base);
       } catch {
-        parsed = null;
+        // Ignore invalid URLs
       }
     }
     if (!parsed) return null;

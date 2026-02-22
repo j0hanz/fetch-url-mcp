@@ -230,7 +230,7 @@ async function connectStdioServer(
   } catch (error: unknown) {
     const err = error instanceof Error ? error : new Error(String(error));
     throw new Error(`Failed to start stdio server: ${err.message}`, {
-      cause: err,
+      cause: error,
     });
   }
 }
