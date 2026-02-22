@@ -43,7 +43,6 @@
   ],
   "scripts": {
     "clean": "node scripts/tasks.mjs clean",
-    "validate:instructions": "node scripts/tasks.mjs validate:instructions",
     "build": "node scripts/tasks.mjs build",
     "copy:assets": "node scripts/tasks.mjs copy:assets",
     "prepare": "npm run build",
@@ -52,16 +51,16 @@
     "start": "node dist/index.js",
     "format": "prettier --write .",
     "type-check": "node scripts/tasks.mjs type-check",
-    "type-check:tests": "node scripts/tasks.mjs type-check:tests",
     "type-check:diagnostics": "tsc --noEmit --extendedDiagnostics",
     "type-check:trace": "node -e \"require('fs').rmSync('.ts-trace',{recursive:true,force:true})\" && tsc --noEmit --generateTrace .ts-trace",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "test": "node scripts/tasks.mjs test",
+    "test:fast": "node --test --import tsx/esm src/__tests__/**/*.test.ts",
     "test:coverage": "node scripts/tasks.mjs test --coverage",
     "knip": "knip",
     "knip:fix": "knip --fix",
-    "inspector": "npm run build && npx -y @modelcontextprotocol/inspector node dist/index.js --stdio",
+    "inspector": "npm run build && npx -y @modelcontextprotocol/inspector node dist/index.js",
     "prepublishOnly": "npm run lint && npm run type-check && npm run build"
   },
   "dependencies": {
@@ -72,19 +71,18 @@
     "zod": "^4.3.6"
   },
   "devDependencies": {
-    "@eslint/js": "^9.39.2",
+    "@eslint/js": "^10.0.1",
+    "eslint": "^10.0.0",
     "@trivago/prettier-plugin-sort-imports": "^6.0.2",
     "@types/node": "^24",
-    "eslint": "^9.23.2",
     "eslint-config-prettier": "^10.1.8",
     "eslint-plugin-de-morgan": "^2.0.0",
     "eslint-plugin-depend": "^1.4.0",
-    "eslint-plugin-sonarjs": "^3.0.6",
     "eslint-plugin-unused-imports": "^4.4.1",
     "knip": "^5.83.1",
     "prettier": "^3.8.1",
     "typescript": "^5.9.3",
-    "typescript-eslint": "^8.55.0"
+    "typescript-eslint": "^8.56.0"
   },
   "engines": {
     "node": ">=24"
