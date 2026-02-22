@@ -9,6 +9,8 @@ import { buffer as consumeBuffer } from 'node:stream/consumers';
 import { finished, pipeline } from 'node:stream/promises';
 import { createBrotliDecompress, createGunzip, createInflate } from 'node:zlib';
 
+import { Agent, type Dispatcher } from 'undici';
+
 import { config } from './config.js';
 import { createErrorWithCode, FetchError, isSystemError } from './errors.js';
 import {
@@ -559,10 +561,10 @@ class SafeDnsResolver {
     private readonly blockedHostSuffixes: readonly string[]
   ) {}
 
-  async assertSafeHostname(
+  async resolveAndValidate(
     hostname: string,
     signal?: AbortSignal
-  ): Promise<void> {
+  ): Promise<string> {
     const normalizedHostname = normalizeDnsName(hostname);
 
     if (!normalizedHostname) {
@@ -587,7 +589,7 @@ class SafeDnsResolver {
           'EBLOCKED'
         );
       }
-      return;
+      return normalizedHostname;
     }
 
     await this.assertNoBlockedCname(normalizedHostname, signal);
@@ -609,7 +611,7 @@ class SafeDnsResolver {
       createAbortSignalError
     );
 
-    if (addresses.length === 0) {
+    if (addresses.length === 0 || !addresses[0]) {
       throw createErrorWithCode(
         `No DNS results returned for ${normalizedHostname}`,
         'ENODATA'
@@ -630,6 +632,8 @@ class SafeDnsResolver {
         );
       }
     }
+
+    return addresses[0].address;
   }
 
   private isBlockedHostname(hostname: string): boolean {
@@ -1069,7 +1073,7 @@ class MaxBytesError extends Error {
 
 type NormalizeUrl = (urlString: string) => string;
 
-type RedirectPreflight = (url: string, signal?: AbortSignal) => Promise<void>;
+type RedirectPreflight = (url: string, signal?: AbortSignal) => Promise<string>;
 
 class RedirectFollower {
   constructor(
@@ -1094,14 +1098,19 @@ class RedirectFollower {
       const { response, nextUrl } = await this.withRedirectErrorContext(
         currentUrl,
         async () => {
+          let ipAddress: string | undefined;
           if (this.preflight) {
-            await this.preflight(currentUrl, init.signal ?? undefined);
+            ipAddress = await this.preflight(
+              currentUrl,
+              init.signal ?? undefined
+            );
           }
           return this.performFetchCycle(
             currentUrl,
             init,
             redirectLimit,
-            redirectCount
+            redirectCount,
+            ipAddress
           );
         }
       );
@@ -1117,12 +1126,32 @@ class RedirectFollower {
     currentUrl: string,
     init: RequestInit,
     redirectLimit: number,
-    redirectCount: number
+    redirectCount: number,
+    ipAddress?: string
   ): Promise<{ response: Response; nextUrl?: string }> {
-    const response = await this.fetchFn(currentUrl, {
+    const fetchInit: RequestInit & { dispatcher?: Dispatcher } = {
       ...init,
-      redirect: 'manual',
-    });
+      redirect: 'manual' as RequestRedirect,
+    };
+    if (ipAddress) {
+      const agent = new Agent({
+        connect: {
+          lookup: (hostname, options, callback) => {
+            const family = isIP(ipAddress) === 6 ? 6 : 4;
+            if (options.all) {
+              callback(null, [{ address: ipAddress, family }]);
+            } else {
+              callback(null, ipAddress, family);
+            }
+          },
+        },
+        keepAliveTimeout: 0,
+        keepAliveMaxTimeout: 0,
+      });
+      fetchInit.dispatcher = agent;
+    }
+
+    const response = await this.fetchFn(currentUrl, fetchInit);
 
     if (!isRedirectStatus(response.status)) return { response };
 
@@ -1136,9 +1165,21 @@ class RedirectFollower {
     const location = this.getRedirectLocation(response, currentUrl);
     cancelResponseBody(response);
 
+    const nextUrl = this.resolveRedirectTarget(currentUrl, location);
+    const parsedNextUrl = new URL(nextUrl);
+    if (
+      parsedNextUrl.protocol !== 'http:' &&
+      parsedNextUrl.protocol !== 'https:'
+    ) {
+      throw createErrorWithCode(
+        `Unsupported redirect protocol: ${parsedNextUrl.protocol}`,
+        'EUNSUPPORTEDPROTOCOL'
+      );
+    }
+
     return {
       response,
-      nextUrl: this.resolveRedirectTarget(currentUrl, location),
+      nextUrl,
     };
   }
 
@@ -1811,7 +1852,7 @@ async function readAndRecordDecodedResponse(
 
 type FetcherConfig = typeof config.fetcher;
 
-type HostnamePreflight = (url: string, signal?: AbortSignal) => Promise<void>;
+type HostnamePreflight = (url: string, signal?: AbortSignal) => Promise<string>;
 
 function extractHostname(url: string): string {
   try {
@@ -1824,7 +1865,7 @@ function extractHostname(url: string): string {
 function createDnsPreflight(dnsResolver: SafeDnsResolver): HostnamePreflight {
   return async (url: string, signal?: AbortSignal) => {
     const hostname = extractHostname(url);
-    await dnsResolver.assertSafeHostname(hostname, signal);
+    return await dnsResolver.resolveAndValidate(hostname, signal);
   };
 }
 
@@ -1884,8 +1925,6 @@ class HttpFetcher {
         finalUrl: string;
       }
   > {
-    const hostname = extractHostname(normalizedUrl);
-
     const timeoutMs = this.fetcherConfig.timeout;
     const headers = buildHeaders();
     const signal = buildRequestSignal(timeoutMs, options?.signal);
@@ -1894,8 +1933,6 @@ class HttpFetcher {
     const ctx = this.telemetry.start(normalizedUrl, 'GET');
 
     try {
-      await this.dnsResolver.assertSafeHostname(hostname, signal ?? undefined);
-
       const { response, url: finalUrl } =
         await this.redirectFollower.fetchWithRedirects(
           normalizedUrl,
@@ -1905,25 +1942,30 @@ class HttpFetcher {
 
       ctx.url = this.telemetry.redact(finalUrl);
 
-      const payload = await readAndRecordDecodedResponse(
-        response,
-        finalUrl,
-        ctx,
-        this.telemetry,
-        this.reader,
-        this.fetcherConfig.maxContentLength,
-        mode,
-        init.signal ?? undefined
-      );
+      try {
+        const payload = await readAndRecordDecodedResponse(
+          response,
+          finalUrl,
+          ctx,
+          this.telemetry,
+          this.reader,
+          this.fetcherConfig.maxContentLength,
+          mode,
+          init.signal ?? undefined
+        );
 
-      if (payload.kind === 'text') return payload.text;
+        if (payload.kind === 'text') return payload.text;
 
-      return {
-        buffer: payload.buffer,
-        encoding: payload.encoding,
-        truncated: payload.truncated,
-        finalUrl,
-      };
+        return {
+          buffer: payload.buffer,
+          encoding: payload.encoding,
+          truncated: payload.truncated,
+          finalUrl,
+        };
+      } catch (error) {
+        await response.body?.cancel().catch(() => undefined);
+        throw error;
+      }
     } catch (error: unknown) {
       const mapped = mapFetchError(error, normalizedUrl, timeoutMs);
       ctx.url = this.telemetry.redact(mapped.url);
