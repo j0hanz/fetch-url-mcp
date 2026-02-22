@@ -334,6 +334,8 @@ function resolveRelatedTaskMeta(
 
 class ToolProgressReporter implements ProgressReporter {
   private reportQueue: Promise<void> = Promise.resolve();
+  private isTerminal = false;
+  private lastProgress = -1;
 
   private constructor(
     private readonly token: ProgressToken | null,
@@ -365,6 +367,15 @@ class ToolProgressReporter implements ProgressReporter {
   }
 
   async report(progress: number, message: string): Promise<void> {
+    if (this.isTerminal) return;
+    if (progress < this.lastProgress) {
+      progress = this.lastProgress;
+    }
+    this.lastProgress = progress;
+    if (progress >= FETCH_PROGRESS_TOTAL) {
+      this.isTerminal = true;
+    }
+
     if (this.onProgress) {
       try {
         this.onProgress(progress, message);
@@ -1322,13 +1333,13 @@ async function executeFetch(
       void progress.report(3, `fetch-url: ${contextStr} [using cache]`);
     }
 
-    void progress.report(4, `fetch-url: ${contextStr} [success]`);
+    void progress.report(4, `fetch-url: ${contextStr} • success`);
     return buildResponse(pipeline, inlineResult, url);
   } catch (error) {
     const isAbort = error instanceof Error && error.name === 'AbortError';
     void progress.report(
       4,
-      `fetch-url: ${contextStr} [${isAbort ? 'cancelled' : 'failed'}]`
+      `fetch-url: ${contextStr} • ${isAbort ? 'cancelled' : 'failed'}`
     );
     throw error;
   }
