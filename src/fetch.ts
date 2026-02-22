@@ -1866,6 +1866,14 @@ async function readAndRecordDecodedResponse(
 }
 
 type FetcherConfig = typeof config.fetcher;
+interface FetchBufferResult {
+  buffer: Uint8Array;
+  encoding: string;
+  truncated: boolean;
+  finalUrl: string;
+}
+type FetchReadMode = 'text' | 'buffer';
+type FetchReadResult = string | FetchBufferResult;
 
 type HostnamePreflight = (url: string, signal?: AbortSignal) => Promise<string>;
 
@@ -1887,7 +1895,6 @@ function createDnsPreflight(dnsResolver: SafeDnsResolver): HostnamePreflight {
 class HttpFetcher {
   constructor(
     private readonly fetcherConfig: FetcherConfig,
-    private readonly dnsResolver: SafeDnsResolver,
     private readonly redirectFollower: RedirectFollower,
     private readonly reader: ResponseTextReader,
     private readonly telemetry: FetchTelemetry
@@ -1903,12 +1910,7 @@ class HttpFetcher {
   async fetchNormalizedUrlBuffer(
     normalizedUrl: string,
     options?: FetchOptions
-  ): Promise<{
-    buffer: Uint8Array;
-    encoding: string;
-    truncated: boolean;
-    finalUrl: string;
-  }> {
+  ): Promise<FetchBufferResult> {
     return this.fetchNormalized(normalizedUrl, 'buffer', options);
   }
 
@@ -1921,25 +1923,12 @@ class HttpFetcher {
     normalizedUrl: string,
     mode: 'buffer',
     options?: FetchOptions
-  ): Promise<{
-    buffer: Uint8Array;
-    encoding: string;
-    truncated: boolean;
-    finalUrl: string;
-  }>;
+  ): Promise<FetchBufferResult>;
   private async fetchNormalized(
     normalizedUrl: string,
-    mode: 'text' | 'buffer',
+    mode: FetchReadMode,
     options?: FetchOptions
-  ): Promise<
-    | string
-    | {
-        buffer: Uint8Array;
-        encoding: string;
-        truncated: boolean;
-        finalUrl: string;
-      }
-  > {
+  ): Promise<FetchReadResult> {
     const timeoutMs = this.fetcherConfig.timeout;
     const headers = buildHeaders();
     const signal = buildRequestSignal(timeoutMs, options?.signal);
@@ -1956,36 +1945,51 @@ class HttpFetcher {
         );
 
       ctx.url = this.telemetry.redact(finalUrl);
-
-      try {
-        const payload = await readAndRecordDecodedResponse(
-          response,
-          finalUrl,
-          ctx,
-          this.telemetry,
-          this.reader,
-          this.fetcherConfig.maxContentLength,
-          mode,
-          init.signal ?? undefined
-        );
-
-        if (payload.kind === 'text') return payload.text;
-
-        return {
-          buffer: payload.buffer,
-          encoding: payload.encoding,
-          truncated: payload.truncated,
-          finalUrl,
-        };
-      } catch (error) {
-        await response.body?.cancel().catch(() => undefined);
-        throw error;
-      }
+      return await this.readPayload(
+        response,
+        finalUrl,
+        ctx,
+        mode,
+        init.signal ?? undefined
+      );
     } catch (error: unknown) {
       const mapped = mapFetchError(error, normalizedUrl, timeoutMs);
       ctx.url = this.telemetry.redact(mapped.url);
       this.telemetry.recordError(ctx, mapped, mapped.statusCode);
       throw mapped;
+    }
+  }
+
+  private async readPayload(
+    response: Response,
+    finalUrl: string,
+    ctx: FetchTelemetryContext,
+    mode: FetchReadMode,
+    signal?: AbortSignal
+  ): Promise<FetchReadResult> {
+    try {
+      const payload = await readAndRecordDecodedResponse(
+        response,
+        finalUrl,
+        ctx,
+        this.telemetry,
+        this.reader,
+        this.fetcherConfig.maxContentLength,
+        mode,
+        signal
+      );
+
+      if (payload.kind === 'text') return payload.text;
+
+      return {
+        buffer: payload.buffer,
+        encoding: payload.encoding,
+        truncated: payload.truncated,
+        finalUrl,
+      };
+    } catch (error) {
+      await response.body?.cancel().catch(() => undefined);
+      throw error;
     }
   }
 }
@@ -2022,7 +2026,6 @@ const secureRedirectFollower = new RedirectFollower(
 const responseReader = new ResponseTextReader();
 const httpFetcher = new HttpFetcher(
   config.fetcher,
-  dnsResolver,
   secureRedirectFollower,
   responseReader,
   telemetry

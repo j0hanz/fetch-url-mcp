@@ -106,6 +106,18 @@ function buildCacheKey(
     : `${namespace}:${urlHash}`;
 }
 
+function resolveVaryString(
+  vary: Record<string, unknown> | string
+): string | null {
+  if (typeof vary === 'string') return vary;
+
+  try {
+    return stableJsonStringify(vary);
+  } catch {
+    return null;
+  }
+}
+
 export function createCacheKey(
   namespace: string,
   url: string,
@@ -118,16 +130,9 @@ export function createCacheKey(
   let varyHash: string | undefined;
 
   if (vary) {
-    let varyString: string | null;
-    if (typeof vary === 'string') {
-      varyString = vary;
-    } else {
-      try {
-        varyString = stableJsonStringify(vary);
-      } catch {
-        return null;
-      }
-    }
+    const varyString = resolveVaryString(vary);
+    if (varyString === null) return null;
+
     if (varyString) {
       varyHash = createHashFragment(
         varyString,
@@ -365,6 +370,25 @@ function sanitizeString(input: string): string {
     .replace(/(?:^-|-$)/g, '');
 }
 
+function resolveUrlFilenameCandidate(url: string): string | null {
+  const parsed = new URL(url);
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return null;
+
+  const basename = pathPosix.basename(parsed.pathname);
+  if (!basename || basename === 'index') return null;
+
+  const cleaned = basename.replace(FILENAME_RULES.EXTENSIONS, '');
+  const sanitized = sanitizeString(cleaned);
+
+  if (sanitized === 'index') return null;
+  return sanitized || null;
+}
+
+function truncateFilenameBase(name: string, extension: string): string {
+  const maxBase = FILENAME_RULES.MAX_LEN - extension.length;
+  return name.length > maxBase ? name.substring(0, maxBase) : name;
+}
+
 export function generateSafeFilename(
   url: string,
   title?: string,
@@ -373,20 +397,7 @@ export function generateSafeFilename(
 ): string {
   const tryUrl = (): string | null => {
     try {
-      if (!URL.canParse(url)) return null;
-      const parsed = new URL(url);
-      if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:')
-        return null;
-
-      const { pathname } = parsed;
-      const basename = pathPosix.basename(pathname);
-      if (!basename || basename === 'index') return null;
-
-      const cleaned = basename.replace(FILENAME_RULES.EXTENSIONS, '');
-      const sanitized = sanitizeString(cleaned);
-
-      if (sanitized === 'index') return null;
-      return sanitized || null;
+      return resolveUrlFilenameCandidate(url);
     } catch {
       return null;
     }
@@ -403,10 +414,7 @@ export function generateSafeFilename(
     hashFallback?.substring(0, 16) ??
     `download-${Date.now()}`;
 
-  const maxBase = FILENAME_RULES.MAX_LEN - extension.length;
-  const truncated = name.length > maxBase ? name.substring(0, maxBase) : name;
-
-  return `${truncated}${extension}`;
+  return `${truncateFilenameBase(name, extension)}${extension}`;
 }
 
 /* -------------------------------------------------------------------------------------------------

@@ -58,6 +58,7 @@ export function composeCloseHandlers(
 
 const MIN_CLEANUP_INTERVAL_MS = 10_000;
 const MAX_CLEANUP_INTERVAL_MS = 60_000;
+const SESSION_CLOSE_BATCH_SIZE = 10;
 
 function getCleanupIntervalMs(sessionTtlMs: number): number {
   return Math.min(
@@ -88,6 +89,14 @@ function isSessionExpired(
   return now - session.lastSeen > sessionTtlMs;
 }
 
+function chunkArray<T>(items: readonly T[], size: number): T[][] {
+  const chunks: T[][] = [];
+  for (let index = 0; index < items.length; index += size) {
+    chunks.push(items.slice(index, index + size));
+  }
+  return chunks;
+}
+
 class SessionCleanupLoop {
   constructor(
     private readonly store: SessionStore,
@@ -112,32 +121,17 @@ class SessionCleanupLoop {
       const now = getNow();
       const evicted = this.store.evictExpired();
 
-      const closeBatchSize = 10;
-      for (let i = 0; i < evicted.length; i += closeBatchSize) {
-        const batch = evicted.slice(i, i + closeBatchSize);
-
-        await Promise.allSettled(
-          batch.map(async (session) => {
-            unregisterMcpSessionServerByServer(session.server);
-
-            const results = await Promise.allSettled([
-              session.transport.close(),
-              session.server.close(),
-            ]);
-
-            const [transportResult, serverResult] = results;
-            if (transportResult.status === 'rejected') {
-              logWarn('Failed to close expired session transport', {
-                error: formatError(transportResult.reason),
-              });
-            }
-            if (serverResult.status === 'rejected') {
-              logWarn('Failed to close expired session server', {
-                error: formatError(serverResult.reason),
-              });
-            }
-          })
+      for (const batch of chunkArray(evicted, SESSION_CLOSE_BATCH_SIZE)) {
+        const results = await Promise.allSettled(
+          batch.map(async (session) => this.closeExpiredSession(session))
         );
+
+        for (const result of results) {
+          if (result.status !== 'rejected') continue;
+          logWarn('Failed to process expired session cleanup task', {
+            error: formatError(result.reason),
+          });
+        }
 
         if (signal.aborted) return;
       }
@@ -149,6 +143,41 @@ class SessionCleanupLoop {
         });
       }
     }
+  }
+
+  private async closeExpiredSession(session: SessionEntry): Promise<void> {
+    try {
+      unregisterMcpSessionServerByServer(session.server);
+    } catch (error) {
+      logWarn('Failed to unregister session server', {
+        error: formatError(error),
+      });
+    }
+
+    const [transportResult, serverResult] = await Promise.allSettled([
+      session.transport.close(),
+      session.server.close(),
+    ]);
+
+    this.logCloseFailure(
+      'transport',
+      transportResult.status === 'rejected' ? transportResult.reason : null
+    );
+    this.logCloseFailure(
+      'server',
+      serverResult.status === 'rejected' ? serverResult.reason : null
+    );
+  }
+
+  private logCloseFailure(
+    target: 'transport' | 'server',
+    error: unknown
+  ): void {
+    if (error === null) return;
+
+    logWarn(`Failed to close expired session ${target}`, {
+      error: formatError(error),
+    });
   }
 }
 

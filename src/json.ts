@@ -1,4 +1,14 @@
 const MAX_DEPTH = 20;
+const MAX_DEPTH_ERROR = `stableStringify: Max depth (${MAX_DEPTH}) exceeded`;
+const CIRCULAR_ERROR = 'stableStringify: Circular reference detected';
+
+function processChildValue(
+  value: unknown,
+  depth: number,
+  seen: WeakSet<object>
+): unknown {
+  return processValue(value, depth + 1, seen);
+}
 
 function processValue(
   obj: unknown,
@@ -11,29 +21,29 @@ function processValue(
 
   // Depth guard
   if (depth > MAX_DEPTH) {
-    throw new Error(`stableStringify: Max depth (${MAX_DEPTH}) exceeded`);
+    throw new Error(MAX_DEPTH_ERROR);
   }
 
   // Cycle detection (track active recursion stack only).
   if (seen.has(obj)) {
-    throw new Error('stableStringify: Circular reference detected');
+    throw new Error(CIRCULAR_ERROR);
   }
   seen.add(obj);
 
   try {
-    const processChild = (value: unknown): unknown =>
-      processValue(value, depth + 1, seen);
-
     if (Array.isArray(obj)) {
-      return obj.map((item) => processChild(item));
+      return obj.map((item) => processChildValue(item, depth, seen));
     }
 
-    const keys = Object.keys(obj).sort((a, b) => a.localeCompare(b));
+    const keys = Object.keys(obj).sort((a, b) => {
+      if (a === b) return 0;
+      return a < b ? -1 : 1;
+    });
     const record = obj as Record<string, unknown>;
     const sortedObj: Record<string, unknown> = {};
 
     for (const key of keys) {
-      sortedObj[key] = processChild(record[key]);
+      sortedObj[key] = processChildValue(record[key], depth, seen);
     }
 
     return sortedObj;

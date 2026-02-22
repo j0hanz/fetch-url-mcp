@@ -1053,6 +1053,10 @@ function isVerboseHealthRequest(ctx: RequestContext): boolean {
   return normalized === '1' || normalized === 'true';
 }
 
+function isGetHealthRoute(ctx: RequestContext): boolean {
+  return ctx.method === 'GET' && ctx.url.pathname === '/health';
+}
+
 interface HealthResponse {
   status: 'ok';
   version: string;
@@ -1136,21 +1140,22 @@ function sendHealth(
   sendJson(res, 200, buildHealthResponse(store, includeDiagnostics));
 }
 
+function isVerboseHealthRoute(ctx: RequestContext): boolean {
+  return isGetHealthRoute(ctx) && isVerboseHealthRequest(ctx);
+}
+
 function shouldAllowHealthWithoutAuth(ctx: RequestContext): boolean {
-  if (ctx.method !== 'GET' || ctx.url.pathname !== '/health') return false;
-  if (isVerboseHealthRequest(ctx)) return false;
-  return true;
+  return isGetHealthRoute(ctx) && !isVerboseHealthRequest(ctx);
 }
 
 function shouldAllowVerboseHealthWithoutAuth(ctx: RequestContext): boolean {
-  if (ctx.method !== 'GET' || ctx.url.pathname !== '/health') return false;
-  if (!isVerboseHealthRequest(ctx)) return false;
+  if (!isVerboseHealthRoute(ctx)) return false;
   // Local-only deployments can expose verbose diagnostics without auth.
   return !config.security.allowRemote;
 }
 
 function isHealthRoute(ctx: RequestContext): boolean {
-  return ctx.method === 'GET' && ctx.url.pathname === '/health';
+  return isGetHealthRoute(ctx);
 }
 
 function ensureHealthAuthIfNeeded(
@@ -1173,14 +1178,13 @@ function resolveHealthDiagnosticsMode(
   ctx: RequestContext,
   authPresent: boolean
 ): boolean {
-  if (!isHealthRoute(ctx)) return false;
-  if (!isVerboseHealthRequest(ctx)) return false;
+  if (!isVerboseHealthRoute(ctx)) return false;
   if (authPresent) return true;
   return !config.security.allowRemote;
 }
 
 function shouldHandleHealthRoute(ctx: RequestContext): boolean {
-  return ctx.method === 'GET' && ctx.url.pathname === '/health';
+  return isGetHealthRoute(ctx);
 }
 
 function sendHealthRouteResponse(

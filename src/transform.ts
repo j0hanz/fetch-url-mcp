@@ -929,9 +929,10 @@ function buildInlineCodeTranslator(): TranslatorConfig {
 }
 
 function buildCodeTranslator(ctx: unknown): TranslatorConfig {
-  if (!isObject(ctx)) return buildInlineCodeTranslator();
+  const inlineCodeTranslator = buildInlineCodeTranslator();
+  if (!isObject(ctx)) return inlineCodeTranslator;
   const { parent } = ctx as { parent?: unknown };
-  if (!isCodeBlock(parent)) return buildInlineCodeTranslator();
+  if (!isCodeBlock(parent)) return inlineCodeTranslator;
 
   return { noEscape: true, preserveWhitespace: true };
 }
@@ -949,9 +950,13 @@ const LAZY_SRC_ATTRIBUTES = [
   'data-srcset',
 ] as const;
 
+function isDataUri(value: string): boolean {
+  return value.startsWith('data:');
+}
+
 function extractNonDataSrcsetUrl(value: string): string | undefined {
   const url = extractFirstSrcsetUrl(value);
-  return url && !url.startsWith('data:') ? url : undefined;
+  return url && !isDataUri(url) ? url : undefined;
 }
 
 function resolveLazySrc(
@@ -959,7 +964,7 @@ function resolveLazySrc(
 ): string | undefined {
   for (const attr of LAZY_SRC_ATTRIBUTES) {
     const lazy = getAttribute(attr);
-    if (!lazy || lazy.startsWith('data:')) continue;
+    if (!lazy || isDataUri(lazy)) continue;
 
     if (attr === 'data-srcset') {
       const url = extractNonDataSrcsetUrl(lazy);
@@ -978,7 +983,7 @@ function resolveImageSrc(
   if (!getAttribute) return '';
 
   const srcRaw = getAttribute('src') ?? '';
-  if (srcRaw && !srcRaw.startsWith('data:')) return srcRaw;
+  if (srcRaw && !isDataUri(srcRaw)) return srcRaw;
 
   // First check common lazy-loading attributes that may contain non-data URLs before falling back to the native srcset, as some sites use data URIs in lazy attributes while still providing valid URLs in srcset.
   const lazySrc = resolveLazySrc(getAttribute);
@@ -992,7 +997,7 @@ function resolveImageSrc(
   }
 
   // If the only available src is a data URI, we choose to omit it rather than include the raw data in the alt text or URL, as data URIs can be very long and are not useful in Markdown output.
-  if (srcRaw.startsWith('data:')) return '[data URI removed]';
+  if (isDataUri(srcRaw)) return '[data URI removed]';
 
   return '';
 }

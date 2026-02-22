@@ -648,15 +648,14 @@ function buildToolContentBlocks(
 ): ToolContentBlockUnion[] {
   const blocks: ToolContentBlockUnion[] = [buildTextBlock(structuredContent)];
 
-  if (resourceLink) {
-    blocks.push(resourceLink);
-  }
-
-  if (embeddedResource) {
-    blocks.push(embeddedResource);
-  }
+  appendIfPresent(blocks, resourceLink);
+  appendIfPresent(blocks, embeddedResource);
 
   return blocks;
+}
+
+function appendIfPresent<T>(items: T[], value: T | null | undefined): void {
+  if (value !== null && value !== undefined) items.push(value);
 }
 
 /* -------------------------------------------------------------------------------------------------
@@ -669,24 +668,36 @@ interface UrlResolution {
   transformed: boolean;
 }
 
+function createUrlResolution(params: {
+  normalizedUrl: string;
+  originalUrl: string;
+  transformed: boolean;
+}): UrlResolution {
+  return {
+    normalizedUrl: params.normalizedUrl,
+    originalUrl: params.originalUrl,
+    transformed: params.transformed,
+  };
+}
+
 function resolveNormalizedUrl(url: string): UrlResolution {
   const { normalizedUrl: validatedUrl } = normalizeUrl(url);
   const transformedResult = transformToRawUrl(validatedUrl);
   if (!transformedResult.transformed) {
-    return {
+    return createUrlResolution({
       normalizedUrl: validatedUrl,
       originalUrl: validatedUrl,
       transformed: false,
-    };
+    });
   }
 
   // Re-validate transformed URLs so blocked-host and length policies still apply.
   const { normalizedUrl: transformedUrl } = normalizeUrl(transformedResult.url);
-  return {
+  return createUrlResolution({
     normalizedUrl: transformedUrl,
     originalUrl: validatedUrl,
     transformed: true,
-  };
+  });
 }
 
 function logRawUrlTransformation(resolvedUrl: UrlResolution): void {
@@ -698,9 +709,7 @@ function logRawUrlTransformation(resolvedUrl: UrlResolution): void {
 }
 
 function extractTitle(value: unknown): string | undefined {
-  const record = asRecord(value);
-  const title = record ? record['title'] : undefined;
-  return typeof title === 'string' ? title : undefined;
+  return readString(value, 'title');
 }
 
 function logCacheMiss(
@@ -715,6 +724,26 @@ function logCacheMiss(
     url: normalizedUrl,
     ...(error ? { error: getErrorMessage(error) } : {}),
   });
+}
+
+function createCacheHitResult<T>(params: {
+  data: T;
+  normalizedUrl: string;
+  cachedUrl: string;
+  fetchedAt: string;
+  cacheKey: string;
+}): PipelineResult<T> {
+  const finalUrl =
+    params.cachedUrl !== params.normalizedUrl ? params.cachedUrl : undefined;
+
+  return {
+    data: params.data,
+    fromCache: true,
+    url: params.normalizedUrl,
+    ...(finalUrl ? { finalUrl } : {}),
+    fetchedAt: params.fetchedAt,
+    cacheKey: params.cacheKey,
+  };
 }
 
 function attemptCacheRetrieval<T>(params: {
@@ -748,16 +777,14 @@ function attemptCacheRetrieval<T>(params: {
   }
 
   logDebug('Cache hit', { namespace: cacheNamespace, url: normalizedUrl });
-  const finalUrl = cached.url !== normalizedUrl ? cached.url : undefined;
 
-  return {
+  return createCacheHitResult({
     data,
-    fromCache: true,
-    url: normalizedUrl,
-    ...(finalUrl ? { finalUrl } : {}),
+    normalizedUrl,
+    cachedUrl: cached.url,
     fetchedAt: cached.fetchedAt,
     cacheKey,
-  };
+  });
 }
 
 function persistCache<T>(params: {
