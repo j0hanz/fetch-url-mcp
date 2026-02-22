@@ -89,6 +89,7 @@ class IpBlocker {
   constructor(private readonly security: SecurityConfig) {}
 
   isBlockedIp(candidate: string): boolean {
+    if (process.env['ALLOW_LOCAL_FETCH'] === 'true') return false;
     const normalized = candidate.trim().toLowerCase();
     if (!normalized) return false;
     if (this.security.blockedHosts.has(normalized)) return true;
@@ -179,6 +180,7 @@ class UrlNormalizer {
   }
 
   private assertNotBlockedHost(hostname: string): void {
+    if (process.env['ALLOW_LOCAL_FETCH'] === 'true') return;
     if (!this.security.blockedHosts.has(hostname)) return;
     throw createValidationError(
       `Blocked host: ${hostname}. Internal hosts are not allowed`
@@ -186,6 +188,7 @@ class UrlNormalizer {
   }
 
   private assertNotBlockedIp(hostname: string): void {
+    if (process.env['ALLOW_LOCAL_FETCH'] === 'true') return;
     if (!this.ipBlocker.isBlockedIp(hostname)) return;
     throw createValidationError(
       `Blocked IP range: ${hostname}. Private IPs are not allowed`
@@ -583,7 +586,10 @@ class SafeDnsResolver {
     }
 
     if (isIP(normalizedHostname)) {
-      if (this.ipBlocker.isBlockedIp(normalizedHostname)) {
+      if (
+        process.env['ALLOW_LOCAL_FETCH'] !== 'true' &&
+        this.ipBlocker.isBlockedIp(normalizedHostname)
+      ) {
         throw createErrorWithCode(
           `Blocked IP range: ${normalizedHostname}. Private IPs are not allowed`,
           'EBLOCKED'
@@ -625,7 +631,10 @@ class SafeDnsResolver {
           'EINVAL'
         );
       }
-      if (this.ipBlocker.isBlockedIp(addr.address)) {
+      if (
+        process.env['ALLOW_LOCAL_FETCH'] !== 'true' &&
+        this.ipBlocker.isBlockedIp(addr.address)
+      ) {
         throw createErrorWithCode(
           `Blocked IP detected for ${normalizedHostname}`,
           'EBLOCKED'
@@ -637,6 +646,7 @@ class SafeDnsResolver {
   }
 
   private isBlockedHostname(hostname: string): boolean {
+    if (process.env['ALLOW_LOCAL_FETCH'] === 'true') return false;
     if (this.security.blockedHosts.has(hostname)) return true;
     return this.blockedHostSuffixes.some((suffix) => hostname.endsWith(suffix));
   }
@@ -826,7 +836,12 @@ function mapFetchError(
 
   if (!isError(error)) return createUnknownFetchError(url, 'Unexpected error');
 
-  if (!isSystemError(error)) return createNetworkFetchError(url, error.message);
+  if (!isSystemError(error)) {
+    const err = error as { message: string; cause?: unknown };
+    const causeStr =
+      err.cause instanceof Error ? err.cause.message : String(err.cause);
+    return createNetworkFetchError(url, `${err.message}. Cause: ${causeStr}`);
+  }
 
   const { code } = error;
 
@@ -1145,8 +1160,8 @@ class RedirectFollower {
             }
           },
         },
-        keepAliveTimeout: 0,
-        keepAliveMaxTimeout: 0,
+        keepAliveTimeout: 1000,
+        keepAliveMaxTimeout: 1000,
       });
       fetchInit.dispatcher = agent;
     }
