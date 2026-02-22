@@ -329,10 +329,11 @@ function truncateHtml(
   const maxSize = config.constants.maxHtmlSize;
   if (maxSize <= 0) return { html, truncated: false };
 
-  // Fast path: V8 optimized byte length check (no allocation)
-  const byteLength = Buffer.byteLength(html, 'utf8');
-  if (byteLength <= maxSize && !inputTruncated)
-    return { html, truncated: false };
+  if (html.length <= maxSize) {
+    const byteLength = Buffer.byteLength(html, 'utf8');
+    if (byteLength <= maxSize && !inputTruncated)
+      return { html, truncated: false };
+  }
 
   const sliced = html.slice(0, maxSize);
   if (Buffer.byteLength(sliced, 'utf8') <= maxSize) {
@@ -345,7 +346,7 @@ function truncateHtml(
   );
 
   logWarn('HTML content exceeds maximum size, truncating', {
-    size: byteLength,
+    size: Buffer.byteLength(html, 'utf8'),
     maxSize,
     truncatedSize: Buffer.byteLength(content, 'utf8'),
   });
@@ -354,7 +355,9 @@ function truncateHtml(
 
 function willTruncate(html: string): boolean {
   const maxSize = config.constants.maxHtmlSize;
-  return maxSize > 0 && getUtf8ByteLength(html) > maxSize;
+  return (
+    maxSize > 0 && (html.length > maxSize || getUtf8ByteLength(html) > maxSize)
+  );
 }
 
 const HEAD_END_PATTERN = /<\/head\s*>|<body\b/i;

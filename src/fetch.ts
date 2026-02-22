@@ -161,8 +161,7 @@ class UrlNormalizer {
   }
 
   private normalizeHostname(url: URL): string {
-    let hostname = url.hostname.toLowerCase();
-    while (hostname.endsWith('.')) hostname = hostname.slice(0, -1);
+    const hostname = url.hostname.toLowerCase().replace(/\.+$/, '');
 
     if (!hostname) {
       throw createValidationError('URL must have a valid hostname');
@@ -328,21 +327,15 @@ class RawUrlTransformer {
   }
 
   private splitParams(urlString: string): { base: string; hash: string } {
-    try {
-      const url = new URL(urlString);
-      const base = url.origin + url.pathname;
-      return { base, hash: url.hash };
-    } catch {
-      const hashIndex = urlString.indexOf('#');
-      const queryIndex = urlString.indexOf('?');
-      const endIndex = Math.min(
-        queryIndex === -1 ? urlString.length : queryIndex,
-        hashIndex === -1 ? urlString.length : hashIndex
-      );
+    const hashIndex = urlString.indexOf('#');
+    const queryIndex = urlString.indexOf('?');
+    const endIndex = Math.min(
+      queryIndex === -1 ? urlString.length : queryIndex,
+      hashIndex === -1 ? urlString.length : hashIndex
+    );
 
-      const hash = hashIndex !== -1 ? urlString.slice(hashIndex) : '';
-      return { base: urlString.slice(0, endIndex), hash };
-    }
+    const hash = hashIndex !== -1 ? urlString.slice(hashIndex) : '';
+    return { base: urlString.slice(0, endIndex), hash };
   }
 
   private tryTransformWithUrl(
@@ -350,10 +343,9 @@ class RawUrlTransformer {
     hash: string,
     preParsed?: URL
   ): { url: string; platform: string } | null {
-    let parsed: URL | null = null;
-    if (preParsed?.href.startsWith(base)) {
-      parsed = preParsed;
-    } else {
+    let parsed: URL | null = preParsed ?? null;
+
+    if (!parsed) {
       try {
         parsed = new URL(base);
       } catch {
@@ -487,8 +479,7 @@ const DNS_LOOKUP_TIMEOUT_MS = 5000;
 const CNAME_LOOKUP_MAX_DEPTH = 5;
 
 function normalizeDnsName(value: string): string {
-  let normalized = value.trim().toLowerCase();
-  while (normalized.endsWith('.')) normalized = normalized.slice(0, -1);
+  const normalized = value.trim().toLowerCase().replace(/\.+$/, '');
   return normalized;
 }
 
