@@ -243,9 +243,13 @@ This tool is useful for:
 - Extracting main content while removing navigation and ads (noise removal).
 - Caching content to speed up repeated queries.
 
+Key behaviors:
+- GitHub, GitLab, and Bitbucket URLs are auto-transformed to raw content endpoints; check resolvedUrl.
+- If truncated is true in the response, use cacheResourceUri with resources/read to retrieve the full content.
+
 Limitations:
 - Inline output may be truncated when MAX_INLINE_CONTENT_CHARS is set.
-- Does not execute complex client-side JavaScript interactions.
+- Does not execute client-side JavaScript; JS-rendered pages may be incomplete.
 `.trim();
 
 // Specific icon for the fetch-url tool (download cloud / web)
@@ -955,10 +959,15 @@ export async function performSharedFetch<T extends { content: string }>(
 export function createToolErrorResponse(
   message: string,
   url: string,
-  extra?: { statusCode?: number; details?: Record<string, unknown> }
+  extra?: {
+    code?: string;
+    statusCode?: number;
+    details?: Record<string, unknown>;
+  }
 ): ToolErrorResponse {
   const errorContent = {
     error: message,
+    ...(extra?.code ? { code: extra.code } : {}),
     url,
     ...(extra?.statusCode !== undefined
       ? { statusCode: extra.statusCode }
@@ -993,19 +1002,28 @@ function resolveToolErrorMessage(
   return `${fallbackMessage}: Unknown error`;
 }
 
+function resolveToolErrorCode(error: unknown): string {
+  if (isValidationError(error)) return 'VALIDATION_ERROR';
+  if (error instanceof FetchError) return error.code;
+  if (error instanceof Error && error.name === 'AbortError') return 'ABORTED';
+  return 'FETCH_ERROR';
+}
+
 export function handleToolError(
   error: unknown,
   url: string,
   fallbackMessage = 'Operation failed'
 ): ToolErrorResponse {
   const message = resolveToolErrorMessage(error, fallbackMessage);
+  const code = resolveToolErrorCode(error);
   if (error instanceof FetchError) {
     return createToolErrorResponse(message, url, {
+      code,
       statusCode: error.statusCode,
       details: error.details,
     });
   }
-  return createToolErrorResponse(message, url);
+  return createToolErrorResponse(message, url, { code });
 }
 
 /* -------------------------------------------------------------------------------------------------

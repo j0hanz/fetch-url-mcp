@@ -1,34 +1,7 @@
-import { z } from 'zod';
-
 import { config } from './config.js';
-import {
-  FETCH_URL_TOOL_NAME,
-  fetchUrlInputSchema,
-  fetchUrlOutputSchema,
-} from './tools.js';
-
-function formatSchemaProperties(schema: z.ZodType): string {
-  const jsonSchema = z.toJSONSchema(schema) as {
-    properties?: Record<string, { type?: string; description?: string }>;
-    required?: string[];
-  };
-  const properties = jsonSchema.properties ?? {};
-  const required = jsonSchema.required ?? [];
-
-  return Object.entries(properties)
-    .map(([key, prop]) => {
-      const isRequired = required.includes(key);
-      const type = prop.type ?? 'unknown';
-      const desc = prop.description ?? '';
-      return `  - \`${key}\` (${type}, ${isRequired ? 'required' : 'optional'}): ${desc}`;
-    })
-    .join('\n');
-}
+import { FETCH_URL_TOOL_NAME } from './tools.js';
 
 export function buildServerInstructions(): string {
-  const inputSchemaStr = formatSchemaProperties(fetchUrlInputSchema);
-  const outputSchemaStr = formatSchemaProperties(fetchUrlOutputSchema);
-
   return `# FETCH-URL INSTRUCTIONS
 
 Available as resource (\`internal://instructions\`) or prompt (\`get-help\`). Load when unsure about tool usage.
@@ -65,7 +38,7 @@ Available as resource (\`internal://instructions\`) or prompt (\`get-help\`). Lo
 - Task-augmented tool calls are supported for \`${FETCH_URL_TOOL_NAME}\`:
   - These tools declare \`execution.taskSupport: "optional"\` — invoke normally or as a task.
   - Send \`tools/call\` with \`task\` to get a task id.
-  - Poll \`tasks/get\` and fetch results via \`tasks/result\`.
+  - Poll \`tasks/get\` until status is \`completed\` or \`failed\`.
   - Use \`tasks/cancel\` to abort.
   - Task data is stored in memory and cleared on restart.
 
@@ -100,21 +73,18 @@ Available as resource (\`internal://instructions\`) or prompt (\`get-help\`). Lo
 
 ---
 
-## TOOL NUANCES & GOTCHAS
+## TOOL BEHAVIOR & GOTCHAS
 
 \`${FETCH_URL_TOOL_NAME}\`
 
-- Purpose: Fetch a URL and return Markdown.
-- Input:
-${inputSchemaStr}
-- Output:
-${outputSchemaStr}
+- Purpose: Fetch a URL and return Markdown. Input/output schemas are available via MCP tool discovery.
 - Side effects: None (read-only, idempotent). Populates the in-memory cache automatically.
 - \`cacheResourceUri\`: Present when cache key generation succeeds; use with \`resources/read\` for full content retrieval.
-- Gotcha: Inline Markdown may be truncated when \`MAX_INLINE_CONTENT_CHARS\` is configured. Check the \`truncated\` field and use the cache resource for full content.
-- Gotcha: GitHub, GitLab, and Bitbucket URLs are auto-transformed to raw content endpoints. Check \`resolvedUrl\` to see the actual fetched URL.
-- Gotcha: Does not execute client-side JavaScript. Content requiring JS rendering may be incomplete.
-- Limits: HTML capped at ${config.constants.maxHtmlSize / 1024 / 1024} MB (\`MAX_HTML_BYTES\`). Inline content unlimited by default; set \`MAX_INLINE_CONTENT_CHARS\` env var to cap.
+- \`resolvedUrl\`: GitHub, GitLab, and Bitbucket URLs are auto-transformed to raw content endpoints. Check this field to see what was actually fetched.
+- \`truncated\`: When \`true\`, inline \`markdown\` was cut to fit the inline limit. Use \`cacheResourceUri\` with \`resources/read\` for the full content.
+- \`maxInlineChars\`: Set to \`0\` for unlimited inline content (default). When both a per-call and global limit exist, the lower value wins.
+- Does not execute client-side JavaScript. Content requiring JS rendering may be incomplete.
+- HTML capped at ${config.constants.maxHtmlSize / 1024 / 1024} MB (\`MAX_HTML_BYTES\`). Inline content unlimited by default; set \`MAX_INLINE_CONTENT_CHARS\` env var to cap.
 
 ---
 
@@ -131,9 +101,12 @@ ${outputSchemaStr}
 
 ## ERROR HANDLING STRATEGY
 
+Error responses include a \`code\` field for programmatic routing:
+
 - \`VALIDATION_ERROR\`: URL invalid or blocked (private IP, metadata endpoint). Do not retry — fix the URL.
 - \`FETCH_ERROR\`: Network/upstream failure (DNS, connection refused, timeout). Retry once with backoff.
 - \`HTTP_{status}\` (e.g. \`HTTP_404\`, \`HTTP_500\`): Upstream returned an HTTP error. Check \`statusCode\` and \`details\` fields. Retry only for 5xx errors.
+- \`ABORTED\`: Request was cancelled (timeout or task cancellation). Retry if the operation is still needed.
 - \`queue_full\`: Worker pool busy (concurrent transforms). Wait briefly, then retry or use the Task interface.
 `;
 }
