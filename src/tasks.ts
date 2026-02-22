@@ -64,6 +64,7 @@ const DEFAULT_PAGE_SIZE = 50;
 
 const CLEANUP_INTERVAL_MS = 60_000;
 const MAX_CURSOR_LENGTH = 256;
+const RESULT_DELIVERY_GRACE_MS = 10_000;
 
 function isTerminalStatus(status: TaskStatus): boolean {
   return (
@@ -81,6 +82,7 @@ function normalizeTaskTtl(ttl: number | undefined): number {
 
 class TaskManager {
   private tasks = new Map<string, InternalTaskState>();
+  private ownerCounts = new Map<string, number>();
   private waiters = new Map<string, Set<(task: TaskState) => void>>();
 
   constructor() {
@@ -97,19 +99,32 @@ class TaskManager {
 
   private removeExpiredTasks(): void {
     const now = Date.now();
+    const expired: string[] = [];
     for (const [id, task] of this.tasks) {
       if (this.isExpired(task, now)) {
-        this.tasks.delete(id);
+        expired.push(id);
       }
+    }
+    for (const id of expired) {
+      this.removeTask(id);
     }
   }
 
-  private countTasksForOwner(ownerKey: string): number {
-    let count = 0;
-    for (const task of this.tasks.values()) {
-      if (task.ownerKey === ownerKey) count += 1;
+  private removeTask(taskId: string): boolean {
+    const task = this.tasks.get(taskId);
+    if (!task) return false;
+    this.tasks.delete(taskId);
+    const prev = this.ownerCounts.get(task.ownerKey) ?? 0;
+    if (prev > 1) {
+      this.ownerCounts.set(task.ownerKey, prev - 1);
+    } else {
+      this.ownerCounts.delete(task.ownerKey);
     }
-    return count;
+    return true;
+  }
+
+  private countTasksForOwner(ownerKey: string): number {
+    return this.ownerCounts.get(ownerKey) ?? 0;
   }
 
   private assertTaskCapacity(ownerKey: string): void {
@@ -155,6 +170,7 @@ class TaskManager {
     };
 
     this.tasks.set(task.taskId, task);
+    this.ownerCounts.set(ownerKey, (this.ownerCounts.get(ownerKey) ?? 0) + 1);
     return task;
   }
 
@@ -165,7 +181,7 @@ class TaskManager {
     if (ownerKey && task.ownerKey !== ownerKey) return undefined;
 
     if (this.isExpired(task)) {
-      this.tasks.delete(taskId);
+      this.removeTask(taskId);
       return undefined;
     }
 
@@ -240,12 +256,13 @@ class TaskManager {
     const page: TaskState[] = [];
     let currentIndex = 0;
     const now = Date.now();
+    const expired: string[] = [];
 
     for (const task of this.tasks.values()) {
       if (task.ownerKey !== ownerKey) continue;
 
       if (this.isExpired(task, now)) {
-        this.tasks.delete(task.taskId);
+        expired.push(task.taskId);
         continue;
       }
 
@@ -257,6 +274,11 @@ class TaskManager {
       }
       currentIndex++;
     }
+
+    for (const id of expired) {
+      this.removeTask(id);
+    }
+
     return page;
   }
 
@@ -297,7 +319,7 @@ class TaskManager {
     if (ownerKey && task.ownerKey !== ownerKey) return undefined;
 
     if (this.isExpired(task)) {
-      this.tasks.delete(taskId);
+      this.removeTask(taskId);
       return undefined;
     }
 
@@ -396,7 +418,7 @@ class TaskManager {
           settleOnce(() => {
             cleanup();
             removeWaiter();
-            this.tasks.delete(taskId);
+            this.removeTask(taskId);
             resolveInContext(undefined);
           });
         })
@@ -416,6 +438,18 @@ class TaskManager {
 
   private isExpired(task: InternalTaskState, now = Date.now()): boolean {
     return now - task._createdAtMs > task.ttl;
+  }
+
+  shrinkTtlAfterDelivery(taskId: string): void {
+    const task = this.tasks.get(taskId);
+    if (!task) return;
+    if (!isTerminalStatus(task.status)) return;
+
+    const elapsed = Date.now() - task._createdAtMs;
+    const newTtl = elapsed + RESULT_DELIVERY_GRACE_MS;
+    if (newTtl < task.ttl) {
+      task.ttl = newTtl;
+    }
   }
 
   private encodeCursor(index: number): string {

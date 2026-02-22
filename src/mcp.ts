@@ -600,6 +600,8 @@ export function registerTaskHandlers(server: McpServer): void {
 
     if (!task) throwTaskNotFound();
 
+    taskManager.shrinkTtlAfterDelivery(taskId);
+
     if (task.status === 'failed') {
       if (task.error) {
         throw new McpError(
@@ -659,6 +661,7 @@ export function registerTaskHandlers(server: McpServer): void {
       tasks: tasks.map((t) => ({
         taskId: t.taskId,
         status: t.status,
+        ...(t.statusMessage ? { statusMessage: t.statusMessage } : {}),
         createdAt: t.createdAt,
         lastUpdatedAt: t.lastUpdatedAt,
         ttl: t.ttl,
