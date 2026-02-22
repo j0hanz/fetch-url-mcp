@@ -209,7 +209,9 @@ export const fetchUrlOutputSchema = z.strictObject({
     : z.string()
   )
     .optional()
-    .describe('The extracted content in Markdown format'),
+    .describe(
+      'The extracted content in Markdown format. May be truncated if exceeding inline limits; check "truncated" field'
+    ),
   fromCache: z
     .boolean()
     .optional()
@@ -1275,13 +1277,13 @@ async function executeFetch(
       void progress.report(3, `fetch-url: ${contextStr} [using cache]`);
     }
 
-    void progress.report(4, `fetch-url: ${contextStr} • success`);
+    void progress.report(4, `fetch-url: ${contextStr} [success]`);
     return buildResponse(pipeline, inlineResult, url);
   } catch (error) {
     const isAbort = error instanceof Error && error.name === 'AbortError';
     void progress.report(
       4,
-      `fetch-url: ${contextStr} • ${isAbort ? 'cancelled' : 'failed'}`
+      `fetch-url: ${contextStr} [${isAbort ? 'cancelled' : 'failed'}]`
     );
     throw error;
   }
