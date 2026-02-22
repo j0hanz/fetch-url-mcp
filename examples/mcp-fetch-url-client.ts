@@ -118,13 +118,34 @@ function getStructuredContent(result: unknown): StructuredContent | null {
   if (typeof result !== 'object' || result === null) {
     return null;
   }
-  const candidate = result as ToolResult;
+  const candidate = result as ToolResult & {
+    content?: Array<{ type: string; text?: string }>;
+  };
   if (
     candidate.structuredContent &&
     typeof candidate.structuredContent === 'object' &&
     !Array.isArray(candidate.structuredContent)
   ) {
     return candidate.structuredContent;
+  }
+  if (
+    candidate.content &&
+    Array.isArray(candidate.content) &&
+    candidate.content[0]?.type === 'text' &&
+    candidate.content[0].text
+  ) {
+    try {
+      const parsed = JSON.parse(candidate.content[0].text);
+      if (
+        typeof parsed === 'object' &&
+        parsed !== null &&
+        !Array.isArray(parsed)
+      ) {
+        return parsed as StructuredContent;
+      }
+    } catch {
+      // ignore
+    }
   }
   return null;
 }

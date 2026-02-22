@@ -47,17 +47,11 @@ interface ToolContentBlock {
 type ToolContentBlockUnion = ContentBlock;
 
 type ToolErrorResponse = CallToolResult & {
-  structuredContent: {
-    error: string;
-    url: string;
-    statusCode?: number;
-    details?: Record<string, unknown>;
-  };
   isError: true;
 };
 
 type ToolResponseBase = CallToolResult & {
-  structuredContent: Record<string, unknown>;
+  structuredContent?: Record<string, unknown> | undefined;
 };
 
 interface FetchPipelineOptions<T> {
@@ -234,20 +228,6 @@ const fetchUrlOutputSchema = z.strictObject({
     .boolean()
     .optional()
     .describe('Whether the returned markdown was truncated'),
-  error: z
-    .string()
-    .max(2048)
-    .optional()
-    .describe('Error message if the request failed'),
-  statusCode: z
-    .number()
-    .int()
-    .optional()
-    .describe('HTTP status code for failed requests'),
-  details: z
-    .record(z.string(), z.unknown())
-    .optional()
-    .describe('Additional error details when available'),
 });
 
 export const FETCH_URL_TOOL_NAME = 'fetch-url';
@@ -946,7 +926,7 @@ export function createToolErrorResponse(
   url: string,
   extra?: { statusCode?: number; details?: Record<string, unknown> }
 ): ToolErrorResponse {
-  const structuredContent = {
+  const errorContent = {
     error: message,
     url,
     ...(extra?.statusCode !== undefined
@@ -956,8 +936,7 @@ export function createToolErrorResponse(
   };
 
   return {
-    content: [buildTextBlock(structuredContent)],
-    structuredContent,
+    content: [buildTextBlock(errorContent)],
     isError: true,
   };
 }
@@ -1246,7 +1225,10 @@ async function fetchPipeline(
     ...(maxInlineChars !== undefined ? { maxInlineChars } : {}),
     transform: async ({ buffer, encoding, truncated }, normalizedUrl) => {
       if (progress) {
-        void progress.report(3, 'Transforming content');
+        const contextStr = URL.canParse(url)
+          ? new URL(url).hostname
+          : 'unknown';
+        void progress.report(2, `fetch-url: ${contextStr} [transforming]`);
       }
       return markdownTransform(
         { buffer, encoding, ...(truncated ? { truncated } : {}) },
@@ -1272,25 +1254,35 @@ async function executeFetch(
   const signal = buildToolAbortSignal(extra?.signal);
   const progress = createProgressReporter(extra);
 
-  void progress.report(1, 'Validating URL');
+  const contextStr = URL.canParse(url) ? new URL(url).hostname : 'unknown';
+  void progress.report(0, `fetch-url: ${contextStr} [starting]`);
   logDebug('Fetching URL', { url });
 
-  void progress.report(2, 'Fetching content');
-  const { pipeline, inlineResult } = await fetchPipeline(
-    url,
-    signal,
-    progress,
-    input.skipNoiseRemoval,
-    input.forceRefresh,
-    input.maxInlineChars
-  );
+  try {
+    void progress.report(1, `fetch-url: ${contextStr} [fetching]`);
+    const { pipeline, inlineResult } = await fetchPipeline(
+      url,
+      signal,
+      progress,
+      input.skipNoiseRemoval,
+      input.forceRefresh,
+      input.maxInlineChars
+    );
 
-  if (pipeline.fromCache) {
-    void progress.report(3, 'Using cached content');
+    if (pipeline.fromCache) {
+      void progress.report(3, `fetch-url: ${contextStr} [using cache]`);
+    }
+
+    void progress.report(4, `fetch-url: ${contextStr} • success`);
+    return buildResponse(pipeline, inlineResult, url);
+  } catch (error) {
+    const isAbort = error instanceof Error && error.name === 'AbortError';
+    void progress.report(
+      4,
+      `fetch-url: ${contextStr} • ${isAbort ? 'cancelled' : 'failed'}`
+    );
+    throw error;
   }
-
-  void progress.report(4, 'Finalizing response');
-  return buildResponse(pipeline, inlineResult, url);
 }
 
 export async function fetchUrlToolHandler(

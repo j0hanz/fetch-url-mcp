@@ -199,10 +199,22 @@ function isServerResult(value: unknown): value is ServerResult {
 
 function tryReadToolStructuredError(value: unknown): string | undefined {
   if (!isObject(value)) return undefined;
-  const record = value as { structuredContent?: unknown };
-  if (!isObject(record.structuredContent)) return undefined;
-  const structured = record.structuredContent as { error?: unknown };
-  return typeof structured.error === 'string' ? structured.error : undefined;
+  const record = value as { content?: unknown[] };
+  if (!Array.isArray(record.content) || record.content.length === 0)
+    return undefined;
+  const firstBlock = record.content[0];
+  if (
+    !isObject(firstBlock) ||
+    firstBlock['type'] !== 'text' ||
+    typeof firstBlock['text'] !== 'string'
+  )
+    return undefined;
+  try {
+    const parsed = JSON.parse(firstBlock['text']) as { error?: unknown };
+    return typeof parsed.error === 'string' ? parsed.error : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 function resolveTaskOwnerKey(extra?: HandlerExtra): string {

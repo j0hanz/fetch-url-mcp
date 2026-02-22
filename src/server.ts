@@ -1,7 +1,5 @@
 import * as fs from 'node:fs/promises';
-import * as path from 'node:path';
 import process from 'node:process';
-import { fileURLToPath } from 'node:url';
 
 import {
   InMemoryTaskMessageQueue,
@@ -11,7 +9,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 
 import { config } from './config.js';
-import { getErrorMessage } from './errors.js';
+import { buildServerInstructions } from './instructions.js';
 import { abortAllTaskExecutions, registerTaskHandlers } from './mcp.js';
 import { logError, logInfo, setMcpServer } from './observability.js';
 import { registerGetHelpPrompt } from './prompts.js';
@@ -46,22 +44,7 @@ async function getLocalIconInfo(): Promise<IconInfo | undefined> {
   }
 }
 
-const currentDir = path.dirname(fileURLToPath(import.meta.url));
-let serverInstructions = `
-Fetch URL MCP Instructions
-(Detailed instructions failed to load - check logs)
-`;
-try {
-  serverInstructions = await fs.readFile(
-    path.join(currentDir, 'instructions.md'),
-    'utf-8'
-  );
-} catch (error) {
-  console.error(
-    '[WARNING] Failed to load instructions.md:',
-    getErrorMessage(error)
-  );
-}
+const serverInstructions = buildServerInstructions();
 
 type McpServerCapabilities = NonNullable<
   NonNullable<ConstructorParameters<typeof McpServer>[1]>['capabilities']

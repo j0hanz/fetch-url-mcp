@@ -64,7 +64,8 @@ describe('fetchUrlToolHandler', () => {
     const response = await fetchUrlToolHandler({ url: '' });
 
     assert.equal(response.isError, true);
-    assert.deepEqual(response.structuredContent, {
+    const parsed = JSON.parse((response.content[0] as { text: string })?.text);
+    assert.deepEqual(parsed, {
       error: 'URL is required',
       url: '',
     });
@@ -184,7 +185,9 @@ describe('fetchUrlToolHandler', () => {
     );
 
     assert.equal(response.isError, true);
-    const structured = response.structuredContent;
+    const structured = JSON.parse(
+      (response.content[0] as { text: string })?.text
+    );
     assert.ok(structured);
     assert.equal(structured.url, url);
     assert.match(String(structured.error), /cancel|abort/i);
@@ -511,7 +514,9 @@ describe('fetchUrlToolHandler', () => {
       });
 
       assert.equal(response.isError, true);
-      const structured = response.structuredContent;
+      const structured = JSON.parse(
+        (response.content[0] as { text: string })?.text
+      );
       assert.ok(structured);
       assert.match(String(structured.error), /convert|markdown/i);
     } finally {
@@ -542,7 +547,9 @@ describe('fetchUrlToolHandler', () => {
       });
 
       assert.equal(response.isError, true);
-      const structured = response.structuredContent;
+      const structured = JSON.parse(
+        (response.content[0] as { text: string })?.text
+      );
       assert.ok(structured);
       assert.equal(structured.statusCode, 500);
       assert.match(String(structured.error), /binary/i);
@@ -566,7 +573,9 @@ describe('fetchUrlToolHandler', () => {
     });
 
     assert.equal(response.isError, true);
-    const structured = response.structuredContent;
+    const structured = JSON.parse(
+      (response.content[0] as { text: string })?.text
+    );
     assert.ok(structured);
     assert.equal(structured.statusCode, 429);
     const details = structured.details as { retryAfter?: number } | undefined;
