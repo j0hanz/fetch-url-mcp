@@ -528,10 +528,10 @@ function truncateWithMarker(
 
   const safeBoundary = findSafeLinkBoundary(content, maxContentLength);
   if (safeBoundary < maxContentLength) {
-    return `${content.substring(0, safeBoundary)}${marker}`;
+    return `${content.substring(0, safeBoundary)}${marker}`.slice(0, limit);
   }
 
-  return `${tentativeContent}${marker}`;
+  return `${tentativeContent}${marker}`.slice(0, limit);
 }
 
 function appendTruncationMarker(content: string, marker: string): string {

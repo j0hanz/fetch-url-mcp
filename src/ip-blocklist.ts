@@ -47,6 +47,7 @@ const BLOCKED_SUBNETS: readonly BlockedSubnet[] = [
   { subnet: IPV6_FC00, prefix: 7, family: 'ipv6' },
   { subnet: IPV6_FE80, prefix: 10, family: 'ipv6' },
   { subnet: IPV6_FF00, prefix: 8, family: 'ipv6' },
+  { subnet: '::', prefix: 96, family: 'ipv6' },
 ];
 
 export function createDefaultBlockList(): BlockList {

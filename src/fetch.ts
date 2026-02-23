@@ -572,7 +572,9 @@ class SafeDnsResolver {
     hostname: string,
     signal?: AbortSignal
   ): Promise<string> {
-    const normalizedHostname = normalizeDnsName(hostname);
+    const normalizedHostname = normalizeDnsName(
+      hostname.replace(/^\[|\]$/g, '')
+    );
 
     if (!normalizedHostname) {
       throw createErrorWithCode('Invalid hostname provided', 'EINVAL');
@@ -1161,6 +1163,8 @@ class RedirectFollower {
             }
           },
         },
+        pipelining: 1,
+        connections: 1,
         keepAliveTimeout: 1000,
         keepAliveMaxTimeout: 1000,
       });
@@ -1772,9 +1776,11 @@ async function decodeResponseIfNeeded(
     const body = createPumpedStream(first.value, decodedReader);
 
     if (signal) {
-      void finished(decodedNodeStream, { cleanup: true }).finally(() => {
-        clearAbortListener();
-      });
+      void finished(decodedNodeStream, { cleanup: true })
+        .catch(() => {})
+        .finally(() => {
+          clearAbortListener();
+        });
     }
 
     return new Response(body, {
