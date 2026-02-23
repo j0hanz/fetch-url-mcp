@@ -357,68 +357,6 @@ function normalizeNestedListIndentation(text: string): string {
   );
 }
 
-function findNextLine(
-  content: string,
-  lastIndex: number,
-  len: number
-): { line: string; nextIndex: number } {
-  let nextIndex = content.indexOf('\n', lastIndex);
-  let line: string;
-
-  if (nextIndex === -1) {
-    line = content.slice(lastIndex);
-    nextIndex = len;
-  } else {
-    if (nextIndex > lastIndex && content.charCodeAt(nextIndex - 1) === 13) {
-      line = content.slice(lastIndex, nextIndex - 1);
-    } else {
-      line = content.slice(lastIndex, nextIndex);
-    }
-    nextIndex++; // Skip \n
-  }
-  return { line, nextIndex };
-}
-
-function checkFenceStart(line: string): string | null {
-  const match = REGEX.FENCE_START.exec(line);
-  return match ? (match[1] ?? '```') : null;
-}
-
-function isFenceClosure(trimmed: string, marker: string): boolean {
-  return (
-    trimmed.startsWith(marker) && trimmed.slice(marker.length).trim() === ''
-  );
-}
-
-function handleFencedLine(
-  line: string,
-  trimmed: string,
-  fenceMarker: string,
-  segments: string[]
-): string | null {
-  segments.push(line);
-  return isFenceClosure(trimmed, fenceMarker) ? null : fenceMarker;
-}
-
-function handleUnfencedLine(
-  line: string,
-  segments: string[],
-  buffer: string[],
-  options?: CleanupOptions
-): { fenceMarker: string | null; buffer: string[] } {
-  const newMarker = checkFenceStart(line);
-  if (!newMarker) {
-    buffer.push(line);
-    return { fenceMarker: null, buffer };
-  }
-  if (buffer.length > 0) {
-    segments.push(processTextBuffer(buffer, options));
-    buffer = [];
-  }
-  segments.push(line);
-  return { fenceMarker: newMarker, buffer };
-}
-
 export function cleanupMarkdownArtifacts(
   content: string,
   options?: CleanupOptions
@@ -435,18 +373,41 @@ export function cleanupMarkdownArtifacts(
   let buffer: string[] = [];
 
   while (lastIndex < len) {
-    const { line, nextIndex } = findNextLine(content, lastIndex, len);
+    let nextIndex = content.indexOf('\n', lastIndex);
+    let line: string;
+
+    if (nextIndex === -1) {
+      line = content.slice(lastIndex);
+      nextIndex = len;
+    } else {
+      if (nextIndex > lastIndex && content.charCodeAt(nextIndex - 1) === 13) {
+        line = content.slice(lastIndex, nextIndex - 1);
+      } else {
+        line = content.slice(lastIndex, nextIndex);
+      }
+      nextIndex++; // Skip \n
+    }
+
     const trimmed = line.trimStart();
 
     if (fenceMarker) {
-      fenceMarker = handleFencedLine(line, trimmed, fenceMarker, segments);
+      segments.push(line);
+      if (trimmed.startsWith(fenceMarker) && trimmed.slice(fenceMarker.length).trim() === '') {
+        fenceMarker = null;
+      }
     } else {
-      ({ fenceMarker, buffer } = handleUnfencedLine(
-        line,
-        segments,
-        buffer,
-        options
-      ));
+      const match = REGEX.FENCE_START.exec(line);
+      const newMarker = match ? (match[1] ?? '```') : null;
+      if (!newMarker) {
+        buffer.push(line);
+      } else {
+        if (buffer.length > 0) {
+          segments.push(processTextBuffer(buffer, options));
+          buffer = [];
+        }
+        segments.push(line);
+        fenceMarker = newMarker;
+      }
     }
 
     lastIndex = nextIndex;

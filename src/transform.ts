@@ -1415,7 +1415,6 @@ function resolveRelativeUrls(markdown: string, baseUrl: string): string {
 
   if (!markdown) return markdown;
 
-  const lines = markdown.split('\n');
   let output = '';
   let buffer = '';
   let fenceMarker: string | null = null;
@@ -1426,10 +1425,29 @@ function resolveRelativeUrls(markdown: string, baseUrl: string): string {
     buffer = '';
   };
 
-  for (let i = 0; i < lines.length; i += 1) {
-    const line = lines[i] ?? '';
+  const len = markdown.length;
+  let lastIndex = 0;
+
+  while (lastIndex < len) {
+    let nextIndex = markdown.indexOf('\n', lastIndex);
+    let line: string;
+    let lineWithNewline: string;
+
+    if (nextIndex === -1) {
+      line = markdown.slice(lastIndex);
+      lineWithNewline = line;
+      nextIndex = len;
+    } else {
+      if (nextIndex > lastIndex && markdown.charCodeAt(nextIndex - 1) === 13) {
+        line = markdown.slice(lastIndex, nextIndex - 1);
+      } else {
+        line = markdown.slice(lastIndex, nextIndex);
+      }
+      lineWithNewline = markdown.slice(lastIndex, nextIndex + 1);
+      nextIndex++; // Skip \n
+    }
+
     const trimmed = line.trimStart();
-    const lineWithNewline = i < lines.length - 1 ? `${line}\n` : line;
 
     if (fenceMarker) {
       output += lineWithNewline;
@@ -1439,18 +1457,18 @@ function resolveRelativeUrls(markdown: string, baseUrl: string): string {
       ) {
         fenceMarker = null;
       }
-      continue;
+    } else {
+      const fenceMatch = FENCE_LINE_PATTERN.exec(line);
+      if (fenceMatch?.[1]) {
+        flushBuffer();
+        output += lineWithNewline;
+        fenceMarker = fenceMatch[1];
+      } else {
+        buffer += lineWithNewline;
+      }
     }
 
-    const fenceMatch = FENCE_LINE_PATTERN.exec(line);
-    if (fenceMatch?.[1]) {
-      flushBuffer();
-      output += lineWithNewline;
-      fenceMarker = fenceMatch[1];
-      continue;
-    }
-
-    buffer += lineWithNewline;
+    lastIndex = nextIndex;
   }
 
   flushBuffer();
