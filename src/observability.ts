@@ -144,11 +144,15 @@ function formatLogEntry(
   return `[${createTimestamp()}] ${level.toUpperCase()}: ${message}${formatMetadata(meta)}`;
 }
 
+const LEVEL_PRIORITY: Readonly<Record<LogLevel, number>> = {
+  debug: 0,
+  info: 1,
+  warn: 2,
+  error: 3,
+};
+
 function shouldLog(level: LogLevel): boolean {
-  // Debug logs only when LOG_LEVEL=debug
-  if (level === 'debug') return isDebugEnabled();
-  // All other levels always log
-  return true;
+  return LEVEL_PRIORITY[level] >= LEVEL_PRIORITY[config.logging.level];
 }
 
 function mapToMcpLevel(

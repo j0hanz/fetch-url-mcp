@@ -250,11 +250,12 @@ class TaskManager {
 
   private collectPage(
     ownerKey: string,
-    startIndex: number,
+    anchorTaskId: string | null,
     pageSize: number
   ): TaskState[] {
     const page: TaskState[] = [];
-    let currentIndex = 0;
+    let collecting = anchorTaskId === null;
+    let anchorFound = anchorTaskId === null;
     const now = Date.now();
     const expired: string[] = [];
 
@@ -266,17 +267,27 @@ class TaskManager {
         continue;
       }
 
-      if (currentIndex >= startIndex) {
-        page.push(task);
-        if (page.length > pageSize) {
-          break;
+      if (!collecting) {
+        if (task.taskId === anchorTaskId) {
+          anchorFound = true;
+          collecting = true;
         }
+        continue;
       }
-      currentIndex++;
+
+      page.push(task);
+      if (page.length > pageSize) break;
     }
 
     for (const id of expired) {
       this.removeTask(id);
+    }
+
+    // Anchor task expired between pages; return empty list so callers stop
+    // pagination cleanly. Silently falling back to page 0 risks infinite loops
+    // for automated clients that always follow nextCursor.
+    if (!anchorFound) {
+      return [];
     }
 
     return page;
@@ -289,21 +300,26 @@ class TaskManager {
     const { ownerKey, cursor, limit } = options;
 
     const pageSize = limit && limit > 0 ? limit : DEFAULT_PAGE_SIZE;
-    const startIndex = cursor ? this.decodeCursor(cursor) : 0;
-
-    if (startIndex === null) {
-      throw new McpError(ErrorCode.InvalidParams, 'Invalid cursor');
+    let anchorTaskId: string | null = null;
+    if (cursor !== undefined) {
+      const decoded = this.decodeCursor(cursor);
+      if (decoded === null) {
+        throw new McpError(ErrorCode.InvalidParams, 'Invalid cursor');
+      }
+      ({ anchorTaskId } = decoded);
     }
 
-    const page = this.collectPage(ownerKey, startIndex, pageSize);
+    const page = this.collectPage(ownerKey, anchorTaskId, pageSize);
     const hasMore = page.length > pageSize;
     if (hasMore) {
       page.pop();
     }
 
-    const nextCursor = hasMore
-      ? this.encodeCursor(startIndex + page.length)
-      : undefined;
+    const lastTask = page.at(-1);
+    const nextCursor =
+      hasMore && lastTask !== undefined
+        ? this.encodeCursor(lastTask.taskId)
+        : undefined;
 
     return nextCursor ? { tasks: page, nextCursor } : { tasks: page };
   }
@@ -452,22 +468,17 @@ class TaskManager {
     }
   }
 
-  private encodeCursor(index: number): string {
-    return Buffer.from(String(index), 'utf8').toString('base64url');
+  private encodeCursor(taskId: string): string {
+    return Buffer.from(taskId, 'utf8').toString('base64url');
   }
 
-  private decodeCursor(cursor: string): number | null {
+  private decodeCursor(cursor: string): { anchorTaskId: string } | null {
     try {
       if (!isValidBase64UrlCursor(cursor)) return null;
-
       const decoded = Buffer.from(cursor, 'base64url').toString('utf8');
-
-      if (!/^\d+$/u.test(decoded)) return null;
-
-      const value = Number.parseInt(decoded, 10);
-      if (!Number.isFinite(value) || value < 0) return null;
-
-      return value;
+      // Basic sanity: non-empty and plausible taskId length (UUIDs are 36 chars)
+      if (!decoded || decoded.length > 128) return null;
+      return { anchorTaskId: decoded };
     } catch {
       return null;
     }

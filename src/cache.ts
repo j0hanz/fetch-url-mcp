@@ -1,6 +1,4 @@
 import { EventEmitter } from 'node:events';
-import type { ServerResponse } from 'node:http';
-import { posix as pathPosix } from 'node:path';
 
 import { z } from 'zod';
 
@@ -13,13 +11,6 @@ import { logWarn } from './observability.js';
 /* -------------------------------------------------------------------------------------------------
  * Schemas & Types
  * ------------------------------------------------------------------------------------------------- */
-
-const CacheNamespace = z.literal('markdown');
-const HashString = z
-  .string()
-  .regex(/^[a-f0-9.]+$/i)
-  .min(8)
-  .max(64);
 
 const CachedPayloadSchema = z.strictObject({
   content: z.string().optional(),
@@ -221,7 +212,9 @@ class InMemoryCacheStore {
     const now = Date.now();
     if (this.isExpired(entry, now)) {
       this.delete(cacheKey);
-      this.notify(cacheKey, true);
+      // listChanged=false: lazy eviction on read is silent — only writes change
+      // the list. Clients must not rely on list-changed events from reads.
+      this.notify(cacheKey, false);
       return undefined;
     }
 
@@ -310,6 +303,19 @@ class InMemoryCacheStore {
     this.updateEmitter.emit('update', { cacheKey, ...parts, listChanged });
   }
 
+  /**
+   * Read an entry without updating its LRU position.
+   * Use this for metadata access (e.g. resource listing) to avoid polluting the
+   * eviction order; expired entries are treated as absent but not evicted here.
+   */
+  peek(cacheKey: string | null): CacheEntry | undefined {
+    if (!cacheKey) return undefined;
+    const entry = this.entries.get(cacheKey);
+    if (!entry) return undefined;
+    if (this.isExpired(entry)) return undefined;
+    return entry;
+  }
+
   private logError(message: string, cacheKey: string, error: unknown): void {
     logWarn(message, {
       key: cacheKey.length > 100 ? cacheKey.slice(0, 100) : cacheKey,
@@ -346,133 +352,20 @@ export function keys(): readonly string[] {
   return store.keys();
 }
 
+/**
+ * Return lightweight metadata (url and optional page title) for a cache entry.
+ * Returns `undefined` if the key is not found or cache is disabled.
+ */
+export function getEntryMeta(
+  cacheKey: string
+): { url: string; title?: string } | undefined {
+  const entry = store.peek(cacheKey);
+  if (!entry) return undefined;
+  return entry.title !== undefined
+    ? { url: entry.url, title: entry.title }
+    : { url: entry.url };
+}
+
 export function isEnabled(): boolean {
   return store.isEnabled();
-}
-
-/* -------------------------------------------------------------------------------------------------
- * Utils: Filename Logic
- * ------------------------------------------------------------------------------------------------- */
-
-const FILENAME_RULES = {
-  MAX_LEN: 200,
-  UNSAFE_CHARS: /[<>:"/\\|?*\p{C}]/gu,
-  WHITESPACE: /\s+/g,
-  EXTENSIONS: /\.(html?|php|aspx?|jsp)$/i,
-} as const;
-
-function sanitizeString(input: string): string {
-  return input
-    .toLowerCase()
-    .replace(FILENAME_RULES.UNSAFE_CHARS, '')
-    .replace(FILENAME_RULES.WHITESPACE, '-')
-    .replace(/-+/g, '-')
-    .replace(/(?:^-|-$)/g, '');
-}
-
-function resolveUrlFilenameCandidate(url: string): string | null {
-  const parsed = new URL(url);
-  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return null;
-
-  const basename = pathPosix.basename(parsed.pathname);
-  if (!basename || basename === 'index') return null;
-
-  const cleaned = basename.replace(FILENAME_RULES.EXTENSIONS, '');
-  const sanitized = sanitizeString(cleaned);
-
-  if (sanitized === 'index') return null;
-  return sanitized || null;
-}
-
-function truncateFilenameBase(name: string, extension: string): string {
-  const maxBase = FILENAME_RULES.MAX_LEN - extension.length;
-  return name.length > maxBase ? name.substring(0, maxBase) : name;
-}
-
-export function generateSafeFilename(
-  url: string,
-  title?: string,
-  hashFallback?: string,
-  extension = '.md'
-): string {
-  const tryUrl = (): string | null => {
-    try {
-      return resolveUrlFilenameCandidate(url);
-    } catch {
-      return null;
-    }
-  };
-
-  const tryTitle = (): string | null => {
-    if (!title) return null;
-    return sanitizeString(title) || null;
-  };
-
-  const name =
-    tryUrl() ??
-    tryTitle() ??
-    hashFallback?.substring(0, 16) ??
-    `download-${Date.now()}`;
-
-  return `${truncateFilenameBase(name, extension)}${extension}`;
-}
-
-/* -------------------------------------------------------------------------------------------------
- * Adapter: Download Handler
- * ------------------------------------------------------------------------------------------------- */
-
-const DownloadParamsSchema = z.strictObject({
-  namespace: CacheNamespace,
-  hash: HashString,
-});
-
-export function handleDownload(
-  res: ServerResponse,
-  namespace: string,
-  hash: string
-): void {
-  const respond = (status: number, msg: string, code: string): void => {
-    res.writeHead(status, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ error: msg, code }));
-  };
-
-  const parsed = DownloadParamsSchema.safeParse({ namespace, hash });
-  if (!parsed.success) {
-    respond(400, 'Invalid namespace or hash', 'BAD_REQUEST');
-    return;
-  }
-
-  const cacheKey = `${parsed.data.namespace}:${parsed.data.hash}`;
-  const entry = store.get(cacheKey, { force: true });
-
-  if (!entry) {
-    respond(404, 'Not found or expired', 'NOT_FOUND');
-    return;
-  }
-
-  const payload = parseCachedPayload(entry.content);
-  const content = payload ? resolveCachedPayloadContent(payload) : null;
-
-  if (!content) {
-    respond(404, 'Content missing', 'NOT_FOUND');
-    return;
-  }
-
-  const fileName = generateSafeFilename(
-    entry.url,
-    payload?.title,
-    parsed.data.hash
-  );
-
-  // Safe header generation
-  const encoded = encodeURIComponent(fileName).replace(/'/g, '%27');
-
-  res.setHeader('Content-Type', 'text/markdown; charset=utf-8');
-  res.setHeader(
-    'Content-Disposition',
-    `attachment; filename="${fileName}"; filename*=UTF-8''${encoded}`
-  );
-  res.setHeader('Cache-Control', `private, max-age=${config.cache.ttl}`);
-  res.setHeader('X-Content-Type-Options', 'nosniff');
-  res.end(content);
 }

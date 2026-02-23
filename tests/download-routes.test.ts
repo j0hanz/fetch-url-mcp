@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 import * as cache from '../dist/cache.js';
-import { handleDownload } from '../dist/cache.js';
+import { handleDownload } from '../dist/download.js';
 
 type ResponseState = {
   headers: Record<string, string>;

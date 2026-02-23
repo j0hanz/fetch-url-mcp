@@ -149,6 +149,25 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return isObject(value);
 }
 
+/** Strip keys whose value is `undefined`, returning an object with only the
+ * present keys. Return type correctly omits the `undefined` union so the result
+ * is compatible with `exactOptionalPropertyTypes`. */
+type Compacted<T extends object> = {
+  [K in keyof T as Exclude<T[K], undefined> extends never
+    ? never
+    : K]?: Exclude<T[K], undefined>;
+};
+
+function compact<T extends object>(obj: T): Compacted<T> {
+  const result: Compacted<T> = {};
+  for (const key of Object.keys(obj) as (keyof T)[]) {
+    if (obj[key] !== undefined) {
+      (result as Record<string, unknown>)[key as string] = obj[key];
+    }
+  }
+  return result;
+}
+
 function normalizeSendNotification(
   sendNotification: unknown
 ): ((notification: ProgressNotification) => Promise<void>) | undefined {
@@ -257,10 +276,7 @@ function throwTaskNotFound(): never {
 
 function requireFetchUrlToolName(name: string): void {
   if (name === FETCH_URL_TOOL_NAME) return;
-  throw new McpError(
-    ErrorCode.MethodNotFound,
-    `Tool '${name}' does not support task execution`
-  );
+  throw new McpError(ErrorCode.MethodNotFound, `Unknown tool: '${name}'`);
 }
 
 function buildRelatedTaskMeta(
@@ -413,7 +429,7 @@ async function runFetchTaskExecution(params: {
           signal: controller.signal,
           requestId: taskId, // Correlation
           _meta: relatedMeta,
-          ...(sendNotification ? { sendNotification } : {}),
+          ...compact({ sendNotification }),
           onProgress: (_progress, message) => {
             updateWorkingTaskStatus(server, taskId, message);
           },
@@ -482,10 +498,10 @@ function handleTaskToolCall(
     server,
     taskId: task.taskId,
     args: validArgs,
-    ...(params._meta ? { meta: params._meta } : {}),
-    ...(context.sendNotification
-      ? { sendNotification: context.sendNotification }
-      : {}),
+    ...compact({
+      meta: params._meta,
+      sendNotification: context.sendNotification,
+    }),
   });
 
   return buildCreateTaskResult({

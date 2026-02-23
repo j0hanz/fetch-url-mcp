@@ -15,6 +15,7 @@ import type {
 
 import * as cache from './cache.js';
 import { config } from './config.js';
+import { generateSafeFilename } from './download.js';
 import { FetchError, getErrorMessage, isSystemError } from './errors.js';
 import {
   fetchNormalizedUrlBuffer,
@@ -620,7 +621,7 @@ function buildEmbeddedResource(
 ): ToolContentBlockUnion | null {
   if (!content) return null;
 
-  const filename = cache.generateSafeFilename(url, title, undefined, '.md');
+  const filename = generateSafeFilename(url, title, undefined, '.md');
   const uri = new URL(filename, 'file:///').href;
 
   const resource: TextResourceContents = {
@@ -916,7 +917,7 @@ export async function executeFetchPipeline<T>(
  * Shared fetch helper
  * ------------------------------------------------------------------------------------------------- */
 
-interface SharedFetchOptions<T extends { content: string }> {
+interface SharedFetchOptions {
   readonly url: string;
   readonly signal?: AbortSignal;
   readonly cacheVary?: Record<string, unknown> | string;
@@ -925,25 +926,25 @@ interface SharedFetchOptions<T extends { content: string }> {
   readonly transform: (
     input: { buffer: Uint8Array; encoding: string; truncated?: boolean },
     normalizedUrl: string
-  ) => T | Promise<T>;
-  readonly serialize?: (result: T) => string;
-  readonly deserialize?: (cached: string) => T | undefined;
+  ) => MarkdownPipelineResult | Promise<MarkdownPipelineResult>;
+  readonly serialize?: (result: MarkdownPipelineResult) => string;
+  readonly deserialize?: (cached: string) => MarkdownPipelineResult | undefined;
 }
 
 interface SharedFetchDeps {
   readonly executeFetchPipeline?: typeof executeFetchPipeline;
 }
 
-export async function performSharedFetch<T extends { content: string }>(
-  options: SharedFetchOptions<T>,
+export async function performSharedFetch(
+  options: SharedFetchOptions,
   deps: SharedFetchDeps = {}
 ): Promise<{
-  pipeline: PipelineResult<T>;
+  pipeline: PipelineResult<MarkdownPipelineResult>;
   inlineResult: InlineResult;
 }> {
   const executePipeline = deps.executeFetchPipeline ?? executeFetchPipeline;
 
-  const pipelineOptions: FetchPipelineOptions<T> = {
+  const pipelineOptions: FetchPipelineOptions<MarkdownPipelineResult> = {
     url: options.url,
     cacheNamespace: 'markdown',
     ...withSignal(options.signal),
@@ -954,7 +955,7 @@ export async function performSharedFetch<T extends { content: string }>(
     ...(options.deserialize ? { deserialize: options.deserialize } : {}),
   };
 
-  const pipeline = await executePipeline<T>(pipelineOptions);
+  const pipeline = await executePipeline(pipelineOptions);
   const inlineResult = applyInlineContentLimit(
     pipeline.data.content,
     options.maxInlineChars
@@ -1277,7 +1278,7 @@ async function fetchPipeline(
   pipeline: PipelineResult<MarkdownPipelineResult>;
   inlineResult: InlineResult;
 }> {
-  return performSharedFetch<MarkdownPipelineResult>({
+  return performSharedFetch({
     url,
     ...withSignal(signal),
     ...(skipNoiseRemoval ? { cacheVary: { skipNoiseRemoval: true } } : {}),

@@ -30,9 +30,10 @@ import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/
 import type { Transport } from '@modelcontextprotocol/sdk/shared/transport.js';
 import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
 
-import { keys as cacheKeys, handleDownload } from './cache.js';
+import { keys as cacheKeys } from './cache.js';
 import { config, enableHttpMode, serverVersion } from './config.js';
 import { hmacSha256Hex, timingSafeEqualUtf8 } from './crypto.js';
+import { handleDownload } from './download.js';
 import { normalizeHost } from './host-normalization.js';
 import {
   createDefaultBlockList,

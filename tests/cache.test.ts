@@ -3,6 +3,7 @@ import { describe, it } from 'node:test';
 
 import * as cache from '../dist/cache.js';
 import { config } from '../dist/config.js';
+import { generateSafeFilename } from '../dist/download.js';
 
 let keyCounter = 0;
 
@@ -254,7 +255,7 @@ function registerCacheKeyParsingTest(): void {
 function registerFilenameGenerationTest(): void {
   it('generates safe filename from URL path', () => {
     const url = 'https://example.com/docs/guide.html';
-    const filename = cache.generateSafeFilename(url);
+    const filename = generateSafeFilename(url);
 
     assert.ok(filename, 'Should generate filename');
     assert.ok(filename.endsWith('.md'), 'Should have .md extension');
@@ -264,7 +265,7 @@ function registerFilenameGenerationTest(): void {
   it('generates safe filename from title when URL has no useful path', () => {
     const url = 'https://example.com/';
     const title = 'My Great Article';
-    const filename = cache.generateSafeFilename(url, title);
+    const filename = generateSafeFilename(url, title);
 
     assert.ok(filename, 'Should generate filename');
     assert.ok(filename.endsWith('.md'), 'Should have .md extension');
@@ -277,7 +278,7 @@ function registerFilenameGenerationTest(): void {
   it('uses hash fallback when URL and title are not useful', () => {
     const url = 'https://example.com/';
     const hashFallback = 'abc123def456789';
-    const filename = cache.generateSafeFilename(url, undefined, hashFallback);
+    const filename = generateSafeFilename(url, undefined, hashFallback);
 
     assert.ok(filename, 'Should generate filename');
     assert.ok(filename.includes('abc123def456'), 'Should include hash prefix');
@@ -286,7 +287,7 @@ function registerFilenameGenerationTest(): void {
 
   it('generates timestamped filename when no context available', () => {
     const url = 'https://example.com/';
-    const filename = cache.generateSafeFilename(url);
+    const filename = generateSafeFilename(url);
 
     assert.ok(filename, 'Should generate filename');
     assert.ok(filename.startsWith('download-'), 'Should have fallback prefix');
@@ -296,7 +297,7 @@ function registerFilenameGenerationTest(): void {
   it('sanitizes unsafe characters from filename', () => {
     const url = 'https://example.com/';
     const title = 'Title <with> unsafe:chars|and*more?';
-    const filename = cache.generateSafeFilename(url, title);
+    const filename = generateSafeFilename(url, title);
 
     assert.ok(!filename.includes('<'), 'Should remove < character');
     assert.ok(!filename.includes('>'), 'Should remove > character');
@@ -309,7 +310,7 @@ function registerFilenameGenerationTest(): void {
   it('truncates very long filenames', () => {
     const url = 'https://example.com/';
     const longTitle = 'a'.repeat(300);
-    const filename = cache.generateSafeFilename(url, longTitle);
+    const filename = generateSafeFilename(url, longTitle);
 
     assert.ok(
       filename.length <= 204,
@@ -320,12 +321,7 @@ function registerFilenameGenerationTest(): void {
 
   it('respects custom extension parameter', () => {
     const url = 'https://example.com/docs/readme.html';
-    const filename = cache.generateSafeFilename(
-      url,
-      undefined,
-      undefined,
-      '.txt'
-    );
+    const filename = generateSafeFilename(url, undefined, undefined, '.txt');
 
     assert.ok(filename.endsWith('.txt'), 'Should use custom extension');
     assert.ok(!filename.endsWith('.md'), 'Should not use default extension');
@@ -341,7 +337,7 @@ function registerFilenameGenerationTest(): void {
     ];
 
     testUrls.forEach((url) => {
-      const filename = cache.generateSafeFilename(url);
+      const filename = generateSafeFilename(url);
       assert.ok(filename.includes('page'), 'Should extract page name');
       assert.ok(!filename.includes('.html'), 'Should strip .html extension');
       assert.ok(!filename.includes('.php'), 'Should strip .php extension');
@@ -350,7 +346,7 @@ function registerFilenameGenerationTest(): void {
 
   it('ignores "index" as filename', () => {
     const url = 'https://example.com/index.html';
-    const filename = cache.generateSafeFilename(url);
+    const filename = generateSafeFilename(url);
 
     // Should fall back to timestamp since "index" is ignored
     assert.ok(

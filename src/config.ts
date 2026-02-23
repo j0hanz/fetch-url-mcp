@@ -448,29 +448,6 @@ const BLOCKED_HOSTS = new Set<string>([
   'instance-data',
 ]);
 
-const BLOCKED_IP_PATTERNS: readonly RegExp[] = [
-  /^10\./,
-  /^172\.(1[6-9]|2\d|3[01])\./,
-  /^192\.168\./,
-  /^127\./,
-  /^0\./,
-  /^169\.254\./,
-  /^100\.64\./,
-  /^fc00:/i,
-  /^fd00:/i,
-  /^fe80:/i,
-  /^::ffff:127\./,
-  /^::ffff:10\./,
-  /^::ffff:172\.(1[6-9]|2\d|3[01])\./,
-  /^::ffff:192\.168\./,
-  /^::ffff:169\.254\./,
-];
-
-const BLOCKED_IP_PATTERN =
-  /^(?:10\.|172\.(?:1[6-9]|2\d|3[01])\.|192\.168\.|127\.|0\.|169\.254\.|100\.64\.|fc00:|fd00:|fe80:)/i;
-const BLOCKED_IPV4_MAPPED_PATTERN =
-  /^::ffff:(?:127\.|10\.|172\.(?:1[6-9]|2\d|3[01])\.|192\.168\.|169\.254\.)/i;
-
 const host = (env['HOST'] ?? LOOPBACK_V4).trim();
 const port = parsePort(env['PORT']);
 const httpsConfig = buildHttpsConfig();
@@ -611,9 +588,6 @@ export const config = {
   },
   security: {
     blockedHosts: BLOCKED_HOSTS,
-    blockedIpPatterns: BLOCKED_IP_PATTERNS,
-    blockedIpPattern: BLOCKED_IP_PATTERN,
-    blockedIpv4MappedPattern: BLOCKED_IPV4_MAPPED_PATTERN,
     allowedHosts: parseAllowedHosts(env['ALLOWED_HOSTS']),
     apiKey: env['API_KEY'],
     allowRemote,
