@@ -41,7 +41,7 @@ function parseMarkedJson<T>(output: string): T {
 describe('http session initialization', () => {
   it('supports multiple initialize requests with independent sessions', () => {
     const script = `
-      import { startHttpServer } from './dist/http-native.js';
+      import { startHttpServer } from './dist/http/native.js';
       import { request } from 'node:http';
 
       const server = await startHttpServer();
@@ -150,7 +150,7 @@ describe('http session initialization', () => {
 
   it('rejects POST /mcp initialize requests without required Accept media types', () => {
     const script = `
-      import { startHttpServer } from './dist/http-native.js';
+      import { startHttpServer } from './dist/http/native.js';
       import { request } from 'node:http';
 
       const server = await startHttpServer();

@@ -18,7 +18,7 @@ import {
   registerInstructionResource,
 } from './resources.js';
 import { registerTools } from './tools.js';
-import { shutdownTransformWorkerPool } from './transform.js';
+import { shutdownTransformWorkerPool } from './transform/transform.js';
 
 /* -------------------------------------------------------------------------------------------------
  * Icons + server info

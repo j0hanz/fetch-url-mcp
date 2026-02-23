@@ -19,20 +19,20 @@ import {
   throwTaskNotFound,
   toTaskSummary,
   withRelatedTaskMeta,
-} from './task-execution.js';
+} from './tasks/execution.js';
+import { taskManager } from './tasks/manager.js';
 import {
   isServerResult,
   parseHandlerExtra,
   resolveTaskOwnerKey,
   resolveToolCallContext,
-} from './task-owner.js';
-import { taskManager } from './tasks.js';
+} from './tasks/owner.js';
 
 // Re-export public API so existing consumers (tests, other modules) keep working.
 export {
   cancelTasksForOwner,
   abortAllTaskExecutions,
-} from './task-execution.js';
+} from './tasks/execution.js';
 
 /* -------------------------------------------------------------------------------------------------
  * Tasks API schemas

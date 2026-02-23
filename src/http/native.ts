@@ -17,8 +17,39 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
 
-import { config, enableHttpMode } from './config.js';
-import { handleDownload } from './download.js';
+import { config, enableHttpMode } from '../config.js';
+import { handleDownload } from '../download.js';
+import {
+  acceptsEventStream,
+  acceptsJsonAndEventStream,
+  isJsonRpcBatchRequest,
+  isMcpRequestBody,
+  type JsonRpcId,
+} from '../mcp-validator.js';
+import { cancelTasksForOwner } from '../mcp.js';
+import {
+  logError,
+  logInfo,
+  registerMcpSessionServer,
+  resolveMcpSessionIdByServer,
+  runWithRequestContext,
+  unregisterMcpSessionServer,
+  unregisterMcpSessionServerByServer,
+} from '../observability.js';
+import {
+  applyHttpServerTuning,
+  drainConnectionsOnShutdown,
+} from '../server-tuning.js';
+import { createMcpServerForHttpSession } from '../server.js';
+import {
+  composeCloseHandlers,
+  createSessionStore,
+  createSlotTracker,
+  ensureSessionCapacity,
+  reserveSessionSlot,
+  type SessionStore,
+  startSessionCleanupLoop,
+} from '../session.js';
 import {
   assertHttpModeConfiguration,
   authService,
@@ -26,13 +57,13 @@ import {
   corsPolicy,
   ensureMcpProtocolVersion,
   hostOriginPolicy,
-} from './http-auth.js';
+} from './auth.js';
 import {
   disableEventLoopMonitoring,
   resetEventLoopMonitoring,
   sendHealthRouteResponse,
   shouldHandleHealthRoute,
-} from './http-health.js';
+} from './health.js';
 import {
   type AuthenticatedContext,
   buildRequestContext,
@@ -52,42 +83,11 @@ import {
   sendError,
   sendJson,
   sendText,
-} from './http-helpers.js';
+} from './helpers.js';
 import {
   createRateLimitManagerImpl,
   type RateLimitManagerImpl,
-} from './http-rate-limit.js';
-import {
-  acceptsEventStream,
-  acceptsJsonAndEventStream,
-  isJsonRpcBatchRequest,
-  isMcpRequestBody,
-  type JsonRpcId,
-} from './mcp-validator.js';
-import { cancelTasksForOwner } from './mcp.js';
-import {
-  logError,
-  logInfo,
-  registerMcpSessionServer,
-  resolveMcpSessionIdByServer,
-  runWithRequestContext,
-  unregisterMcpSessionServer,
-  unregisterMcpSessionServerByServer,
-} from './observability.js';
-import {
-  applyHttpServerTuning,
-  drainConnectionsOnShutdown,
-} from './server-tuning.js';
-import { createMcpServerForHttpSession } from './server.js';
-import {
-  composeCloseHandlers,
-  createSessionStore,
-  createSlotTracker,
-  ensureSessionCapacity,
-  reserveSessionSlot,
-  type SessionStore,
-  startSessionCleanupLoop,
-} from './session.js';
+} from './rate-limit.js';
 
 // ---------------------------------------------------------------------------
 // MCP session gateway

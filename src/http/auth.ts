@@ -8,17 +8,17 @@ import {
 } from '@modelcontextprotocol/sdk/server/auth/errors.js';
 import type { AuthInfo } from '@modelcontextprotocol/sdk/server/auth/types.js';
 
-import { config } from './config.js';
-import { hmacSha256Hex, timingSafeEqualUtf8 } from './crypto.js';
-import { normalizeHost } from './host-normalization.js';
+import { config } from '../config.js';
+import { hmacSha256Hex, timingSafeEqualUtf8 } from '../crypto.js';
+import { normalizeHost } from '../host-normalization.js';
+import { isObject } from '../type-guards.js';
 import {
   getHeaderValue,
   type RequestContext,
   sendEmpty,
   sendError,
   sendJson,
-} from './http-helpers.js';
-import { isObject } from './type-guards.js';
+} from './helpers.js';
 
 // ---------------------------------------------------------------------------
 // CORS

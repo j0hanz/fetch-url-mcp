@@ -114,7 +114,7 @@ describe('http server tuning helpers', () => {
 
   it('requires ALLOW_REMOTE for non-loopback bindings', async () => {
     const script = `
-      import { startHttpServer } from './dist/http-native.js';
+      import { startHttpServer } from './dist/http/native.js';
 
       let server;
       try {
@@ -145,7 +145,7 @@ describe('http server tuning helpers', () => {
 
   it('startHttpServer starts and stops without connecting', async () => {
     const script = `
-      import { startHttpServer } from './dist/http-native.js';
+      import { startHttpServer } from './dist/http/native.js';
 
       const server = await startHttpServer();
       await server.shutdown('TEST');

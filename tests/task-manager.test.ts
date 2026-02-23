@@ -4,7 +4,7 @@ import { describe, it } from 'node:test';
 import { config } from '../dist/config.js';
 import { cancelTasksForOwner } from '../dist/mcp.js';
 import { getRequestId, runWithRequestContext } from '../dist/observability.js';
-import { taskManager } from '../dist/tasks.js';
+import { taskManager } from '../dist/tasks/manager.js';
 
 describe('TaskManager.waitForTerminalTask', () => {
   it('resolves undefined after TTL expiration', { timeout: 2000 }, async () => {

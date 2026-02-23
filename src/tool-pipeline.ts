@@ -9,8 +9,8 @@ import {
   transformToRawUrl,
 } from './fetch.js';
 import { logDebug, logWarn } from './observability.js';
-import type { MarkdownTransformResult } from './transform-types.js';
-import { transformBufferToMarkdown } from './transform.js';
+import { transformBufferToMarkdown } from './transform/transform.js';
+import type { MarkdownTransformResult } from './transform/types.js';
 import { isObject } from './type-guards.js';
 
 /* -------------------------------------------------------------------------------------------------

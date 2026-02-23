@@ -3,7 +3,7 @@ import process from 'node:process';
 
 import { parseCliArgs, renderCliUsage } from './cli.js';
 import { serverVersion } from './config.js';
-import { startHttpServer } from './http-native.js';
+import { startHttpServer } from './http/native.js';
 import { logError } from './observability.js';
 import { startStdioServer } from './server.js';
 

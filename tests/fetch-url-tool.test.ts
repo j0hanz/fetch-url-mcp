@@ -11,7 +11,7 @@ import { fetchUrlToolHandler } from '../dist/tools.js';
 import {
   htmlToMarkdown,
   shutdownTransformWorkerPool,
-} from '../dist/transform.js';
+} from '../dist/transform/transform.js';
 
 after(async () => {
   await shutdownTransformWorkerPool();

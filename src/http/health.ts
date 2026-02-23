@@ -3,11 +3,11 @@ import { freemem, hostname, totalmem } from 'node:os';
 import { monitorEventLoopDelay, performance } from 'node:perf_hooks';
 import process from 'node:process';
 
-import { keys as cacheKeys } from './cache.js';
-import { config, serverVersion } from './config.js';
-import { type RequestContext, sendJson } from './http-helpers.js';
-import type { SessionStore } from './session.js';
-import { getTransformPoolStats } from './transform.js';
+import { keys as cacheKeys } from '../cache.js';
+import { config, serverVersion } from '../config.js';
+import type { SessionStore } from '../session.js';
+import { getTransformPoolStats } from '../transform/transform.js';
+import { type RequestContext, sendJson } from './helpers.js';
 
 // ---------------------------------------------------------------------------
 // Event-loop monitoring

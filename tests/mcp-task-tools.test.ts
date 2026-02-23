@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { after, describe, it } from 'node:test';
 
 import { createMcpServer } from '../dist/server.js';
-import { shutdownTransformWorkerPool } from '../dist/transform.js';
+import { shutdownTransformWorkerPool } from '../dist/transform/transform.js';
 
 after(async () => {
   await shutdownTransformWorkerPool();

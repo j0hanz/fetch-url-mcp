@@ -1,6 +1,6 @@
 import process from 'node:process';
 
-import { FetchError, getErrorMessage } from '../errors.js';
+import { FetchError, getErrorMessage } from '../../errors.js';
 import { transformHtmlToMarkdownInProcess } from '../transform.js';
 
 const send = process.send?.bind(process);

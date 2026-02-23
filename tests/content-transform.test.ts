@@ -6,7 +6,7 @@ import { cleanupMarkdownArtifacts } from '../dist/markdown-cleanup.js';
 import {
   shutdownTransformWorkerPool,
   transformHtmlToMarkdown,
-} from '../dist/transform.js';
+} from '../dist/transform/transform.js';
 
 after(async () => {
   await shutdownTransformWorkerPool();

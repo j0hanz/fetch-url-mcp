@@ -10,14 +10,14 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import type { Transport } from '@modelcontextprotocol/sdk/shared/transport.js';
 
-import { config } from './config.js';
+import { config } from '../config.js';
 import {
   createDefaultBlockList,
   normalizeIpForBlockList,
-} from './ip-blocklist.js';
-import type { JsonRpcId } from './mcp-validator.js';
-import { logWarn } from './observability.js';
-import { composeCloseHandlers } from './session.js';
+} from '../ip-blocklist.js';
+import type { JsonRpcId } from '../mcp-validator.js';
+import { logWarn } from '../observability.js';
+import { composeCloseHandlers } from '../session.js';
 
 // ---------------------------------------------------------------------------
 // Shared types

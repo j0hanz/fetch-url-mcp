@@ -5,8 +5,8 @@ import { setInterval } from 'node:timers';
 
 import { ErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js';
 
-import { config } from './config.js';
-import { type CancellableTimeout, createUnrefTimeout } from './timer-utils.js';
+import { config } from '../config.js';
+import { type CancellableTimeout, createUnrefTimeout } from '../timer-utils.js';
 
 export type TaskStatus =
   | 'working'

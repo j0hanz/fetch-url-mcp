@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { htmlToMarkdown } from '../dist/transform.js';
+import { htmlToMarkdown } from '../dist/transform/transform.js';
 
 describe('htmlToMarkdown noise filtering', () => {
   it('removes common noise nodes while keeping content', () => {

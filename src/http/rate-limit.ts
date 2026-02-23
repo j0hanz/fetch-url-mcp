@@ -1,7 +1,7 @@
 import { setInterval as setIntervalPromise } from 'node:timers/promises';
 
-import { type RequestContext, sendJson } from './http-helpers.js';
-import { logWarn } from './observability.js';
+import { logWarn } from '../observability.js';
+import { type RequestContext, sendJson } from './helpers.js';
 
 // ---------------------------------------------------------------------------
 // Types

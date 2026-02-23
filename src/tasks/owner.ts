@@ -1,7 +1,7 @@
 import type { ServerResult } from '@modelcontextprotocol/sdk/types.js';
 
-import type { ProgressNotification } from './tools.js';
-import { isObject } from './type-guards.js';
+import type { ProgressNotification } from '../tools.js';
+import { isObject } from '../type-guards.js';
 
 /* -------------------------------------------------------------------------------------------------
  * Handler extra parsing & owner-key resolution

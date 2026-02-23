@@ -5,21 +5,25 @@ import {
   type ServerResult,
 } from '@modelcontextprotocol/sdk/types.js';
 
-import { logWarn, runWithRequestContext } from './observability.js';
-import {
-  compact,
-  isRecord,
-  type ToolCallContext,
-  tryReadToolStructuredError,
-} from './task-owner.js';
-import { type CreateTaskResult, taskManager, type TaskState } from './tasks.js';
+import { logWarn, runWithRequestContext } from '../observability.js';
 import {
   FETCH_URL_TOOL_NAME,
   type FetchUrlInput,
   fetchUrlInputSchema,
   fetchUrlToolHandler,
   type ProgressNotification,
-} from './tools.js';
+} from '../tools.js';
+import {
+  type CreateTaskResult,
+  taskManager,
+  type TaskState,
+} from './manager.js';
+import {
+  compact,
+  isRecord,
+  type ToolCallContext,
+  tryReadToolStructuredError,
+} from './owner.js';
 
 /* -------------------------------------------------------------------------------------------------
  * Extended tool-call request shape (task-aware)

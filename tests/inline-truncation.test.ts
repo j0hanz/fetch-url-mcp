@@ -6,7 +6,7 @@ import { after, describe, it } from 'node:test';
 // markdown with code fences that exceed the inline limit.
 import { config } from '../dist/config.js';
 import { fetchUrlToolHandler } from '../dist/tools.js';
-import { shutdownTransformWorkerPool } from '../dist/transform.js';
+import { shutdownTransformWorkerPool } from '../dist/transform/transform.js';
 
 after(async () => {
   await shutdownTransformWorkerPool();

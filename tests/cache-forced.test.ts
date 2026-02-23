@@ -5,7 +5,7 @@ import * as cache from '../dist/cache.js';
 import { config } from '../dist/config.js';
 import { normalizeUrl } from '../dist/fetch.js';
 import { fetchUrlToolHandler } from '../dist/tools.js';
-import { shutdownTransformWorkerPool } from '../dist/transform.js';
+import { shutdownTransformWorkerPool } from '../dist/transform/transform.js';
 
 after(async () => {
   await shutdownTransformWorkerPool();

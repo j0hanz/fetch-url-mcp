@@ -2,12 +2,12 @@ import assert from 'node:assert/strict';
 import diagnosticsChannel from 'node:diagnostics_channel';
 import { describe, it } from 'node:test';
 
-import type { TransformStageEvent } from '../dist/transform-types.js';
 import {
   endTransformStage,
   type StageBudget,
   startTransformStage,
-} from '../dist/transform.js';
+} from '../dist/transform/transform.js';
+import type { TransformStageEvent } from '../dist/transform/types.js';
 
 describe('transform telemetry', () => {
   it('redacts query and fragment from the URL', () => {

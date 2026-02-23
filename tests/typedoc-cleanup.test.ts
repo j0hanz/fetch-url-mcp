@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { htmlToMarkdown } from '../dist/transform.js';
+import { htmlToMarkdown } from '../dist/transform/transform.js';
 
 describe('TypeDoc cleanup', () => {
   it('removes TypeDoc style comments from text', () => {

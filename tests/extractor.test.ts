@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { extractContent } from '../dist/transform.js';
+import { extractContent } from '../dist/transform/transform.js';
 
 type MetadataCase = {
   html: string;

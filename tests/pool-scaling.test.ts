@@ -6,7 +6,7 @@ import {
   getTransformPoolStats,
   shutdownTransformWorkerPool,
   transformHtmlToMarkdown,
-} from '../dist/transform.js';
+} from '../dist/transform/transform.js';
 
 describe('worker pool scaling', () => {
   afterEach(async () => {

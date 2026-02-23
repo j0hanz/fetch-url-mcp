@@ -9,10 +9,11 @@ import {
   Worker,
 } from 'node:worker_threads';
 
-import { config } from './config.js';
-import { FetchError, getErrorMessage } from './errors.js';
-import { logWarn } from './observability.js';
-import { type CancellableTimeout, createUnrefTimeout } from './timer-utils.js';
+import { config } from '../config.js';
+import { FetchError, getErrorMessage } from '../errors.js';
+import { logWarn } from '../observability.js';
+import { type CancellableTimeout, createUnrefTimeout } from '../timer-utils.js';
+import { isObject } from '../type-guards.js';
 import type {
   MarkdownTransformResult,
   TransformWorkerCancelMessage,
@@ -20,8 +21,7 @@ import type {
   TransformWorkerOutgoingMessage,
   TransformWorkerResultMessage,
   TransformWorkerTransformMessage,
-} from './transform-types.js';
-import { isObject } from './type-guards.js';
+} from './types.js';
 
 // ---------------------------------------------------------------------------
 // Abort helper (inlined to avoid circular dependency with transform.ts)

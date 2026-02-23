@@ -41,7 +41,7 @@ function parseMarkedJson<T>(output: string): T {
 describe('health endpoint', () => {
   it('returns 200 with minimal public status payload by default', () => {
     const script = `
-      import { startHttpServer } from './dist/http-native.js';
+      import { startHttpServer } from './dist/http/native.js';
       import { request } from 'node:http';
 
       const server = await startHttpServer();
@@ -105,7 +105,7 @@ describe('health endpoint', () => {
 
   it('returns detailed metrics for authenticated verbose health checks', () => {
     const script = `
-      import { startHttpServer } from './dist/http-native.js';
+      import { startHttpServer } from './dist/http/native.js';
       import { request } from 'node:http';
 
       const server = await startHttpServer();

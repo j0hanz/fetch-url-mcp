@@ -6,7 +6,7 @@ import { config } from '../dist/config.js';
 import {
   shutdownTransformWorkerPool,
   transformBufferToMarkdown,
-} from '../dist/transform.js';
+} from '../dist/transform/transform.js';
 
 type WorkerMode = 'threads' | 'process';
 

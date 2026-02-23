@@ -40,9 +40,9 @@ npm run inspector          # build + launch MCP Inspector for interactive testin
 
 - Installing new npm packages
 - Changing env-var defaults or hardcoded limits in `src/config.ts`
-- Modifying auth, session, or security logic in `src/http-native.ts`
+- Modifying auth, session, or security logic in `src/http/native.ts`
 - Changing the MCP public surface: tool input/output schemas, resource URIs, prompt names, or annotations
-- Modifying the worker transform pipeline (`src/transform.ts`, `src/workers/`)
+- Modifying the worker transform pipeline (`src/transform/transform.ts`, `src/transform/workers/`)
 
 **Never:**
 
@@ -54,23 +54,26 @@ npm run inspector          # build + launch MCP Inspector for interactive testin
 
 ## Key Source Files
 
-| File                             | Purpose                                                                       |
-| -------------------------------- | ----------------------------------------------------------------------------- |
-| `src/index.ts`                   | CLI entrypoint, transport selection, shutdown wiring (shebang required)       |
-| `src/server.ts`                  | MCP server lifecycle, tool/resource/prompt registration                       |
-| `src/tools.ts`                   | `fetch-url` tool definition and full fetch pipeline                           |
-| `src/config.ts`                  | Env-driven configuration — single source of truth for all defaults and limits |
-| `src/fetch.ts`                   | URL normalization, SSRF protection, HTTP fetch with redirect following        |
-| `src/transform.ts`               | Worker pool management, HTML-to-Markdown pipeline                             |
-| `src/workers/transform-child.ts` | Worker thread entrypoint (runs in isolation)                                  |
-| `src/http-native.ts`             | Streamable HTTP server, bearer/OAuth auth, session management                 |
-| `src/cache.ts`                   | In-memory LRU cache for Markdown results                                      |
-| `src/observability.ts`           | Structured logging helpers (`logDebug`, `logWarn`, `logError`)                |
+| File                                       | Purpose                                                                       |
+| ------------------------------------------ | ----------------------------------------------------------------------------- |
+| `src/index.ts`                             | CLI entrypoint, transport selection, shutdown wiring (shebang required)       |
+| `src/server.ts`                            | MCP server lifecycle, tool/resource/prompt registration                       |
+| `src/tools.ts`                             | `fetch-url` tool definition and full fetch pipeline                           |
+| `src/config.ts`                            | Env-driven configuration — single source of truth for all defaults and limits |
+| `src/fetch.ts`                             | URL normalization, SSRF protection, HTTP fetch with redirect following        |
+| `src/transform/transform.ts`               | Worker pool management, HTML-to-Markdown pipeline                             |
+| `src/transform/workers/transform-child.ts` | Worker thread entrypoint (runs in isolation)                                  |
+| `src/http/native.ts`                       | Streamable HTTP server, bearer/OAuth auth, session management                 |
+| `src/cache.ts`                             | In-memory LRU cache for Markdown results                                      |
+| `src/observability.ts`                     | Structured logging helpers (`logDebug`, `logWarn`, `logError`)                |
 
 ## Project Structure
 
 ```text
 src/             TypeScript source (compiles to dist/)
+  http/          Streamable HTTP transport (auth, health, rate-limit, helpers)
+  transform/     HTML-to-Markdown pipeline (worker pool, types, workers)
+  tasks/         Task lifecycle management (manager, execution, owner)
 tests/           Tests — import from dist/, not src/
 scripts/         Build and test orchestration (tasks.mjs)
 assets/          Static assets (logo.svg)

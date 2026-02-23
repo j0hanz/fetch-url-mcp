@@ -11,21 +11,21 @@ import {
 
 import { isProbablyReaderable, Readability } from '@mozilla/readability';
 
-import { config } from './config.js';
-import { removeNoiseFromHtml } from './dom-noise-removal.js';
-import { FetchError, getErrorMessage } from './errors.js';
-import { isRawTextContentUrl } from './fetch.js';
+import { config } from '../config.js';
+import { removeNoiseFromHtml } from '../dom-noise-removal.js';
+import { FetchError, getErrorMessage } from '../errors.js';
+import { isRawTextContentUrl } from '../fetch.js';
 import {
   detectLanguageFromCode,
   resolveLanguageFromAttributes,
-} from './language-detection.js';
+} from '../language-detection.js';
 import {
   addSourceToMarkdown,
   buildMetadataFooter,
   cleanupMarkdownArtifacts,
   extractTitleFromRawMarkdown,
   isRawTextContent,
-} from './markdown-cleanup.js';
+} from '../markdown-cleanup.js';
 import {
   getOperationId,
   getRequestId,
@@ -34,7 +34,8 @@ import {
   logInfo,
   logWarn,
   redactUrl,
-} from './observability.js';
+} from '../observability.js';
+import { isLikeNode, isObject } from '../type-guards.js';
 import type {
   ExtractedArticle,
   ExtractedMetadata,
@@ -44,13 +45,12 @@ import type {
   TransformOptions,
   TransformStageContext,
   TransformStageEvent,
-} from './transform-types.js';
+} from './types.js';
 import {
   getOrCreateWorkerPool,
   getWorkerPoolStats,
   shutdownWorkerPool,
-} from './transform-worker-pool.js';
-import { isLikeNode, isObject } from './type-guards.js';
+} from './worker-pool.js';
 
 const utf8Decoder = new TextDecoder('utf-8');
 

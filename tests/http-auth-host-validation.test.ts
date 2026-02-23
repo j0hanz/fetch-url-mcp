@@ -41,7 +41,7 @@ function parseMarkedJson<T>(output: string): T {
 describe('http auth and host/origin validation', () => {
   it('rejects disallowed host and origin headers', () => {
     const script = `
-      import { startHttpServer } from './dist/http-native.js';
+      import { startHttpServer } from './dist/http/native.js';
       import { request } from 'node:http';
 
       const server = await startHttpServer();
@@ -95,7 +95,7 @@ describe('http auth and host/origin validation', () => {
 
   it('accepts X-API-Key for static auth', () => {
     const script = `
-      import { startHttpServer } from './dist/http-native.js';
+      import { startHttpServer } from './dist/http/native.js';
       import { request } from 'node:http';
 
       const server = await startHttpServer();

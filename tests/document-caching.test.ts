@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import { after, describe, it } from 'node:test';
 
-import { shutdownTransformWorkerPool } from '../dist/transform.js';
-import { transformHtmlToMarkdown } from '../dist/transform.js';
+import { shutdownTransformWorkerPool } from '../dist/transform/transform.js';
+import { transformHtmlToMarkdown } from '../dist/transform/transform.js';
 
 after(async () => {
   await shutdownTransformWorkerPool();

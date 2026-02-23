@@ -1,6 +1,6 @@
 import { parentPort } from 'node:worker_threads';
 
-import { FetchError, getErrorMessage } from '../errors.js';
+import { FetchError, getErrorMessage } from '../../errors.js';
 import { transformHtmlToMarkdownInProcess } from '../transform.js';
 
 if (!parentPort) throw new Error('transform-worker started without parentPort');

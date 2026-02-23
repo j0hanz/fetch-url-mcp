@@ -42,7 +42,7 @@ describe('http duplicate-header protection', () => {
   it('rejects duplicate single-value headers', () => {
     const script = `
       import { createConnection } from 'node:net';
-      import { startHttpServer } from './dist/http-native.js';
+      import { startHttpServer } from './dist/http/native.js';
 
       const server = await startHttpServer();
       const port = server.port;
