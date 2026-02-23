@@ -559,9 +559,7 @@ function resolveUrls(document: Document, baseUrlStr: string): void {
   }
 
   const elements = document.querySelectorAll('a[href],img[src],source[srcset]');
-  for (let i = 0; i < elements.length; i++) {
-    const el = elements[i];
-    if (!el) continue;
+  for (const el of elements) {
     const tag = el.tagName.toLowerCase();
     if (tag === 'a') processUrlElement(el, 'href', base, false);
     else if (tag === 'img') processUrlElement(el, 'src', base, false);
