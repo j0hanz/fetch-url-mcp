@@ -248,9 +248,7 @@ class TaskManager {
         status: 'cancelled',
         statusMessage,
       });
-
-      const updated = this.tasks.get(task.taskId);
-      if (updated) cancelled.push(updated);
+      cancelled.push(task);
     }
 
     return cancelled;

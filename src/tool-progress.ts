@@ -101,34 +101,32 @@ class ToolProgressReporter implements ProgressReporter {
 
   async report(progress: number, message: string): Promise<void> {
     if (this.isTerminal) return;
-    if (progress < this.lastProgress) {
-      progress = this.lastProgress;
-    }
-    this.lastProgress = progress;
-    if (progress >= FETCH_PROGRESS_TOTAL) {
+    const effectiveProgress = Math.max(progress, this.lastProgress);
+    const isIncreasing = effectiveProgress > this.lastProgress;
+    this.lastProgress = effectiveProgress;
+
+    if (effectiveProgress >= FETCH_PROGRESS_TOTAL) {
       this.isTerminal = true;
     }
-
     if (this.onProgress) {
       try {
-        this.onProgress(progress, message);
+        this.onProgress(effectiveProgress, message);
       } catch (error: unknown) {
         logWarn('Progress callback failed', {
           error: getErrorMessage(error),
-          progress,
+          progress: effectiveProgress,
           message,
         });
       }
     }
-
-    if (this.token === null || !this.sendNotification) return;
+    if (!isIncreasing || this.token === null || !this.sendNotification) return;
     const { sendNotification } = this;
 
     const notification: ProgressNotification = {
       method: 'notifications/progress',
       params: {
         progressToken: this.token,
-        progress,
+        progress: effectiveProgress,
         total: FETCH_PROGRESS_TOTAL,
         message,
         ...(this.relatedTaskMeta

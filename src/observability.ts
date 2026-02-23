@@ -202,12 +202,14 @@ function writeLog(level: LogLevel, message: string, meta?: LogMetadata): void {
     ? (sessionServers.get(sessionId) ?? mcpServer)
     : mcpServer;
   if (!server) return;
+  if (!server.isConnected()) return;
 
   try {
     server.server
       .sendLoggingMessage(
         {
           level: mapToMcpLevel(level),
+          logger: 'fetch-url-mcp',
           // Preserve existing behavior: MCP payload includes only message + provided meta (not ALS context meta).
           data: meta ? { message, ...meta } : message,
         },

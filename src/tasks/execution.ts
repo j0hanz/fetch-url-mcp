@@ -155,10 +155,6 @@ export function withRelatedTaskMeta(
   };
 }
 
-function buildTaskStatusParams(task: TaskState): TaskStatusNotificationParams {
-  return toTaskSummary(task);
-}
-
 export function emitTaskStatusNotification(
   server: McpServer,
   task: TaskState
@@ -168,7 +164,7 @@ export function emitTaskStatusNotification(
   void server.server
     .notification({
       method: 'notifications/tasks/status',
-      params: buildTaskStatusParams(task),
+      params: toTaskSummary(task),
     } as { method: string; params: TaskStatusNotificationParams })
     .catch((error: unknown) => {
       logWarn('Failed to send task status notification', {
