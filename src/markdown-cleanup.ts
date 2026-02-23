@@ -392,7 +392,10 @@ export function cleanupMarkdownArtifacts(
 
     if (fenceMarker) {
       segments.push(line);
-      if (trimmed.startsWith(fenceMarker) && trimmed.slice(fenceMarker.length).trim() === '') {
+      if (
+        trimmed.startsWith(fenceMarker) &&
+        trimmed.slice(fenceMarker.length).trim() === ''
+      ) {
         fenceMarker = null;
       }
     } else {
