@@ -7,7 +7,6 @@ import type {
   ToolCallback,
 } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type {
-  CallToolResult,
   ContentBlock,
   TextResourceContents,
   ToolAnnotations,
@@ -16,12 +15,6 @@ import type {
 import * as cache from './cache.js';
 import { config } from './config.js';
 import { generateSafeFilename } from './download.js';
-import { FetchError, getErrorMessage, isSystemError } from './errors.js';
-import {
-  fetchNormalizedUrlBuffer,
-  normalizeUrl,
-  transformToRawUrl,
-} from './fetch.js';
 import {
   getRequestId,
   logDebug,
@@ -29,9 +22,40 @@ import {
   logWarn,
   runWithRequestContext,
 } from './observability.js';
-import type { MarkdownTransformResult } from './transform-types.js';
-import { transformBufferToMarkdown } from './transform.js';
+import { createToolErrorResponse, handleToolError } from './tool-errors.js';
+import {
+  appendTruncationMarker,
+  type InlineContentResult,
+  type MarkdownPipelineResult,
+  markdownTransform,
+  parseCachedMarkdownResult,
+  performSharedFetch,
+  type PipelineResult,
+  readNestedRecord,
+  readString,
+  serializeMarkdownResult,
+  TRUNCATION_MARKER,
+  withSignal,
+} from './tool-pipeline.js';
+import {
+  createProgressReporter,
+  type ProgressReporter,
+  type ToolHandlerExtra,
+} from './tool-progress.js';
 import { isObject } from './type-guards.js';
+
+// Re-export public API so existing consumers keep working.
+export { createToolErrorResponse, handleToolError } from './tool-errors.js';
+export {
+  executeFetchPipeline,
+  parseCachedMarkdownResult,
+  performSharedFetch,
+} from './tool-pipeline.js';
+export {
+  createProgressReporter,
+  type ProgressNotification,
+  type ProgressNotificationParams,
+} from './tool-progress.js';
 
 export interface FetchUrlInput {
   url: string;
@@ -40,79 +64,15 @@ export interface FetchUrlInput {
   maxInlineChars?: number | undefined;
 }
 
-interface ToolContentBlock {
-  type: 'text';
-  text: string;
-}
-
 type ToolContentBlockUnion = ContentBlock;
 type ToolOutputBlock = ToolContentBlockUnion;
 
-type ToolErrorResponse = CallToolResult & {
-  isError: true;
-};
-
-type ToolResponseBase = CallToolResult & {
-  structuredContent?: Record<string, unknown> | undefined;
-};
-
-interface FetchPipelineOptions<T> {
-  url: string;
-  cacheNamespace: string;
-  signal?: AbortSignal;
-  cacheVary?: Record<string, unknown> | string;
-  forceRefresh?: boolean;
-  transform: (
-    input: { buffer: Uint8Array; encoding: string; truncated?: boolean },
-    url: string
-  ) => T | Promise<T>;
-  serialize?: (result: T) => string;
-  deserialize?: (cached: string) => T | undefined;
-}
-
-interface PipelineResult<T> {
-  data: T;
-  fromCache: boolean;
-  url: string;
-  originalUrl?: string;
-  finalUrl?: string;
-  fetchedAt: string;
-  cacheKey?: string | null;
-}
-
-type ProgressToken = string | number;
-
-interface RequestMeta {
-  progressToken?: ProgressToken | undefined;
+interface ToolResponseBase {
   [key: string]: unknown;
+  content: ToolContentBlockUnion[];
+  structuredContent?: Record<string, unknown> | undefined;
+  isError?: boolean;
 }
-
-export interface ProgressNotificationParams {
-  progressToken: ProgressToken;
-  progress: number;
-  total?: number;
-  message?: string;
-  _meta?: Record<string, unknown>;
-}
-
-export interface ProgressNotification {
-  method: 'notifications/progress';
-  params: ProgressNotificationParams;
-}
-
-interface ToolHandlerExtra {
-  signal?: AbortSignal;
-  requestId?: string | number;
-  sessionId?: unknown;
-  requestInfo?: unknown;
-  _meta?: RequestMeta;
-  sendNotification?: (notification: ProgressNotification) => Promise<void>;
-  onProgress?: (progress: number, message: string) => void;
-}
-
-const TRUNCATION_MARKER = '...[truncated]';
-const FETCH_PROGRESS_TOTAL = 4;
-const PROGRESS_NOTIFICATION_TIMEOUT_MS = 5000;
 
 export const fetchUrlInputSchema = z.strictObject({
   url: z
@@ -254,360 +214,19 @@ Limitations:
 - Does not execute client-side JavaScript; JS-rendered pages may be incomplete.
 `.trim();
 
-// Specific icon for the fetch-url tool (download cloud / web)
 const TOOL_ICON = {
   src: 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSJjdXJyZW50Q29sb3IiIHN0cm9rZS13aWR0aD0iMiIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cGF0aCBkPSJNMjEgMTV2NGEyIDIgMCAwIDEtMiAySDVhMiAyIDAgMCAxLTItMnYtNCIvPjxwb2x5bGluZSBwb2ludHM9IjcgMTAgMTIgMTUgMTcgMTAiLz48bGluZSB4MT0iMTIiIHkxPSIxNSIgeDI9IjEyIiB5Mj0iMyIvPjwvc3ZnPg==',
   mimeType: 'image/svg+xml',
 };
 
-interface ProgressReporter {
-  report: (progress: number, message: string) => Promise<void>;
-}
-
 /* -------------------------------------------------------------------------------------------------
- * Small runtime helpers
+ * Tool response builders
  * ------------------------------------------------------------------------------------------------- */
 
-type JsonRecord = Record<string, unknown>;
-
-function asRecord(value: unknown): JsonRecord | undefined {
-  return isObject(value) ? (value as JsonRecord) : undefined;
-}
-
-function readUnknown(obj: unknown, key: string): unknown {
-  const record = asRecord(obj);
-  return record ? record[key] : undefined;
-}
-
-function readString(obj: unknown, key: string): string | undefined {
-  const value = readUnknown(obj, key);
-  return typeof value === 'string' ? value : undefined;
-}
-
-function readNestedRecord(
-  obj: unknown,
-  keys: readonly string[]
-): JsonRecord | undefined {
-  let current: unknown = obj;
-  for (const key of keys) {
-    current = readUnknown(current, key);
-    if (current === undefined) return undefined;
-  }
-  return asRecord(current);
-}
-
-function safeJsonParse(value: string): unknown {
-  try {
-    return JSON.parse(value) as unknown;
-  } catch {
-    return undefined;
-  }
-}
-
-function withSignal(
-  signal?: AbortSignal
-): { signal: AbortSignal } | Record<string, never> {
-  return signal === undefined ? {} : { signal };
-}
-
-function buildToolAbortSignal(
-  extraSignal: AbortSignal | undefined
-): AbortSignal | undefined {
-  const { timeoutMs } = config.tools;
-  if (timeoutMs <= 0) return extraSignal;
-
-  const timeoutSignal = AbortSignal.timeout(timeoutMs);
-  if (!extraSignal) return timeoutSignal;
-
-  return AbortSignal.any([extraSignal, timeoutSignal]);
-}
-
-/* -------------------------------------------------------------------------------------------------
- * Progress reporting
- * ------------------------------------------------------------------------------------------------- */
-
-function resolveRelatedTaskMeta(
-  meta?: RequestMeta
-): { taskId: string } | undefined {
-  const related = readUnknown(meta, 'io.modelcontextprotocol/related-task');
-  const taskId = readString(related, 'taskId');
-  return taskId ? { taskId } : undefined;
-}
-
-class ToolProgressReporter implements ProgressReporter {
-  private reportQueue: Promise<void> = Promise.resolve();
-  private isTerminal = false;
-  private lastProgress = -1;
-
-  private constructor(
-    private readonly token: ProgressToken | null,
-    private readonly sendNotification:
-      | ((notification: ProgressNotification) => Promise<void>)
-      | undefined,
-    private readonly relatedTaskMeta: { taskId: string } | undefined,
-    private readonly onProgress:
-      | ((progress: number, message: string) => void)
-      | undefined
-  ) {}
-
-  static create(extra?: ToolHandlerExtra): ProgressReporter {
-    const token = extra?._meta?.progressToken ?? null;
-    const sendNotification = extra?.sendNotification;
-    const relatedTaskMeta = resolveRelatedTaskMeta(extra?._meta);
-    const onProgress = extra?.onProgress;
-
-    if (token === null && !onProgress) {
-      return { report: async () => {} };
-    }
-
-    return new ToolProgressReporter(
-      token,
-      sendNotification,
-      relatedTaskMeta,
-      onProgress
-    );
-  }
-
-  async report(progress: number, message: string): Promise<void> {
-    if (this.isTerminal) return;
-    if (progress < this.lastProgress) {
-      progress = this.lastProgress;
-    }
-    this.lastProgress = progress;
-    if (progress >= FETCH_PROGRESS_TOTAL) {
-      this.isTerminal = true;
-    }
-
-    if (this.onProgress) {
-      try {
-        this.onProgress(progress, message);
-      } catch (error: unknown) {
-        logWarn('Progress callback failed', {
-          error: getErrorMessage(error),
-          progress,
-          message,
-        });
-      }
-    }
-
-    if (this.token === null || !this.sendNotification) return;
-    const { sendNotification } = this;
-
-    const notification: ProgressNotification = {
-      method: 'notifications/progress',
-      params: {
-        progressToken: this.token,
-        progress,
-        total: FETCH_PROGRESS_TOTAL,
-        message,
-        ...(this.relatedTaskMeta
-          ? {
-              _meta: {
-                'io.modelcontextprotocol/related-task': this.relatedTaskMeta,
-              },
-            }
-          : {}),
-      },
-    };
-
-    this.reportQueue = this.reportQueue.then(async () => {
-      let timeoutId: NodeJS.Timeout | undefined;
-      const timeoutPromise = new Promise<{ timeout: true }>((resolve) => {
-        timeoutId = setTimeout(() => {
-          resolve({ timeout: true });
-        }, PROGRESS_NOTIFICATION_TIMEOUT_MS);
-        timeoutId.unref();
-      });
-
-      try {
-        const outcome = await Promise.race([
-          sendNotification(notification).then(() => ({ ok: true as const })),
-          timeoutPromise,
-        ]);
-
-        if ('timeout' in outcome) {
-          logWarn('Progress notification timed out', { progress, message });
-        }
-      } catch (error) {
-        logWarn('Failed to send progress notification', {
-          error: getErrorMessage(error),
-          progress,
-          message,
-        });
-      } finally {
-        if (timeoutId) clearTimeout(timeoutId);
-      }
-    });
-
-    await this.reportQueue;
-  }
-}
-
-export function createProgressReporter(
-  extra?: ToolHandlerExtra
-): ProgressReporter {
-  return ToolProgressReporter.create(extra);
-}
-
-/* -------------------------------------------------------------------------------------------------
- * Inline content limiting
- * ------------------------------------------------------------------------------------------------- */
-
-interface InlineContentResult {
-  content?: string;
-  contentSize: number;
-  truncated?: boolean;
-}
-
-type InlineResult = ReturnType<InlineContentLimiter['apply']>;
-
-function getOpenCodeFence(
-  content: string
-): { fenceChar: string; fenceLength: number } | null {
-  const FENCE_PATTERN = /^([ \t]*)(`{3,}|~{3,})/gm;
-  let match;
-  let inFence = false;
-  let fenceChar: string | null = null;
-  let fenceLength = 0;
-
-  while ((match = FENCE_PATTERN.exec(content)) !== null) {
-    const marker = match[2];
-    if (!marker) continue;
-
-    const [char] = marker;
-    if (!char) continue;
-    const { length } = marker;
-
-    if (!inFence) {
-      inFence = true;
-      fenceChar = char;
-      fenceLength = length;
-    } else if (char === fenceChar && length >= fenceLength) {
-      inFence = false;
-      fenceChar = null;
-      fenceLength = 0;
-    }
-  }
-
-  if (inFence && fenceChar) {
-    return { fenceChar, fenceLength };
-  }
-  return null;
-}
-
-function findSafeLinkBoundary(content: string, limit: number): number {
-  const lastBracket = content.lastIndexOf('[', limit);
-  if (lastBracket === -1) return limit;
-  const afterBracket = content.substring(lastBracket, limit);
-  const closedPattern = /^\[[^\]]*\]\([^)]*\)/;
-  if (closedPattern.test(afterBracket)) return limit;
-  const start =
-    lastBracket > 0 && content[lastBracket - 1] === '!'
-      ? lastBracket - 1
-      : lastBracket;
-  return start;
-}
-
-function truncateWithMarker(
-  content: string,
-  limit: number,
-  marker: string
-): string {
-  if (content.length <= limit) return content;
-  const maxContentLength = Math.max(0, limit - marker.length);
-  const tentativeContent = content.substring(0, maxContentLength);
-  const openFence = getOpenCodeFence(tentativeContent);
-  if (openFence) {
-    const fenceCloser = `\n${openFence.fenceChar.repeat(openFence.fenceLength)}\n`;
-    const adjustedLength = Math.max(
-      0,
-      limit - marker.length - fenceCloser.length
-    );
-    return `${content.substring(0, adjustedLength)}${fenceCloser}${marker}`;
-  }
-
-  const safeBoundary = findSafeLinkBoundary(content, maxContentLength);
-  if (safeBoundary < maxContentLength) {
-    return `${content.substring(0, safeBoundary)}${marker}`.slice(0, limit);
-  }
-
-  return `${tentativeContent}${marker}`.slice(0, limit);
-}
-
-function appendTruncationMarker(content: string, marker: string): string {
-  if (!content) return marker;
-  if (content.endsWith(marker)) return content;
-
-  const openFence = getOpenCodeFence(content);
-  const contentWithFence = openFence
-    ? `${content}\n${openFence.fenceChar.repeat(openFence.fenceLength)}\n`
-    : content;
-
-  const safeBoundary = findSafeLinkBoundary(
-    contentWithFence,
-    contentWithFence.length
-  );
-  if (safeBoundary < contentWithFence.length) {
-    return `${contentWithFence.substring(0, safeBoundary)}${marker}`;
-  }
-
-  return `${contentWithFence}${marker}`;
-}
-
-class InlineContentLimiter {
-  apply(content: string, inlineLimitOverride?: number): InlineContentResult {
-    const contentSize = content.length;
-    const inlineLimit = this.resolveInlineLimit(inlineLimitOverride);
-
-    if (inlineLimit <= 0) {
-      return { content, contentSize };
-    }
-
-    if (contentSize <= inlineLimit) {
-      return { content, contentSize };
-    }
-
-    const truncatedContent = truncateWithMarker(
-      content,
-      inlineLimit,
-      TRUNCATION_MARKER
-    );
-
-    return {
-      content: truncatedContent,
-      contentSize,
-      truncated: true,
-    };
-  }
-
-  private resolveInlineLimit(inlineLimitOverride?: number): number {
-    const globalLimit = config.constants.maxInlineContentChars;
-
-    if (inlineLimitOverride === undefined) return globalLimit;
-    if (globalLimit > 0 && inlineLimitOverride > 0) {
-      return Math.min(inlineLimitOverride, globalLimit);
-    }
-
-    return inlineLimitOverride;
-  }
-}
-
-const inlineLimiter = new InlineContentLimiter();
-
-function applyInlineContentLimit(
-  content: string,
-  inlineLimitOverride?: number
-): InlineContentResult {
-  return inlineLimiter.apply(content, inlineLimitOverride);
-}
-
-/* -------------------------------------------------------------------------------------------------
- * Tool response blocks (text + optional embedded resource)
- * ------------------------------------------------------------------------------------------------- */
-
-function buildTextBlock(
-  structuredContent: Record<string, unknown>
-): ToolContentBlock {
+function buildTextBlock(structuredContent: Record<string, unknown>): {
+  type: 'text';
+  text: string;
+} {
   return {
     type: 'text',
     text: JSON.stringify(structuredContent),
@@ -675,494 +294,28 @@ function appendIfPresent<T>(items: T[], value: T | null | undefined): void {
 }
 
 /* -------------------------------------------------------------------------------------------------
- * Fetch pipeline executor (normalize → raw-transform → cache → fetch → transform → persist)
+ * Tool abort signal
  * ------------------------------------------------------------------------------------------------- */
 
-interface UrlResolution {
-  normalizedUrl: string;
-  originalUrl: string;
-  transformed: boolean;
-}
+function buildToolAbortSignal(
+  extraSignal: AbortSignal | undefined
+): AbortSignal | undefined {
+  const { timeoutMs } = config.tools;
+  if (timeoutMs <= 0) return extraSignal;
 
-function createUrlResolution(params: {
-  normalizedUrl: string;
-  originalUrl: string;
-  transformed: boolean;
-}): UrlResolution {
-  return {
-    normalizedUrl: params.normalizedUrl,
-    originalUrl: params.originalUrl,
-    transformed: params.transformed,
-  };
-}
+  const timeoutSignal = AbortSignal.timeout(timeoutMs);
+  if (!extraSignal) return timeoutSignal;
 
-function resolveNormalizedUrl(url: string): UrlResolution {
-  const { normalizedUrl: validatedUrl } = normalizeUrl(url);
-  const transformedResult = transformToRawUrl(validatedUrl);
-  if (!transformedResult.transformed) {
-    return createUrlResolution({
-      normalizedUrl: validatedUrl,
-      originalUrl: validatedUrl,
-      transformed: false,
-    });
-  }
-
-  // Re-validate transformed URLs so blocked-host and length policies still apply.
-  const { normalizedUrl: transformedUrl } = normalizeUrl(transformedResult.url);
-  return createUrlResolution({
-    normalizedUrl: transformedUrl,
-    originalUrl: validatedUrl,
-    transformed: true,
-  });
-}
-
-function logRawUrlTransformation(resolvedUrl: UrlResolution): void {
-  if (!resolvedUrl.transformed) return;
-
-  logDebug('Using transformed raw content URL', {
-    original: resolvedUrl.originalUrl,
-  });
-}
-
-function extractTitle(value: unknown): string | undefined {
-  return readString(value, 'title');
-}
-
-function logCacheMiss(
-  reason: string,
-  cacheNamespace: string,
-  normalizedUrl: string,
-  error?: unknown
-): void {
-  const log = reason.startsWith('deserialize') ? logWarn : logDebug;
-  log(`Cache miss due to ${reason}`, {
-    namespace: cacheNamespace,
-    url: normalizedUrl,
-    ...(error ? { error: getErrorMessage(error) } : {}),
-  });
-}
-
-function createCacheHitResult<T>(params: {
-  data: T;
-  normalizedUrl: string;
-  cachedUrl: string;
-  fetchedAt: string;
-  cacheKey: string;
-}): PipelineResult<T> {
-  const finalUrl =
-    params.cachedUrl !== params.normalizedUrl ? params.cachedUrl : undefined;
-
-  return {
-    data: params.data,
-    fromCache: true,
-    url: params.normalizedUrl,
-    ...(finalUrl ? { finalUrl } : {}),
-    fetchedAt: params.fetchedAt,
-    cacheKey: params.cacheKey,
-  };
-}
-
-function attemptCacheRetrieval<T>(params: {
-  cacheKey: string | null;
-  deserialize: ((cached: string) => T | undefined) | undefined;
-  cacheNamespace: string;
-  normalizedUrl: string;
-}): PipelineResult<T> | null {
-  const { cacheKey, deserialize, cacheNamespace, normalizedUrl } = params;
-  if (!cacheKey) return null;
-
-  const cached = cache.get(cacheKey);
-  if (!cached) return null;
-
-  if (!deserialize) {
-    logCacheMiss('missing deserializer', cacheNamespace, normalizedUrl);
-    return null;
-  }
-
-  let data: T | undefined;
-  try {
-    data = deserialize(cached.content);
-  } catch (error: unknown) {
-    logCacheMiss('deserialize exception', cacheNamespace, normalizedUrl, error);
-    return null;
-  }
-
-  if (data === undefined) {
-    logCacheMiss('deserialize failure', cacheNamespace, normalizedUrl);
-    return null;
-  }
-
-  logDebug('Cache hit', { namespace: cacheNamespace, url: normalizedUrl });
-
-  return createCacheHitResult({
-    data,
-    normalizedUrl,
-    cachedUrl: cached.url,
-    fetchedAt: cached.fetchedAt,
-    cacheKey,
-  });
-}
-
-function persistCache<T>(params: {
-  cacheKey: string | null;
-  data: T;
-  serialize: ((result: T) => string) | undefined;
-  normalizedUrl: string;
-  cacheNamespace: string;
-  force?: boolean;
-}): void {
-  const { cacheKey, data, serialize, normalizedUrl, cacheNamespace, force } =
-    params;
-  if (!cacheKey) return;
-
-  const serializer = serialize ?? JSON.stringify;
-  const title = extractTitle(data);
-  const metadata = {
-    url: normalizedUrl,
-    ...(title === undefined ? {} : { title }),
-  };
-
-  try {
-    cache.set(
-      cacheKey,
-      serializer(data),
-      metadata,
-      force ? { force: true } : undefined
-    );
-  } catch (error: unknown) {
-    logWarn('Failed to persist cache entry', {
-      namespace: cacheNamespace,
-      url: normalizedUrl,
-      error: getErrorMessage(error),
-    });
-  }
-}
-
-export async function executeFetchPipeline<T>(
-  options: FetchPipelineOptions<T>
-): Promise<PipelineResult<T>> {
-  const resolvedUrl = resolveNormalizedUrl(options.url);
-  logRawUrlTransformation(resolvedUrl);
-
-  const cacheKey = cache.createCacheKey(
-    options.cacheNamespace,
-    resolvedUrl.normalizedUrl,
-    options.cacheVary
-  );
-
-  if (!options.forceRefresh) {
-    const cachedResult = attemptCacheRetrieval({
-      cacheKey,
-      deserialize: options.deserialize,
-      cacheNamespace: options.cacheNamespace,
-      normalizedUrl: resolvedUrl.normalizedUrl,
-    });
-    if (cachedResult) {
-      return { ...cachedResult, originalUrl: resolvedUrl.originalUrl };
-    }
-  }
-
-  logDebug('Fetching URL', { url: resolvedUrl.normalizedUrl });
-
-  const { buffer, encoding, truncated, finalUrl } =
-    await fetchNormalizedUrlBuffer(
-      resolvedUrl.normalizedUrl,
-      withSignal(options.signal)
-    );
-  const transformUrl = finalUrl || resolvedUrl.normalizedUrl;
-  const data = await options.transform(
-    { buffer, encoding, ...(truncated ? { truncated: true } : {}) },
-    transformUrl
-  );
-
-  if (cache.isEnabled()) {
-    persistCache({
-      cacheKey,
-      data,
-      serialize: options.serialize,
-      normalizedUrl: finalUrl || resolvedUrl.normalizedUrl,
-      cacheNamespace: options.cacheNamespace,
-    });
-
-    if (finalUrl && finalUrl !== resolvedUrl.normalizedUrl) {
-      const finalCacheKey = cache.createCacheKey(
-        options.cacheNamespace,
-        finalUrl,
-        options.cacheVary
-      );
-      if (finalCacheKey && finalCacheKey !== cacheKey) {
-        persistCache({
-          cacheKey: finalCacheKey,
-          data,
-          serialize: options.serialize,
-          normalizedUrl: finalUrl,
-          cacheNamespace: options.cacheNamespace,
-        });
-      }
-    }
-  }
-
-  return {
-    data,
-    fromCache: false,
-    url: resolvedUrl.normalizedUrl,
-    originalUrl: resolvedUrl.originalUrl,
-    finalUrl,
-    fetchedAt: new Date().toISOString(),
-    cacheKey,
-  };
+  return AbortSignal.any([extraSignal, timeoutSignal]);
 }
 
 /* -------------------------------------------------------------------------------------------------
- * Shared fetch helper
- * ------------------------------------------------------------------------------------------------- */
-
-interface SharedFetchOptions {
-  readonly url: string;
-  readonly signal?: AbortSignal;
-  readonly cacheVary?: Record<string, unknown> | string;
-  readonly forceRefresh?: boolean;
-  readonly maxInlineChars?: number;
-  readonly transform: (
-    input: { buffer: Uint8Array; encoding: string; truncated?: boolean },
-    normalizedUrl: string
-  ) => MarkdownPipelineResult | Promise<MarkdownPipelineResult>;
-  readonly serialize?: (result: MarkdownPipelineResult) => string;
-  readonly deserialize?: (cached: string) => MarkdownPipelineResult | undefined;
-}
-
-interface SharedFetchDeps {
-  readonly executeFetchPipeline?: typeof executeFetchPipeline;
-}
-
-export async function performSharedFetch(
-  options: SharedFetchOptions,
-  deps: SharedFetchDeps = {}
-): Promise<{
-  pipeline: PipelineResult<MarkdownPipelineResult>;
-  inlineResult: InlineResult;
-}> {
-  const executePipeline = deps.executeFetchPipeline ?? executeFetchPipeline;
-
-  const pipelineOptions: FetchPipelineOptions<MarkdownPipelineResult> = {
-    url: options.url,
-    cacheNamespace: 'markdown',
-    ...withSignal(options.signal),
-    ...(options.cacheVary ? { cacheVary: options.cacheVary } : {}),
-    ...(options.forceRefresh ? { forceRefresh: true } : {}),
-    transform: options.transform,
-    ...(options.serialize ? { serialize: options.serialize } : {}),
-    ...(options.deserialize ? { deserialize: options.deserialize } : {}),
-  };
-
-  const pipeline = await executePipeline(pipelineOptions);
-  const inlineResult = applyInlineContentLimit(
-    pipeline.data.content,
-    options.maxInlineChars
-  );
-
-  return { pipeline, inlineResult };
-}
-
-/* -------------------------------------------------------------------------------------------------
- * Tool error mapping
- * ------------------------------------------------------------------------------------------------- */
-
-export function createToolErrorResponse(
-  message: string,
-  url: string,
-  extra?: {
-    code?: string;
-    statusCode?: number;
-    details?: Record<string, unknown>;
-  }
-): ToolErrorResponse {
-  const errorContent = {
-    error: message,
-    ...(extra?.code ? { code: extra.code } : {}),
-    url,
-    ...(extra?.statusCode !== undefined
-      ? { statusCode: extra.statusCode }
-      : {}),
-    ...(extra?.details ? { details: extra.details } : {}),
-  };
-
-  return {
-    content: [buildTextBlock(errorContent)],
-    isError: true,
-  };
-}
-
-function isValidationError(error: unknown): error is NodeJS.ErrnoException {
-  return (
-    error instanceof Error &&
-    isSystemError(error) &&
-    error.code === 'VALIDATION_ERROR'
-  );
-}
-
-function resolveToolErrorMessage(
-  error: unknown,
-  fallbackMessage: string
-): string {
-  if (isValidationError(error) || error instanceof FetchError) {
-    return error.message;
-  }
-  if (error instanceof Error) {
-    return `${fallbackMessage}: ${error.message}`;
-  }
-  return `${fallbackMessage}: Unknown error`;
-}
-
-function resolveToolErrorCode(error: unknown): string {
-  if (isValidationError(error)) return 'VALIDATION_ERROR';
-  if (error instanceof FetchError) return error.code;
-  if (error instanceof Error && error.name === 'AbortError') return 'ABORTED';
-  return 'FETCH_ERROR';
-}
-
-export function handleToolError(
-  error: unknown,
-  url: string,
-  fallbackMessage = 'Operation failed'
-): ToolErrorResponse {
-  const message = resolveToolErrorMessage(error, fallbackMessage);
-  const code = resolveToolErrorCode(error);
-  if (error instanceof FetchError) {
-    return createToolErrorResponse(message, url, {
-      code,
-      statusCode: error.statusCode,
-      details: error.details,
-    });
-  }
-  return createToolErrorResponse(message, url, { code });
-}
-
-/* -------------------------------------------------------------------------------------------------
- * Markdown pipeline (transform + cache codec)
- * ------------------------------------------------------------------------------------------------- */
-
-type MarkdownPipelineResult = MarkdownTransformResult & {
-  readonly content: string;
-};
-
-function normalizeExtractedMetadata(
-  metadata:
-    | {
-        title?: string | undefined;
-        description?: string | undefined;
-        author?: string | undefined;
-        image?: string | undefined;
-        favicon?: string | undefined;
-        publishedAt?: string | undefined;
-        modifiedAt?: string | undefined;
-      }
-    | undefined
-): MarkdownPipelineResult['metadata'] | undefined {
-  if (!metadata) return undefined;
-
-  const normalized = {
-    ...(metadata.title ? { title: metadata.title } : {}),
-    ...(metadata.description ? { description: metadata.description } : {}),
-    ...(metadata.author ? { author: metadata.author } : {}),
-    ...(metadata.image ? { image: metadata.image } : {}),
-    ...(metadata.favicon ? { favicon: metadata.favicon } : {}),
-    ...(metadata.publishedAt ? { publishedAt: metadata.publishedAt } : {}),
-    ...(metadata.modifiedAt ? { modifiedAt: metadata.modifiedAt } : {}),
-  };
-
-  if (Object.keys(normalized).length === 0) return undefined;
-  return normalized;
-}
-
-const cachedMarkdownSchema = z
-  .object({
-    markdown: z.string().optional(),
-    content: z.string().optional(),
-    title: z.string().optional(),
-    metadata: z
-      .strictObject({
-        title: z.string().optional(),
-        description: z.string().optional(),
-        author: z.string().optional(),
-        image: z.string().optional(),
-        favicon: z.string().optional(),
-        publishedAt: z.string().optional(),
-        modifiedAt: z.string().optional(),
-      })
-      .optional(),
-    truncated: z.boolean().optional(),
-  })
-  .catchall(z.unknown())
-  .refine(
-    (value) =>
-      typeof value.markdown === 'string' || typeof value.content === 'string',
-    { message: 'Missing markdown/content' }
-  );
-
-export function parseCachedMarkdownResult(
-  cached: string
-): MarkdownPipelineResult | undefined {
-  const parsed = safeJsonParse(cached);
-  const result = cachedMarkdownSchema.safeParse(parsed);
-  if (!result.success) return undefined;
-
-  const markdown = result.data.markdown ?? result.data.content;
-  if (typeof markdown !== 'string') return undefined;
-
-  const metadata = normalizeExtractedMetadata(result.data.metadata);
-
-  const truncated = result.data.truncated ?? false;
-  const persistedMarkdown = truncated
-    ? appendTruncationMarker(markdown, TRUNCATION_MARKER)
-    : markdown;
-
-  return {
-    content: persistedMarkdown,
-    markdown: persistedMarkdown,
-    title: result.data.title,
-    ...(metadata ? { metadata } : {}),
-    truncated,
-  };
-}
-
-const markdownTransform = async (
-  input: { buffer: Uint8Array; encoding: string; truncated?: boolean },
-  url: string,
-  signal?: AbortSignal,
-  skipNoiseRemoval?: boolean
-): Promise<MarkdownPipelineResult> => {
-  const result = await transformBufferToMarkdown(input.buffer, url, {
-    includeMetadata: true,
-    encoding: input.encoding,
-    ...withSignal(signal),
-    ...(skipNoiseRemoval ? { skipNoiseRemoval: true } : {}),
-    ...(input.truncated ? { inputTruncated: true } : {}),
-  });
-  const truncated = Boolean(result.truncated || input.truncated);
-  return { ...result, content: result.markdown, truncated };
-};
-
-function serializeMarkdownResult(result: MarkdownPipelineResult): string {
-  const persistedMarkdown = result.truncated
-    ? appendTruncationMarker(result.markdown, TRUNCATION_MARKER)
-    : result.markdown;
-
-  return JSON.stringify({
-    markdown: persistedMarkdown,
-    title: result.title,
-    metadata: result.metadata,
-    truncated: result.truncated,
-  });
-}
-
-/* -------------------------------------------------------------------------------------------------
- * fetch-url tool implementation
+ * Structured response assembly
  * ------------------------------------------------------------------------------------------------- */
 
 function buildStructuredContent(
   pipeline: PipelineResult<MarkdownPipelineResult>,
-  inlineResult: InlineResult,
+  inlineResult: InlineContentResult,
   inputUrl: string
 ): Record<string, unknown> {
   const cacheResourceUri = resolveCacheResourceUri(pipeline.cacheKey);
@@ -1213,7 +366,7 @@ function resolveCacheResourceUri(
 function buildFetchUrlContentBlocks(
   structuredContent: Record<string, unknown>,
   pipeline: PipelineResult<MarkdownPipelineResult>,
-  inlineResult: InlineResult
+  inlineResult: InlineContentResult
 ): ToolContentBlockUnion[] {
   const cacheResourceUri = readString(structuredContent, 'cacheResourceUri');
   const contentToEmbed = config.runtime.httpMode
@@ -1238,7 +391,7 @@ function buildFetchUrlContentBlocks(
 
 function buildResponse(
   pipeline: PipelineResult<MarkdownPipelineResult>,
-  inlineResult: InlineResult,
+  inlineResult: InlineContentResult,
   inputUrl: string
 ): ToolResponseBase {
   const structuredContent = buildStructuredContent(
@@ -1252,7 +405,6 @@ function buildResponse(
     inlineResult
   );
 
-  // Runtime validation guard: verify output matches schema
   const validation = fetchUrlOutputSchema.safeParse(structuredContent);
   if (!validation.success) {
     logWarn('Tool output schema validation failed', {
@@ -1267,6 +419,26 @@ function buildResponse(
   };
 }
 
+/* -------------------------------------------------------------------------------------------------
+ * fetch-url tool implementation
+ * ------------------------------------------------------------------------------------------------- */
+
+export function getUrlContext(urlStr: string): string {
+  try {
+    const u = new URL(urlStr);
+    const host = u.hostname.replace(/^www\./, '');
+    const path = u.pathname;
+    if (path === '/' || path === '') return host;
+    let basename = path.split('/').filter(Boolean).pop();
+    if (basename && basename.length > 20) {
+      basename = `${basename.substring(0, 17)}...`;
+    }
+    return basename ? `${host}/…/${basename}` : host;
+  } catch {
+    return 'unknown';
+  }
+}
+
 async function fetchPipeline(
   url: string,
   signal?: AbortSignal,
@@ -1276,7 +448,7 @@ async function fetchPipeline(
   maxInlineChars?: number
 ): Promise<{
   pipeline: PipelineResult<MarkdownPipelineResult>;
-  inlineResult: InlineResult;
+  inlineResult: InlineContentResult;
 }> {
   return performSharedFetch({
     url,
@@ -1299,22 +471,6 @@ async function fetchPipeline(
     serialize: serializeMarkdownResult,
     deserialize: parseCachedMarkdownResult,
   });
-}
-
-export function getUrlContext(urlStr: string): string {
-  try {
-    const u = new URL(urlStr);
-    const host = u.hostname.replace(/^www\./, '');
-    const path = u.pathname;
-    if (path === '/' || path === '') return host;
-    let basename = path.split('/').filter(Boolean).pop();
-    if (basename && basename.length > 20) {
-      basename = `${basename.substring(0, 17)}...`;
-    }
-    return basename ? `${host}/…/${basename}` : host;
-  } catch {
-    return 'unknown';
-  }
 }
 
 async function executeFetch(
