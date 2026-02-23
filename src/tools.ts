@@ -313,6 +313,37 @@ function buildToolAbortSignal(
  * Structured response assembly
  * ------------------------------------------------------------------------------------------------- */
 
+function truncateStr(
+  value: string | undefined,
+  max: number
+): string | undefined {
+  if (value === undefined || value.length <= max) return value;
+  return value.slice(0, max);
+}
+
+function truncateMetadata(metadata: {
+  title?: string;
+  description?: string;
+  author?: string;
+  image?: string;
+  favicon?: string;
+  publishedAt?: string;
+  modifiedAt?: string;
+}): Record<string, unknown> {
+  return {
+    ...metadata,
+    ...(metadata.title !== undefined
+      ? { title: truncateStr(metadata.title, 512) }
+      : {}),
+    ...(metadata.description !== undefined
+      ? { description: truncateStr(metadata.description, 2048) }
+      : {}),
+    ...(metadata.author !== undefined
+      ? { author: truncateStr(metadata.author, 512) }
+      : {}),
+  };
+}
+
 function buildStructuredContent(
   pipeline: PipelineResult<MarkdownPipelineResult>,
   inlineResult: InlineContentResult,
@@ -332,8 +363,8 @@ function buildStructuredContent(
     ...(pipeline.finalUrl ? { finalUrl: pipeline.finalUrl } : {}),
     ...(cacheResourceUri ? { cacheResourceUri } : {}),
     inputUrl,
-    title: pipeline.data.title,
-    ...(metadata ? { metadata } : {}),
+    title: truncateStr(pipeline.data.title, 512),
+    ...(metadata ? { metadata: truncateMetadata(metadata) } : {}),
     markdown,
     fromCache: pipeline.fromCache,
     fetchedAt: pipeline.fetchedAt,

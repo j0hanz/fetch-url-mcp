@@ -1395,7 +1395,11 @@ function resolveRelativeUrlsInSegment(
   return output;
 }
 
-function resolveRelativeUrls(markdown: string, baseUrl: string): string {
+function resolveRelativeUrls(
+  markdown: string,
+  baseUrl: string,
+  signal?: AbortSignal
+): string {
   let origin: string;
   try {
     ({ origin } = new URL(baseUrl));
@@ -1418,7 +1422,11 @@ function resolveRelativeUrls(markdown: string, baseUrl: string): string {
   const len = markdown.length;
   let lastIndex = 0;
 
+  let lineCount = 0;
   while (lastIndex < len) {
+    if (++lineCount % 500 === 0 && signal?.aborted) {
+      throw new Error('Transform aborted during URL resolution');
+    }
     let nextIndex = markdown.indexOf('\n', lastIndex);
     let line: string;
     let lineWithNewline: string;
@@ -1479,7 +1487,7 @@ function translateHtmlToMarkdown(params: {
   const cleanedHtml = skipNoiseRemoval
     ? html
     : stageTracker.run(url, 'markdown:noise', () =>
-        removeNoiseFromHtml(html, document, url)
+        removeNoiseFromHtml(html, document, url, signal)
       );
 
   abortPolicy.throwIfAborted(signal, url, 'markdown:cleaned');
@@ -1494,7 +1502,7 @@ function translateHtmlToMarkdown(params: {
     content,
     signal ? { signal, url } : { url }
   );
-  return url ? resolveRelativeUrls(cleaned, url) : cleaned;
+  return url ? resolveRelativeUrls(cleaned, url, signal) : cleaned;
 }
 
 function appendMetadataFooter(
@@ -1895,6 +1903,7 @@ function buildContentSource(params: {
   document?: Document;
   truncated: boolean;
   skipNoiseRemoval?: boolean;
+  signal?: AbortSignal;
 }): ContentSource {
   const {
     html,
@@ -1906,6 +1915,7 @@ function buildContentSource(params: {
     document,
     truncated,
     skipNoiseRemoval,
+    signal,
   } = params;
 
   const metadata = createContentMetadataBlock(
@@ -1920,7 +1930,7 @@ function buildContentSource(params: {
     // Readability output can still be noisy (unless user requested skip).
     const cleanedArticleHtml = skipNoiseRemoval
       ? article.content
-      : removeNoiseFromHtml(article.content, undefined, url);
+      : removeNoiseFromHtml(article.content, undefined, url, signal);
     return {
       sourceHtml: cleanedArticleHtml,
       title: article.title,
@@ -1935,7 +1945,7 @@ function buildContentSource(params: {
   if (document) {
     const cleanedHtml = skipNoiseRemoval
       ? html
-      : removeNoiseFromHtml(html, document, url);
+      : removeNoiseFromHtml(html, document, url, signal);
 
     const contentRoot = findContentRoot(document);
     if (contentRoot) {
@@ -2006,6 +2016,7 @@ function resolveContentSource(params: {
     document,
     truncated: truncated ?? false,
     ...(params.skipNoiseRemoval ? { skipNoiseRemoval: true } : {}),
+    ...(params.signal ? { signal: params.signal } : {}),
   });
 }
 

@@ -523,6 +523,12 @@ export const config = {
     stageWarnRatio: 0.5,
     metadataFormat: 'markdown',
     maxWorkerScale: 4,
+    cancelAckTimeoutMs: parseInteger(
+      env['TRANSFORM_CANCEL_ACK_TIMEOUT_MS'],
+      200,
+      50,
+      5000
+    ),
     workerMode: parseTransformWorkerMode(env['TRANSFORM_WORKER_MODE']),
     workerResourceLimits: resolveWorkerResourceLimits(),
   },

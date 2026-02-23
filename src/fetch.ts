@@ -93,8 +93,9 @@ class IpBlocker {
   constructor(private readonly security: SecurityConfig) {}
 
   isBlockedIp(candidate: string): boolean {
-    if (isLocalFetchAllowed()) return false;
     const normalized = candidate.trim().toLowerCase();
+    if (isCloudMetadataHost(normalized)) return true;
+    if (isLocalFetchAllowed()) return false;
     if (!normalized) return false;
     if (this.security.blockedHosts.has(normalized)) return true;
 
@@ -111,6 +112,21 @@ function createValidationError(message: string): Error {
 }
 
 const BLOCKED_HOST_SUFFIXES: readonly string[] = ['.local', '.internal'];
+
+// This list is not exhaustive but covers the most common cloud metadata endpoints.
+const CLOUD_METADATA_HOSTS: ReadonlySet<string> = new Set([
+  '169.254.169.254', // AWS / GCP / Azure
+  'metadata.google.internal', // GCP
+  '100.100.100.200', // Alibaba Cloud
+  'fd00:ec2::254', // AWS IPv6
+]);
+
+function isCloudMetadataHost(hostname: string): boolean {
+  const lowered = hostname.toLowerCase();
+  if (CLOUD_METADATA_HOSTS.has(lowered)) return true;
+  const normalized = normalizeIpForBlockList(lowered);
+  return normalized !== null && CLOUD_METADATA_HOSTS.has(normalized.ip);
+}
 
 type ConstantsConfig = typeof config.constants;
 
@@ -184,6 +200,11 @@ class UrlNormalizer {
   }
 
   private assertNotBlockedHost(hostname: string): void {
+    if (isCloudMetadataHost(hostname)) {
+      throw createValidationError(
+        `Blocked host: ${hostname}. Cloud metadata endpoints are not allowed`
+      );
+    }
     if (isLocalFetchAllowed()) return;
     if (!this.security.blockedHosts.has(hostname)) return;
     throw createValidationError(
@@ -192,6 +213,11 @@ class UrlNormalizer {
   }
 
   private assertNotBlockedIp(hostname: string): void {
+    if (isCloudMetadataHost(hostname)) {
+      throw createValidationError(
+        `Blocked IP range: ${hostname}. Cloud metadata endpoints are not allowed`
+      );
+    }
     if (isLocalFetchAllowed()) return;
     if (!this.ipBlocker.isBlockedIp(hostname)) return;
     throw createValidationError(
@@ -592,6 +618,12 @@ class SafeDnsResolver {
     }
 
     if (isIP(normalizedHostname)) {
+      if (isCloudMetadataHost(normalizedHostname)) {
+        throw createErrorWithCode(
+          `Blocked IP range: ${normalizedHostname}. Cloud metadata endpoints are not allowed`,
+          'EBLOCKED'
+        );
+      }
       if (
         process.env['ALLOW_LOCAL_FETCH'] !== 'true' &&
         this.ipBlocker.isBlockedIp(normalizedHostname)
@@ -637,6 +669,12 @@ class SafeDnsResolver {
           'EINVAL'
         );
       }
+      if (isCloudMetadataHost(addr.address)) {
+        throw createErrorWithCode(
+          `Blocked IP detected for ${normalizedHostname}`,
+          'EBLOCKED'
+        );
+      }
       if (!isLocalFetchAllowed() && this.ipBlocker.isBlockedIp(addr.address)) {
         throw createErrorWithCode(
           `Blocked IP detected for ${normalizedHostname}`,
@@ -649,6 +687,7 @@ class SafeDnsResolver {
   }
 
   private isBlockedHostname(hostname: string): boolean {
+    if (isCloudMetadataHost(hostname)) return true;
     if (isLocalFetchAllowed()) return false;
     if (this.security.blockedHosts.has(hostname)) return true;
     return this.blockedHostSuffixes.some((suffix) => hostname.endsWith(suffix));

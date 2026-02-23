@@ -691,7 +691,10 @@ class WorkerPool implements TransformWorkerPool {
     }
 
     let resolve: () => void = () => {};
-    const timeout = createUnrefTimeout(200, undefined);
+    const timeout = createUnrefTimeout(
+      config.transform.cancelAckTimeoutMs,
+      undefined
+    );
     const racePromise = new Promise<void>((finish) => {
       resolve = finish;
     });

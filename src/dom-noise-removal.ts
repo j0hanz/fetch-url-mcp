@@ -478,7 +478,11 @@ function cleanHeadings(document: Document): void {
   }
 }
 
-function stripNoise(document: Document, context: NoiseContext): void {
+function stripNoise(
+  document: Document,
+  context: NoiseContext,
+  signal?: AbortSignal
+): void {
   cleanHeadings(document);
 
   // Remove Base & Extra
@@ -498,6 +502,9 @@ function stripNoise(document: Document, context: NoiseContext): void {
   // Candidates
   const candidates = document.querySelectorAll(context.candidateSelector);
   for (let i = candidates.length - 1; i >= 0; i--) {
+    if (i % 500 === 0 && signal?.aborted) {
+      throw new Error('Noise removal aborted');
+    }
     const node = candidates[i];
     if (!node) continue;
     if (!node.parentNode) continue;
@@ -592,7 +599,8 @@ function mayContainNoise(html: string): boolean {
 export function removeNoiseFromHtml(
   html: string,
   document?: Document,
-  baseUrl?: string
+  baseUrl?: string,
+  signal?: AbortSignal
 ): string {
   const shouldParse =
     isFullDocumentHtml(html) ||
@@ -611,7 +619,7 @@ export function removeNoiseFromHtml(
 
     const doc = document ?? parseHTML(html).document;
 
-    stripNoise(doc, context);
+    stripNoise(doc, context, signal);
 
     if (baseUrl) resolveUrls(doc, baseUrl);
 
