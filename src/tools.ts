@@ -1286,9 +1286,7 @@ async function fetchPipeline(
     ...(maxInlineChars !== undefined ? { maxInlineChars } : {}),
     transform: async ({ buffer, encoding, truncated }, normalizedUrl) => {
       if (progress) {
-        const contextStr = URL.canParse(url)
-          ? new URL(url).hostname
-          : 'unknown';
+        const contextStr = getUrlContext(url);
         void progress.report(2, `fetch-url: ${contextStr} [transforming]`);
       }
       return markdownTransform(
@@ -1303,6 +1301,22 @@ async function fetchPipeline(
   });
 }
 
+export function getUrlContext(urlStr: string): string {
+  try {
+    const u = new URL(urlStr);
+    const host = u.hostname.replace(/^www\./, '');
+    const path = u.pathname;
+    if (path === '/' || path === '') return host;
+    let basename = path.split('/').filter(Boolean).pop();
+    if (basename && basename.length > 20) {
+      basename = `${basename.substring(0, 17)}...`;
+    }
+    return basename ? `${host}/…/${basename}` : host;
+  } catch {
+    return 'unknown';
+  }
+}
+
 async function executeFetch(
   input: FetchUrlInput,
   extra?: ToolHandlerExtra
@@ -1315,7 +1329,7 @@ async function executeFetch(
   const signal = buildToolAbortSignal(extra?.signal);
   const progress = createProgressReporter(extra);
 
-  const contextStr = URL.canParse(url) ? new URL(url).hostname : 'unknown';
+  const contextStr = getUrlContext(url);
   void progress.report(0, `fetch-url: ${contextStr} [starting]`);
   logDebug('Fetching URL', { url });
 
