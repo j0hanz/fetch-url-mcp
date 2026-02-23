@@ -2,6 +2,15 @@ const MAX_DEPTH = 20;
 const MAX_DEPTH_ERROR = `stableStringify: Max depth (${MAX_DEPTH}) exceeded`;
 const CIRCULAR_ERROR = 'stableStringify: Circular reference detected';
 
+function compareObjectKeys(a: string, b: string): number {
+  if (a === b) return 0;
+  return a < b ? -1 : 1;
+}
+
+function getSortedObjectKeys(obj: object): string[] {
+  return Object.keys(obj).sort(compareObjectKeys);
+}
+
 function processChildValue(
   value: unknown,
   depth: number,
@@ -35,10 +44,7 @@ function processValue(
       return obj.map((item) => processChildValue(item, depth, seen));
     }
 
-    const keys = Object.keys(obj).sort((a, b) => {
-      if (a === b) return 0;
-      return a < b ? -1 : 1;
-    });
+    const keys = getSortedObjectKeys(obj);
     const record = obj as Record<string, unknown>;
     const sortedObj: Record<string, unknown> = {};
 

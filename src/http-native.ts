@@ -195,9 +195,7 @@ function createRequestAbortSignal(req: IncomingMessage): {
     };
   }
 
-  const onAborted = (): void => {
-    abortRequest();
-  };
+  const onAborted = abortRequest;
   const onClose = (): void => {
     // A normal close after a complete body should not be treated as cancellation.
     if (req.complete) return;

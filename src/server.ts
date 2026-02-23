@@ -72,14 +72,16 @@ function createServerCapabilities(): McpServerCapabilities {
   };
 }
 
-function createServerInfo(icons?: IconInfo[]): {
+interface ServerInfo {
   name: string;
   title: string;
   description: string;
   version: string;
   websiteUrl: string;
   icons?: IconInfo[];
-} {
+}
+
+function createServerInfo(icons?: IconInfo[]): ServerInfo {
   return {
     name: config.server.name,
     title: 'Fetch URL',
@@ -89,10 +91,6 @@ function createServerInfo(icons?: IconInfo[]): {
     websiteUrl: 'https://github.com/j0hanz/fetch-url-mcp',
     ...(icons ? { icons } : {}),
   };
-}
-
-function toIconList(icon?: IconInfo): IconInfo[] | undefined {
-  return icon ? [icon] : undefined;
 }
 
 /* -------------------------------------------------------------------------------------------------
@@ -124,7 +122,7 @@ async function createMcpServerWithOptions(
     serverConfig.instructions = serverInstructions;
   }
 
-  const serverInfo = createServerInfo(toIconList(localIcon));
+  const serverInfo = createServerInfo(localIcon ? [localIcon] : undefined);
   const server = new McpServer(serverInfo, serverConfig);
 
   if (options?.registerObservabilityServer ?? true) {

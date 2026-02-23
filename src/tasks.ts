@@ -114,17 +114,25 @@ class TaskManager {
     const task = this.tasks.get(taskId);
     if (!task) return false;
     this.tasks.delete(taskId);
-    const prev = this.ownerCounts.get(task.ownerKey) ?? 0;
-    if (prev > 1) {
-      this.ownerCounts.set(task.ownerKey, prev - 1);
-    } else {
-      this.ownerCounts.delete(task.ownerKey);
-    }
+    this.decrementOwnerCount(task.ownerKey);
     return true;
   }
 
   private countTasksForOwner(ownerKey: string): number {
     return this.ownerCounts.get(ownerKey) ?? 0;
+  }
+
+  private incrementOwnerCount(ownerKey: string): void {
+    this.ownerCounts.set(ownerKey, (this.ownerCounts.get(ownerKey) ?? 0) + 1);
+  }
+
+  private decrementOwnerCount(ownerKey: string): void {
+    const previousCount = this.ownerCounts.get(ownerKey) ?? 0;
+    if (previousCount > 1) {
+      this.ownerCounts.set(ownerKey, previousCount - 1);
+      return;
+    }
+    this.ownerCounts.delete(ownerKey);
   }
 
   private assertTaskCapacity(ownerKey: string): void {
@@ -170,7 +178,7 @@ class TaskManager {
     };
 
     this.tasks.set(task.taskId, task);
-    this.ownerCounts.set(ownerKey, (this.ownerCounts.get(ownerKey) ?? 0) + 1);
+    this.incrementOwnerCount(ownerKey);
     return task;
   }
 

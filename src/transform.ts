@@ -330,13 +330,13 @@ function truncateHtml(
   if (maxSize <= 0) return { html, truncated: false };
 
   if (html.length <= maxSize) {
-    const byteLength = Buffer.byteLength(html, 'utf8');
+    const byteLength = getUtf8ByteLength(html);
     if (byteLength <= maxSize && !inputTruncated)
       return { html, truncated: false };
   }
 
   const sliced = html.slice(0, maxSize);
-  if (Buffer.byteLength(sliced, 'utf8') <= maxSize) {
+  if (getUtf8ByteLength(sliced) <= maxSize) {
     return { html: trimDanglingTagFragment(sliced), truncated: true };
   }
 
@@ -346,9 +346,9 @@ function truncateHtml(
   );
 
   logWarn('HTML content exceeds maximum size, truncating', {
-    size: Buffer.byteLength(html, 'utf8'),
+    size: getUtf8ByteLength(html),
     maxSize,
-    truncatedSize: Buffer.byteLength(content, 'utf8'),
+    truncatedSize: getUtf8ByteLength(content),
   });
   return { html: content, truncated: true };
 }

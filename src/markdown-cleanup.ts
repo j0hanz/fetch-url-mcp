@@ -71,6 +71,14 @@ function throwIfAborted(
   });
 }
 
+function createAbortChecker(options?: CleanupOptions): (stage: string) => void {
+  const signal = options?.signal;
+  const url = options?.url ?? '';
+  return (stage: string): void => {
+    throwIfAborted(signal, url, stage);
+  };
+}
+
 // --- Helper Functions ---
 
 function getLineEnding(content: string): '\n' | '\r\n' {
@@ -246,6 +254,7 @@ function preprocessLines(lines: string[], options?: CleanupOptions): string {
   const len = lines.length;
   const promote = config.markdownCleanup.promoteOrphanHeadings;
   const removeToc = config.markdownCleanup.removeTocBlocks;
+  const checkAbort = createAbortChecker(options);
 
   let skipUntil = -1;
 
@@ -265,11 +274,7 @@ function preprocessLines(lines: string[], options?: CleanupOptions): string {
     }
 
     if (promote && trimmed.length > 0) {
-      throwIfAborted(
-        options?.signal,
-        options?.url ?? '',
-        'markdown:cleanup:promote'
-      );
+      checkAbort('markdown:cleanup:promote');
       const promoted = tryPromoteOrphan(lines, i, trimmed);
       if (promoted) line = promoted;
     }
@@ -288,12 +293,9 @@ function processTextBuffer(lines: string[], options?: CleanupOptions): string {
 
 function applyGlobalRegexes(text: string, options?: CleanupOptions): string {
   let result = text;
+  const checkAbort = createAbortChecker(options);
 
-  throwIfAborted(
-    options?.signal,
-    options?.url ?? '',
-    'markdown:cleanup:headings'
-  );
+  checkAbort('markdown:cleanup:headings');
 
   // fixAndSpaceHeadings
   result = result
@@ -302,11 +304,7 @@ function applyGlobalRegexes(text: string, options?: CleanupOptions): string {
     .replace(REGEX.HEADING_CAMEL_CASE, '$1\n\n$2');
 
   if (config.markdownCleanup.removeTypeDocComments) {
-    throwIfAborted(
-      options?.signal,
-      options?.url ?? '',
-      'markdown:cleanup:typedoc'
-    );
+    checkAbort('markdown:cleanup:typedoc');
     result = result
       .split('\n')
       .filter((line) => !isTypeDocArtifactLine(line))
@@ -316,21 +314,13 @@ function applyGlobalRegexes(text: string, options?: CleanupOptions): string {
     );
   }
   if (config.markdownCleanup.removeSkipLinks) {
-    throwIfAborted(
-      options?.signal,
-      options?.url ?? '',
-      'markdown:cleanup:skip-links'
-    );
+    checkAbort('markdown:cleanup:skip-links');
     result = result
       .replace(REGEX.ZERO_WIDTH_ANCHOR, '')
       .replace(REGEX.COMBINED_LINE_REMOVALS, '');
   }
 
-  throwIfAborted(
-    options?.signal,
-    options?.url ?? '',
-    'markdown:cleanup:spacing'
-  );
+  checkAbort('markdown:cleanup:spacing');
 
   // normalizeSpacing
   result = result
@@ -343,11 +333,7 @@ function applyGlobalRegexes(text: string, options?: CleanupOptions): string {
 
   result = normalizeNestedListIndentation(result);
 
-  throwIfAborted(
-    options?.signal,
-    options?.url ?? '',
-    'markdown:cleanup:properties'
-  );
+  checkAbort('markdown:cleanup:properties');
 
   // fixProperties
   for (let k = 0; k < 3; k++) {
@@ -439,7 +425,8 @@ export function cleanupMarkdownArtifacts(
 ): string {
   if (!content) return '';
 
-  throwIfAborted(options?.signal, options?.url ?? '', 'markdown:cleanup:begin');
+  const checkAbort = createAbortChecker(options);
+  checkAbort('markdown:cleanup:begin');
 
   const len = content.length;
   let lastIndex = 0;

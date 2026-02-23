@@ -23,6 +23,16 @@ function setIfDefined<T>(
   setter(value);
 }
 
+function assignServerValue<T extends keyof HttpServerTuningTarget>(
+  server: HttpServerTuningTarget,
+  key: T,
+  value: HttpServerTuningTarget[T] | undefined
+): void {
+  setIfDefined(value, (resolved) => {
+    server[key] = resolved;
+  });
+}
+
 export function applyHttpServerTuning(server: HttpServerTuningTarget): void {
   const {
     headersTimeoutMs,
@@ -33,21 +43,11 @@ export function applyHttpServerTuning(server: HttpServerTuningTarget): void {
     maxConnections,
   } = config.server.http;
 
-  setIfDefined(headersTimeoutMs, (value) => {
-    server.headersTimeout = value;
-  });
-  setIfDefined(requestTimeoutMs, (value) => {
-    server.requestTimeout = value;
-  });
-  setIfDefined(keepAliveTimeoutMs, (value) => {
-    server.keepAliveTimeout = value;
-  });
-  setIfDefined(keepAliveTimeoutBufferMs, (value) => {
-    server.keepAliveTimeoutBuffer = value;
-  });
-  setIfDefined(maxHeadersCount, (value) => {
-    server.maxHeadersCount = value;
-  });
+  assignServerValue(server, 'headersTimeout', headersTimeoutMs);
+  assignServerValue(server, 'requestTimeout', requestTimeoutMs);
+  assignServerValue(server, 'keepAliveTimeout', keepAliveTimeoutMs);
+  assignServerValue(server, 'keepAliveTimeoutBuffer', keepAliveTimeoutBufferMs);
+  assignServerValue(server, 'maxHeadersCount', maxHeadersCount);
 
   if (typeof maxConnections === 'number' && maxConnections > 0) {
     server.maxConnections = maxConnections;

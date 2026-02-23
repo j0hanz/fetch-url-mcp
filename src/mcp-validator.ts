@@ -38,7 +38,14 @@ function parseAcceptHeader(
   header: string | null | undefined
 ): readonly string[] {
   if (!header) return [];
-  return header.split(',').map((value) => value.trim());
+  return header
+    .split(',')
+    .map((value) => value.trim())
+    .filter((value) => value.length > 0);
+}
+
+function extractAcceptMediaType(value: string): string {
+  return value.split(';', 1)[0]?.trim().toLowerCase() ?? '';
 }
 
 export function acceptsEventStream(header: string | null | undefined): boolean {
@@ -53,7 +60,7 @@ function hasAcceptedMediaType(
   wildcardPrefix: string
 ): boolean {
   return parseAcceptHeader(header).some((rawPart) => {
-    const mediaType = rawPart.trim().split(';', 1)[0]?.trim().toLowerCase();
+    const mediaType = extractAcceptMediaType(rawPart);
     if (!mediaType) return false;
     if (mediaType === '*/*') return true;
     if (mediaType === exact) return true;

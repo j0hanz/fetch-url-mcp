@@ -180,6 +180,19 @@ function normalizeSendNotification(
   };
 }
 
+function normalizeAuthInfo(
+  authInfo: unknown
+): NonNullable<HandlerExtra['authInfo']> | undefined {
+  if (!isObject(authInfo)) return undefined;
+
+  const { clientId, token } = authInfo;
+  const normalized: NonNullable<HandlerExtra['authInfo']> = {};
+  if (typeof clientId === 'string') normalized.clientId = clientId;
+  if (typeof token === 'string') normalized.token = token;
+
+  return normalized.clientId || normalized.token ? normalized : undefined;
+}
+
 function parseHandlerExtra(extra: unknown): HandlerExtra | undefined {
   if (!isObject(extra)) return undefined;
 
@@ -187,12 +200,9 @@ function parseHandlerExtra(extra: unknown): HandlerExtra | undefined {
   const { sessionId, authInfo, signal, requestId, sendNotification } = extra;
   if (typeof sessionId === 'string') parsed.sessionId = sessionId;
 
-  if (isObject(authInfo)) {
-    const { clientId, token } = authInfo;
-    const normalized: NonNullable<HandlerExtra['authInfo']> = {};
-    if (typeof clientId === 'string') normalized.clientId = clientId;
-    if (typeof token === 'string') normalized.token = token;
-    if (normalized.clientId || normalized.token) parsed.authInfo = normalized;
+  const normalizedAuthInfo = normalizeAuthInfo(authInfo);
+  if (normalizedAuthInfo) {
+    parsed.authInfo = normalizedAuthInfo;
   }
 
   if (signal instanceof AbortSignal) parsed.signal = signal;
@@ -364,7 +374,21 @@ interface TaskStatusNotificationParams extends Record<string, unknown> {
   pollInterval: number;
 }
 
-function buildTaskStatusParams(task: TaskState): TaskStatusNotificationParams {
+type TaskSummary = CreateTaskResult['task'];
+
+interface RelatedTaskMeta {
+  'io.modelcontextprotocol/related-task': { taskId: string };
+}
+
+function toTaskSummary(task: {
+  taskId: string;
+  status: TaskState['status'];
+  statusMessage?: string;
+  createdAt: string;
+  lastUpdatedAt: string;
+  ttl: number;
+  pollInterval: number;
+}): TaskSummary {
   return {
     taskId: task.taskId,
     status: task.status,
@@ -374,6 +398,27 @@ function buildTaskStatusParams(task: TaskState): TaskStatusNotificationParams {
     ttl: task.ttl,
     pollInterval: task.pollInterval,
   };
+}
+
+function withRelatedTaskMeta(
+  result: ServerResult,
+  taskId: string
+): ServerResult {
+  const relatedTaskMeta: RelatedTaskMeta = {
+    'io.modelcontextprotocol/related-task': { taskId },
+  };
+
+  return {
+    ...result,
+    _meta: {
+      ...result._meta,
+      ...relatedTaskMeta,
+    },
+  };
+}
+
+function buildTaskStatusParams(task: TaskState): TaskStatusNotificationParams {
+  return toTaskSummary(task);
 }
 
 function emitTaskStatusNotification(server: McpServer, task: TaskState): void {
@@ -504,15 +549,7 @@ function handleTaskToolCall(
     }),
   });
 
-  return buildCreateTaskResult({
-    taskId: task.taskId,
-    status: task.status,
-    ...(task.statusMessage ? { statusMessage: task.statusMessage } : {}),
-    createdAt: task.createdAt,
-    lastUpdatedAt: task.lastUpdatedAt,
-    ttl: task.ttl,
-    pollInterval: task.pollInterval,
-  });
+  return buildCreateTaskResult(toTaskSummary(task));
 }
 
 async function handleDirectToolCall(
@@ -592,15 +629,7 @@ export function registerTaskHandlers(server: McpServer): void {
 
     if (!task) throwTaskNotFound();
 
-    return Promise.resolve({
-      taskId: task.taskId,
-      status: task.status,
-      statusMessage: task.statusMessage,
-      createdAt: task.createdAt,
-      lastUpdatedAt: task.lastUpdatedAt,
-      ttl: task.ttl,
-      pollInterval: task.pollInterval,
-    });
+    return Promise.resolve(toTaskSummary(task));
   });
 
   server.server.setRequestHandler(TaskResultSchema, async (request, extra) => {
@@ -638,13 +667,7 @@ export function registerTaskHandlers(server: McpServer): void {
         isError: true,
       };
 
-      return Promise.resolve({
-        ...fallback,
-        _meta: {
-          ...fallback._meta,
-          'io.modelcontextprotocol/related-task': { taskId: task.taskId },
-        },
-      });
+      return Promise.resolve(withRelatedTaskMeta(fallback, task.taskId));
     }
 
     if (task.status === 'cancelled') {
@@ -655,13 +678,7 @@ export function registerTaskHandlers(server: McpServer): void {
       ? task.result
       : { content: [] };
 
-    return Promise.resolve({
-      ...result,
-      _meta: {
-        ...result._meta,
-        'io.modelcontextprotocol/related-task': { taskId: task.taskId },
-      },
-    });
+    return Promise.resolve(withRelatedTaskMeta(result, task.taskId));
   });
 
   server.server.setRequestHandler(TaskListSchema, async (request, extra) => {
@@ -674,15 +691,7 @@ export function registerTaskHandlers(server: McpServer): void {
     );
 
     return Promise.resolve({
-      tasks: tasks.map((t) => ({
-        taskId: t.taskId,
-        status: t.status,
-        ...(t.statusMessage ? { statusMessage: t.statusMessage } : {}),
-        createdAt: t.createdAt,
-        lastUpdatedAt: t.lastUpdatedAt,
-        ttl: t.ttl,
-        pollInterval: t.pollInterval,
-      })),
+      tasks: tasks.map((task) => toTaskSummary(task)),
       nextCursor,
     });
   });
@@ -700,14 +709,6 @@ export function registerTaskHandlers(server: McpServer): void {
 
     emitTaskStatusNotification(server, task);
 
-    return Promise.resolve({
-      taskId: task.taskId,
-      status: task.status,
-      statusMessage: task.statusMessage,
-      createdAt: task.createdAt,
-      lastUpdatedAt: task.lastUpdatedAt,
-      ttl: task.ttl,
-      pollInterval: task.pollInterval,
-    });
+    return Promise.resolve(toTaskSummary(task));
   });
 }

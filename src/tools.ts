@@ -46,6 +46,7 @@ interface ToolContentBlock {
 }
 
 type ToolContentBlockUnion = ContentBlock;
+type ToolOutputBlock = ToolContentBlockUnion;
 
 type ToolErrorResponse = CallToolResult & {
   isError: true;
@@ -640,7 +641,7 @@ function buildCacheResourceLink(
   cacheResourceUri: string,
   contentSize: number,
   fetchedAt: string
-): ToolContentBlockUnion {
+): ToolOutputBlock {
   return {
     type: 'resource_link',
     uri: cacheResourceUri,

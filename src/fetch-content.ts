@@ -1,5 +1,7 @@
 import { Buffer } from 'node:buffer';
 
+const UTF8_ENCODING = 'utf-8';
+
 export function getCharsetFromContentType(
   contentType: string | null
 ): string | undefined {
@@ -16,12 +18,12 @@ export function getCharsetFromContentType(
 }
 
 function createDecoder(encoding: string | undefined): TextDecoder {
-  if (!encoding) return new TextDecoder('utf-8');
+  if (!encoding) return new TextDecoder(UTF8_ENCODING);
 
   try {
     return new TextDecoder(encoding);
   } catch {
-    return new TextDecoder('utf-8');
+    return new TextDecoder(UTF8_ENCODING);
   }
 }
 
@@ -91,14 +93,23 @@ function readQuotedValue(input: string, startIndex: number): string {
   return (stop === -1 ? tail : tail.slice(0, stop)).trim();
 }
 
+function findTokenValue(
+  original: string,
+  lower: string,
+  token: string,
+  fromIndex = 0
+): string | undefined {
+  const tokenIndex = lower.indexOf(token, fromIndex);
+  if (tokenIndex === -1) return undefined;
+
+  const valueStart = tokenIndex + token.length;
+  const value = readQuotedValue(original, valueStart);
+  return value || undefined;
+}
+
 function extractHtmlCharset(headSnippet: string): string | undefined {
   const lower = headSnippet.toLowerCase();
-  const charsetToken = 'charset=';
-  const charsetIdx = lower.indexOf(charsetToken);
-  if (charsetIdx === -1) return undefined;
-
-  const valueStart = charsetIdx + charsetToken.length;
-  const charset = readQuotedValue(headSnippet, valueStart);
+  const charset = findTokenValue(headSnippet, lower, 'charset=');
   return charset ? charset.toLowerCase() : undefined;
 }
 
@@ -114,12 +125,7 @@ function extractXmlEncoding(headSnippet: string): string | undefined {
       : headSnippet.slice(xmlStart, xmlEnd + 2);
   const declarationLower = declaration.toLowerCase();
 
-  const encodingToken = 'encoding=';
-  const encodingIdx = declarationLower.indexOf(encodingToken);
-  if (encodingIdx === -1) return undefined;
-
-  const valueStart = encodingIdx + encodingToken.length;
-  const encoding = readQuotedValue(declaration, valueStart);
+  const encoding = findTokenValue(declaration, declarationLower, 'encoding=');
   return encoding ? encoding.toLowerCase() : undefined;
 }
 

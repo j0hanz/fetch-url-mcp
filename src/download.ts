@@ -49,30 +49,37 @@ function truncateFilenameBase(name: string, extension: string): string {
   return name.length > maxBase ? name.substring(0, maxBase) : name;
 }
 
+function resolveTitleFilenameCandidate(title?: string): string | null {
+  if (!title) return null;
+  return sanitizeString(title) || null;
+}
+
+function resolveFilenameBase(
+  url: string,
+  title?: string,
+  hashFallback?: string
+): string {
+  try {
+    const fromUrl = resolveUrlFilenameCandidate(url);
+    if (fromUrl) return fromUrl;
+  } catch {
+    // Ignore URL parsing errors and continue fallbacks.
+  }
+
+  const fromTitle = resolveTitleFilenameCandidate(title);
+  if (fromTitle) return fromTitle;
+
+  if (hashFallback) return hashFallback.substring(0, 16);
+  return `download-${Date.now()}`;
+}
+
 export function generateSafeFilename(
   url: string,
   title?: string,
   hashFallback?: string,
   extension = '.md'
 ): string {
-  const tryUrl = (): string | null => {
-    try {
-      return resolveUrlFilenameCandidate(url);
-    } catch {
-      return null;
-    }
-  };
-
-  const tryTitle = (): string | null => {
-    if (!title) return null;
-    return sanitizeString(title) || null;
-  };
-
-  const name =
-    tryUrl() ??
-    tryTitle() ??
-    hashFallback?.substring(0, 16) ??
-    `download-${Date.now()}`;
+  const name = resolveFilenameBase(url, title, hashFallback);
 
   return `${truncateFilenameBase(name, extension)}${extension}`;
 }

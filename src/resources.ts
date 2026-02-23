@@ -45,6 +45,20 @@ const CACHE_HASH_PATTERN = /^[a-f0-9.]{8,64}$/i;
 const RESOURCE_NOT_FOUND_ERROR_CODE = -32002;
 const MAX_COMPLETION_VALUES = 100;
 
+function buildOptionalIcons(
+  iconInfo?: IconInfo
+): { icons: IconInfo[] } | Record<string, never> {
+  if (!iconInfo) return {};
+  return {
+    icons: [
+      {
+        src: iconInfo.src,
+        mimeType: iconInfo.mimeType,
+      },
+    ],
+  };
+}
+
 function isValidCacheResourceParts(parts: CacheResourceParts): boolean {
   return (
     CACHE_NAMESPACE_PATTERN.test(parts.namespace) &&
@@ -363,16 +377,7 @@ export function registerInstructionResource(
         audience: ['assistant'],
         priority: 0.9,
       },
-      ...(iconInfo
-        ? {
-            icons: [
-              {
-                src: iconInfo.src,
-                mimeType: iconInfo.mimeType,
-              },
-            ],
-          }
-        : {}),
+      ...buildOptionalIcons(iconInfo),
     },
     (uri): ReadResourceResult => ({
       contents: [
@@ -410,16 +415,7 @@ export function registerCacheResourceTemplate(
         audience: ['assistant'],
         priority: 0.6,
       },
-      ...(iconInfo
-        ? {
-            icons: [
-              {
-                src: iconInfo.src,
-                mimeType: iconInfo.mimeType,
-              },
-            ],
-          }
-        : {}),
+      ...buildOptionalIcons(iconInfo),
     },
     (uri, variables): ReadResourceResult =>
       readCacheResource(uri, normalizeTemplateVariables(variables))

@@ -8,14 +8,14 @@ export function normalizeHost(value: string): string | null {
   const first = takeFirstHostValue(trimmedLower);
   if (!first) return null;
 
-  const socketAddress = SocketAddress.parse(first);
-  if (socketAddress) return normalizeHostname(socketAddress.address);
+  const normalizedSocketAddress = normalizeSocketAddress(first);
+  if (normalizedSocketAddress) return normalizedSocketAddress;
 
   const parsed = parseHostWithUrl(first);
   if (parsed) return parsed;
 
-  const ipv6 = stripIpv6Brackets(first);
-  if (ipv6) return normalizeHostname(ipv6);
+  const normalizedBracketedIpv6 = normalizeBracketedIpv6(first);
+  if (normalizedBracketedIpv6) return normalizedBracketedIpv6;
 
   if (isIpV6Literal(first)) {
     return normalizeHostname(first);
@@ -46,6 +46,18 @@ function stripPortIfPresent(value: string): string {
 
 function isIpV6Literal(value: string): boolean {
   return isIP(value) === 6;
+}
+
+function normalizeSocketAddress(value: string): string | null {
+  const socketAddress = SocketAddress.parse(value);
+  if (!socketAddress) return null;
+  return normalizeHostname(socketAddress.address);
+}
+
+function normalizeBracketedIpv6(value: string): string | null {
+  const ipv6 = stripIpv6Brackets(value);
+  if (!ipv6) return null;
+  return normalizeHostname(ipv6);
 }
 
 function normalizeHostname(value: string): string | null {

@@ -83,13 +83,17 @@ const defaultFetch: FetchLike = (input, init) => globalThis.fetch(input, init);
 
 type SecurityConfig = typeof config.security;
 
+function isLocalFetchAllowed(): boolean {
+  return process.env['ALLOW_LOCAL_FETCH'] === 'true';
+}
+
 class IpBlocker {
   private readonly blockList = createDefaultBlockList();
 
   constructor(private readonly security: SecurityConfig) {}
 
   isBlockedIp(candidate: string): boolean {
-    if (process.env['ALLOW_LOCAL_FETCH'] === 'true') return false;
+    if (isLocalFetchAllowed()) return false;
     const normalized = candidate.trim().toLowerCase();
     if (!normalized) return false;
     if (this.security.blockedHosts.has(normalized)) return true;
@@ -180,7 +184,7 @@ class UrlNormalizer {
   }
 
   private assertNotBlockedHost(hostname: string): void {
-    if (process.env['ALLOW_LOCAL_FETCH'] === 'true') return;
+    if (isLocalFetchAllowed()) return;
     if (!this.security.blockedHosts.has(hostname)) return;
     throw createValidationError(
       `Blocked host: ${hostname}. Internal hosts are not allowed`
@@ -188,7 +192,7 @@ class UrlNormalizer {
   }
 
   private assertNotBlockedIp(hostname: string): void {
-    if (process.env['ALLOW_LOCAL_FETCH'] === 'true') return;
+    if (isLocalFetchAllowed()) return;
     if (!this.ipBlocker.isBlockedIp(hostname)) return;
     throw createValidationError(
       `Blocked IP range: ${hostname}. Private IPs are not allowed`
@@ -631,10 +635,7 @@ class SafeDnsResolver {
           'EINVAL'
         );
       }
-      if (
-        process.env['ALLOW_LOCAL_FETCH'] !== 'true' &&
-        this.ipBlocker.isBlockedIp(addr.address)
-      ) {
+      if (!isLocalFetchAllowed() && this.ipBlocker.isBlockedIp(addr.address)) {
         throw createErrorWithCode(
           `Blocked IP detected for ${normalizedHostname}`,
           'EBLOCKED'
@@ -646,7 +647,7 @@ class SafeDnsResolver {
   }
 
   private isBlockedHostname(hostname: string): boolean {
-    if (process.env['ALLOW_LOCAL_FETCH'] === 'true') return false;
+    if (isLocalFetchAllowed()) return false;
     if (this.security.blockedHosts.has(hostname)) return true;
     return this.blockedHostSuffixes.some((suffix) => hostname.endsWith(suffix));
   }

@@ -80,6 +80,24 @@ function handleSessionCleanupError(error: unknown): void {
   logWarn('Session cleanup loop failed', { error: formatError(error) });
 }
 
+function getRejectedSettledResult<T>(
+  result: PromiseSettledResult<T>
+): PromiseRejectedResult | undefined {
+  return result.status === 'rejected' ? result : undefined;
+}
+
+function logRejectedSettledResults(
+  results: readonly PromiseSettledResult<unknown>[],
+  message: string
+): void {
+  for (const result of results) {
+    const rejected = getRejectedSettledResult(result);
+    if (!rejected) continue;
+
+    logWarn(message, { error: formatError(rejected.reason) });
+  }
+}
+
 function isSessionExpired(
   session: SessionEntry,
   now: number,
@@ -126,12 +144,10 @@ class SessionCleanupLoop {
           batch.map(async (session) => this.closeExpiredSession(session))
         );
 
-        for (const result of results) {
-          if (result.status !== 'rejected') continue;
-          logWarn('Failed to process expired session cleanup task', {
-            error: formatError(result.reason),
-          });
-        }
+        logRejectedSettledResults(
+          results,
+          'Failed to process expired session cleanup task'
+        );
 
         if (signal.aborted) return;
       }
@@ -159,21 +175,18 @@ class SessionCleanupLoop {
       session.server.close(),
     ]);
 
-    this.logCloseFailure(
-      'transport',
-      transportResult.status === 'rejected' ? transportResult.reason : null
-    );
-    this.logCloseFailure(
-      'server',
-      serverResult.status === 'rejected' ? serverResult.reason : null
-    );
+    const transportRejected = getRejectedSettledResult(transportResult);
+    const serverRejected = getRejectedSettledResult(serverResult);
+
+    this.logCloseFailure('transport', transportRejected?.reason);
+    this.logCloseFailure('server', serverRejected?.reason);
   }
 
   private logCloseFailure(
     target: 'transport' | 'server',
     error: unknown
   ): void {
-    if (error === null) return;
+    if (error == null) return;
 
     logWarn(`Failed to close expired session ${target}`, {
       error: formatError(error),
@@ -195,6 +208,15 @@ function moveSessionToEnd(
 ): void {
   sessions.delete(sessionId);
   sessions.set(sessionId, session);
+}
+
+function removeSessionById(
+  sessions: Map<string, SessionEntry>,
+  sessionId: string
+): SessionEntry | undefined {
+  const session = sessions.get(sessionId);
+  sessions.delete(sessionId);
+  return session;
 }
 
 function isBlankSessionId(sessionId: string): boolean {
@@ -229,10 +251,7 @@ class InMemorySessionStore implements SessionStore {
 
   remove(sessionId: string): SessionEntry | undefined {
     if (isBlankSessionId(sessionId)) return undefined;
-
-    const session = this.sessions.get(sessionId);
-    this.sessions.delete(sessionId);
-    return session;
+    return removeSessionById(this.sessions, sessionId);
   }
 
   size(): number {
@@ -274,10 +293,7 @@ class InMemorySessionStore implements SessionStore {
     const oldest = this.sessions.keys().next();
     if (oldest.done) return undefined;
 
-    const oldestId = oldest.value;
-    const session = this.sessions.get(oldestId);
-    this.sessions.delete(oldestId);
-    return session;
+    return removeSessionById(this.sessions, oldest.value);
   }
 }
 

@@ -6,20 +6,33 @@ interface IconInfo {
   mimeType: string;
 }
 
+function buildOptionalPromptIcons(
+  iconInfo?: IconInfo
+): { icons: IconInfo[] } | Record<string, never> {
+  if (!iconInfo) return {};
+  return {
+    icons: [
+      {
+        src: iconInfo.src,
+        mimeType: iconInfo.mimeType,
+      },
+    ],
+  };
+}
+
 export function registerGetHelpPrompt(
   server: McpServer,
   instructions: string,
   iconInfo?: IconInfo
 ): void {
   const description = 'Return the Fetch URL usage instructions.';
-  const iconConfig = iconInfo ? { icons: [{ ...iconInfo }] } : {};
 
   server.registerPrompt(
     'get-help',
     {
       title: 'Get Help',
       description,
-      ...iconConfig,
+      ...buildOptionalPromptIcons(iconInfo),
     },
     (): GetPromptResult => ({
       description,

@@ -15,21 +15,32 @@ function createPendingPromise<T>(): Promise<T> {
   return new Promise<T>(() => {});
 }
 
-export function createUnrefTimeout<T>(
+function createAbortSafeTimeoutPromise<T>(
   timeoutMs: number,
-  value: T
-): CancellableTimeout<T> {
-  const controller = new AbortController();
-
-  const promise = setTimeoutPromise(timeoutMs, value, {
+  value: T,
+  signal: AbortSignal
+): Promise<T> {
+  return setTimeoutPromise(timeoutMs, value, {
     ref: false,
-    signal: controller.signal,
+    signal,
   }).catch((err: unknown) => {
     if (isAbortError(err)) {
       return createPendingPromise<T>();
     }
     throw err;
   });
+}
+
+export function createUnrefTimeout<T>(
+  timeoutMs: number,
+  value: T
+): CancellableTimeout<T> {
+  const controller = new AbortController();
+  const promise = createAbortSafeTimeoutPromise(
+    timeoutMs,
+    value,
+    controller.signal
+  );
 
   return {
     promise,
