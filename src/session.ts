@@ -1,7 +1,7 @@
-import { setInterval as setIntervalPromise } from 'node:timers/promises';
-
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
+
+import { setInterval as setIntervalPromise } from 'node:timers/promises';
 
 import {
   logInfo,

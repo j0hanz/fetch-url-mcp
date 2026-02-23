@@ -2,14 +2,13 @@ import { Buffer } from 'node:buffer';
 import diagnosticsChannel from 'node:diagnostics_channel';
 import { performance } from 'node:perf_hooks';
 
+import { isProbablyReaderable, Readability } from '@mozilla/readability';
 import { parseHTML } from 'linkedom';
 import {
   NodeHtmlMarkdown,
   type TranslatorConfig,
   type TranslatorConfigObject,
 } from 'node-html-markdown';
-
-import { isProbablyReaderable, Readability } from '@mozilla/readability';
 
 import { config } from '../config.js';
 import { removeNoiseFromHtml } from '../dom-noise-removal.js';

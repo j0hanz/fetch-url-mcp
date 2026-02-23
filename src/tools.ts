@@ -1,7 +1,3 @@
-import { randomUUID } from 'node:crypto';
-
-import { z } from 'zod';
-
 import type {
   McpServer,
   ToolCallback,
@@ -11,6 +7,10 @@ import type {
   TextResourceContents,
   ToolAnnotations,
 } from '@modelcontextprotocol/sdk/types.js';
+
+import { randomUUID } from 'node:crypto';
+
+import { z } from 'zod';
 
 import * as cache from './cache.js';
 import { config } from './config.js';
