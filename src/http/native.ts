@@ -515,22 +515,41 @@ class HttpRequestPipeline {
             return;
           }
 
-          try {
-            ctx.body = await jsonBodyReader.read(
-              ctx.req,
-              DEFAULT_BODY_LIMIT_BYTES,
-              ctx.signal
-            );
-          } catch {
-            if (ctx.url.pathname === '/mcp' && ctx.method === 'POST') {
-              sendError(ctx.res, -32700, 'Parse error', 400, null);
-            } else {
-              sendJson(ctx.res, 400, {
-                error: 'Invalid JSON or Payload too large',
-              });
+          if (ctx.method === 'POST') {
+            try {
+              ctx.body = await jsonBodyReader.read(
+                ctx.req,
+                DEFAULT_BODY_LIMIT_BYTES,
+                ctx.signal
+              );
+            } catch {
+              if (ctx.url.pathname === '/mcp') {
+                sendError(ctx.res, -32700, 'Parse error', 400, null);
+              } else {
+                sendJson(ctx.res, 400, {
+                  error: 'Invalid JSON or Payload too large',
+                });
+              }
+              drainRequest(rawReq);
+              return;
             }
-            drainRequest(rawReq);
-            return;
+          } else {
+            const contentLengthHeader = getHeaderValue(
+              rawReq,
+              'content-length'
+            );
+            const transferEncodingHeader = getHeaderValue(
+              rawReq,
+              'transfer-encoding'
+            );
+            const hasRequestBody =
+              (contentLengthHeader !== null &&
+                Number.parseInt(contentLengthHeader, 10) > 0) ||
+              transferEncodingHeader !== null;
+            if (hasRequestBody) {
+              drainRequest(rawReq);
+            }
+            ctx.body = undefined;
           }
 
           await this.dispatcher.dispatch(ctx);

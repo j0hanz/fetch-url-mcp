@@ -34,13 +34,13 @@ export function isMcpRequestBody(body: unknown): body is McpRequestBody {
   return mcpRequestSchema.safeParse(body).success;
 }
 
-function parseAcceptHeader(
+function parseAcceptMediaTypes(
   header: string | null | undefined
 ): readonly string[] {
   if (!header) return [];
   return header
     .split(',')
-    .map((value) => value.trim())
+    .map((value) => extractAcceptMediaType(value.trim()))
     .filter((value) => value.length > 0);
 }
 
@@ -49,18 +49,16 @@ function extractAcceptMediaType(value: string): string {
 }
 
 export function acceptsEventStream(header: string | null | undefined): boolean {
-  return parseAcceptHeader(header).some((value) =>
-    value.trim().toLowerCase().startsWith('text/event-stream')
-  );
+  const mediaTypes = parseAcceptMediaTypes(header);
+  return mediaTypes.some((mediaType) => mediaType === 'text/event-stream');
 }
 
 function hasAcceptedMediaType(
-  header: string | null | undefined,
+  mediaTypes: readonly string[],
   exact: string,
   wildcardPrefix: string
 ): boolean {
-  return parseAcceptHeader(header).some((rawPart) => {
-    const mediaType = extractAcceptMediaType(rawPart);
+  return mediaTypes.some((mediaType) => {
     if (!mediaType) return false;
     if (mediaType === '*/*') return true;
     if (mediaType === exact) return true;
@@ -72,12 +70,13 @@ function hasAcceptedMediaType(
 export function acceptsJsonAndEventStream(
   header: string | null | undefined
 ): boolean {
+  const mediaTypes = parseAcceptMediaTypes(header);
   const acceptsJson = hasAcceptedMediaType(
-    header,
+    mediaTypes,
     'application/json',
     'application/*'
   );
   if (!acceptsJson) return false;
 
-  return hasAcceptedMediaType(header, 'text/event-stream', 'text/*');
+  return hasAcceptedMediaType(mediaTypes, 'text/event-stream', 'text/*');
 }

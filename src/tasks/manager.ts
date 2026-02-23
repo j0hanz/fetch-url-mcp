@@ -353,7 +353,7 @@ class TaskManager {
     const now = Date.now();
 
     if (deadlineMs <= now) {
-      this.tasks.delete(taskId);
+      this.removeTask(taskId);
       return undefined;
     }
 

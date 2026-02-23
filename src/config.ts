@@ -4,15 +4,31 @@ import { isIP } from 'node:net';
 import process from 'node:process';
 import { domainToASCII } from 'node:url';
 
+import { getErrorMessage } from './errors.js';
+
+function hasPackageJsonVersion(value: unknown): value is { version: string } {
+  if (typeof value !== 'object' || value === null) return false;
+  const record = value as { version?: unknown };
+  return typeof record.version === 'string';
+}
+
 function readServerVersion(moduleUrl: string): string {
   const packageJsonPath = findPackageJSON(moduleUrl);
   if (!packageJsonPath) throw new Error('package.json not found');
-  const packageJson = JSON.parse(readFileSync(packageJsonPath, 'utf-8')) as {
-    version?: string;
-  };
-  if (typeof packageJson.version !== 'string') {
-    throw new Error('package.json version is missing');
+
+  let packageJson: unknown;
+  try {
+    packageJson = JSON.parse(readFileSync(packageJsonPath, 'utf-8'));
+  } catch (error) {
+    throw new Error(
+      `Failed to parse package.json at ${packageJsonPath}: ${getErrorMessage(error)}`,
+      { cause: error }
+    );
   }
+  if (!hasPackageJsonVersion(packageJson)) {
+    throw new Error(`package.json version is missing at ${packageJsonPath}`);
+  }
+
   return packageJson.version;
 }
 

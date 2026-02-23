@@ -172,11 +172,7 @@ class InlineContentLimiter {
     const contentSize = content.length;
     const inlineLimit = this.resolveInlineLimit(inlineLimitOverride);
 
-    if (inlineLimit <= 0) {
-      return { content, contentSize };
-    }
-
-    if (contentSize <= inlineLimit) {
+    if (isWithinInlineLimit(contentSize, inlineLimit)) {
       return { content, contentSize };
     }
 
@@ -203,6 +199,13 @@ class InlineContentLimiter {
 
     return inlineLimitOverride;
   }
+}
+
+function isWithinInlineLimit(
+  contentSize: number,
+  inlineLimit: number
+): boolean {
+  return inlineLimit <= 0 || contentSize <= inlineLimit;
 }
 
 const inlineLimiter = new InlineContentLimiter();
