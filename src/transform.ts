@@ -2778,11 +2778,11 @@ class WorkerPool implements TransformWorkerPool {
 
     await this.waitForCancelAck(id);
 
-    this.failTask(
+    const taken = this.failTask(
       id,
       abortPolicy.createAbortError(url, 'transform:signal-abort')
     );
-    if (slot) this.restartWorker(workerIndex, slot);
+    if (taken && slot) this.restartWorker(workerIndex, slot);
   }
 
   private clearAbortListener(
@@ -2836,7 +2836,10 @@ class WorkerPool implements TransformWorkerPool {
     });
 
     if (slot.busy && slot.currentTaskId) {
-      this.failTask(slot.currentTaskId, new Error(message));
+      this.failTask(
+        slot.currentTaskId,
+        new FetchError(message, '', 503, { reason: 'worker_exit' })
+      );
     }
 
     this.restartWorker(workerIndex, slot);
@@ -2927,14 +2930,15 @@ class WorkerPool implements TransformWorkerPool {
     slot.currentTaskId = null;
   }
 
-  private failTask(id: string, error: unknown): void {
+  private failTask(id: string, error: unknown): boolean {
     const inflight = this.takeInflight(id);
-    if (!inflight) return;
+    if (!inflight) return false;
 
     this.finalizeTask(inflight.context, () => {
       inflight.reject(error);
     });
     this.markIdle(inflight.workerIndex);
+    return true;
   }
 
   private maybeScaleUp(): void {

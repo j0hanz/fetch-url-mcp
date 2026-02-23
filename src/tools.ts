@@ -587,7 +587,6 @@ class InlineContentLimiter {
     if (globalLimit > 0 && inlineLimitOverride > 0) {
       return Math.min(inlineLimitOverride, globalLimit);
     }
-    if (globalLimit > 0 && inlineLimitOverride === 0) return globalLimit;
 
     return inlineLimitOverride;
   }
