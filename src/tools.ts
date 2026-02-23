@@ -208,10 +208,11 @@ This tool is useful for:
 Key behaviors:
 - GitHub, GitLab, and Bitbucket URLs are auto-transformed to raw content endpoints; check resolvedUrl.
 - If truncated is true in the response, use cacheResourceUri with resources/read to retrieve the full content.
+- For long-running fetches or large pages, invoke with task: {} to get a taskId and poll tasks/get until complete.
 
 Limitations:
-- Inline output may be truncated when MAX_INLINE_CONTENT_CHARS is set.
 - Does not execute client-side JavaScript; JS-rendered pages may be incomplete.
+- If the error code is queue_full, the worker pool is busy — retry the call using task mode (task: {}) instead.
 `.trim();
 
 const TOOL_ICON = {

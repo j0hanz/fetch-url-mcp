@@ -255,6 +255,25 @@ export function logError(message: string, error?: Error | LogMetadata): void {
   writeLog('error', message, errorMeta);
 }
 
+export function setLogLevel(level: string): void {
+  const normalized = level.toLowerCase();
+  // Map MCP logging levels (RFC 5424 subset) to internal levels.
+  if (normalized === 'debug') {
+    config.logging.level = 'debug';
+  } else if (normalized === 'info' || normalized === 'notice') {
+    config.logging.level = 'info';
+  } else if (normalized === 'warning' || normalized === 'warn') {
+    config.logging.level = 'warn';
+  } else if (
+    normalized === 'error' ||
+    normalized === 'critical' ||
+    normalized === 'alert' ||
+    normalized === 'emergency'
+  ) {
+    config.logging.level = 'error';
+  }
+}
+
 export function redactUrl(rawUrl: string): string {
   try {
     const url = new URL(rawUrl);

@@ -85,6 +85,7 @@ Available as resource (\`internal://instructions\`) or prompt (\`get-help\`). Lo
 - \`maxInlineChars\`: Set to \`0\` for unlimited inline content (default). When both a per-call and global limit exist, the lower value wins.
 - Does not execute client-side JavaScript. Content requiring JS rendering may be incomplete.
 - HTML capped at ${config.constants.maxHtmlSize / 1024 / 1024} MB (\`MAX_HTML_BYTES\`). Inline content unlimited by default; set \`MAX_INLINE_CONTENT_CHARS\` env var to cap.
+- Error responses: read \`code\` (\`VALIDATION_ERROR\`, \`FETCH_ERROR\`, \`HTTP_xxx\`, \`ABORTED\`, \`queue_full\`) and \`statusCode\` from \`content[0]\` JSON for programmatic routing.
 
 ---
 

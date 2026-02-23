@@ -1,6 +1,8 @@
 import * as fs from 'node:fs/promises';
 import process from 'node:process';
 
+import { z } from 'zod';
+
 import {
   InMemoryTaskMessageQueue,
   InMemoryTaskStore,
@@ -11,7 +13,12 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { config } from './config.js';
 import { buildServerInstructions } from './instructions.js';
 import { abortAllTaskExecutions, registerTaskHandlers } from './mcp.js';
-import { logError, logInfo, setMcpServer } from './observability.js';
+import {
+  logError,
+  logInfo,
+  setLogLevel,
+  setMcpServer,
+} from './observability.js';
 import { registerGetHelpPrompt } from './prompts.js';
 import {
   registerCacheResourceTemplate,
@@ -134,12 +141,27 @@ async function createMcpServerWithOptions(
   registerInstructionResource(server, serverInstructions, localIcon);
   registerCacheResourceTemplate(server, localIcon);
   registerTaskHandlers(server);
+  registerLoggingSetLevelHandler(server);
 
   return server;
 }
 
 export async function createMcpServerForHttpSession(): Promise<McpServer> {
   return createMcpServerWithOptions({ registerObservabilityServer: false });
+}
+
+function registerLoggingSetLevelHandler(server: McpServer): void {
+  const SetLevelRequestSchema = z
+    .object({
+      method: z.literal('logging/setLevel'),
+      params: z.object({ level: z.string() }).loose(),
+    })
+    .loose();
+
+  server.server.setRequestHandler(SetLevelRequestSchema, async (request) => {
+    setLogLevel(request.params.level);
+    return Promise.resolve({});
+  });
 }
 
 function attachServerErrorHandler(server: McpServer): void {
