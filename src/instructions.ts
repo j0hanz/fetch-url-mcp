@@ -25,10 +25,7 @@ Available as resource (\`internal://instructions\`) or prompt (\`get-help\`). Lo
 ## RESOURCES & RESOURCE LINKS
 
 - \`internal://instructions\`: This document.
-- \`internal://cache/{namespace}/{hash}\`: Immutable cached Markdown snapshots from previous \`${FETCH_URL_TOOL_NAME}\` calls. Ephemeral — lost when the server process restarts.
-- \`${FETCH_URL_TOOL_NAME}\` responses include a \`resource_link\` content block when cache is enabled; use that URI directly with \`resources/read\`/\`resources/subscribe\`.
-- If inline Markdown is truncated (ends with \`...[truncated]\`), the full content may be available via the cache resource. Use \`resources/read\` with the cache URI to retrieve it.
-- Clients can subscribe to cache resource URIs via \`resources/subscribe\` and receive \`notifications/resources/updated\` when that specific cache entry changes.
+- \`internal://cache/{namespace}/{hash}\`: Ephemeral cached Markdown from previous calls. Use the \`cacheResourceUri\` from tool responses with \`resources/read\` to retrieve full content. Supports \`resources/subscribe\` for change notifications.
 
 ---
 
@@ -67,9 +64,7 @@ Available as resource (\`internal://instructions\`) or prompt (\`get-help\`). Lo
 
 ### WORKFLOW D: ASYNC EXECUTION (LARGE SITES / TIMEOUTS)
 
-1. Call \`tools/call\` with \`task: { ttl: ... }\` to start a background fetch.
-2. Poll \`tasks/get\` until status is \`completed\` or \`failed\`.
-3. Retrieve result via \`tasks/result\`.
+Add \`task: { ttl: <ms> }\` to the \`tools/call\` request; poll \`tasks/get\` until \`completed\` or \`failed\`; then call \`tasks/result\`.
 
 ---
 
