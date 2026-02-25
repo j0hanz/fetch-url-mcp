@@ -316,7 +316,13 @@ function trimUtf8Buffer(buffer: Buffer, maxBytes: number): Buffer {
 function trimDanglingTagFragment(content: string): string {
   const lastOpen = content.lastIndexOf('<');
   const lastClose = content.lastIndexOf('>');
-  return lastOpen > lastClose ? content.substring(0, lastOpen) : content;
+  if (
+    lastOpen > lastClose &&
+    /^<([a-zA-Z/!?]|$)/.test(content.substring(lastOpen))
+  ) {
+    return content.substring(0, lastOpen);
+  }
+  return content;
 }
 
 function truncateHtml(
@@ -875,10 +881,6 @@ function isCodeBlock(
   return tagName === 'PRE' || tagName === 'WRAPPED-PRE';
 }
 
-function isAnchor(node: unknown): node is { tagName?: string } {
-  return getTagName(node) === 'A';
-}
-
 function resolveAttributeLanguage(node: unknown): string | undefined {
   const getAttribute = hasGetAttribute(node)
     ? node.getAttribute.bind(node)
@@ -1001,7 +1003,7 @@ function resolveImageSrc(
 function buildImageTranslator(ctx: unknown): TranslatorConfig {
   if (!isObject(ctx)) return { content: '' };
 
-  const { node, parent } = ctx as { node?: unknown; parent?: unknown };
+  const { node } = ctx as { node?: unknown };
   const getAttribute = hasGetAttribute(node)
     ? node.getAttribute.bind(node)
     : undefined;
@@ -1013,11 +1015,7 @@ function buildImageTranslator(ctx: unknown): TranslatorConfig {
 
   const markdown = `![${alt}](${src})`;
 
-  if (isAnchor(parent)) {
-    return { content: markdown };
-  }
-
-  return { content: `\n\n${markdown}\n\n` };
+  return { content: markdown };
 }
 
 const GFM_ALERT_MAP: ReadonlyMap<string, string> = new Map([
@@ -1431,8 +1429,8 @@ function resolveRelativeUrls(
 
   let lineCount = 0;
   while (lastIndex < len) {
-    if (++lineCount % 500 === 0 && signal?.aborted) {
-      throw new Error('Transform aborted during URL resolution');
+    if (++lineCount % 500 === 0) {
+      abortPolicy.throwIfAborted(signal, baseUrl, 'markdown:resolve-urls');
     }
     let nextIndex = markdown.indexOf('\n', lastIndex);
     let line: string;
@@ -1692,7 +1690,15 @@ function getTextContentSkippingHidden(node: Node, parts: string[]): void {
   }
   if (nodeType !== 1) return;
 
-  const { tagName } = node as Element;
+  const element = node as Element;
+  if (
+    element.hasAttribute('hidden') ||
+    element.getAttribute('aria-hidden') === 'true'
+  ) {
+    return;
+  }
+
+  const { tagName } = element;
   if (tagName === 'SCRIPT' || tagName === 'STYLE' || tagName === 'NOSCRIPT')
     return;
 

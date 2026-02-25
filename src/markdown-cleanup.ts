@@ -24,7 +24,6 @@ const REGEX = {
   SOURCE_KEY: /^source:\s/im,
   HEADING_SPACING: /(^#{1,6}\s[^\n]*)\n([^\n])/gm,
   HEADING_CODE_BLOCK: /(^#{1,6}\s+\w+)```/gm,
-  HEADING_CAMEL_CASE: /(^#{1,6}\s+\w*[A-Z])([A-Z][a-z])/gm,
   SPACING_LINK_FIX: /\]\(([^)]+)\)\[/g,
   SPACING_ADJ_COMBINED: /(?:\]\([^)]+\)|`[^`]+`)(?=[A-Za-z0-9])/g,
   SPACING_CODE_DASH: /(`[^`]+`)\s*\\-\s*/g,
@@ -303,8 +302,7 @@ function applyGlobalRegexes(text: string, options?: CleanupOptions): string {
   // fixAndSpaceHeadings
   result = result
     .replace(REGEX.HEADING_SPACING, '$1\n\n$2')
-    .replace(REGEX.HEADING_CODE_BLOCK, '$1\n\n```')
-    .replace(REGEX.HEADING_CAMEL_CASE, '$1\n\n$2');
+    .replace(REGEX.HEADING_CODE_BLOCK, '$1\n\n```');
 
   if (config.markdownCleanup.removeTypeDocComments) {
     checkAbort('markdown:cleanup:typedoc');
