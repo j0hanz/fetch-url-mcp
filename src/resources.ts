@@ -95,6 +95,17 @@ function firstVariableValue(value: TemplateVariableValue): string | undefined {
   return undefined;
 }
 
+function validateCacheResourceParts(
+  namespace: string,
+  hash: string
+): CacheResourceParts | null {
+  const decoded = {
+    namespace: decodeSegment(namespace),
+    hash: decodeSegment(hash),
+  };
+  return isValidCacheResourceParts(decoded) ? decoded : null;
+}
+
 function parseCacheResourceFromVariables(
   variables: Record<string, TemplateVariableValue>
 ): CacheResourceParts | null {
@@ -102,12 +113,7 @@ function parseCacheResourceFromVariables(
   const hash = firstVariableValue(variables['hash']);
   if (!namespace || !hash) return null;
 
-  const decoded = {
-    namespace: decodeSegment(namespace),
-    hash: decodeSegment(hash),
-  };
-
-  return isValidCacheResourceParts(decoded) ? decoded : null;
+  return validateCacheResourceParts(namespace, hash);
 }
 
 function parseCacheResourceFromUri(uri: URL): CacheResourceParts | null {
@@ -123,12 +129,7 @@ function parseCacheResourceFromUri(uri: URL): CacheResourceParts | null {
   const hash = segments[1];
   if (!namespace || !hash) return null;
 
-  const decoded = {
-    namespace: decodeSegment(namespace),
-    hash: decodeSegment(hash),
-  };
-
-  return isValidCacheResourceParts(decoded) ? decoded : null;
+  return validateCacheResourceParts(namespace, hash);
 }
 
 function toCacheResourceUri(parts: CacheResourceParts): string {

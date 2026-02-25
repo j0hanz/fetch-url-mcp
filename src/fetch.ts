@@ -195,46 +195,33 @@ class UrlNormalizer {
   }
 
   private assertHostnameAllowed(hostname: string): void {
-    this.assertNotBlockedHost(hostname);
-    this.assertNotBlockedIp(hostname);
-    this.assertNotBlockedHostnameSuffix(hostname);
-  }
-
-  private assertNotBlockedHost(hostname: string): void {
     if (isCloudMetadataHost(hostname)) {
       throw createValidationError(
         `Blocked host: ${hostname}. Cloud metadata endpoints are not allowed`
       );
     }
-    if (isLocalFetchAllowed()) return;
-    if (!this.security.blockedHosts.has(hostname)) return;
-    throw createValidationError(
-      `Blocked host: ${hostname}. Internal hosts are not allowed`
-    );
-  }
 
-  private assertNotBlockedIp(hostname: string): void {
-    if (isCloudMetadataHost(hostname)) {
+    if (!isLocalFetchAllowed()) {
+      if (this.security.blockedHosts.has(hostname)) {
+        throw createValidationError(
+          `Blocked host: ${hostname}. Internal hosts are not allowed`
+        );
+      }
+
+      if (this.ipBlocker.isBlockedIp(hostname)) {
+        throw createValidationError(
+          `Blocked IP range: ${hostname}. Private IPs are not allowed`
+        );
+      }
+    }
+
+    if (
+      this.blockedHostSuffixes.some((suffix) => hostname.endsWith(suffix))
+    ) {
       throw createValidationError(
-        `Blocked IP range: ${hostname}. Cloud metadata endpoints are not allowed`
+        `Blocked hostname pattern: ${hostname}. Internal domain suffixes are not allowed`
       );
     }
-    if (isLocalFetchAllowed()) return;
-    if (!this.ipBlocker.isBlockedIp(hostname)) return;
-    throw createValidationError(
-      `Blocked IP range: ${hostname}. Private IPs are not allowed`
-    );
-  }
-
-  private assertNotBlockedHostnameSuffix(hostname: string): void {
-    const blocked = this.blockedHostSuffixes.some((suffix) =>
-      hostname.endsWith(suffix)
-    );
-    if (!blocked) return;
-
-    throw createValidationError(
-      `Blocked hostname pattern: ${hostname}. Internal domain suffixes are not allowed`
-    );
   }
 }
 
@@ -783,64 +770,61 @@ function parseRetryAfter(header: string | null): number {
   return Math.ceil(deltaMs / 1000);
 }
 
-function createCanceledFetchError(url: string): FetchError {
-  return new FetchError('Request was canceled', url, 499, {
-    reason: 'aborted',
-  });
-}
+type FetchErrorInput =
+  | { kind: 'canceled' }
+  | { kind: 'aborted' }
+  | { kind: 'timeout'; timeout: number }
+  | { kind: 'rate-limited'; retryAfter: string | null }
+  | { kind: 'http'; status: number; statusText: string }
+  | { kind: 'too-many-redirects' }
+  | { kind: 'missing-redirect-location' }
+  | { kind: 'network'; message: string }
+  | { kind: 'unknown'; message?: string };
 
-function createTimeoutFetchError(url: string, timeoutMs: number): FetchError {
-  return new FetchError(`Request timeout after ${timeoutMs}ms`, url, 504, {
-    timeout: timeoutMs,
-  });
-}
-
-function createRateLimitedFetchError(
-  url: string,
-  retryAfterHeader: string | null
-): FetchError {
-  return new FetchError('Too many requests', url, 429, {
-    retryAfter: parseRetryAfter(retryAfterHeader),
-  });
-}
-
-function createHttpFetchError(
-  url: string,
-  status: number,
-  statusText: string
-): FetchError {
-  return new FetchError(`HTTP ${status}: ${statusText}`, url, status);
-}
-
-function createTooManyRedirectsFetchError(url: string): FetchError {
-  return new FetchError('Too many redirects', url);
-}
-
-function createMissingRedirectLocationFetchError(url: string): FetchError {
-  return new FetchError('Redirect response missing Location header', url);
-}
-
-function buildNetworkErrorMessage(url: string): string {
-  return `Network error: Could not reach ${url}`;
-}
-
-function createNetworkFetchError(url: string, message?: string): FetchError {
-  return new FetchError(
-    buildNetworkErrorMessage(url),
-    url,
-    undefined,
-    message ? { message } : {}
-  );
-}
-
-function createUnknownFetchError(url: string, message: string): FetchError {
-  return new FetchError(message, url);
-}
-
-function createAbortedFetchError(url: string): FetchError {
-  return new FetchError('Request was aborted during response read', url, 499, {
-    reason: 'aborted',
-  });
+function createFetchError(input: FetchErrorInput, url: string): FetchError {
+  switch (input.kind) {
+    case 'canceled':
+      return new FetchError('Request was canceled', url, 499, {
+        reason: 'aborted',
+      });
+    case 'aborted':
+      return new FetchError(
+        'Request was aborted during response read',
+        url,
+        499,
+        { reason: 'aborted' }
+      );
+    case 'timeout':
+      return new FetchError(
+        `Request timeout after ${input.timeout}ms`,
+        url,
+        504,
+        { timeout: input.timeout }
+      );
+    case 'rate-limited':
+      return new FetchError('Too many requests', url, 429, {
+        retryAfter: parseRetryAfter(input.retryAfter),
+      });
+    case 'http':
+      return new FetchError(
+        `HTTP ${input.status}: ${input.statusText}`,
+        url,
+        input.status
+      );
+    case 'too-many-redirects':
+      return new FetchError('Too many redirects', url);
+    case 'missing-redirect-location':
+      return new FetchError('Redirect response missing Location header', url);
+    case 'network':
+      return new FetchError(
+        `Network error: Could not reach ${url}`,
+        url,
+        undefined,
+        { message: input.message }
+      );
+    case 'unknown':
+      return new FetchError(input.message ?? 'Unexpected error', url);
+  }
 }
 
 function isAbortError(error: unknown): boolean {
@@ -873,17 +857,21 @@ function mapFetchError(
 
   if (isAbortError(error)) {
     return isTimeoutError(error)
-      ? createTimeoutFetchError(url, timeoutMs)
-      : createCanceledFetchError(url);
+      ? createFetchError({ kind: 'timeout', timeout: timeoutMs }, url)
+      : createFetchError({ kind: 'canceled' }, url);
   }
 
-  if (!isError(error)) return createUnknownFetchError(url, 'Unexpected error');
+  if (!isError(error))
+    return createFetchError({ kind: 'unknown', message: 'Unexpected error' }, url);
 
   if (!isSystemError(error)) {
     const err = error as { message: string; cause?: unknown };
     const causeStr =
       err.cause instanceof Error ? err.cause.message : String(err.cause);
-    return createNetworkFetchError(url, `${err.message}. Cause: ${causeStr}`);
+    return createFetchError(
+      { kind: 'network', message: `${err.message}. Cause: ${causeStr}` },
+      url
+    );
   }
 
   const { code } = error;
@@ -902,10 +890,7 @@ function mapFetchError(
     return new FetchError(error.message, url, 400, { code });
   }
 
-  return new FetchError(buildNetworkErrorMessage(url), url, undefined, {
-    code,
-    message: error.message,
-  });
+  return createFetchError({ kind: 'network', message: error.message }, url);
 }
 
 type FetchChannelEvent =
@@ -964,6 +949,17 @@ class FetchTelemetry {
     return this.redactor.redact(url);
   }
 
+  private contextFields(
+    ctx: FetchTelemetryContext
+  ): Record<string, string | undefined> {
+    return {
+      ...(ctx.contextRequestId
+        ? { contextRequestId: ctx.contextRequestId }
+        : {}),
+      ...(ctx.operationId ? { operationId: ctx.operationId } : {}),
+    };
+  }
+
   start(url: string, method: string): FetchTelemetryContext {
     const safeUrl = this.redactor.redact(url);
     const contextRequestId = this.context.getRequestId();
@@ -978,26 +974,22 @@ class FetchTelemetry {
     if (contextRequestId) ctx.contextRequestId = contextRequestId;
     if (operationId) ctx.operationId = operationId;
 
-    const event: FetchChannelEvent = {
+    const ctxFields = this.contextFields(ctx);
+    this.publish({
       v: 1,
       type: 'start',
       requestId: ctx.requestId,
       method: ctx.method,
       url: ctx.url,
-    };
-    if (ctx.contextRequestId) event.contextRequestId = ctx.contextRequestId;
-    if (ctx.operationId) event.operationId = ctx.operationId;
-    this.publish(event);
+      ...ctxFields,
+    });
 
-    const logData: Record<string, unknown> = {
+    this.logger.debug('HTTP Request', {
       requestId: ctx.requestId,
       method: ctx.method,
       url: ctx.url,
-    };
-    if (ctx.contextRequestId)
-      logData['contextRequestId'] = ctx.contextRequestId;
-    if (ctx.operationId) logData['operationId'] = ctx.operationId;
-    this.logger.debug('HTTP Request', logData);
+      ...ctxFields,
+    });
 
     return ctx;
   }
@@ -1009,18 +1001,16 @@ class FetchTelemetry {
   ): void {
     const duration = performance.now() - context.startTime;
     const durationLabel = `${Math.round(duration)}ms`;
+    const ctxFields = this.contextFields(context);
 
-    const event: FetchChannelEvent = {
+    this.publish({
       v: 1,
       type: 'end',
       requestId: context.requestId,
       status: response.status,
       duration,
-    };
-    if (context.contextRequestId)
-      event.contextRequestId = context.contextRequestId;
-    if (context.operationId) event.operationId = context.operationId;
-    this.publish(event);
+      ...ctxFields,
+    });
 
     const contentType = response.headers.get('content-type') ?? undefined;
     const contentLengthHeader = response.headers.get('content-length');
@@ -1028,31 +1018,23 @@ class FetchTelemetry {
       contentLengthHeader ??
       (contentSize === undefined ? undefined : String(contentSize));
 
-    const logData: Record<string, unknown> = {
+    this.logger.debug('HTTP Response', {
       requestId: context.requestId,
       status: response.status,
       url: context.url,
       duration: durationLabel,
-    };
-    if (context.contextRequestId)
-      logData['contextRequestId'] = context.contextRequestId;
-    if (context.operationId) logData['operationId'] = context.operationId;
-    if (contentType) logData['contentType'] = contentType;
-    if (size) logData['size'] = size;
-
-    this.logger.debug('HTTP Response', logData);
+      ...ctxFields,
+      ...(contentType ? { contentType } : {}),
+      ...(size ? { size } : {}),
+    });
 
     if (duration > SLOW_REQUEST_THRESHOLD_MS) {
-      const warnData: Record<string, unknown> = {
+      this.logger.warn('Slow HTTP request detected', {
         requestId: context.requestId,
         url: context.url,
         duration: durationLabel,
-      };
-      if (context.contextRequestId)
-        warnData['contextRequestId'] = context.contextRequestId;
-      if (context.operationId) warnData['operationId'] = context.operationId;
-
-      this.logger.warn('Slow HTTP request detected', warnData);
+        ...ctxFields,
+      });
     }
   }
 
@@ -1064,21 +1046,19 @@ class FetchTelemetry {
     const duration = performance.now() - context.startTime;
     const err = isError(error) ? error : new Error(String(error));
     const code = isSystemError(err) ? err.code : undefined;
+    const ctxFields = this.contextFields(context);
 
-    const event: Extract<FetchChannelEvent, { type: 'error' }> = {
+    this.publish({
       v: 1,
       type: 'error',
       requestId: context.requestId,
       url: context.url,
       error: err.message,
       duration,
-    };
-    if (code !== undefined) event.code = code;
-    if (status !== undefined) event.status = status;
-    if (context.contextRequestId)
-      event.contextRequestId = context.contextRequestId;
-    if (context.operationId) event.operationId = context.operationId;
-    this.publish(event);
+      ...(code !== undefined ? { code } : {}),
+      ...(status !== undefined ? { status } : {}),
+      ...ctxFields,
+    });
 
     const logData: Record<string, unknown> = {
       requestId: context.requestId,
@@ -1086,10 +1066,8 @@ class FetchTelemetry {
       status,
       code,
       error: err.message,
+      ...ctxFields,
     };
-    if (context.contextRequestId)
-      logData['contextRequestId'] = context.contextRequestId;
-    if (context.operationId) logData['operationId'] = context.operationId;
 
     if (status === 429) {
       this.logger.warn('HTTP Request Error', logData);
@@ -1177,7 +1155,7 @@ class RedirectFollower {
       currentUrl = nextUrl;
     }
 
-    throw createTooManyRedirectsFetchError(currentUrl);
+    throw createFetchError({ kind: 'too-many-redirects' }, currentUrl);
   }
 
   private async performFetchCycle(
@@ -1215,12 +1193,10 @@ class RedirectFollower {
 
     if (!isRedirectStatus(response.status)) return { response };
 
-    this.assertRedirectWithinLimit(
-      response,
-      currentUrl,
-      redirectLimit,
-      redirectCount
-    );
+    if (redirectCount >= redirectLimit) {
+      cancelResponseBody(response);
+      throw createFetchError({ kind: 'too-many-redirects' }, currentUrl);
+    }
 
     const location = this.getRedirectLocation(response, currentUrl);
     cancelResponseBody(response);
@@ -1243,23 +1219,12 @@ class RedirectFollower {
     };
   }
 
-  private assertRedirectWithinLimit(
-    response: Response,
-    currentUrl: string,
-    redirectLimit: number,
-    redirectCount: number
-  ): void {
-    if (redirectCount < redirectLimit) return;
-    cancelResponseBody(response);
-    throw createTooManyRedirectsFetchError(currentUrl);
-  }
-
   private getRedirectLocation(response: Response, currentUrl: string): string {
     const location = response.headers.get('location');
     if (location) return location;
 
     cancelResponseBody(response);
-    throw createMissingRedirectLocationFetchError(currentUrl);
+    throw createFetchError({ kind: 'missing-redirect-location' }, currentUrl);
   }
 
   private resolveRedirectTarget(baseUrl: string, location: string): string {
@@ -1329,7 +1294,7 @@ class ResponseTextReader {
   }> {
     if (signal?.aborted) {
       cancelResponseBody(response);
-      throw createAbortedFetchError(url);
+      throw createFetchError({ kind: 'aborted' }, url);
     }
 
     if (!response.body) {
@@ -1363,7 +1328,7 @@ class ResponseTextReader {
     size: number;
     truncated: boolean;
   }> {
-    if (signal?.aborted) throw createCanceledFetchError(url);
+    if (signal?.aborted) throw createFetchError({ kind: 'canceled' }, url);
 
     const limit = maxBytes <= 0 ? Number.POSITIVE_INFINITY : maxBytes;
 
@@ -1501,7 +1466,7 @@ class ResponseTextReader {
         truncated: false,
       };
     } catch (error: unknown) {
-      if (signal?.aborted) throw createAbortedFetchError(url);
+      if (signal?.aborted) throw createFetchError({ kind: 'aborted' }, url);
       if (error instanceof FetchError) throw error;
       if (error instanceof MaxBytesError) {
         source.destroy();
@@ -1561,15 +1526,22 @@ function resolveResponseError(
   finalUrl: string
 ): FetchError | null {
   if (response.status === 429) {
-    return createRateLimitedFetchError(
-      finalUrl,
-      response.headers.get('retry-after')
+    return createFetchError(
+      { kind: 'rate-limited', retryAfter: response.headers.get('retry-after') },
+      finalUrl
     );
   }
 
   return response.ok
     ? null
-    : createHttpFetchError(finalUrl, response.status, response.statusText);
+    : createFetchError(
+        {
+          kind: 'http',
+          status: response.status,
+          statusText: response.statusText,
+        },
+        finalUrl
+      );
 }
 
 function resolveMediaType(contentType: string | null): string | null {

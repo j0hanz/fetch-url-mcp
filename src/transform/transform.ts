@@ -398,19 +398,18 @@ function mergeMetadata(
   if (!early) return late;
 
   const merged: ExtractedMetadata = {};
-  const title = late.title ?? early.title;
-  const description = late.description ?? early.description;
-  const author = late.author ?? early.author;
-  const image = late.image ?? early.image;
-  const publishedAt = late.publishedAt ?? early.publishedAt;
-  const modifiedAt = late.modifiedAt ?? early.modifiedAt;
-
-  if (title !== undefined) merged.title = title;
-  if (description !== undefined) merged.description = description;
-  if (author !== undefined) merged.author = author;
-  if (image !== undefined) merged.image = image;
-  if (publishedAt !== undefined) merged.publishedAt = publishedAt;
-  if (modifiedAt !== undefined) merged.modifiedAt = modifiedAt;
+  const keys = [
+    'title',
+    'description',
+    'author',
+    'image',
+    'publishedAt',
+    'modifiedAt',
+  ] as const;
+  for (const key of keys) {
+    const value = late[key] ?? early[key];
+    if (value !== undefined) merged[key] = value;
+  }
 
   return merged;
 }
@@ -1080,6 +1079,128 @@ function buildPreTranslator(ctx: unknown): TranslatorConfig {
   };
 }
 
+function getNodeAttr(
+  node: unknown
+): ((name: string) => string | null) | undefined {
+  if (!isLikeNode(node)) return undefined;
+  return typeof node.getAttribute === 'function'
+    ? node.getAttribute.bind(node)
+    : undefined;
+}
+
+function buildDivTranslator(ctx: unknown): Record<string, unknown> {
+  if (!isObject(ctx)) return {};
+  const { node } = ctx as { node?: unknown };
+  const getAttribute = getNodeAttr(node);
+  if (!getAttribute) return {};
+
+  const className = getAttribute('class') ?? '';
+  if (className.includes('mermaid')) {
+    return {
+      noEscape: true,
+      preserveWhitespace: true,
+      postprocess: ({ content }: { content: string }) =>
+        `\n\n\`\`\`mermaid\n${content.trim()}\n\`\`\`\n\n`,
+    };
+  }
+  const isAdmonition =
+    className.includes('admonition') ||
+    className.includes('callout') ||
+    className.includes('custom-block') ||
+    getAttribute('role') === 'alert' ||
+    /\b(note|tip|info|warning|danger|caution|important)\b/i.test(className);
+  if (isAdmonition) {
+    return {
+      postprocess: ({ content }: { content: string }) => {
+        const alertType = resolveGfmAlertType(className);
+        const lines = content.trim().split('\n');
+        const header = alertType ? `> [!${alertType}]\n` : '';
+        return `\n\n${header}> ${lines.join('\n> ')}\n\n`;
+      },
+    };
+  }
+
+  if (!className.includes('type')) return {};
+
+  return {
+    postprocess: ({ content }: { content: string }) => {
+      const lines = content.split('\n');
+      const separated: string[] = [];
+
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i] ?? '';
+        const nextLine = i < lines.length - 1 ? (lines[i + 1] ?? '') : '';
+
+        separated.push(line);
+
+        if (
+          line.trim() &&
+          nextLine.trim() &&
+          line.includes(':') &&
+          nextLine.includes(':') &&
+          !line.startsWith(' ') &&
+          !nextLine.startsWith(' ')
+        ) {
+          separated.push('');
+        }
+      }
+
+      return separated.join('\n');
+    },
+  };
+}
+
+function buildSectionTranslator(ctx: unknown): Record<string, unknown> {
+  if (isObject(ctx)) {
+    const { node } = ctx as { node?: unknown };
+    const getAttribute = getNodeAttr(node);
+    if (getAttribute?.('class')?.includes('tsd-member')) {
+      return {
+        postprocess: ({ content }: { content: string }) =>
+          `\n\n&nbsp;\n\n${content}\n\n`,
+      };
+    }
+  }
+  return {
+    postprocess: ({ content }: { content: string }) => `\n\n${content}\n\n`,
+  };
+}
+
+function buildSpanTranslator(ctx: unknown): Record<string, unknown> {
+  if (!isObject(ctx)) return {};
+  const { node } = ctx as { node?: unknown };
+  const getAttribute = getNodeAttr(node);
+  if (!getAttribute) return {};
+
+  const dataAs = getAttribute('data-as') ?? '';
+  if (dataAs === 'p') {
+    return {
+      postprocess: ({ content }: { content: string }) =>
+        `\n\n${content.trim()}\n\n`,
+    };
+  }
+  return {};
+}
+
+function buildMermaidPreTranslator(ctx: unknown): TranslatorConfig {
+  if (!isObject(ctx)) return buildPreTranslator(ctx);
+  const { node } = ctx as { node?: unknown };
+  const getAttribute = getNodeAttr(node);
+  if (!getAttribute) return buildPreTranslator(ctx);
+
+  const className = getAttribute('class') ?? '';
+  if (className.includes('mermaid')) {
+    return {
+      noEscape: true,
+      preserveWhitespace: true,
+      postprocess: ({ content }: { content: string }) =>
+        `\n\n\`\`\`mermaid\n${content.trim()}\n\`\`\`\n\n`,
+    };
+  }
+
+  return buildPreTranslator(ctx);
+}
+
 function createCustomTranslators(): TranslatorConfigObject {
   return {
     code: (ctx: unknown) => buildCodeTranslator(ctx),
@@ -1113,70 +1234,7 @@ function createCustomTranslators(): TranslatorConfigObject {
 
       return { content: items ? `\n${items}\n` : '' };
     },
-    div: (ctx: unknown) => {
-      if (!isObject(ctx)) return {};
-      const { node } = ctx as { node?: unknown };
-      if (!isLikeNode(node)) return {};
-
-      const getAttribute =
-        typeof node.getAttribute === 'function'
-          ? node.getAttribute.bind(node)
-          : undefined;
-      const className = getAttribute?.('class') ?? '';
-      if (className.includes('mermaid')) {
-        return {
-          noEscape: true,
-          preserveWhitespace: true,
-          postprocess: ({ content }: { content: string }) =>
-            `\n\n\`\`\`mermaid\n${content.trim()}\n\`\`\`\n\n`,
-        };
-      }
-      const isAdmonition =
-        className.includes('admonition') ||
-        className.includes('callout') ||
-        className.includes('custom-block') ||
-        getAttribute?.('role') === 'alert' ||
-        /\b(note|tip|info|warning|danger|caution|important)\b/i.test(className);
-      if (isAdmonition) {
-        return {
-          postprocess: ({ content }: { content: string }) => {
-            const alertType = resolveGfmAlertType(className);
-            const lines = content.trim().split('\n');
-            const header = alertType ? `> [!${alertType}]\n` : '';
-            return `\n\n${header}> ${lines.join('\n> ')}\n\n`;
-          },
-        };
-      }
-
-      if (!className.includes('type')) return {};
-
-      return {
-        postprocess: ({ content }: { content: string }) => {
-          const lines = content.split('\n');
-          const separated: string[] = [];
-
-          for (let i = 0; i < lines.length; i++) {
-            const line = lines[i] ?? '';
-            const nextLine = i < lines.length - 1 ? (lines[i + 1] ?? '') : '';
-
-            separated.push(line);
-
-            if (
-              line.trim() &&
-              nextLine.trim() &&
-              line.includes(':') &&
-              nextLine.includes(':') &&
-              !line.startsWith(' ') &&
-              !nextLine.startsWith(' ')
-            ) {
-              separated.push('');
-            }
-          }
-
-          return separated.join('\n');
-        },
-      };
-    },
+    div: buildDivTranslator,
     kbd: () => ({
       postprocess: ({ content }: { content: string }) => `\`${content}\``,
     }),
@@ -1189,26 +1247,7 @@ function createCustomTranslators(): TranslatorConfigObject {
     sup: () => ({
       postprocess: ({ content }: { content: string }) => `^${content}^`,
     }),
-    section: (ctx: unknown) => {
-      if (isObject(ctx)) {
-        const { node } = ctx as { node?: unknown };
-        if (isLikeNode(node)) {
-          const getAttribute =
-            typeof node.getAttribute === 'function'
-              ? node.getAttribute.bind(node)
-              : undefined;
-          if (getAttribute?.('class')?.includes('tsd-member')) {
-            return {
-              postprocess: ({ content }: { content: string }) =>
-                `\n\n&nbsp;\n\n${content}\n\n`,
-            };
-          }
-        }
-      }
-      return {
-        postprocess: ({ content }: { content: string }) => `\n\n${content}\n\n`,
-      };
-    },
+    section: buildSectionTranslator,
     details: () => ({
       postprocess: ({ content }: { content: string }) => {
         const trimmed = content.trim();
@@ -1220,47 +1259,8 @@ function createCustomTranslators(): TranslatorConfigObject {
       postprocess: ({ content }: { content: string }) =>
         `${content.trim()}\n\n`,
     }),
-    span: (ctx: unknown) => {
-      if (!isObject(ctx)) return {};
-      const { node } = ctx as { node?: unknown };
-      if (!isLikeNode(node)) return {};
-
-      const getAttribute =
-        typeof node.getAttribute === 'function'
-          ? node.getAttribute.bind(node)
-          : undefined;
-      const dataAs = getAttribute?.('data-as') ?? '';
-      if (dataAs === 'p') {
-        return {
-          postprocess: ({ content }: { content: string }) =>
-            `\n\n${content.trim()}\n\n`,
-        };
-      }
-      return {};
-    },
-    pre: (ctx: unknown) => {
-      if (!isObject(ctx)) return buildPreTranslator(ctx);
-      const { node } = ctx as { node?: unknown };
-      if (!isLikeNode(node)) {
-        return buildPreTranslator(ctx);
-      }
-
-      const getAttribute =
-        typeof node.getAttribute === 'function'
-          ? node.getAttribute.bind(node)
-          : undefined;
-      const className = getAttribute?.('class') ?? '';
-      if (className.includes('mermaid')) {
-        return {
-          noEscape: true,
-          preserveWhitespace: true,
-          postprocess: ({ content }: { content: string }) =>
-            `\n\n\`\`\`mermaid\n${content.trim()}\n\`\`\`\n\n`,
-        };
-      }
-
-      return buildPreTranslator(ctx);
-    },
+    span: buildSpanTranslator,
+    pre: buildMermaidPreTranslator,
   };
 }
 
@@ -1933,19 +1933,25 @@ function buildContentSource(params: {
     includeMetadata
   );
 
+  const base: Pick<
+    ContentSource,
+    'favicon' | 'metadata' | 'extractedMetadata' | 'truncated'
+  > = {
+    favicon: extractedMeta.favicon,
+    metadata,
+    extractedMetadata: extractedMeta,
+    truncated,
+  };
+
   if (useArticleContent && article) {
-    // Readability output can still be noisy (unless user requested skip).
     const cleanedArticleHtml = skipNoiseRemoval
       ? article.content
       : removeNoiseFromHtml(article.content, undefined, url, signal);
     return {
+      ...base,
       sourceHtml: cleanedArticleHtml,
       title: article.title,
-      favicon: extractedMeta.favicon,
-      metadata,
-      extractedMetadata: extractedMeta,
       skipNoiseRemoval: true,
-      truncated,
     };
   }
 
@@ -1955,38 +1961,19 @@ function buildContentSource(params: {
       : removeNoiseFromHtml(html, document, url, signal);
 
     const contentRoot = findContentRoot(document);
-    if (contentRoot) {
-      return {
-        sourceHtml: contentRoot,
-        title: extractedMeta.title,
-        favicon: extractedMeta.favicon,
-        metadata,
-        extractedMetadata: extractedMeta,
-        skipNoiseRemoval: true,
-        document,
-        truncated,
-      };
-    }
-
     return {
-      sourceHtml: cleanedHtml,
+      ...base,
+      sourceHtml: contentRoot ?? cleanedHtml,
       title: extractedMeta.title,
-      favicon: extractedMeta.favicon,
-      metadata,
-      extractedMetadata: extractedMeta,
       skipNoiseRemoval: true,
       document,
-      truncated,
     };
   }
 
   return {
+    ...base,
     sourceHtml: html,
     title: extractedMeta.title,
-    favicon: extractedMeta.favicon,
-    metadata,
-    extractedMetadata: extractedMeta,
-    truncated,
   };
 }
 

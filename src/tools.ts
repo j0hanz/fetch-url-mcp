@@ -43,6 +43,7 @@ import {
   type ToolHandlerExtra,
 } from './tool-progress.js';
 import { isObject } from './type-guards.js';
+import type { ExtractedMetadata } from './transform/types.js';
 
 // Re-export public API so existing consumers keep working.
 export { createToolErrorResponse, handleToolError } from './tool-errors.js';
@@ -296,27 +297,22 @@ function truncateStr(
   return value.slice(0, max);
 }
 
-function truncateMetadata(metadata: {
-  title?: string;
-  description?: string;
-  author?: string;
-  image?: string;
-  favicon?: string;
-  publishedAt?: string;
-  modifiedAt?: string;
-}): Record<string, unknown> {
-  return {
-    ...metadata,
-    ...(metadata.title !== undefined
-      ? { title: truncateStr(metadata.title, 512) }
-      : {}),
-    ...(metadata.description !== undefined
-      ? { description: truncateStr(metadata.description, 2048) }
-      : {}),
-    ...(metadata.author !== undefined
-      ? { author: truncateStr(metadata.author, 512) }
-      : {}),
-  };
+const METADATA_FIELD_LIMITS: Record<string, number> = {
+  title: 512,
+  description: 2048,
+  author: 512,
+};
+
+function truncateMetadata(metadata: ExtractedMetadata): ExtractedMetadata {
+  const result = { ...metadata };
+  for (const [key, limit] of Object.entries(METADATA_FIELD_LIMITS)) {
+    const field = key as keyof ExtractedMetadata;
+    const value = result[field];
+    if (typeof value === 'string' && value.length > limit) {
+      result[field] = value.slice(0, limit);
+    }
+  }
+  return result;
 }
 
 function buildStructuredContent(

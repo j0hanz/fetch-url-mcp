@@ -255,35 +255,23 @@ interface UrlResolution {
   transformed: boolean;
 }
 
-function createUrlResolution(params: {
-  normalizedUrl: string;
-  originalUrl: string;
-  transformed: boolean;
-}): UrlResolution {
-  return {
-    normalizedUrl: params.normalizedUrl,
-    originalUrl: params.originalUrl,
-    transformed: params.transformed,
-  };
-}
-
 function resolveNormalizedUrl(url: string): UrlResolution {
   const { normalizedUrl: validatedUrl } = normalizeUrl(url);
   const transformedResult = transformToRawUrl(validatedUrl);
   if (!transformedResult.transformed) {
-    return createUrlResolution({
+    return {
       normalizedUrl: validatedUrl,
       originalUrl: validatedUrl,
       transformed: false,
-    });
+    };
   }
 
   const { normalizedUrl: transformedUrl } = normalizeUrl(transformedResult.url);
-  return createUrlResolution({
+  return {
     normalizedUrl: transformedUrl,
     originalUrl: validatedUrl,
     transformed: true,
-  });
+  };
 }
 
 function logRawUrlTransformation(resolvedUrl: UrlResolution): void {
@@ -515,18 +503,11 @@ function normalizeExtractedMetadata(
 ): MarkdownPipelineResult['metadata'] | undefined {
   if (!metadata) return undefined;
 
-  const normalized = {
-    ...(metadata.title ? { title: metadata.title } : {}),
-    ...(metadata.description ? { description: metadata.description } : {}),
-    ...(metadata.author ? { author: metadata.author } : {}),
-    ...(metadata.image ? { image: metadata.image } : {}),
-    ...(metadata.favicon ? { favicon: metadata.favicon } : {}),
-    ...(metadata.publishedAt ? { publishedAt: metadata.publishedAt } : {}),
-    ...(metadata.modifiedAt ? { modifiedAt: metadata.modifiedAt } : {}),
-  };
+  const normalized = Object.fromEntries(
+    Object.entries(metadata).filter(([, v]) => Boolean(v))
+  );
 
-  if (Object.keys(normalized).length === 0) return undefined;
-  return normalized;
+  return Object.keys(normalized).length > 0 ? normalized : undefined;
 }
 
 const cachedMarkdownSchema = z
