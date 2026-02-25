@@ -1,10 +1,19 @@
-import { setTimeout as setTimeoutPromise } from 'node:timers/promises';
+import {
+  setInterval as setIntervalPromise,
+  setTimeout as setTimeoutPromise,
+} from 'node:timers/promises';
 
 import { isAbortError } from './errors.js';
 
 export interface CancellableTimeout<T> {
   promise: Promise<T>;
   cancel: () => void;
+}
+
+interface IntervalLoopOptions<T> {
+  signal: AbortSignal;
+  onTick: (value: T) => void | Promise<void>;
+  onError?: (error: unknown) => void;
 }
 
 function createAbortSafeTimeoutPromise<T>(
@@ -40,4 +49,27 @@ export function createUnrefTimeout<T>(
       controller.abort();
     },
   };
+}
+
+export function startAbortableIntervalLoop<T>(
+  intervalMs: number,
+  value: T,
+  options: IntervalLoopOptions<T>
+): void {
+  const ticks = setIntervalPromise(intervalMs, value, {
+    signal: options.signal,
+    ref: false,
+  });
+
+  void (async () => {
+    try {
+      for await (const tickValue of ticks) {
+        await options.onTick(tickValue);
+        if (options.signal.aborted) return;
+      }
+    } catch (error: unknown) {
+      if (isAbortError(error)) return;
+      options.onError?.(error);
+    }
+  })();
 }

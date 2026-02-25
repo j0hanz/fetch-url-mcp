@@ -1,14 +1,13 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 
-import { setInterval as setIntervalPromise } from 'node:timers/promises';
-
 import { getErrorMessage, isAbortError } from './errors.js';
 import {
   logInfo,
   logWarn,
   unregisterMcpSessionServerByServer,
 } from './observability.js';
+import { startAbortableIntervalLoop } from './timer-utils.js';
 
 export interface SessionEntry {
   readonly server: McpServer;
@@ -121,42 +120,41 @@ class SessionCleanupLoop {
 
   start(): AbortController {
     const controller = new AbortController();
-    void this.run(controller.signal).catch(handleSessionCleanupError);
-    return controller;
-  }
-
-  private async run(signal: AbortSignal): Promise<void> {
     const intervalMs =
       this.cleanupIntervalMsOverride ?? getCleanupIntervalMs(this.sessionTtlMs);
 
-    const ticks = setIntervalPromise(intervalMs, Date.now, {
-      signal,
-      ref: false,
+    startAbortableIntervalLoop(intervalMs, Date.now, {
+      signal: controller.signal,
+      onTick: async (getNow) => {
+        await this.handleTick(getNow(), controller.signal);
+      },
+      onError: handleSessionCleanupError,
     });
 
-    for await (const getNow of ticks) {
-      const now = getNow();
-      const evicted = this.store.evictExpired();
+    return controller;
+  }
 
-      for (const batch of chunkArray(evicted, SESSION_CLOSE_BATCH_SIZE)) {
-        const results = await Promise.allSettled(
-          batch.map(async (session) => this.closeExpiredSession(session))
-        );
+  private async handleTick(now: number, signal: AbortSignal): Promise<void> {
+    const evicted = this.store.evictExpired();
 
-        logRejectedSettledResults(
-          results,
-          'Failed to process expired session cleanup task'
-        );
+    for (const batch of chunkArray(evicted, SESSION_CLOSE_BATCH_SIZE)) {
+      const results = await Promise.allSettled(
+        batch.map(async (session) => this.closeExpiredSession(session))
+      );
 
-        if (signal.aborted) return;
-      }
+      logRejectedSettledResults(
+        results,
+        'Failed to process expired session cleanup task'
+      );
 
-      if (evicted.length > 0) {
-        logInfo('Expired sessions evicted', {
-          evicted: evicted.length,
-          timestamp: new Date(now).toISOString(),
-        });
-      }
+      if (signal.aborted) return;
+    }
+
+    if (evicted.length > 0) {
+      logInfo('Expired sessions evicted', {
+        evicted: evicted.length,
+        timestamp: new Date(now).toISOString(),
+      });
     }
   }
 

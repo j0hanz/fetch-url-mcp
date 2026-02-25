@@ -1,7 +1,6 @@
-import { setInterval as setIntervalPromise } from 'node:timers/promises';
-
 import { isAbortError } from '../lib/errors.js';
 import { logWarn } from '../lib/observability.js';
+import { startAbortableIntervalLoop } from '../lib/timer-utils.js';
 import { type RequestContext, sendJson } from './helpers.js';
 
 // ---------------------------------------------------------------------------
@@ -39,23 +38,17 @@ class RateLimiter implements RateLimitManagerImpl {
   }
 
   private startCleanupLoop(): void {
-    const interval = setIntervalPromise(
-      this.options.cleanupIntervalMs,
-      Date.now,
-      { signal: this.cleanup.signal, ref: false }
-    );
-
-    void (async () => {
-      try {
-        for await (const getNow of interval) {
-          this.cleanupEntries(getNow());
-        }
-      } catch (err) {
+    startAbortableIntervalLoop(this.options.cleanupIntervalMs, Date.now, {
+      signal: this.cleanup.signal,
+      onTick: (getNow) => {
+        this.cleanupEntries(getNow());
+      },
+      onError: (err) => {
         if (!isAbortError(err)) {
           logWarn('Rate limit cleanup failed', { error: err });
         }
-      }
-    })();
+      },
+    });
   }
 
   private cleanupEntries(now: number): void {
