@@ -60,7 +60,7 @@
     "test": "node scripts/tasks.mjs test",
     "knip": "knip",
     "knip:fix": "knip --fix",
-    "inspector": "npm run build && npx -y @modelcontextprotocol/inspector node dist/index.js ${workspaceFolder}",
+    "inspector": "npm run build && npx -y @modelcontextprotocol/inspector node dist/index.js --stdio",
     "prepublishOnly": "npm run lint && npm run type-check && npm run build"
   },
   "dependencies": {
