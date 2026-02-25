@@ -79,21 +79,15 @@ export const fetchUrlInputSchema = z.strictObject({
     .url({ protocol: /^https?$/i })
     .min(1)
     .max(config.constants.maxUrlLength)
-    .describe(
-      `The URL of the webpage to fetch and convert to Markdown. Max ${config.constants.maxUrlLength} characters.`
-    ),
+    .describe(`Target URL. Max ${config.constants.maxUrlLength} chars.`),
   skipNoiseRemoval: z
     .boolean()
     .optional()
-    .describe(
-      'When true, preserves navigation, footers, and other elements normally filtered as noise'
-    ),
+    .describe('Preserve navigation/footers (disable noise filtering).'),
   forceRefresh: z
     .boolean()
     .optional()
-    .describe(
-      'When true, bypasses the cache and fetches fresh content from the URL'
-    ),
+    .describe('Bypass cache and fetch fresh content.'),
   maxInlineChars: z
     .number()
     .int()
@@ -101,7 +95,7 @@ export const fetchUrlInputSchema = z.strictObject({
     .max(config.constants.maxHtmlSize)
     .optional()
     .describe(
-      `Optional per-call inline markdown limit (0 to ${config.constants.maxHtmlSize}). 0 means unlimited. If a global inline limit is configured, the lower value is used.`
+      `Inline markdown limit (0-${config.constants.maxHtmlSize}, 0=unlimited). Lower of this or global limit applies.`
     ),
 });
 
@@ -110,109 +104,89 @@ export const fetchUrlOutputSchema = z.strictObject({
     .string()
     .min(1)
     .max(config.constants.maxUrlLength)
-    .describe('The fetched URL'),
+    .describe('Fetched URL.'),
   inputUrl: z
     .string()
     .max(config.constants.maxUrlLength)
     .optional()
-    .describe('The original URL provided by the caller'),
+    .describe('Original requested URL.'),
   resolvedUrl: z
     .string()
     .max(config.constants.maxUrlLength)
     .optional()
-    .describe('The normalized or transformed URL that was fetched'),
+    .describe('Final URL after raw-content transformations.'),
   finalUrl: z
     .string()
     .max(config.constants.maxUrlLength)
     .optional()
-    .describe('The final response URL after redirects'),
+    .describe('Final URL after HTTP redirects.'),
   cacheResourceUri: z
     .string()
     .max(config.constants.maxUrlLength)
     .optional()
-    .describe(
-      'Internal cache resource URI for retrieving full markdown via resources/read'
-    ),
-  title: z.string().max(512).optional().describe('Page title'),
+    .describe('URI for resources/read to get full markdown.'),
+  title: z.string().max(512).optional().describe('Page title.'),
   metadata: z
     .strictObject({
-      title: z.string().max(512).optional().describe('Detected page title'),
+      title: z.string().max(512).optional().describe('Detected page title.'),
       description: z
         .string()
         .max(2048)
         .optional()
-        .describe('Detected page description'),
-      author: z.string().max(512).optional().describe('Detected page author'),
+        .describe('Detected page description.'),
+      author: z.string().max(512).optional().describe('Detected page author.'),
       image: z
         .string()
         .max(config.constants.maxUrlLength)
         .optional()
-        .describe('Detected page preview image URL'),
+        .describe('Detected page preview image URL.'),
       favicon: z
         .string()
         .max(config.constants.maxUrlLength)
         .optional()
-        .describe('Detected page favicon URL'),
+        .describe('Detected page favicon URL.'),
       publishedAt: z
         .string()
         .max(64)
         .optional()
-        .describe('Detected publication date (if present)'),
+        .describe('Detected publication date.'),
       modifiedAt: z
         .string()
         .max(64)
         .optional()
-        .describe('Detected last modified date (if present)'),
+        .describe('Detected last modified date.'),
     })
     .optional()
-    .describe('Detected metadata extracted from page markup'),
+    .describe('Extracted page metadata.'),
   markdown: (config.constants.maxInlineContentChars > 0
     ? z.string().max(config.constants.maxInlineContentChars)
     : z.string()
   )
     .optional()
-    .describe(
-      'The extracted content in Markdown format. May be truncated if exceeding inline limits; check "truncated" field'
-    ),
-  fromCache: z
-    .boolean()
-    .optional()
-    .describe('Whether this response was served from cache'),
-  fetchedAt: z
-    .string()
-    .max(64)
-    .optional()
-    .describe('ISO timestamp of fetch/cache retrieval time'),
+    .describe('Extracted Markdown. May be truncated (check truncated field).'),
+  fromCache: z.boolean().optional().describe('True if served from cache.'),
+  fetchedAt: z.string().max(64).optional().describe('ISO timestamp of fetch.'),
   contentSize: z
     .number()
     .int()
     .min(0)
     .max(config.constants.maxHtmlSize * 4)
     .optional()
-    .describe('Full markdown size in characters before inline truncation'),
-  truncated: z
-    .boolean()
-    .optional()
-    .describe('Whether the returned markdown was truncated'),
+    .describe('Full markdown size before truncation.'),
+  truncated: z.boolean().optional().describe('True if markdown was truncated.'),
 });
 
 export const FETCH_URL_TOOL_NAME = 'fetch-url';
 const FETCH_URL_TOOL_DESCRIPTION = `
-Fetches a webpage and converts it to clean Markdown format optimized for LLM context.
-
-This tool is useful for:
-- Reading documentation, blog posts, or articles.
-- Extracting main content while removing navigation and ads (noise removal).
-- Caching content to speed up repeated queries.
-
-Key behaviors:
-- GitHub, GitLab, and Bitbucket URLs are auto-transformed to raw content endpoints; check resolvedUrl.
-- If truncated is true in the response, use cacheResourceUri with resources/read to retrieve the full content.
-- For long-running fetches or large pages, invoke with task: {} to get a taskId and poll tasks/get until complete.
-
-Limitations:
-- Does not execute client-side JavaScript; JS-rendered pages may be incomplete.
-- If the error code is queue_full, the worker pool is busy — retry the call using task mode (task: {}) instead.
+<role>Web Content Extractor</role>
+<task>Fetch public webpages and convert HTML to clean Markdown.</task>
+<constraints>
+- READ-ONLY. No JavaScript execution.
+- GitHub/GitLab/Bitbucket URLs auto-transform to raw endpoints (check resolvedUrl).
+- If truncated=true, use cacheResourceUri with resources/read for full content.
+- For large pages/timeouts, use task mode (task: {}).
+- If error queue_full, retry with task mode.
+</constraints>
 `.trim();
 
 const TOOL_ICON = {

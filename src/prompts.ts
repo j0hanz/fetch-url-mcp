@@ -26,7 +26,7 @@ export function registerGetHelpPrompt(
   iconInfo?: IconInfo
 ): void {
   const description =
-    'Return Fetch URL server instructions: how to fetch URLs, handle truncated content, recover full content via cacheResourceUri, use task mode for long pages, and route errors by code.';
+    'Return Fetch URL server instructions: workflows, cache usage, task mode, and error handling.';
 
   server.registerPrompt(
     'get-help',
