@@ -270,6 +270,41 @@ function updateWorkingTaskStatus(
   if (updated) emitTaskStatusNotification(server, updated);
 }
 
+function updateTaskAndEmitStatus(
+  server: McpServer,
+  taskId: string,
+  update: Parameters<(typeof taskManager)['updateTask']>[1]
+): void {
+  taskManager.updateTask(taskId, update);
+  const task = taskManager.getTask(taskId);
+  if (task) emitTaskStatusNotification(server, task);
+}
+
+function buildTaskFailureState(error: unknown): {
+  statusMessage: string;
+  error: { code: number; message: string; data?: unknown };
+} {
+  const statusMessage = getErrorMessage(error);
+  if (error instanceof McpError) {
+    return {
+      statusMessage,
+      error: {
+        code: error.code,
+        message: statusMessage,
+        data: error.data,
+      },
+    };
+  }
+
+  return {
+    statusMessage,
+    error: {
+      code: ErrorCode.InternalError,
+      message: statusMessage,
+    },
+  };
+}
+
 async function runTaskToolExecution(params: {
   server: McpServer;
   taskId: string;
@@ -307,38 +342,21 @@ async function runTaskToolExecution(params: {
         const isToolError =
           isObject(result) && 'isError' in result && result.isError === true;
 
-        taskManager.updateTask(taskId, {
+        updateTaskAndEmitStatus(server, taskId, {
           status: isToolError ? 'failed' : 'completed',
           statusMessage: isToolError
             ? (tryReadToolStructuredError(result) ?? 'Tool execution failed')
             : 'Task completed successfully.',
           result,
         });
-
-        const task = taskManager.getTask(taskId);
-        if (task) emitTaskStatusNotification(server, task);
       } catch (error: unknown) {
-        const errorMessage = getErrorMessage(error);
-        const errorPayload =
-          error instanceof McpError
-            ? {
-                code: error.code,
-                message: errorMessage,
-                data: error.data,
-              }
-            : {
-                code: ErrorCode.InternalError,
-                message: errorMessage,
-              };
+        const failure = buildTaskFailureState(error);
 
-        taskManager.updateTask(taskId, {
+        updateTaskAndEmitStatus(server, taskId, {
           status: 'failed',
-          statusMessage: errorMessage,
-          error: errorPayload,
+          statusMessage: failure.statusMessage,
+          error: failure.error,
         });
-
-        const task = taskManager.getTask(taskId);
-        if (task) emitTaskStatusNotification(server, task);
       } finally {
         clearTaskExecution(taskId);
       }
