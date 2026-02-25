@@ -11,7 +11,7 @@ const execFileAsync = promisify(execFile);
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-test('mcp fetch-url client supports task mode', async () => {
+test('mcp fetch-url client supports task mode', async (t) => {
   const repoRoot = path.resolve(__dirname, '..');
   const builtClientPath = path.join(
     repoRoot,
@@ -27,6 +27,12 @@ test('mcp fetch-url client supports task mode', async () => {
   const clientPath = existsSync(builtClientPath)
     ? builtClientPath
     : sourceClientPath;
+  if (!existsSync(clientPath)) {
+    t.skip(
+      'Example client not present (neither dist/examples nor examples source exists)'
+    );
+    return;
+  }
   const mockServerPath = path.join(
     repoRoot,
     'tests',
