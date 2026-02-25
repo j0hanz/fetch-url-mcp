@@ -106,13 +106,18 @@ describe('http auth and host/origin validation', () => {
           const req = request(options, (res) => {
             let raw = '';
             res.on('data', (chunk) => { raw += chunk; });
-            res.on('end', () =>
+            res.on('end', () => {
+              let parsedBody = null;
+              try {
+                parsedBody = raw ? JSON.parse(raw) : null;
+              } catch {}
               resolve({
                 status: res.statusCode ?? 0,
                 headers: res.headers,
                 body: raw,
-              })
-            );
+                parsedBody,
+              });
+            });
           });
           req.on('error', (error) => resolve({ error: error.message }));
           req.end();
@@ -125,7 +130,8 @@ describe('http auth and host/origin validation', () => {
         path: '/mcp',
         method: 'POST',
         headers: {
-          host: '127.0.0.1',
+          host: '127.0.0.1:' + port,
+          origin: 'http://127.0.0.1',
           'content-type': 'application/json',
           accept: 'application/json, text/event-stream',
         },
@@ -136,11 +142,11 @@ describe('http auth and host/origin validation', () => {
         port,
         path: '/.well-known/oauth-protected-resource/mcp',
         method: 'GET',
-        headers: { host: '127.0.0.1' },
+        headers: { host: '127.0.0.1:' + port },
       });
 
       await server.shutdown('TEST');
-      console.error('${RESULT_MARKER}' + JSON.stringify({ unauthorized, metadata }));
+      console.error('${RESULT_MARKER}' + JSON.stringify({ port, unauthorized, metadata }));
     `;
 
     const result = runIsolatedNode(script, {
@@ -152,6 +158,7 @@ describe('http auth and host/origin validation', () => {
 
     assert.equal(result.status, 0, result.stderr);
     const payload = parseMarkedJson<{
+      port: number;
       unauthorized: {
         status: number;
         headers: Record<string, string | string[] | undefined>;
@@ -159,6 +166,10 @@ describe('http auth and host/origin validation', () => {
       metadata: {
         status: number;
         body: string;
+        parsedBody: {
+          resource?: string;
+          resource_metadata?: string;
+        } | null;
       };
     }>(result.stderr);
 
@@ -166,10 +177,23 @@ describe('http auth and host/origin validation', () => {
     const challenge = payload.unauthorized.headers['www-authenticate'];
     assert.equal(typeof challenge, 'string');
     assert.match(challenge, /Bearer resource_metadata=".+"/);
+    const exposeHeaders =
+      payload.unauthorized.headers['access-control-expose-headers'];
+    assert.equal(typeof exposeHeaders, 'string');
+    assert.match(exposeHeaders, /MCP-Session-ID/i);
+    assert.match(exposeHeaders, /WWW-Authenticate/i);
 
     assert.equal(payload.metadata.status, 200);
     assert.match(payload.metadata.body, /"resource"/);
     assert.match(payload.metadata.body, /"bearer_methods_supported"/);
+    assert.equal(
+      payload.metadata.parsedBody?.resource,
+      `http://127.0.0.1:${payload.port}/mcp`
+    );
+    assert.equal(
+      payload.metadata.parsedBody?.resource_metadata,
+      `http://127.0.0.1:${payload.port}/.well-known/oauth-protected-resource/mcp`
+    );
   });
 
   it('accepts X-API-Key for static auth', () => {

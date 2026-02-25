@@ -554,6 +554,10 @@ export const config = {
   tasks: {
     maxTotal: DEFAULT_TASKS_MAX_TOTAL,
     maxPerOwner: RESOLVED_TASKS_MAX_PER_OWNER,
+    emitStatusNotifications: parseBoolean(
+      env['TASKS_STATUS_NOTIFICATIONS'],
+      true
+    ),
   },
   cache: {
     enabled: parseBoolean(env['CACHE_ENABLED'], true),

@@ -40,7 +40,7 @@ export function registerGetHelpPrompt(
       description,
       messages: [
         {
-          role: 'user',
+          role: 'assistant',
           content: {
             type: 'text',
             text: instructions,

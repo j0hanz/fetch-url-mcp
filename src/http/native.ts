@@ -822,7 +822,19 @@ export async function startHttpServer(): Promise<{
   const sessionStore = createSessionStore(config.server.sessionTtlMs);
   const sessionCleanup = startSessionCleanupLoop(
     sessionStore,
-    config.server.sessionTtlMs
+    config.server.sessionTtlMs,
+    {
+      onEvictSession: (session) => {
+        const sessionId = resolveMcpSessionIdByServer(session.server);
+        if (!sessionId) return;
+
+        cancelTasksForOwner(
+          `session:${sessionId}`,
+          'The task was cancelled because the MCP session expired.'
+        );
+        unregisterMcpSessionServer(sessionId);
+      },
+    }
   );
 
   const mcpGateway = new McpSessionGateway(

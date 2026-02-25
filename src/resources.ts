@@ -46,6 +46,60 @@ const CACHE_HASH_PATTERN = /^[a-f0-9.]{8,64}$/i;
 // does not export this value, so it is defined locally.
 const RESOURCE_NOT_FOUND_ERROR_CODE = -32002;
 const MAX_COMPLETION_VALUES = 100;
+type CleanupCallback = () => void;
+const patchedCleanupServers = new WeakSet<McpServer>();
+const serverCleanupCallbacks = new WeakMap<McpServer, Set<CleanupCallback>>();
+
+function getServerCleanupCallbackSet(server: McpServer): Set<CleanupCallback> {
+  let callbacks = serverCleanupCallbacks.get(server);
+  if (!callbacks) {
+    callbacks = new Set<CleanupCallback>();
+    serverCleanupCallbacks.set(server, callbacks);
+  }
+  return callbacks;
+}
+
+function drainServerCleanupCallbacks(server: McpServer): void {
+  const callbacks = serverCleanupCallbacks.get(server);
+  if (!callbacks || callbacks.size === 0) return;
+
+  const pending = [...callbacks];
+  callbacks.clear();
+  for (const callback of pending) {
+    try {
+      callback();
+    } catch (error: unknown) {
+      logWarn('Server cleanup callback failed', { error });
+    }
+  }
+}
+
+function ensureServerCleanupHooks(server: McpServer): void {
+  if (patchedCleanupServers.has(server)) return;
+  patchedCleanupServers.add(server);
+
+  const originalOnClose = server.server.onclose;
+  server.server.onclose = () => {
+    drainServerCleanupCallbacks(server);
+    originalOnClose?.();
+  };
+
+  // FIXME: Monkey-patching server.close remains necessary until the SDK exposes
+  // a first-class lifecycle cleanup registration API.
+  const originalClose = server.close.bind(server);
+  server.close = async (): Promise<void> => {
+    drainServerCleanupCallbacks(server);
+    await originalClose();
+  };
+}
+
+function registerServerCleanupCallback(
+  server: McpServer,
+  callback: CleanupCallback
+): void {
+  ensureServerCleanupHooks(server);
+  getServerCleanupCallbackSet(server).add(callback);
+}
 
 function buildOptionalIcons(
   iconInfo?: IconInfo
@@ -286,27 +340,7 @@ function registerCacheResourceNotifications(server: McpServer): void {
     unsubscribe();
   };
 
-  // Both patches are intentional and handle distinct disconnection scenarios:
-  // • `server.server.onclose` fires when the transport closes unexpectedly
-  //   (e.g., client drops the connection) — the SDK calls it directly from
-  //   `_onclose()` without going through `server.close()`.
-  // • `server.close()` fires when the application shuts the server down
-  //   gracefully. The `server.close()` path also eventually triggers `onclose`,
-  //   so the `cleanedUp` guard below prevents double-invocation.
-  const originalOnClose = server.server.onclose;
-  server.server.onclose = () => {
-    cleanup();
-    originalOnClose?.();
-  };
-
-  // FIXME: Monkey-patching server.close is fragile if other modules wrap it.
-  // A proper fix requires a first-class lifecycle hook or cleanup registration API
-  // in the SDK. Until then, the cleanedUp guard prevents double-invocation.
-  const originalClose = server.close.bind(server);
-  server.close = async (): Promise<void> => {
-    cleanup();
-    await originalClose();
-  };
+  registerServerCleanupCallback(server, cleanup);
 }
 
 function normalizeTemplateVariables(

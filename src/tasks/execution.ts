@@ -5,7 +5,9 @@ import {
   type ServerResult,
 } from '@modelcontextprotocol/sdk/types.js';
 
+import { config } from '../config.js';
 import { logWarn, runWithRequestContext } from '../observability.js';
+import type { ToolHandlerExtra } from '../tool-progress.js';
 import {
   FETCH_URL_TOOL_NAME,
   type FetchUrlInput,
@@ -167,6 +169,7 @@ export function emitTaskStatusNotification(
   server: McpServer,
   task: TaskState
 ): void {
+  if (!config.tasks.emitStatusNotifications) return;
   if (!server.isConnected()) return;
 
   // NOTE: 'notifications/tasks/status' is not part of the MCP v2025-11-25 specification.
@@ -200,6 +203,21 @@ function requireFetchUrlArgs(args: unknown): FetchUrlInput {
   return parsed.data;
 }
 
+interface TaskCapableToolDescriptor {
+  name: string;
+  parseArguments: (args: unknown) => FetchUrlInput;
+}
+
+const TASK_CAPABLE_TOOLS = new Map<string, TaskCapableToolDescriptor>([
+  [
+    FETCH_URL_TOOL_NAME,
+    {
+      name: FETCH_URL_TOOL_NAME,
+      parseArguments: requireFetchUrlArgs,
+    },
+  ],
+]);
+
 // -32002 is the MCP extension code for resource-not-found; the SDK ErrorCode enum does not export it.
 const RESOURCE_NOT_FOUND_ERROR_CODE = -32002;
 
@@ -207,8 +225,9 @@ export function throwTaskNotFound(): never {
   throw new McpError(RESOURCE_NOT_FOUND_ERROR_CODE, 'Task not found');
 }
 
-function requireFetchUrlToolName(name: string): void {
-  if (name === FETCH_URL_TOOL_NAME) return;
+function resolveTaskCapableTool(name: string): TaskCapableToolDescriptor {
+  const descriptor = TASK_CAPABLE_TOOLS.get(name);
+  if (descriptor) return descriptor;
   throw new McpError(ErrorCode.MethodNotFound, `Unknown tool: '${name}'`);
 }
 
@@ -341,8 +360,8 @@ function handleTaskToolCall(
   params: ExtendedCallToolRequest['params'],
   context: ToolCallContext
 ): CreateTaskResult {
-  requireFetchUrlToolName(params.name);
-  const validArgs = requireFetchUrlArgs(params.arguments);
+  const tool = resolveTaskCapableTool(params.name);
+  const validArgs = tool.parseArguments(params.arguments);
 
   const task = taskManager.createTask(
     params.task?.ttl !== undefined ? { ttl: params.task.ttl } : undefined,
@@ -369,12 +388,16 @@ async function handleDirectToolCall(
 ): Promise<ServerResult> {
   const args = requireFetchUrlArgs(params.arguments);
 
-  const extra = compact({
-    signal: context.signal,
-    requestId: context.requestId,
-    sendNotification: context.sendNotification,
-    _meta: params._meta,
-  });
+  const extra: ToolHandlerExtra = {
+    ...(context.signal ? { signal: context.signal } : {}),
+    ...(context.requestId !== undefined
+      ? { requestId: context.requestId }
+      : {}),
+    ...(context.sendNotification
+      ? { sendNotification: context.sendNotification }
+      : {}),
+    ...(params._meta ? { _meta: params._meta } : {}),
+  };
 
   return fetchUrlToolHandler(args, extra);
 }
@@ -390,7 +413,7 @@ export async function handleToolCallRequest(
     return handleTaskToolCall(server, params, context);
   }
 
-  if (params.name === FETCH_URL_TOOL_NAME) {
+  if (TASK_CAPABLE_TOOLS.has(params.name)) {
     return handleDirectToolCall(params, context);
   }
 

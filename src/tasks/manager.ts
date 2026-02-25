@@ -36,6 +36,7 @@ export interface TaskState {
 
 interface InternalTaskState extends TaskState {
   _createdAtMs: number;
+  _ownerCounted: boolean;
 }
 
 interface CreateTaskOptions {
@@ -115,8 +116,17 @@ class TaskManager {
     const task = this.tasks.get(taskId);
     if (!task) return false;
     this.tasks.delete(taskId);
-    this.decrementOwnerCount(task.ownerKey);
+    this.releaseOwnerCount(task);
     return true;
+  }
+
+  private releaseOwnerCount(task: InternalTaskState | TaskState): void {
+    const internal = task as Partial<InternalTaskState>;
+    if (internal._ownerCounted === false) return;
+    if ('_ownerCounted' in internal) {
+      internal._ownerCounted = false;
+    }
+    this.decrementOwnerCount(task.ownerKey);
   }
 
   private countTasksForOwner(ownerKey: string): number {
@@ -176,6 +186,7 @@ class TaskManager {
       ttl: normalizeTaskTtl(options?.ttl),
       pollInterval: DEFAULT_POLL_INTERVAL_MS,
       _createdAtMs: now.getTime(),
+      _ownerCounted: true,
     };
 
     this.tasks.set(task.taskId, task);
@@ -227,7 +238,7 @@ class TaskManager {
       status: 'cancelled',
       statusMessage: 'The task was cancelled by request.',
     });
-    this.decrementOwnerCount(task.ownerKey);
+    this.releaseOwnerCount(task);
 
     return this.tasks.get(taskId);
   }
@@ -248,7 +259,7 @@ class TaskManager {
         status: 'cancelled',
         statusMessage,
       });
-      this.decrementOwnerCount(task.ownerKey);
+      this.releaseOwnerCount(task);
       cancelled.push(task);
     }
 

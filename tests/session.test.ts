@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
+import { setTimeout as delay } from 'node:timers/promises';
 
 import * as http from '../dist/session.js';
 
@@ -263,6 +264,48 @@ describe('http session utilities', () => {
         'Expired session should be removed'
       );
       assert.ok(store.get('fresh'), 'Fresh session should remain');
+    });
+
+    it('runs expired-session cleanup hook when cleanup loop evicts sessions', async () => {
+      const ttlMs = 5;
+      const store = http.createSessionStore(ttlMs);
+      const calls: string[] = [];
+
+      store.set('expired-loop', {
+        server: {
+          close: async () => {
+            calls.push('server.close');
+          },
+        },
+        transport: {
+          close: async () => {
+            calls.push('transport.close');
+          },
+        },
+        createdAt: Date.now() - 100,
+        lastSeen: Date.now() - 100,
+        protocolInitialized: false,
+        negotiatedProtocolVersion: '2025-11-25',
+        authFingerprint: 'test',
+      } as any);
+
+      const cleanup = http.startSessionCleanupLoop(store, ttlMs, {
+        cleanupIntervalMs: 5,
+        onEvictSession: () => {
+          calls.push('onEvictSession');
+        },
+      });
+
+      try {
+        await delay(40);
+      } finally {
+        cleanup.abort();
+      }
+
+      assert.equal(store.get('expired-loop'), undefined);
+      assert.ok(calls.includes('onEvictSession'));
+      assert.ok(calls.includes('transport.close'));
+      assert.ok(calls.includes('server.close'));
     });
   });
 

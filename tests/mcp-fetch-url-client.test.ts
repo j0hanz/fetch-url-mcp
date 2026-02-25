@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
+import { existsSync } from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
 import test from 'node:test';
@@ -12,12 +13,20 @@ const __dirname = path.dirname(__filename);
 
 test('mcp fetch-url client supports task mode', async () => {
   const repoRoot = path.resolve(__dirname, '..');
-  const clientPath = path.join(
+  const builtClientPath = path.join(
     repoRoot,
     'dist',
     'examples',
     'mcp-fetch-url-client.js'
   );
+  const sourceClientPath = path.join(
+    repoRoot,
+    'examples',
+    'mcp-fetch-url-client.ts'
+  );
+  const clientPath = existsSync(builtClientPath)
+    ? builtClientPath
+    : sourceClientPath;
   const mockServerPath = path.join(
     repoRoot,
     'tests',

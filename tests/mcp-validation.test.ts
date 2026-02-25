@@ -186,11 +186,11 @@ describe('mcp-validation', () => {
       );
     });
 
-    it('null id is rejected for requests', () => {
+    it('accepts null id for JSON-RPC compatibility', () => {
       assertCase(
         {
           input: { jsonrpc: '2.0', method: 'test', id: null },
-          expected: false,
+          expected: true,
         },
         isMcpRequestBody
       );

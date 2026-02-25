@@ -44,6 +44,10 @@ class CorsPolicy {
       'Access-Control-Allow-Headers',
       'Content-Type, Authorization, X-API-Key, MCP-Protocol-Version, MCP-Session-ID, X-MCP-Session-ID, Last-Event-ID'
     );
+    res.setHeader(
+      'Access-Control-Expose-Headers',
+      'MCP-Session-ID, X-MCP-Session-ID, MCP-Protocol-Version, WWW-Authenticate'
+    );
 
     if (req.method !== 'OPTIONS') return false;
     sendEmpty(res, 204);
@@ -466,14 +470,23 @@ function resolvePublicOrigin(req: IncomingMessage): string {
   return config.auth.resourceUrl.origin;
 }
 
+function buildRequestScopedProtectedResourceUrls(req: IncomingMessage): {
+  resource: string;
+  resourceMetadata: string;
+} {
+  const origin = resolvePublicOrigin(req);
+  return {
+    resource: new URL('/mcp', `${origin}/`).href,
+    resourceMetadata: new URL(resolveResourceMetadataPath(), `${origin}/`).href,
+  };
+}
+
 function resolveResourceMetadataPath(): string {
   return '/.well-known/oauth-protected-resource/mcp';
 }
 
 export function buildResourceMetadataUrl(req: IncomingMessage): string {
-  const origin = resolvePublicOrigin(req);
-  const path = resolveResourceMetadataPath();
-  return new URL(path, `${origin}/`).href;
+  return buildRequestScopedProtectedResourceUrls(req).resourceMetadata;
 }
 
 export function applyUnauthorizedAuthHeaders(
@@ -494,11 +507,11 @@ export function buildProtectedResourceMetadataDocument(req: IncomingMessage): {
   bearer_methods_supported: string[];
   scopes_supported: string[];
 } {
-  const metadataUrl = buildResourceMetadataUrl(req);
+  const urls = buildRequestScopedProtectedResourceUrls(req);
 
   return {
-    resource: config.auth.resourceUrl.href,
-    resource_metadata: metadataUrl,
+    resource: urls.resource,
+    resource_metadata: urls.resourceMetadata,
     authorization_servers: config.auth.issuerUrl
       ? [config.auth.issuerUrl.href]
       : [],

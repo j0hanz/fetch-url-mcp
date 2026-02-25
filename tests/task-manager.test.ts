@@ -175,6 +175,42 @@ describe('TaskManager.updateTask terminal behavior', () => {
   });
 });
 
+describe('TaskManager owner capacity accounting', () => {
+  it('does not undercount after cancelled tasks expire', async () => {
+    const originalMaxPerOwner = config.tasks.maxPerOwner;
+    const originalMaxTotal = config.tasks.maxTotal;
+    const ownerKey = `owner-count-drift-${Date.now()}`;
+
+    config.tasks.maxPerOwner = 1;
+    config.tasks.maxTotal = Math.max(originalMaxTotal, 3);
+
+    try {
+      const first = taskManager.createTask({ ttl: 40 }, 'Task 1', ownerKey);
+      taskManager.cancelTask(first.taskId, ownerKey);
+
+      const second = taskManager.createTask({ ttl: 2_000 }, 'Task 2', ownerKey);
+      assert.equal(
+        taskManager.getTask(second.taskId, ownerKey)?.status,
+        'working'
+      );
+
+      await new Promise((resolve) => setTimeout(resolve, 80));
+      // Trigger lazy cleanup for the expired cancelled task.
+      taskManager.getTask(first.taskId, ownerKey);
+
+      assert.throws(
+        () => taskManager.createTask(undefined, 'Task 3', ownerKey),
+        (error: unknown) =>
+          error instanceof Error &&
+          error.message.toLowerCase().includes('capacity')
+      );
+    } finally {
+      config.tasks.maxPerOwner = originalMaxPerOwner;
+      config.tasks.maxTotal = originalMaxTotal;
+    }
+  });
+});
+
 describe('cancelTasksForOwner', () => {
   it('cancels only active tasks for the specified owner', () => {
     const ownerKey = `session:test-owner-${Date.now()}`;

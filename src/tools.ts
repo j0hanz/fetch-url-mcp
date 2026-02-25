@@ -194,6 +194,8 @@ const TOOL_ICON = {
   src: 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSJjdXJyZW50Q29sb3IiIHN0cm9rZS13aWR0aD0iMiIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cGF0aCBkPSJNMjEgMTV2NGEyIDIgMCAwIDEtMiAySDVhMiAyIDAgMCAxLTItMnYtNCIvPjxwb2x5bGluZSBwb2ludHM9IjcgMTAgMTIgMTUgMTcgMTAiLz48bGluZSB4MT0iMTIiIHkxPSIxNSIgeDI9IjEyIiB5Mj0iMyIvPjwvc3ZnPg==',
   mimeType: 'image/svg+xml',
 };
+const JSON_SCHEMA_DRAFT_2020_12_URI =
+  'https://json-schema.org/draft/2020-12/schema';
 
 /* -------------------------------------------------------------------------------------------------
  * Tool response builders
@@ -217,7 +219,7 @@ function buildEmbeddedResource(
   if (!content) return null;
 
   const filename = generateSafeFilename(url, title, undefined, '.md');
-  const uri = new URL(filename, 'file:///').href;
+  const uri = `internal://inline/${encodeURIComponent(filename)}`;
 
   const resource: TextResourceContents = {
     uri,
@@ -571,12 +573,25 @@ export async function fetchUrlToolHandler(
 
 type FetchUrlToolHandler = ToolCallback<typeof fetchUrlInputSchema>;
 
+function withJsonSchema202012(
+  schema: Record<string, unknown>
+): Record<string, unknown> {
+  if (typeof schema['$schema'] === 'string') return schema;
+  return {
+    $schema: JSON_SCHEMA_DRAFT_2020_12_URI,
+    ...schema,
+  };
+}
+
 const TOOL_DEFINITION = {
   name: FETCH_URL_TOOL_NAME,
   title: 'Fetch URL',
   description: FETCH_URL_TOOL_DESCRIPTION,
   inputSchema: fetchUrlInputSchema,
-  outputSchema: z.toJSONSchema(fetchUrlOutputSchema),
+  // Explicitly mark JSON Schema dialect for MCP clients and static reviews.
+  outputSchema: withJsonSchema202012(
+    z.toJSONSchema(fetchUrlOutputSchema) as Record<string, unknown>
+  ),
   handler: fetchUrlToolHandler,
   execution: {
     taskSupport: 'optional',
@@ -597,6 +612,19 @@ const TOOL_DEFINITION = {
   annotations: ToolAnnotations;
   handler: FetchUrlToolHandler;
 };
+
+function applyRegisteredToolExecutionMetadata(
+  registeredTool: {
+    execution?:
+      | { taskSupport?: 'optional' | 'required' | 'forbidden' | undefined }
+      | undefined;
+  },
+  execution: { taskSupport: 'optional' | 'required' | 'forbidden' }
+): void {
+  // SDK workaround: RegisteredTool does not expose `execution` in its public type.
+  // Keep the mutation localized to one helper so future SDK upgrades touch one place.
+  registeredTool.execution = execution;
+}
 
 export function withRequestContextIfMissing<TParams, TResult, TExtra = unknown>(
   handler: (params: TParams, extra?: TExtra) => Promise<TResult>
@@ -659,8 +687,9 @@ export function registerTools(server: McpServer): void {
     } as { inputSchema: typeof fetchUrlInputSchema } & Record<string, unknown>,
     withRequestContextIfMissing(TOOL_DEFINITION.handler)
   );
-  // SDK workaround: RegisteredTool does not expose `execution` in its public type, so we
-  // assign it directly post-registration to enable task-augmented tool calls (taskSupport).
   // TODO: Remove when @modelcontextprotocol/sdk exposes `execution` in RegisteredTool type.
-  registeredTool.execution = TOOL_DEFINITION.execution;
+  applyRegisteredToolExecutionMetadata(
+    registeredTool,
+    TOOL_DEFINITION.execution
+  );
 }

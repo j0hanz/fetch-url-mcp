@@ -119,7 +119,11 @@ function chunkArray<T>(items: readonly T[], size: number): T[][] {
 class SessionCleanupLoop {
   constructor(
     private readonly store: SessionStore,
-    private readonly sessionTtlMs: number
+    private readonly sessionTtlMs: number,
+    private readonly onEvictSession?:
+      | ((session: SessionEntry) => Promise<void> | void)
+      | undefined,
+    private readonly cleanupIntervalMsOverride?: number
   ) {}
 
   start(): AbortController {
@@ -129,7 +133,8 @@ class SessionCleanupLoop {
   }
 
   private async run(signal: AbortSignal): Promise<void> {
-    const intervalMs = getCleanupIntervalMs(this.sessionTtlMs);
+    const intervalMs =
+      this.cleanupIntervalMsOverride ?? getCleanupIntervalMs(this.sessionTtlMs);
 
     const ticks = setIntervalPromise(intervalMs, Date.now, {
       signal,
@@ -163,6 +168,16 @@ class SessionCleanupLoop {
   }
 
   private async closeExpiredSession(session: SessionEntry): Promise<void> {
+    if (this.onEvictSession) {
+      try {
+        await this.onEvictSession(session);
+      } catch (error) {
+        logWarn('Expired session pre-close hook failed', {
+          error: formatError(error),
+        });
+      }
+    }
+
     try {
       unregisterMcpSessionServerByServer(session.server);
     } catch (error) {
@@ -197,9 +212,18 @@ class SessionCleanupLoop {
 
 export function startSessionCleanupLoop(
   store: SessionStore,
-  sessionTtlMs: number
+  sessionTtlMs: number,
+  options?: {
+    onEvictSession?: (session: SessionEntry) => Promise<void> | void;
+    cleanupIntervalMs?: number;
+  }
 ): AbortController {
-  return new SessionCleanupLoop(store, sessionTtlMs).start();
+  return new SessionCleanupLoop(
+    store,
+    sessionTtlMs,
+    options?.onEvictSession,
+    options?.cleanupIntervalMs
+  ).start();
 }
 
 function moveSessionToEnd(
