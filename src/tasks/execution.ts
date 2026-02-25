@@ -57,6 +57,9 @@ export interface ExtendedCallToolRequest {
  * Abort-controller management for in-flight task executions
  * ------------------------------------------------------------------------------------------------- */
 
+// Intentionally process-global (not session-scoped): abortAllTaskExecutions() is called
+// during SIGTERM/SIGINT shutdown to cancel every in-flight task across all sessions.
+// TODO: consider per-session isolation if stricter task-ownership semantics are needed.
 const taskAbortControllers = new Map<string, AbortController>();
 
 function attachAbortController(taskId: string): AbortController {
@@ -166,6 +169,8 @@ export function emitTaskStatusNotification(
 ): void {
   if (!server.isConnected()) return;
 
+  // NOTE: 'notifications/tasks/status' is not part of the MCP v2025-11-25 specification.
+  // This relies on the experimental task infrastructure in the SDK and may change.
   void server.server
     .notification({
       method: 'notifications/tasks/status',

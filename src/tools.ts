@@ -443,6 +443,9 @@ function buildResponse(
       url: inputUrl,
       issues: validation.error.issues,
     });
+    // Omit structuredContent so the SDK does not receive data that fails its
+    // output schema validation. The client still gets the payload via content[0].text.
+    return { content };
   }
 
   return {
@@ -655,5 +658,7 @@ export function registerTools(server: McpServer): void {
     } as { inputSchema: typeof fetchUrlInputSchema } & Record<string, unknown>,
     withRequestContextIfMissing(TOOL_DEFINITION.handler)
   );
+  // SDK workaround: RegisteredTool does not expose `execution` in its public type, so we
+  // assign it directly post-registration to enable task-augmented tool calls (taskSupport).
   registeredTool.execution = TOOL_DEFINITION.execution;
 }

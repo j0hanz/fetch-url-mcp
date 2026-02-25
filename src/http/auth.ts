@@ -25,6 +25,8 @@ import {
 // ---------------------------------------------------------------------------
 
 class CorsPolicy {
+  // NOTE: CorsPolicy.handle() is invoked only AFTER hostOriginPolicy.validate() in
+  // HttpRequestPipeline, so Access-Control-Allow-Origin is never reflected for blocked origins.
   handle(ctx: RequestContext): boolean {
     const { req, res } = ctx;
     const origin = getHeaderValue(req, 'origin');
@@ -202,7 +204,9 @@ export function ensureMcpProtocolVersion(
 
   if (!version) {
     if (!requireHeader) {
-      // Backwards-compatible fallback when header is missing.
+      // Permissive backward-compat fallback: clients predating MCP 2025-03-26 do not
+      // send MCP-Protocol-Version. Accepting requests without the header keeps older
+      // integrations working. Pass requireHeader: true to enforce strict version checking.
       return true;
     }
 

@@ -73,7 +73,8 @@ class RateLimiter implements RateLimitManagerImpl {
   check(ctx: RequestContext): boolean {
     if (!this.options.enabled || ctx.method === 'OPTIONS') return true;
 
-    const key = ctx.ip ?? 'unknown';
+    if (!ctx.ip) return true; // no identifiable IP (e.g. Unix socket) — bypass rate limiting
+    const key = ctx.ip;
     const now = Date.now();
     let entry = this.store.get(key);
 
