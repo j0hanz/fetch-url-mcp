@@ -152,12 +152,29 @@ class McpSessionGateway {
     }
 
     const requestId = body.id ?? null;
-    const isInitNotification = isInitializedNotification(body.method);
+    const isInitMethod = isInitializedNotification(body.method);
+    const isInitNotification = isInitMethod && body.id === undefined;
     const sessionId = getMcpSessionId(ctx.req);
 
-    let session = sessionId ? this.store.get(sessionId) : undefined;
+    if (isInitMethod && !isInitNotification) {
+      sendError(
+        ctx.res,
+        -32600,
+        'notifications/initialized must be sent as a notification',
+        400,
+        requestId
+      );
+      return;
+    }
+
+    const session = sessionId ? this.store.get(sessionId) : undefined;
     if (sessionId && !session) {
       sendError(ctx.res, -32600, 'Session not found', 404, requestId);
+      return;
+    }
+
+    if (!session && isInitNotification) {
+      sendError(ctx.res, -32600, 'Missing session ID', 400, requestId);
       return;
     }
 
@@ -179,16 +196,15 @@ class McpSessionGateway {
           return;
         }
       }
-
-      if (isInitNotification && !session.protocolInitialized) {
-        session.protocolInitialized = true;
-        if (sessionId) this.store.touch(sessionId);
-      }
     } else {
       if (!ensureMcpProtocolVersion(ctx.req, ctx.res)) return;
     }
 
-    if (isInitNotification && body.id === undefined) {
+    if (session && isInitNotification) {
+      if (!session.protocolInitialized) {
+        session.protocolInitialized = true;
+      }
+      if (sessionId) this.store.touch(sessionId);
       sendText(ctx.res, 200, '');
       return;
     }
@@ -203,14 +219,6 @@ class McpSessionGateway {
     if (!transport) return;
 
     await transport.handleRequest(ctx.req, ctx.res, body);
-
-    if (sessionId && isInitNotification) {
-      session = this.store.get(sessionId);
-      if (session) {
-        session.protocolInitialized = true;
-        this.store.touch(sessionId);
-      }
-    }
   }
 
   async handleGet(ctx: AuthenticatedContext): Promise<void> {

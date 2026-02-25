@@ -356,4 +356,145 @@ describe('http session initialization', () => {
       /Accept header must include application\/json and text\/event-stream/
     );
   });
+
+  it('rejects invalid initialized notifications and does not unlock the session', () => {
+    const script = `
+      import { startHttpServer } from './dist/http/native.js';
+      import { request } from 'node:http';
+
+      const server = await startHttpServer();
+      const port = server.port;
+
+      function sendRpc(body, sessionId) {
+        return new Promise((resolve) => {
+          const headers = {
+            'content-type': 'application/json',
+            accept: 'application/json, text/event-stream',
+            authorization: 'Bearer test-token',
+            host: '127.0.0.1',
+            'mcp-protocol-version': '2025-11-25',
+          };
+          if (sessionId) headers['mcp-session-id'] = sessionId;
+
+          const req = request(
+            { hostname: '127.0.0.1', port, path: '/mcp', method: 'POST', headers },
+            (res) => {
+              let raw = '';
+              res.on('data', (chunk) => { raw += chunk; });
+              res.on('end', () => {
+                resolve({
+                  status: res.statusCode ?? 0,
+                  bodyPreview: raw.slice(0, 512),
+                  sessionId: res.headers['mcp-session-id'] ?? null,
+                  containsTools: raw.includes('"tools"'),
+                });
+              });
+            }
+          );
+          req.on('error', (error) => resolve({ error: error.message }));
+          req.write(JSON.stringify(body));
+          req.end();
+        });
+      }
+
+      const noSessionInitialized = await sendRpc({
+        jsonrpc: '2.0',
+        method: 'notifications/initialized',
+        params: {},
+      });
+
+      const init = await sendRpc({
+        jsonrpc: '2.0',
+        id: 'init',
+        method: 'initialize',
+        params: {
+          protocolVersion: '2025-11-25',
+          capabilities: {},
+          clientInfo: { name: 'test-client', version: '1.0.0' },
+        },
+      });
+
+      const sid = init.sessionId;
+
+      const invalidInitializedRequest = await sendRpc(
+        {
+          jsonrpc: '2.0',
+          id: 'bad-init-notification',
+          method: 'notifications/initialized',
+          params: {},
+        },
+        sid
+      );
+
+      const stillBlocked = await sendRpc(
+        { jsonrpc: '2.0', id: 'list-blocked', method: 'tools/list', params: {} },
+        sid
+      );
+
+      const validInitialized = await sendRpc(
+        { jsonrpc: '2.0', method: 'notifications/initialized', params: {} },
+        sid
+      );
+
+      const unlocked = await sendRpc(
+        { jsonrpc: '2.0', id: 'list-ok', method: 'tools/list', params: {} },
+        sid
+      );
+
+      await server.shutdown('TEST');
+      console.error('${RESULT_MARKER}' + JSON.stringify({
+        noSessionInitialized,
+        init,
+        invalidInitializedRequest,
+        stillBlocked,
+        validInitialized,
+        unlocked,
+      }));
+    `;
+
+    const result = runIsolatedNode(script, {
+      HOST: '127.0.0.1',
+      PORT: '0',
+      ACCESS_TOKENS: 'test-token',
+      ALLOW_REMOTE: 'false',
+    });
+
+    assert.equal(result.status, 0, result.stderr);
+    const payload = parseMarkedJson<{
+      noSessionInitialized: { status: number; bodyPreview: string };
+      init: { status: number; sessionId: string | null };
+      invalidInitializedRequest: { status: number; bodyPreview: string };
+      stillBlocked: {
+        status: number;
+        bodyPreview: string;
+        containsTools: boolean;
+      };
+      validInitialized: { status: number };
+      unlocked: { status: number; containsTools: boolean };
+    }>(result.stderr);
+
+    assert.equal(payload.noSessionInitialized.status, 400);
+    assert.match(
+      payload.noSessionInitialized.bodyPreview,
+      /Missing session ID/
+    );
+
+    assert.equal(payload.init.status, 200);
+    assert.equal(typeof payload.init.sessionId, 'string');
+
+    assert.equal(payload.invalidInitializedRequest.status, 400);
+    assert.match(
+      payload.invalidInitializedRequest.bodyPreview,
+      /notifications\/initialized must be sent as a notification/
+    );
+
+    assert.equal(payload.stillBlocked.status, 400);
+    assert.equal(payload.stillBlocked.containsTools, false);
+    assert.match(payload.stillBlocked.bodyPreview, /Session not initialized/);
+
+    assert.equal(payload.validInitialized.status, 200);
+
+    assert.equal(payload.unlocked.status, 200);
+    assert.equal(payload.unlocked.containsTools, true);
+  });
 });

@@ -143,10 +143,21 @@ export async function createMcpServerForHttpSession(): Promise<McpServer> {
 }
 
 function registerLoggingSetLevelHandler(server: McpServer): void {
+  const LoggingLevelSchema = z.enum([
+    'debug',
+    'info',
+    'notice',
+    'warning',
+    'error',
+    'critical',
+    'alert',
+    'emergency',
+  ]);
+
   const SetLevelRequestSchema = z
     .object({
       method: z.literal('logging/setLevel'),
-      params: z.object({ level: z.string() }).loose(),
+      params: z.object({ level: LoggingLevelSchema }).loose(),
     })
     .loose();
 

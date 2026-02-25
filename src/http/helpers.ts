@@ -116,6 +116,7 @@ const SINGLE_VALUE_HEADER_NAMES: readonly string[] = [
   'host',
   'origin',
   'content-length',
+  'mcp-protocol-version',
   'mcp-session-id',
   'x-mcp-session-id',
 ];

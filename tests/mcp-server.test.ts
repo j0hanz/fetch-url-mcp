@@ -168,6 +168,25 @@ describe('MCP Server', () => {
       );
     });
 
+    it('rejects unsupported logging/setLevel values', async () => {
+      const server = await createMcpServer();
+      const requestHandlers = (
+        server.server as unknown as {
+          _requestHandlers: Map<string, (request: unknown) => Promise<unknown>>;
+        }
+      )._requestHandlers;
+
+      const handler = requestHandlers.get('logging/setLevel');
+      assert.ok(handler, 'logging/setLevel handler should be registered');
+
+      assert.throws(() =>
+        handler({
+          method: 'logging/setLevel',
+          params: { level: 'verbose' },
+        })
+      );
+    });
+
     it('registers notifications/cancelled handling', async () => {
       const server = await createMcpServer();
       const notificationHandlers = (
