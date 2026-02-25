@@ -4,15 +4,12 @@ import process from 'node:process';
 import { parseCliArgs, renderCliUsage } from './cli.js';
 import { startHttpServer } from './http/native.js';
 import { serverVersion } from './lib/config.js';
+import { toError } from './lib/errors.js';
 import { logError } from './lib/observability.js';
 import { startStdioServer } from './server.js';
 
 const FORCE_EXIT_TIMEOUT_MS = 10_000;
 let forcedExitTimer: NodeJS.Timeout | undefined;
-
-function toError(value: unknown): Error {
-  return value instanceof Error ? value : new Error(String(value));
-}
 
 function scheduleForcedExit(reason: string): void {
   if (forcedExitTimer) return;

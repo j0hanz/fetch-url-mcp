@@ -32,6 +32,14 @@ export function getErrorMessage(error: unknown): string {
   return formatUnknownError(error);
 }
 
+export function toError(error: unknown): Error {
+  return isError(error) ? error : new Error(getErrorMessage(error));
+}
+
+export function isAbortError(error: unknown): boolean {
+  return isError(error) && error.name === 'AbortError';
+}
+
 function isNonEmptyString(value: unknown): value is string {
   return typeof value === 'string' && value.length > 0;
 }

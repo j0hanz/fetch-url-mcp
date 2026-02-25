@@ -6,6 +6,7 @@ import { randomUUID } from 'node:crypto';
 import { setInterval } from 'node:timers';
 
 import { config } from '../lib/config.js';
+import { toError } from '../lib/errors.js';
 import {
   type CancellableTimeout,
   createUnrefTimeout,
@@ -389,7 +390,7 @@ class TaskManager {
         }
       );
       const rejectInContext = AsyncLocalStorage.bind((error: unknown): void => {
-        reject(error instanceof Error ? error : new Error(String(error)));
+        reject(toError(error));
       });
 
       let settled = false;

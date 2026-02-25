@@ -1,5 +1,7 @@
 import { parseArgs } from 'node:util';
 
+import { getErrorMessage } from './lib/errors.js';
+
 export interface CliValues {
   readonly stdio: boolean;
   readonly http: boolean;
@@ -39,10 +41,6 @@ const optionSchema = {
   help: { type: 'boolean', short: 'h', default: false },
   version: { type: 'boolean', short: 'v', default: false },
 } as const;
-
-function toErrorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
 
 type ParsedValues = ReturnType<typeof parseArgs>['values'];
 type CliFlagKey = keyof CliValues;
@@ -92,7 +90,7 @@ export function parseCliArgs(args: readonly string[]): CliParseResult {
   } catch (error: unknown) {
     return {
       ok: false,
-      message: toErrorMessage(error),
+      message: getErrorMessage(error),
     };
   }
 }

@@ -12,7 +12,12 @@ import { createBrotliDecompress, createGunzip, createInflate } from 'node:zlib';
 import { Agent, type Dispatcher } from 'undici';
 
 import { config } from './config.js';
-import { createErrorWithCode, FetchError, isSystemError } from './errors.js';
+import {
+  createErrorWithCode,
+  FetchError,
+  isSystemError,
+  toError,
+} from './errors.js';
 import {
   decodeBuffer,
   getCharsetFromContentType,
@@ -1045,7 +1050,7 @@ class FetchTelemetry {
     status?: number
   ): void {
     const duration = performance.now() - context.startTime;
-    const err = isError(error) ? error : new Error(String(error));
+    const err = toError(error);
     const code = isSystemError(err) ? err.code : undefined;
     const ctxFields = this.contextFields(context);
 
@@ -1443,7 +1448,7 @@ class ResponseTextReader {
           if (captureChunks) chunks.push(buf);
           callback(null, buf);
         } catch (error: unknown) {
-          callback(error instanceof Error ? error : new Error(String(error)));
+          callback(toError(error));
         }
       },
     });
@@ -1756,9 +1761,7 @@ async function decodeResponseIfNeeded(
   }
 
   void decodedPipeline.catch((error: unknown) => {
-    decodedNodeStream.destroy(
-      error instanceof Error ? error : new Error(String(error))
-    );
+    decodedNodeStream.destroy(toError(error));
   });
 
   const decodedBodyStream = toWebReadableStream(

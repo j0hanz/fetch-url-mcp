@@ -19,6 +19,7 @@ import process from 'node:process';
 
 import { config, enableHttpMode } from '../lib/config.js';
 import { handleDownload } from '../lib/download.js';
+import { toError } from '../lib/errors.js';
 import {
   acceptsEventStream,
   acceptsJsonAndEventStream,
@@ -542,7 +543,7 @@ class HttpDispatcher {
 
       sendJson(ctx.res, 404, { error: 'Not Found' });
     } catch (err) {
-      const error = err instanceof Error ? err : new Error(String(err));
+      const error = toError(err);
       logError('Request failed', error);
       if (!ctx.res.writableEnded) {
         sendJson(ctx.res, 500, { error: 'Internal Server Error' });
@@ -695,10 +696,7 @@ class HttpRequestPipeline {
 // ---------------------------------------------------------------------------
 
 function handlePipelineError(error: unknown, res: ServerResponse): void {
-  logError(
-    'Request pipeline failed',
-    error instanceof Error ? error : new Error(String(error))
-  );
+  logError('Request pipeline failed', toError(error));
 
   if (res.writableEnded) return;
 

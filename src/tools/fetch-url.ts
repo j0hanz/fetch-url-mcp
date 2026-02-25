@@ -16,6 +16,7 @@ import { z } from 'zod';
 import * as cache from '../lib/cache.js';
 import { config } from '../lib/config.js';
 import { generateSafeFilename } from '../lib/download.js';
+import { isAbortError, toError } from '../lib/errors.js';
 import {
   getRequestId,
   logDebug,
@@ -437,7 +438,7 @@ async function executeFetch(
     progress.report(4, `fetch-url: ${contextStr} • completed`);
     return buildResponse(pipeline, inlineResult, url);
   } catch (error) {
-    const isAbort = error instanceof Error && error.name === 'AbortError';
+    const isAbort = isAbortError(error);
     progress.report(
       4,
       `fetch-url: ${contextStr} • ${isAbort ? 'cancelled' : 'failed'}`
@@ -451,10 +452,7 @@ export async function fetchUrlToolHandler(
   extra?: ToolHandlerExtra
 ): Promise<ToolResponseBase> {
   return executeFetch(input, extra).catch((error: unknown) => {
-    logError(
-      'fetch-url tool error',
-      error instanceof Error ? error : undefined
-    );
+    logError('fetch-url tool error', toError(error));
     return handleToolError(error, input.url, 'Failed to fetch URL');
   });
 }

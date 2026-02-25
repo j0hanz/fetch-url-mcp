@@ -1,5 +1,6 @@
 import { setInterval as setIntervalPromise } from 'node:timers/promises';
 
+import { isAbortError } from '../lib/errors.js';
 import { logWarn } from '../lib/observability.js';
 import { type RequestContext, sendJson } from './helpers.js';
 
@@ -18,10 +19,6 @@ export interface RateLimitConfig {
   windowMs: number;
   cleanupIntervalMs: number;
   enabled: boolean;
-}
-
-function isAbortError(error: unknown): boolean {
-  return error instanceof Error && error.name === 'AbortError';
 }
 
 export interface RateLimitManagerImpl {

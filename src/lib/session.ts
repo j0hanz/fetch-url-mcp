@@ -3,6 +3,7 @@ import type { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/se
 
 import { setInterval as setIntervalPromise } from 'node:timers/promises';
 
+import { getErrorMessage, isAbortError } from './errors.js';
 import {
   logInfo,
   logWarn,
@@ -68,17 +69,9 @@ function getCleanupIntervalMs(sessionTtlMs: number): number {
   );
 }
 
-function formatError(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
-
-function isAbortError(error: unknown): boolean {
-  return error instanceof Error && error.name === 'AbortError';
-}
-
 function handleSessionCleanupError(error: unknown): void {
   if (isAbortError(error)) return;
-  logWarn('Session cleanup loop failed', { error: formatError(error) });
+  logWarn('Session cleanup loop failed', { error: getErrorMessage(error) });
 }
 
 function getRejectedSettledResult<T>(
@@ -95,7 +88,7 @@ function logRejectedSettledResults(
     const rejected = getRejectedSettledResult(result);
     if (!rejected) continue;
 
-    logWarn(message, { error: formatError(rejected.reason) });
+    logWarn(message, { error: getErrorMessage(rejected.reason) });
   }
 }
 
@@ -173,7 +166,7 @@ class SessionCleanupLoop {
         await this.onEvictSession(session);
       } catch (error) {
         logWarn('Expired session pre-close hook failed', {
-          error: formatError(error),
+          error: getErrorMessage(error),
         });
       }
     }
@@ -182,7 +175,7 @@ class SessionCleanupLoop {
       unregisterMcpSessionServerByServer(session.server);
     } catch (error) {
       logWarn('Failed to unregister session server', {
-        error: formatError(error),
+        error: getErrorMessage(error),
       });
     }
 
@@ -205,7 +198,7 @@ class SessionCleanupLoop {
     if (error == null) return;
 
     logWarn(`Failed to close expired session ${target}`, {
-      error: formatError(error),
+      error: getErrorMessage(error),
     });
   }
 }

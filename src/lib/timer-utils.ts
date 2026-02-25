@@ -1,14 +1,10 @@
 import { setTimeout as setTimeoutPromise } from 'node:timers/promises';
 
-import { isError } from './type-guards.js';
+import { isAbortError } from './errors.js';
 
 export interface CancellableTimeout<T> {
   promise: Promise<T>;
   cancel: () => void;
-}
-
-function isAbortError(error: unknown): boolean {
-  return isError(error) && error.name === 'AbortError';
 }
 
 function createAbortSafeTimeoutPromise<T>(

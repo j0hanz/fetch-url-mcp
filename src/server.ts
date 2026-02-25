@@ -7,6 +7,7 @@ import process from 'node:process';
 import { z } from 'zod';
 
 import { config } from './lib/config.js';
+import { toError } from './lib/errors.js';
 import { abortAllTaskExecutions, registerTaskHandlers } from './lib/mcp.js';
 import {
   logError,
@@ -169,7 +170,7 @@ function registerLoggingSetLevelHandler(server: McpServer): void {
 
 function attachServerErrorHandler(server: McpServer): void {
   server.server.onerror = (error) => {
-    logError('[MCP Error]', error instanceof Error ? error : { error });
+    logError('[MCP Error]', toError(error));
   };
 }
 
@@ -207,7 +208,7 @@ function createShutdownHandler(server: McpServer): (signal: string) => void {
     Promise.resolve()
       .then(() => shutdownServer(server, signal))
       .catch((err: unknown) => {
-        const error = err instanceof Error ? err : new Error(String(err));
+        const error = toError(err);
         logError('Error during shutdown', error);
         process.exitCode = 1;
       })
@@ -233,7 +234,7 @@ async function connectStdioServer(
     await server.connect(transport);
     logInfo('Fetch URL MCP server running on stdio');
   } catch (error: unknown) {
-    const err = error instanceof Error ? error : new Error(String(error));
+    const err = toError(error);
     throw new Error(`Failed to start stdio server: ${err.message}`, {
       cause: error,
     });

@@ -1,6 +1,6 @@
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 
-import { FetchError, isSystemError } from './errors.js';
+import { FetchError, isAbortError, isSystemError } from './errors.js';
 
 /* -------------------------------------------------------------------------------------------------
  * Tool error mapping
@@ -65,7 +65,7 @@ function resolveToolErrorMessage(
 function resolveToolErrorCode(error: unknown): string {
   if (error instanceof FetchError) return error.code;
   if (isValidationError(error)) return 'VALIDATION_ERROR';
-  if (error instanceof Error && error.name === 'AbortError') return 'ABORTED';
+  if (isAbortError(error)) return 'ABORTED';
   return 'FETCH_ERROR';
 }
 
