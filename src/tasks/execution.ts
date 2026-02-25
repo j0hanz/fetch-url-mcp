@@ -185,15 +185,29 @@ export function emitTaskStatusNotification(
   void server.server
     .notification({
       method: 'notifications/tasks/status',
-      params: toTaskSummary(task),
-    } as { method: string; params: TaskStatusNotificationParams })
+      params: buildTaskStatusNotificationParams(task),
+    })
     .catch((error: unknown) => {
       logWarn('Failed to send task status notification', {
         taskId: task.taskId,
         status: task.status,
-        error,
+        error: getErrorMessage(error),
       });
     });
+}
+
+function buildTaskStatusNotificationParams(
+  task: TaskState
+): TaskStatusNotificationParams {
+  return {
+    taskId: task.taskId,
+    status: task.status,
+    ...(task.statusMessage ? { statusMessage: task.statusMessage } : {}),
+    createdAt: task.createdAt,
+    lastUpdatedAt: task.lastUpdatedAt,
+    ttl: task.ttl,
+    pollInterval: task.pollInterval,
+  };
 }
 
 /* -------------------------------------------------------------------------------------------------
@@ -400,16 +414,12 @@ async function handleDirectToolCall(
   const tool = resolveTaskCapableTool(params.name);
   const args = tool.parseArguments(params.arguments);
 
-  const extra: ToolHandlerExtra = {
-    ...(context.signal ? { signal: context.signal } : {}),
-    ...(context.requestId !== undefined
-      ? { requestId: context.requestId }
-      : {}),
-    ...(context.sendNotification
-      ? { sendNotification: context.sendNotification }
-      : {}),
-    ...(params._meta ? { _meta: params._meta } : {}),
-  };
+  const extra = compact({
+    signal: context.signal,
+    requestId: context.requestId,
+    sendNotification: context.sendNotification,
+    _meta: params._meta,
+  }) as ToolHandlerExtra;
 
   return tool.execute(args, extra);
 }
