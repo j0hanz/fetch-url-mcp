@@ -438,10 +438,42 @@ export function getUrlContext(urlStr: string): string {
     const host = u.hostname.replace(/^www\./, '');
     const path = u.pathname;
     if (path === '/' || path === '') return host;
-    let basename = path.split('/').filter(Boolean).pop();
+
+    const parts = path.split('/').filter(Boolean);
+    if (parts.length === 0) return host;
+
+    // Special case for GitHub/GitLab/Bitbucket
+    if (
+      host === 'github.com' ||
+      host === 'gitlab.com' ||
+      host === 'bitbucket.org'
+    ) {
+      if (parts.length >= 2) {
+        const p0 = parts[0] ?? '';
+        const p1 = parts[1] ?? '';
+        return `${host}/${p0}/${p1}`;
+      }
+    }
+
+    // Special case for Wikipedia
+    if (
+      host.endsWith('wikipedia.org') &&
+      parts[0] === 'wiki' &&
+      parts.length >= 2
+    ) {
+      const p1 = parts[1] ?? '';
+      return `wikipedia.org/${p1}`;
+    }
+
+    let basename = parts.pop() ?? '';
     if (basename && basename.length > 20) {
       basename = `${basename.substring(0, 17)}...`;
     }
+
+    if (parts.length === 0) {
+      return `${host}/${basename}`;
+    }
+
     return basename ? `${host}/…/${basename}` : host;
   } catch {
     return 'unknown';
@@ -468,7 +500,10 @@ async function fetchPipeline(
     transform: async ({ buffer, encoding, truncated }, normalizedUrl) => {
       if (progress) {
         const contextStr = getUrlContext(url);
-        void progress.report(2, `fetch-url: ${contextStr} [transforming]`);
+        void progress.report(
+          2,
+          `fetch-url: ${contextStr} [converting to Markdown]`
+        );
       }
       return markdownTransform(
         { buffer, encoding, ...(truncated ? { truncated } : {}) },
@@ -499,7 +534,7 @@ async function executeFetch(
   logDebug('Fetching URL', { url });
 
   try {
-    void progress.report(1, `fetch-url: ${contextStr} [fetching]`);
+    void progress.report(1, `fetch-url: ${contextStr} [fetching HTML]`);
     const { pipeline, inlineResult } = await fetchPipeline(
       url,
       signal,
@@ -510,10 +545,10 @@ async function executeFetch(
     );
 
     if (pipeline.fromCache) {
-      void progress.report(3, `fetch-url: ${contextStr} [using cache]`);
+      void progress.report(3, `fetch-url: ${contextStr} [loaded from cache]`);
     }
 
-    void progress.report(4, `fetch-url: ${contextStr} • success`);
+    void progress.report(4, `fetch-url: ${contextStr} • completed`);
     return buildResponse(pipeline, inlineResult, url);
   } catch (error) {
     const isAbort = error instanceof Error && error.name === 'AbortError';
