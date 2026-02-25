@@ -9,10 +9,29 @@ import {
 } from '../dist/lib/fetch.js';
 import { runWithRequestContext } from '../dist/lib/observability.js';
 
+type FetchEvent = Record<string, unknown>;
+
+function isFetchEventWithType(
+  value: unknown,
+  type: string
+): value is FetchEvent {
+  return (
+    !!value && typeof value === 'object' && Reflect.get(value, 'type') === type
+  );
+}
+
+function findFetchEvent(events: readonly unknown[], type: string): FetchEvent {
+  const event = events.find((candidate) =>
+    isFetchEventWithType(candidate, type)
+  );
+  assert.ok(event, `${type} event should be published`);
+  return event;
+}
+
 function createCapture() {
   const channel = diagnosticsChannel.channel('fetch-url-mcp.fetch');
-  const events = [];
-  const listener = (event) => {
+  const events: unknown[] = [];
+  const listener = (event: unknown) => {
     events.push(event);
   };
   channel.subscribe(listener);
@@ -40,8 +59,7 @@ describe('fetch telemetry interceptors', () => {
       'post'
     );
 
-    const startEvent = capture.events.find((event) => event.type === 'start');
-    assert.ok(startEvent);
+    const startEvent = findFetchEvent(capture.events, 'start');
     assert.equal(startEvent.method, 'POST');
     assert.equal(startEvent.requestId, context.requestId);
     assert.equal(startEvent.url, 'https://example.com/path');
@@ -57,8 +75,7 @@ describe('fetch telemetry interceptors', () => {
 
     recordFetchResponse(context, response, 2);
 
-    const endEvent = capture.events.find((event) => event.type === 'end');
-    assert.ok(endEvent);
+    const endEvent = findFetchEvent(capture.events, 'end');
     assert.equal(endEvent.requestId, context.requestId);
     assert.equal(endEvent.status, 201);
     assert.equal(typeof endEvent.duration, 'number');
@@ -73,8 +90,7 @@ describe('fetch telemetry interceptors', () => {
 
     recordFetchError(context, error, 502);
 
-    const errorEvent = capture.events.find((event) => event.type === 'error');
-    assert.ok(errorEvent);
+    const errorEvent = findFetchEvent(capture.events, 'error');
     assert.equal(errorEvent.requestId, context.requestId);
     assert.equal(errorEvent.status, 502);
     assert.equal(errorEvent.code, 'ECONNRESET');
@@ -93,14 +109,12 @@ describe('fetch telemetry interceptors', () => {
       }
     );
 
-    const startEvent = capture.events.find((event) => event.type === 'start');
-    assert.ok(startEvent);
+    const startEvent = findFetchEvent(capture.events, 'start');
     assert.equal(startEvent.contextRequestId, 'context-request');
     assert.equal(startEvent.operationId, 'context-operation');
     assert.notEqual(startEvent.requestId, 'context-request');
 
-    const endEvent = capture.events.find((event) => event.type === 'end');
-    assert.ok(endEvent);
+    const endEvent = findFetchEvent(capture.events, 'end');
     assert.equal(endEvent.contextRequestId, 'context-request');
     assert.equal(endEvent.operationId, 'context-operation');
   });

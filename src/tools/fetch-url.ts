@@ -602,7 +602,8 @@ export function registerTools(server: McpServer): void {
     } as { inputSchema: typeof fetchUrlInputSchema } & Record<string, unknown>,
     withRequestContextIfMissing(TOOL_DEFINITION.handler)
   );
-  // TODO: Remove when @modelcontextprotocol/sdk exposes `execution` in RegisteredTool type.
+  // SDK typing gap workaround: preserve runtime `execution` metadata until the
+  // registered tool type includes this field.
   applyRegisteredToolExecutionMetadata(
     registeredTool,
     TOOL_DEFINITION.execution

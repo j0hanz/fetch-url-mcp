@@ -66,7 +66,8 @@ export interface ExtendedCallToolRequest {
 
 // Intentionally process-global (not session-scoped): abortAllTaskExecutions() is called
 // during SIGTERM/SIGINT shutdown to cancel every in-flight task across all sessions.
-// TODO: consider per-session isolation if stricter task-ownership semantics are needed.
+// Keep this process-global so shutdown can cancel all in-flight tasks across sessions.
+// Per-session isolation would require a different cancellation fan-out strategy.
 const taskAbortControllers = new Map<string, AbortController>();
 
 function attachAbortController(taskId: string): AbortController {

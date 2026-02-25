@@ -26,26 +26,57 @@ type SubscriptionHandler = (
   extra?: unknown
 ) => Promise<Record<string, never>>;
 
+function getPrivateRequestHandlers(target: object): Map<string, unknown> {
+  const handlers = Reflect.get(target, '_requestHandlers');
+  assert.ok(
+    handlers instanceof Map,
+    'MCP protocol should expose _requestHandlers'
+  );
+  return handlers;
+}
+
+function getMutableServerMethods(target: unknown): MutableServerMethods {
+  assert.ok(target && typeof target === 'object', 'server should be an object');
+  const isConnected = Reflect.get(target, 'isConnected');
+  const sendResourceListChanged = Reflect.get(
+    target,
+    'sendResourceListChanged'
+  );
+  assert.equal(typeof isConnected, 'function');
+  assert.equal(typeof sendResourceListChanged, 'function');
+  return target as MutableServerMethods;
+}
+
+function getMutableProtocolMethods(target: unknown): MutableProtocolMethods {
+  assert.ok(
+    target && typeof target === 'object',
+    'protocol server should be an object'
+  );
+  const sendResourceUpdated = Reflect.get(target, 'sendResourceUpdated');
+  assert.equal(typeof sendResourceUpdated, 'function');
+  return target as MutableProtocolMethods;
+}
+
 function getSubscriptionHandler(
   server: Awaited<ReturnType<typeof createMcpServer>>,
   method: SubscriptionRequest['method']
 ): SubscriptionHandler {
-  const handlers = (
-    server.server as unknown as {
-      _requestHandlers: Map<string, SubscriptionHandler>;
-    }
-  )._requestHandlers;
+  const handlers = getPrivateRequestHandlers(server.server);
 
   const handler = handlers.get(method);
-  assert.ok(handler, `${method} handler should be registered`);
-  return handler;
+  assert.equal(
+    typeof handler,
+    'function',
+    `${method} handler should be registered`
+  );
+  return handler as SubscriptionHandler;
 }
 
 describe('resource subscriptions', () => {
   it('sends resources/updated only for subscribed cache URIs', async () => {
     const server = await createMcpServer();
-    const mutableServer = server as unknown as MutableServerMethods;
-    const mutableProtocol = server.server as unknown as MutableProtocolMethods;
+    const mutableServer = getMutableServerMethods(server);
+    const mutableProtocol = getMutableProtocolMethods(server.server);
     const originalIsConnected = mutableServer.isConnected;
     const originalSendResourceListChanged =
       mutableServer.sendResourceListChanged;

@@ -3,6 +3,22 @@ import { describe, it } from 'node:test';
 
 import { createMcpServer } from '../dist/server.js';
 
+function getPrivateMap(target: object, key: string): Map<string, unknown> {
+  const value = Reflect.get(target, key);
+  assert.ok(value instanceof Map, `${key} should be a Map`);
+  return value;
+}
+
+function getPrivateObject<T extends object>(
+  target: object,
+  key: string
+): T | undefined {
+  const value = Reflect.get(target, key);
+  if (value === undefined) return undefined;
+  assert.ok(value && typeof value === 'object', `${key} should be an object`);
+  return value as T;
+}
+
 describe('MCP Server', () => {
   describe('createMcpServer', () => {
     it('creates a server instance', async () => {
@@ -45,15 +61,11 @@ describe('MCP Server', () => {
     it('publishes extended server info metadata', async () => {
       const server = await createMcpServer();
 
-      const serverInfo = (
-        server.server as unknown as {
-          _serverInfo?: {
-            title?: string;
-            description?: string;
-            websiteUrl?: string;
-          };
-        }
-      )._serverInfo;
+      const serverInfo = getPrivateObject<{
+        title?: string;
+        description?: string;
+        websiteUrl?: string;
+      }>(server.server, '_serverInfo');
 
       assert.ok(serverInfo, 'Server info should be available');
       assert.equal(serverInfo?.title, 'Fetch URL');
@@ -66,13 +78,9 @@ describe('MCP Server', () => {
         'https://github.com/j0hanz/fetch-url-mcp'
       );
 
-      const capabilities = (
-        server.server as unknown as {
-          _capabilities?: {
-            resources?: { subscribe?: boolean; listChanged?: boolean };
-          };
-        }
-      )._capabilities;
+      const capabilities = getPrivateObject<{
+        resources?: { subscribe?: boolean; listChanged?: boolean };
+      }>(server.server, '_capabilities');
       assert.equal(capabilities?.resources?.subscribe, true);
       assert.equal(capabilities?.resources?.listChanged, true);
     });
@@ -138,14 +146,9 @@ describe('MCP Server', () => {
   describe('Prompts', () => {
     it('registers get-help prompt', async () => {
       const server = await createMcpServer();
-      const prompts = (
-        server as unknown as {
-          _registeredPrompts?: Record<
-            string,
-            { callback?: (...args: unknown[]) => unknown }
-          >;
-        }
-      )._registeredPrompts;
+      const prompts = getPrivateObject<
+        Record<string, { callback?: (...args: unknown[]) => unknown }>
+      >(server, '_registeredPrompts');
       const prompt = prompts?.['get-help'];
 
       assert.ok(prompt, 'get-help prompt should be registered');
@@ -156,11 +159,7 @@ describe('MCP Server', () => {
   describe('Protocol handlers', () => {
     it('registers logging/setLevel request handling', async () => {
       const server = await createMcpServer();
-      const requestHandlers = (
-        server.server as unknown as {
-          _requestHandlers: Map<string, unknown>;
-        }
-      )._requestHandlers;
+      const requestHandlers = getPrivateMap(server.server, '_requestHandlers');
 
       assert.ok(
         requestHandlers.has('logging/setLevel'),
@@ -170,17 +169,18 @@ describe('MCP Server', () => {
 
     it('rejects unsupported logging/setLevel values', async () => {
       const server = await createMcpServer();
-      const requestHandlers = (
-        server.server as unknown as {
-          _requestHandlers: Map<string, (request: unknown) => Promise<unknown>>;
-        }
-      )._requestHandlers;
+      const requestHandlers = getPrivateMap(server.server, '_requestHandlers');
 
       const handler = requestHandlers.get('logging/setLevel');
-      assert.ok(handler, 'logging/setLevel handler should be registered');
+      assert.equal(
+        typeof handler,
+        'function',
+        'logging/setLevel handler should be registered'
+      );
+      const loggingSetLevelHandler = handler as (request: unknown) => unknown;
 
       assert.throws(() =>
-        handler({
+        loggingSetLevelHandler({
           method: 'logging/setLevel',
           params: { level: 'verbose' },
         })
@@ -189,11 +189,10 @@ describe('MCP Server', () => {
 
     it('registers notifications/cancelled handling', async () => {
       const server = await createMcpServer();
-      const notificationHandlers = (
-        server.server as unknown as {
-          _notificationHandlers: Map<string, unknown>;
-        }
-      )._notificationHandlers;
+      const notificationHandlers = getPrivateMap(
+        server.server,
+        '_notificationHandlers'
+      );
 
       assert.ok(
         notificationHandlers.has('notifications/cancelled'),

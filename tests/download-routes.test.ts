@@ -91,12 +91,18 @@ function registerMarkdownNamespaceTest(): void {
 
     const { res, headers, getBody, getStatus } = createResponseCapture();
 
-    handleDownload(res as any, 'markdown', 'abc123def456');
+    (
+      handleDownload as (
+        response: unknown,
+        namespace: string,
+        hash: string
+      ) => void
+    )(res, 'markdown', 'abc123def456');
 
     assert.equal(getStatus(), 200);
     assert.equal(getBody(), '# Title\n\nBody');
     assert.equal(headers['content-type'], 'text/markdown; charset=utf-8');
-    assert.equal(headers['content-disposition'].includes('article.md'), true);
+    assert.equal(headers['content-disposition']?.includes('article.md'), true);
   });
 }
 
@@ -109,7 +115,13 @@ function registerMarkdownContentFallbackTest(): void {
 
     const { res, getBody } = createResponseCapture();
 
-    handleDownload(res as any, 'markdown', 'abc123ff');
+    (
+      handleDownload as (
+        response: unknown,
+        namespace: string,
+        hash: string
+      ) => void
+    )(res, 'markdown', 'abc123ff');
 
     assert.equal(getBody(), '# Title\n\nBody');
   });
@@ -122,7 +134,13 @@ function registerInvalidPayloadTest(): void {
 
     const { res, getJson, getStatus } = createResponseCapture();
 
-    handleDownload(res as any, 'markdown', 'deadbeef');
+    (
+      handleDownload as (
+        response: unknown,
+        namespace: string,
+        hash: string
+      ) => void
+    )(res, 'markdown', 'deadbeef');
 
     assert.equal(getStatus(), 404);
     assert.equal((getJson() as { code?: string }).code, 'NOT_FOUND');

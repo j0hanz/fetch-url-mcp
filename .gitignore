@@ -8,6 +8,7 @@ dist/
 *.tsbuildinfo
 .tsbuildinfo.build
 .tsbuildinfo.examples
+.tsbuildinfo.tests
 
 # Environment variables
 .env

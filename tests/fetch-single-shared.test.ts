@@ -3,12 +3,18 @@ import { beforeEach, describe, it } from 'node:test';
 
 import { performSharedFetch } from '../dist/lib/tool-pipeline.js';
 
+type SharedFetchOptions = Parameters<typeof performSharedFetch>[0];
+type SharedFetchDeps = NonNullable<Parameters<typeof performSharedFetch>[1]>;
+type ExecuteFetchPipeline = NonNullable<
+  SharedFetchDeps['executeFetchPipeline']
+>;
+
 let executeFetchPipelineCalls: Array<unknown> = [];
 
-const executeFetchPipeline = async (options: unknown) => {
+const executeFetchPipeline: ExecuteFetchPipeline = async (options) => {
   executeFetchPipelineCalls.push(options);
   return {
-    data: { content: 'hello' },
+    data: { content: 'hello' } as never,
     fromCache: false,
     url: 'https://example.com',
     fetchedAt: new Date().toISOString(),
@@ -25,10 +31,14 @@ describe('performSharedFetch', () => {
     await performSharedFetch(
       {
         url: 'https://example.com',
-        includeMetadata: true,
-        transform: () => ({ content: 'hello' }),
-      } as any,
-      { executeFetchPipeline: executeFetchPipeline as any }
+        transform: () => ({
+          markdown: 'hello',
+          content: 'hello',
+          title: undefined,
+          truncated: false,
+        }),
+      } as SharedFetchOptions,
+      { executeFetchPipeline }
     );
 
     const call = executeFetchPipelineCalls[0] as

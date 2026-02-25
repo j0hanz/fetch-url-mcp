@@ -4,10 +4,14 @@ import { describe, it } from 'node:test';
 
 import {
   endTransformStage,
-  type StageBudget,
   startTransformStage,
 } from '../dist/transform/transform.js';
 import type { TransformStageEvent } from '../dist/transform/types.js';
+
+type StageBudget = {
+  totalBudgetMs: number;
+  elapsedMs: number;
+};
 
 describe('transform telemetry', () => {
   it('redacts query and fragment from the URL', () => {

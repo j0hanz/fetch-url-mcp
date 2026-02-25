@@ -44,10 +44,15 @@ function createChunkedBufferResponse(
     },
   });
 
-  return new Response(stream, {
-    status: 200,
-    headers,
-  });
+  return new Response(
+    stream,
+    headers
+      ? {
+          status: 200,
+          headers,
+        }
+      : { status: 200 }
+  );
 }
 
 describe('readResponseText', () => {

@@ -134,10 +134,11 @@ function resolveOwnerScopedExtra(extra: unknown): {
 type RequestHandlerFn = (request: unknown, extra?: unknown) => Promise<unknown>;
 
 function getSdkCallToolHandler(server: McpServer): RequestHandlerFn | null {
-  const protocol = server.server as unknown as {
-    _requestHandlers?: Map<string, RequestHandlerFn>;
-  };
-  return protocol._requestHandlers?.get('tools/call') ?? null;
+  const maybeHandlers: unknown = Reflect.get(server.server, '_requestHandlers');
+  if (!(maybeHandlers instanceof Map)) return null;
+
+  const handler: unknown = maybeHandlers.get('tools/call');
+  return typeof handler === 'function' ? (handler as RequestHandlerFn) : null;
 }
 
 /* -------------------------------------------------------------------------------------------------

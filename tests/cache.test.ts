@@ -151,7 +151,7 @@ function registerCacheKeyGenerationTest(): void {
     const namespace = 'test-ns';
 
     // Create circular reference
-    const circular: any = { a: 1 };
+    const circular: { a: number; self?: unknown } = { a: 1 };
     circular.self = circular;
 
     const key = cache.createCacheKey(namespace, url, circular);
@@ -411,13 +411,17 @@ function registerCacheEvictionOrderTest(): void {
     });
 
     const allKeys = cache.keys();
+    const oldestKey = keys[0];
+    const newestKey = keys[keys.length - 1];
+    assert.ok(oldestKey);
+    assert.ok(newestKey);
     assert.equal(
-      allKeys.includes(keys[0]),
+      allKeys.includes(oldestKey),
       false,
       'Oldest key should be evicted'
     );
     assert.equal(
-      allKeys.includes(keys[keys.length - 1]),
+      allKeys.includes(newestKey),
       true,
       'Newest key should be present'
     );
@@ -445,8 +449,8 @@ function registerCacheUpdateNotificationTest(): void {
 
     assert.equal(captured1.length, 1, 'First listener should receive event');
     assert.equal(captured2.length, 1, 'Second listener should receive event');
-    assert.equal(captured1[0].cacheKey, cacheKey);
-    assert.equal(captured2[0].cacheKey, cacheKey);
+    assert.equal(captured1[0]?.cacheKey, cacheKey);
+    assert.equal(captured2[0]?.cacheKey, cacheKey);
   });
 
   it('stops notifications after unsubscribe', () => {

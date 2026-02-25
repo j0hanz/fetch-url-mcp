@@ -12,13 +12,20 @@ type RequestHandler = (request: unknown, extra?: unknown) => Promise<unknown>;
 
 type HandlerMap = Map<string, RequestHandler>;
 
+function getPrivateRequestHandlers(target: object): Map<string, unknown> {
+  const handlers = Reflect.get(target, '_requestHandlers');
+  assert.ok(
+    handlers instanceof Map,
+    'MCP protocol should expose _requestHandlers'
+  );
+  return handlers;
+}
+
 function getRequestHandler(
   server: Awaited<ReturnType<typeof createMcpServer>>,
   method: string
 ): RequestHandler {
-  const handlers = (
-    server.server as unknown as { _requestHandlers: HandlerMap }
-  )._requestHandlers;
+  const handlers = getPrivateRequestHandlers(server.server) as HandlerMap;
   const handler = handlers.get(method);
   assert.ok(handler, `${method} handler should be registered`);
   return handler;

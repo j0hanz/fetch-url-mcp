@@ -4,6 +4,24 @@ import { setTimeout as delay } from 'node:timers/promises';
 
 import * as http from '../dist/lib/session.js';
 
+type SessionStore = ReturnType<typeof http.createSessionStore>;
+type SessionEntry = Parameters<SessionStore['set']>[1];
+
+function createMockSessionEntry(
+  overrides: Partial<SessionEntry> = {}
+): SessionEntry {
+  return {
+    server: { close: async () => {} },
+    transport: { close: async () => {} },
+    createdAt: Date.now(),
+    lastSeen: Date.now(),
+    protocolInitialized: false,
+    negotiatedProtocolVersion: '2025-11-25',
+    authFingerprint: 'test',
+    ...overrides,
+  } as SessionEntry;
+}
+
 describe('http session utilities', () => {
   describe('createSlotTracker', () => {
     it('creates slot tracker with required methods', () => {
@@ -67,16 +85,7 @@ describe('http session utilities', () => {
     it('stores and retrieves sessions', () => {
       const store = http.createSessionStore(60000);
       const sessionId = 'test-session-123';
-      const mockTransport = { close: () => Promise.resolve() } as any;
-
-      const entry = {
-        transport: mockTransport,
-        createdAt: Date.now(),
-        lastSeen: Date.now(),
-        protocolInitialized: false,
-
-        authFingerprint: 'test',
-      };
+      const entry = createMockSessionEntry();
 
       store.set(sessionId, entry);
       const retrieved = store.get(sessionId);
@@ -88,16 +97,7 @@ describe('http session utilities', () => {
     it('removes sessions', () => {
       const store = http.createSessionStore(60000);
       const sessionId = 'remove-test';
-      const mockTransport = { close: () => Promise.resolve() } as any;
-
-      const entry = {
-        transport: mockTransport,
-        createdAt: Date.now(),
-        lastSeen: Date.now(),
-        protocolInitialized: false,
-
-        authFingerprint: 'test',
-      };
+      const entry = createMockSessionEntry();
 
       store.set(sessionId, entry);
       assert.ok(store.get(sessionId), 'Session should exist');
@@ -114,17 +114,12 @@ describe('http session utilities', () => {
     it('touches sessions to update lastSeen', () => {
       const store = http.createSessionStore(60000);
       const sessionId = 'touch-test';
-      const mockTransport = { close: () => Promise.resolve() } as any;
 
       const initialTime = Date.now();
-      const entry = {
-        transport: mockTransport,
+      const entry = createMockSessionEntry({
         createdAt: initialTime,
         lastSeen: initialTime,
-        protocolInitialized: false,
-
-        authFingerprint: 'test',
-      };
+      });
 
       store.set(sessionId, entry);
 
@@ -138,16 +133,7 @@ describe('http session utilities', () => {
 
     it('clears all sessions', () => {
       const store = http.createSessionStore(60000);
-      const mockTransport = { close: () => Promise.resolve() } as any;
-
-      const entry = {
-        transport: mockTransport,
-        createdAt: Date.now(),
-        lastSeen: Date.now(),
-        protocolInitialized: false,
-
-        authFingerprint: 'test',
-      };
+      const entry = createMockSessionEntry();
 
       store.set('session-1', entry);
       store.set('session-2', entry);
@@ -162,16 +148,7 @@ describe('http session utilities', () => {
 
     it('reports correct store size', () => {
       const store = http.createSessionStore(60000);
-      const mockTransport = { close: () => Promise.resolve() } as any;
-
-      const entry = {
-        transport: mockTransport,
-        createdAt: Date.now(),
-        lastSeen: Date.now(),
-        protocolInitialized: false,
-
-        authFingerprint: 'test',
-      };
+      const entry = createMockSessionEntry();
 
       assert.equal(store.size(), 0, 'Initial size should be 0');
 
@@ -185,36 +162,23 @@ describe('http session utilities', () => {
 
     it('evicts oldest session', () => {
       const store = http.createSessionStore(60000);
-      const mockTransport = { close: () => Promise.resolve() } as any;
 
       // Add sessions with different lastSeen times
       const now = Date.now();
-      store.set('oldest', {
-        transport: mockTransport,
-        createdAt: now - 3000,
-        lastSeen: now - 3000,
-        protocolInitialized: false,
+      store.set(
+        'oldest',
+        createMockSessionEntry({ createdAt: now - 3000, lastSeen: now - 3000 })
+      );
 
-        authFingerprint: 'test',
-      });
+      store.set(
+        'middle',
+        createMockSessionEntry({ createdAt: now - 2000, lastSeen: now - 2000 })
+      );
 
-      store.set('middle', {
-        transport: mockTransport,
-        createdAt: now - 2000,
-        lastSeen: now - 2000,
-        protocolInitialized: false,
-
-        authFingerprint: 'test',
-      });
-
-      store.set('newest', {
-        transport: mockTransport,
-        createdAt: now,
-        lastSeen: now,
-        protocolInitialized: false,
-
-        authFingerprint: 'test',
-      });
+      store.set(
+        'newest',
+        createMockSessionEntry({ createdAt: now, lastSeen: now })
+      );
 
       const evicted = store.evictOldest();
       assert.ok(evicted, 'Should evict a session');
@@ -231,29 +195,20 @@ describe('http session utilities', () => {
     it('evicts expired sessions based on TTL', () => {
       const ttlMs = 100; // 100ms TTL for testing
       const store = http.createSessionStore(ttlMs);
-      const mockTransport = { close: () => Promise.resolve() } as any;
 
       const now = Date.now();
 
       // Add expired session
-      store.set('expired', {
-        transport: mockTransport,
-        createdAt: now - 200,
-        lastSeen: now - 200,
-        protocolInitialized: false,
-
-        authFingerprint: 'test',
-      });
+      store.set(
+        'expired',
+        createMockSessionEntry({ createdAt: now - 200, lastSeen: now - 200 })
+      );
 
       // Add fresh session
-      store.set('fresh', {
-        transport: mockTransport,
-        createdAt: now,
-        lastSeen: now,
-        protocolInitialized: false,
-
-        authFingerprint: 'test',
-      });
+      store.set(
+        'fresh',
+        createMockSessionEntry({ createdAt: now, lastSeen: now })
+      );
 
       const evicted = store.evictExpired();
       assert.equal(evicted.length, 1, 'Should evict 1 expired session');
@@ -271,23 +226,23 @@ describe('http session utilities', () => {
       const store = http.createSessionStore(ttlMs);
       const calls: string[] = [];
 
-      store.set('expired-loop', {
-        server: {
-          close: async () => {
-            calls.push('server.close');
-          },
-        },
-        transport: {
-          close: async () => {
-            calls.push('transport.close');
-          },
-        },
-        createdAt: Date.now() - 100,
-        lastSeen: Date.now() - 100,
-        protocolInitialized: false,
-        negotiatedProtocolVersion: '2025-11-25',
-        authFingerprint: 'test',
-      } as any);
+      store.set(
+        'expired-loop',
+        createMockSessionEntry({
+          server: {
+            close: async () => {
+              calls.push('server.close');
+            },
+          } as SessionEntry['server'],
+          transport: {
+            close: async () => {
+              calls.push('transport.close');
+            },
+          } as SessionEntry['transport'],
+          createdAt: Date.now() - 100,
+          lastSeen: Date.now() - 100,
+        })
+      );
 
       const cleanup = http.startSessionCleanupLoop(store, ttlMs, {
         cleanupIntervalMs: 5,
@@ -328,11 +283,11 @@ describe('http session utilities', () => {
       );
     });
 
-    it('handles first handler being null/undefined', () => {
+    it('handles missing first handler', () => {
       const calls: string[] = [];
       const handler = () => calls.push('handler');
 
-      const composed = http.composeCloseHandlers(null as any, handler);
+      const composed = http.composeCloseHandlers(undefined, handler);
       if (composed) {
         composed();
       }
@@ -340,11 +295,11 @@ describe('http session utilities', () => {
       assert.deepEqual(calls, ['handler'], 'Should execute second handler');
     });
 
-    it('handles second handler being null/undefined', () => {
+    it('handles missing second handler', () => {
       const calls: string[] = [];
       const handler = () => calls.push('handler');
 
-      const composed = http.composeCloseHandlers(handler, null as any);
+      const composed = http.composeCloseHandlers(handler, undefined);
       if (composed) {
         composed();
       }
@@ -381,13 +336,11 @@ describe('http session utilities', () => {
     it('allows session when under capacity', () => {
       const store = http.createSessionStore(60000);
       const maxSessions = 100;
-      const mockRes = {} as any;
       const evictOldest = () => false;
 
       const allowed = http.ensureSessionCapacity({
         store,
         maxSessions,
-        // res: mockRes, // Removed as it is not part of the signature
         evictOldest,
       });
 

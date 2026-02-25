@@ -176,10 +176,16 @@ describe('http auth and host/origin validation', () => {
     assert.equal(payload.unauthorized.status, 401);
     const challenge = payload.unauthorized.headers['www-authenticate'];
     assert.equal(typeof challenge, 'string');
+    if (typeof challenge !== 'string') {
+      throw new Error('Expected WWW-Authenticate header');
+    }
     assert.match(challenge, /Bearer resource_metadata=".+"/);
     const exposeHeaders =
       payload.unauthorized.headers['access-control-expose-headers'];
     assert.equal(typeof exposeHeaders, 'string');
+    if (typeof exposeHeaders !== 'string') {
+      throw new Error('Expected Access-Control-Expose-Headers header');
+    }
     assert.match(exposeHeaders, /MCP-Session-ID/i);
     assert.match(exposeHeaders, /WWW-Authenticate/i);
 

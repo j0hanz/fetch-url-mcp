@@ -189,8 +189,10 @@ describe('url-transformer', () => {
     });
 
     it('handles non-string input gracefully', () => {
-      // Testing invalid input
-      const result = transformToRawUrl(null as any);
+      const callTransformToRawUrl = transformToRawUrl as (
+        url: unknown
+      ) => ReturnType<typeof transformToRawUrl>;
+      const result = callTransformToRawUrl(null);
       assert.equal(result.transformed, false);
     });
   });

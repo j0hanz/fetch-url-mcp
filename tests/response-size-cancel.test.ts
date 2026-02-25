@@ -25,7 +25,7 @@ function createResponseWithTrackableBody(
     },
   });
 
-  const response = new Response(tracked, { headers });
+  const response = new Response(tracked, headers ? { headers } : undefined);
   return { response, cancelled };
 }
 
@@ -55,9 +55,13 @@ test('readResponseText enforces maxBytes in the no-body arrayBuffer fallback', a
     headers: new Headers(),
     body: null,
     arrayBuffer: async () => data.buffer,
-  } as unknown as Response;
+  } satisfies Pick<Response, 'headers' | 'body' | 'arrayBuffer'>;
 
-  const result = await readResponseText(fakeResponse, 'https://example.com', 5);
+  const result = await readResponseText(
+    fakeResponse as Response,
+    'https://example.com',
+    5
+  );
   assert.equal(result.text, 'xxxxx');
   assert.equal(result.size, 5);
 });

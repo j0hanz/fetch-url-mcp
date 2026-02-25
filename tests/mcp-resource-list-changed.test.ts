@@ -10,10 +10,22 @@ interface MutableServerMethods {
   sendResourceListChanged: () => void;
 }
 
+function getMutableServerMethods(target: unknown): MutableServerMethods {
+  assert.ok(target && typeof target === 'object', 'server should be an object');
+  const isConnected = Reflect.get(target, 'isConnected');
+  const sendResourceListChanged = Reflect.get(
+    target,
+    'sendResourceListChanged'
+  );
+  assert.equal(typeof isConnected, 'function');
+  assert.equal(typeof sendResourceListChanged, 'function');
+  return target as MutableServerMethods;
+}
+
 describe('cache resource list changed notifications', () => {
   it('emits when cache key set changes and stops after close', async () => {
     const server = await createMcpServer();
-    const mutable = server as unknown as MutableServerMethods;
+    const mutable = getMutableServerMethods(server);
     const originalIsConnected = mutable.isConnected;
     const originalSendResourceListChanged = mutable.sendResourceListChanged;
 

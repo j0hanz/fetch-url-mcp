@@ -9,18 +9,27 @@ import {
 } from '../dist/lib/session.js';
 import type { SessionStore } from '../dist/lib/session.js';
 
+type SessionEntry = Parameters<SessionStore['set']>[1];
+
+function createMockSessionEntry(): SessionEntry {
+  return {
+    transport: { close: async () => {} },
+    createdAt: Date.now(),
+    lastSeen: Date.now(),
+    protocolInitialized: false,
+    authFingerprint: 'test',
+  } as SessionEntry;
+}
+
 function createStore(initialSize: number): SessionStore {
   const store = createSessionStore(60_000);
-  const mockTransport = { close: () => Promise.resolve() } as any;
+  const baseEntry = createMockSessionEntry();
 
   for (let index = 0; index < initialSize; index += 1) {
     store.set(`session-${index}`, {
-      transport: mockTransport,
+      ...baseEntry,
       createdAt: Date.now(),
       lastSeen: Date.now(),
-      protocolInitialized: false,
-
-      authFingerprint: 'test',
     });
   }
 

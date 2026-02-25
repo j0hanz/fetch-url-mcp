@@ -30,17 +30,26 @@ type CompletionHandler = (
   extra?: unknown
 ) => Promise<CompletionResponse>;
 
+function getPrivateRequestHandlers(target: object): Map<string, unknown> {
+  const handlers = Reflect.get(target, '_requestHandlers');
+  assert.ok(
+    handlers instanceof Map,
+    'MCP protocol should expose _requestHandlers'
+  );
+  return handlers;
+}
+
 function getCompletionHandler(
   server: Awaited<ReturnType<typeof createMcpServer>>
 ): CompletionHandler {
-  const handlers = (
-    server.server as unknown as {
-      _requestHandlers: Map<string, CompletionHandler>;
-    }
-  )._requestHandlers;
+  const handlers = getPrivateRequestHandlers(server.server);
   const handler = handlers.get('completion/complete');
-  assert.ok(handler, 'completion/complete handler should be registered');
-  return handler;
+  assert.equal(
+    typeof handler,
+    'function',
+    'completion/complete handler should be registered'
+  );
+  return handler as CompletionHandler;
 }
 
 describe('MCP completion handler', () => {
