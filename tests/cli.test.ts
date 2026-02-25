@@ -5,6 +5,7 @@ import { parseCliArgs, renderCliUsage } from '../dist/cli.js';
 
 function assertParseSuccess(args: readonly string[]): {
   stdio: boolean;
+  http: boolean;
   help: boolean;
   version: boolean;
 } {
@@ -28,6 +29,7 @@ describe('parseCliArgs', () => {
   it('parses long-form flags', () => {
     assert.deepEqual(assertParseSuccess(['--stdio']), {
       stdio: true,
+      http: false,
       help: false,
       version: false,
     });
@@ -36,16 +38,25 @@ describe('parseCliArgs', () => {
   it('parses short-form aliases', () => {
     assert.deepEqual(assertParseSuccess(['-h']), {
       stdio: false,
+      http: false,
       help: true,
       version: false,
     });
     assert.deepEqual(assertParseSuccess(['-v']), {
       stdio: false,
+      http: false,
       help: false,
       version: true,
     });
     assert.deepEqual(assertParseSuccess(['-s']), {
       stdio: true,
+      http: false,
+      help: false,
+      version: false,
+    });
+    assert.deepEqual(assertParseSuccess(['--http']), {
+      stdio: false,
+      http: true,
       help: false,
       version: false,
     });
@@ -60,12 +71,18 @@ describe('parseCliArgs', () => {
     const message = assertParseError(['build']);
     assert.match(message, /unexpected argument|positionals/i);
   });
+
+  it('rejects conflicting transport flags', () => {
+    const message = assertParseError(['--stdio', '--http']);
+    assert.match(message, /either --stdio or --http/i);
+  });
 });
 
 describe('renderCliUsage', () => {
   it('includes short and long options', () => {
     const usage = renderCliUsage();
     assert.match(usage, /--stdio\|-s/);
+    assert.match(usage, /--http/);
     assert.match(usage, /--help\|-h/);
     assert.match(usage, /--version\|-v/);
   });

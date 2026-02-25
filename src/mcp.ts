@@ -27,6 +27,7 @@ import {
   resolveTaskOwnerKey,
   resolveToolCallContext,
 } from './tasks/owner.js';
+import { hasTaskCapableTool } from './tasks/tool-registry.js';
 
 // Re-export public API so existing consumers (tests, other modules) keep working.
 export {
@@ -130,36 +131,60 @@ function resolveOwnerScopedExtra(extra: unknown): {
   };
 }
 
+type RequestHandlerFn = (request: unknown, extra?: unknown) => Promise<unknown>;
+
+function getSdkCallToolHandler(server: McpServer): RequestHandlerFn | null {
+  const protocol = server.server as unknown as {
+    _requestHandlers?: Map<string, RequestHandlerFn>;
+  };
+  return protocol._requestHandlers?.get('tools/call') ?? null;
+}
+
 /* -------------------------------------------------------------------------------------------------
  * Register handlers
  * ------------------------------------------------------------------------------------------------- */
 
 export function registerTaskHandlers(server: McpServer): void {
-  server.server.setRequestHandler(
-    CallToolRequestSchema,
-    async (request, extra) => {
-      const parsedExtra = parseHandlerExtra(extra);
-      const context = resolveToolCallContext(parsedExtra);
-      const requestId =
-        context.requestId !== undefined
-          ? String(context.requestId)
-          : randomUUID();
+  const sdkCallToolHandler = getSdkCallToolHandler(server);
 
-      const sessionId = parsedExtra?.sessionId;
+  if (sdkCallToolHandler) {
+    server.server.setRequestHandler(
+      CallToolRequestSchema,
+      async (request, extra) => {
+        const parsedExtra = parseHandlerExtra(extra);
+        const context = resolveToolCallContext(parsedExtra);
+        const requestId =
+          context.requestId !== undefined
+            ? String(context.requestId)
+            : randomUUID();
 
-      return runWithRequestContext(
-        {
-          requestId,
-          operationId: requestId,
-          ...(sessionId ? { sessionId } : {}),
-        },
-        () => {
-          const parsed = parseExtendedCallToolRequest(request);
-          return handleToolCallRequest(server, parsed, context);
-        }
-      );
-    }
-  );
+        const sessionId = parsedExtra?.sessionId;
+
+        return runWithRequestContext(
+          {
+            requestId,
+            operationId: requestId,
+            ...(sessionId ? { sessionId } : {}),
+          },
+          () => {
+            const toolName = request.params.name;
+
+            // Only intercept task-capable tools managed by the local task registry.
+            // Delegate all other tools to the SDK handler to avoid shadowing future tools.
+            if (!hasTaskCapableTool(toolName)) {
+              return sdkCallToolHandler(
+                request,
+                extra
+              ) as Promise<ServerResult>;
+            }
+
+            const parsed = parseExtendedCallToolRequest(request);
+            return handleToolCallRequest(server, parsed, context);
+          }
+        );
+      }
+    );
+  }
 
   server.server.setRequestHandler(TaskGetSchema, (request, extra) => {
     const { taskId } = request.params;

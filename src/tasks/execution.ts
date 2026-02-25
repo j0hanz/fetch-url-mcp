@@ -8,14 +8,10 @@ import {
 import { config } from '../config.js';
 import { RESOURCE_NOT_FOUND_ERROR_CODE } from '../errors.js';
 import { logWarn, runWithRequestContext } from '../observability.js';
-import type { ToolHandlerExtra } from '../tool-progress.js';
-import {
-  FETCH_URL_TOOL_NAME,
-  type FetchUrlInput,
-  fetchUrlInputSchema,
-  fetchUrlToolHandler,
-  type ProgressNotification,
-} from '../tools.js';
+import type {
+  ProgressNotification,
+  ToolHandlerExtra,
+} from '../tool-progress.js';
 import { isObject } from '../type-guards.js';
 import {
   type CreateTaskResult,
@@ -27,6 +23,11 @@ import {
   type ToolCallContext,
   tryReadToolStructuredError,
 } from './owner.js';
+import {
+  getTaskCapableTool,
+  hasTaskCapableTool,
+  type TaskCapableToolDescriptor,
+} from './tool-registry.js';
 
 /* -------------------------------------------------------------------------------------------------
  * Extended tool-call request shape (task-aware)
@@ -196,38 +197,12 @@ export function emitTaskStatusNotification(
  * Validation helpers
  * ------------------------------------------------------------------------------------------------- */
 
-function requireFetchUrlArgs(args: unknown): FetchUrlInput {
-  const parsed = fetchUrlInputSchema.safeParse(args);
-  if (!parsed.success) {
-    throw new McpError(
-      ErrorCode.InvalidParams,
-      'Invalid arguments for fetch-url'
-    );
-  }
-  return parsed.data;
-}
-
-interface TaskCapableToolDescriptor {
-  name: string;
-  parseArguments: (args: unknown) => FetchUrlInput;
-}
-
-const TASK_CAPABLE_TOOLS = new Map<string, TaskCapableToolDescriptor>([
-  [
-    FETCH_URL_TOOL_NAME,
-    {
-      name: FETCH_URL_TOOL_NAME,
-      parseArguments: requireFetchUrlArgs,
-    },
-  ],
-]);
-
 export function throwTaskNotFound(): never {
   throw new McpError(RESOURCE_NOT_FOUND_ERROR_CODE, 'Task not found');
 }
 
 function resolveTaskCapableTool(name: string): TaskCapableToolDescriptor {
-  const descriptor = TASK_CAPABLE_TOOLS.get(name);
+  const descriptor = getTaskCapableTool(name);
   if (descriptor) return descriptor;
   throw new McpError(ErrorCode.MethodNotFound, `Unknown tool: '${name}'`);
 }
@@ -235,7 +210,7 @@ function resolveTaskCapableTool(name: string): TaskCapableToolDescriptor {
 // Validates that the tool name is recognized before we attempt to execute it.
 // This ensures that an unknown tool produces a MethodNotFound error, rather than potentially executing and failing with an internal error if the tool handler does not properly validate its input.
 function assertKnownTool(name: string): void {
-  if (!TASK_CAPABLE_TOOLS.has(name)) {
+  if (!hasTaskCapableTool(name)) {
     throw new McpError(ErrorCode.MethodNotFound, `Unknown tool: '${name}'`);
   }
 }
@@ -292,24 +267,31 @@ function updateWorkingTaskStatus(
   if (updated) emitTaskStatusNotification(server, updated);
 }
 
-async function runFetchTaskExecution(params: {
+async function runTaskToolExecution(params: {
   server: McpServer;
   taskId: string;
-  args: FetchUrlInput;
+  args: unknown;
+  tool: TaskCapableToolDescriptor;
   meta?: ExtendedCallToolRequest['params']['_meta'];
+  sessionId?: string;
   sendNotification?: (notification: ProgressNotification) => Promise<void>;
 }): Promise<void> {
-  const { server, taskId, args, meta, sendNotification } = params;
+  const { server, taskId, args, tool, meta, sessionId, sendNotification } =
+    params;
 
   return runWithRequestContext(
-    { requestId: taskId, operationId: taskId },
+    {
+      requestId: taskId,
+      operationId: taskId,
+      ...(sessionId ? { sessionId } : {}),
+    },
     async () => {
       const controller = attachAbortController(taskId);
 
       try {
         const relatedMeta = buildRelatedTaskMeta(taskId, meta);
 
-        const result = await fetchUrlToolHandler(args, {
+        const result = await tool.execute(args, {
           signal: controller.signal,
           requestId: taskId,
           _meta: relatedMeta,
@@ -319,7 +301,8 @@ async function runFetchTaskExecution(params: {
           },
         });
 
-        const isToolError = isObject(result) && result['isError'] === true;
+        const isToolError =
+          isObject(result) && 'isError' in result && result.isError === true;
 
         taskManager.updateTask(taskId, {
           status: isToolError ? 'failed' : 'completed',
@@ -375,12 +358,14 @@ function handleTaskToolCall(
     context.ownerKey
   );
 
-  void runFetchTaskExecution({
+  void runTaskToolExecution({
     server,
     taskId: task.taskId,
     args: validArgs,
+    tool,
     ...compact({
       meta: params._meta,
+      sessionId: context.sessionId,
       sendNotification: context.sendNotification,
     }),
   });
@@ -392,7 +377,8 @@ async function handleDirectToolCall(
   params: ExtendedCallToolRequest['params'],
   context: ToolCallContext
 ): Promise<ServerResult> {
-  const args = requireFetchUrlArgs(params.arguments);
+  const tool = resolveTaskCapableTool(params.name);
+  const args = tool.parseArguments(params.arguments);
 
   const extra: ToolHandlerExtra = {
     ...(context.signal ? { signal: context.signal } : {}),
@@ -405,7 +391,7 @@ async function handleDirectToolCall(
     ...(params._meta ? { _meta: params._meta } : {}),
   };
 
-  return fetchUrlToolHandler(args, extra);
+  return tool.execute(args, extra);
 }
 
 export async function handleToolCallRequest(

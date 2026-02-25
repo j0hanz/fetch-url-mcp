@@ -20,6 +20,7 @@ import {
   resolveCachedPayloadContent,
 } from './cache.js';
 import { RESOURCE_NOT_FOUND_ERROR_CODE } from './errors.js';
+import { registerServerLifecycleCleanup } from './mcp-lifecycle.js';
 import { logWarn } from './observability.js';
 import { isObject } from './type-guards.js';
 
@@ -44,63 +45,6 @@ const CACHE_RESOURCE_PREFIX = 'internal://cache/';
 const CACHE_NAMESPACE_PATTERN = /^[a-z0-9_-]{1,64}$/i;
 const CACHE_HASH_PATTERN = /^[a-f0-9.]{8,64}$/i;
 const MAX_COMPLETION_VALUES = 100;
-type CleanupCallback = () => void;
-const patchedCleanupServers = new WeakSet<McpServer>();
-const serverCleanupCallbacks = new WeakMap<McpServer, Set<CleanupCallback>>();
-
-function getServerCleanupCallbackSet(server: McpServer): Set<CleanupCallback> {
-  let callbacks = serverCleanupCallbacks.get(server);
-  if (!callbacks) {
-    callbacks = new Set<CleanupCallback>();
-    serverCleanupCallbacks.set(server, callbacks);
-  }
-  return callbacks;
-}
-
-// Safety: drainServerCleanupCallbacks is idempotent against double-fire.
-// callbacks.clear() runs before iteration so a second call (e.g. from both
-// server.close and server.server.onclose firing) always sees an empty Set.
-function drainServerCleanupCallbacks(server: McpServer): void {
-  const callbacks = serverCleanupCallbacks.get(server);
-  if (!callbacks || callbacks.size === 0) return;
-
-  const pending = [...callbacks];
-  callbacks.clear();
-  for (const callback of pending) {
-    try {
-      callback();
-    } catch (error: unknown) {
-      logWarn('Server cleanup callback failed', { error });
-    }
-  }
-}
-
-function ensureServerCleanupHooks(server: McpServer): void {
-  if (patchedCleanupServers.has(server)) return;
-  patchedCleanupServers.add(server);
-
-  const originalOnClose = server.server.onclose;
-  server.server.onclose = () => {
-    drainServerCleanupCallbacks(server);
-    originalOnClose?.();
-  };
-
-  // FIXME: Monkey-patching server.close remains necessary until the SDK exposes
-  // a first-class lifecycle cleanup registration API.
-  const originalClose = server.close.bind(server);
-  server.close = async (): Promise<void> => {
-    drainServerCleanupCallbacks(server);
-    await originalClose();
-  };
-}
-
-function registerServerCleanupCallback(
-  server: McpServer,
-  callback: CleanupCallback
-): void {
-  ensureServerCleanupHooks(server);
-  getServerCleanupCallbackSet(server).add(callback);
-}
 
 function buildOptionalIcons(
   iconInfo?: IconInfo
@@ -344,7 +288,7 @@ function registerCacheResourceNotifications(server: McpServer): void {
     unsubscribe();
   };
 
-  registerServerCleanupCallback(server, cleanup);
+  registerServerLifecycleCleanup(server, cleanup);
 }
 
 function normalizeTemplateVariables(

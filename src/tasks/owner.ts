@@ -19,6 +19,7 @@ export interface HandlerExtra {
 
 export interface ToolCallContext {
   ownerKey: string;
+  sessionId?: string;
   signal?: AbortSignal;
   requestId?: string | number;
   sendNotification?: (notification: ProgressNotification) => Promise<void>;
@@ -106,6 +107,7 @@ export function resolveTaskOwnerKey(extra?: HandlerExtra): string {
 export function resolveToolCallContext(extra?: HandlerExtra): ToolCallContext {
   return compact({
     ownerKey: resolveTaskOwnerKey(extra),
+    sessionId: extra?.sessionId,
     signal: extra?.signal,
     requestId: extra?.requestId,
     sendNotification: extra?.sendNotification,

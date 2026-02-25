@@ -2,6 +2,7 @@ import { parseArgs } from 'node:util';
 
 export interface CliValues {
   readonly stdio: boolean;
+  readonly http: boolean;
   readonly help: boolean;
   readonly version: boolean;
 }
@@ -22,10 +23,11 @@ const usageLines = [
   'Fetch URL MCP server',
   '',
   'Usage:',
-  '  fetch-url-mcp [--stdio|-s] [--help|-h] [--version|-v]',
+  '  fetch-url-mcp [--stdio|-s | --http] [--help|-h] [--version|-v]',
   '',
   'Options:',
-  '  --stdio, -s   Run in stdio mode (no HTTP server).',
+  '  --stdio, -s   Run in stdio mode (default).',
+  '  --http        Run in Streamable HTTP mode.',
   '  --help, -h    Show this help message.',
   '  --version, -v Show server version.',
   '',
@@ -33,6 +35,7 @@ const usageLines = [
 
 const optionSchema = {
   stdio: { type: 'boolean', short: 's', default: false },
+  http: { type: 'boolean', default: false },
   help: { type: 'boolean', short: 'h', default: false },
   version: { type: 'boolean', short: 'v', default: false },
 } as const;
@@ -55,6 +58,7 @@ function readCliFlag(values: ParsedValues, key: CliFlagKey): boolean {
 function buildCliValues(values: ParsedValues): CliValues {
   return {
     stdio: readCliFlag(values, 'stdio'),
+    http: readCliFlag(values, 'http'),
     help: readCliFlag(values, 'help'),
     version: readCliFlag(values, 'version'),
   };
@@ -73,9 +77,17 @@ export function parseCliArgs(args: readonly string[]): CliParseResult {
       allowPositionals: false,
     });
 
+    const cliValues = buildCliValues(values);
+    if (cliValues.stdio && cliValues.http) {
+      return {
+        ok: false,
+        message: 'Choose either --stdio or --http, not both',
+      };
+    }
+
     return {
       ok: true,
-      values: buildCliValues(values),
+      values: cliValues,
     };
   } catch (error: unknown) {
     return {

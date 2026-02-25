@@ -7,6 +7,7 @@ import type {
   TextResourceContents,
   ToolAnnotations,
 } from '@modelcontextprotocol/sdk/types.js';
+import { ErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js';
 
 import { randomUUID } from 'node:crypto';
 
@@ -22,6 +23,10 @@ import {
   logWarn,
   runWithRequestContext,
 } from './observability.js';
+import {
+  registerTaskCapableTool,
+  unregisterTaskCapableTool,
+} from './tasks/tool-registry.js';
 import { handleToolError } from './tool-errors.js';
 import {
   appendTruncationMarker,
@@ -679,7 +684,25 @@ function resolveSessionIdFromExtra(extra: unknown): string | undefined {
 }
 
 export function registerTools(server: McpServer): void {
-  if (!config.tools.enabled.includes(FETCH_URL_TOOL_NAME)) return;
+  if (!config.tools.enabled.includes(FETCH_URL_TOOL_NAME)) {
+    unregisterTaskCapableTool(FETCH_URL_TOOL_NAME);
+    return;
+  }
+
+  registerTaskCapableTool({
+    name: FETCH_URL_TOOL_NAME,
+    parseArguments: (args) => {
+      const parsed = fetchUrlInputSchema.safeParse(args);
+      if (!parsed.success) {
+        throw new McpError(
+          ErrorCode.InvalidParams,
+          'Invalid arguments for fetch-url'
+        );
+      }
+      return parsed.data;
+    },
+    execute: fetchUrlToolHandler,
+  });
 
   const registeredTool = server.registerTool(
     TOOL_DEFINITION.name,

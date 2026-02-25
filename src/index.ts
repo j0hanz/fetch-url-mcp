@@ -40,7 +40,7 @@ if (values.version) {
   process.stdout.write(`${serverVersion}\n`);
   process.exit(0);
 }
-const isStdioMode = values.stdio;
+const isStdioMode = !values.http;
 let isShuttingDown = false;
 
 const shutdownHandlerRef: { current?: (signal: string) => Promise<void> } = {};

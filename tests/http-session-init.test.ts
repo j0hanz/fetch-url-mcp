@@ -125,8 +125,8 @@ describe('http session initialization', () => {
       };
       missingHeader: {
         status: number;
-        sessionId: string | null;
-        hasInitializeResult: boolean;
+        sessionId?: string | null;
+        hasInitializeResult?: boolean;
       };
     }>(result.stderr);
 
@@ -143,9 +143,83 @@ describe('http session initialization', () => {
     assert.equal(typeof payload.legacy.sessionId, 'string');
     assert.equal(payload.legacy.hasInitializeResult, true);
 
-    assert.equal(payload.missingHeader.status, 200);
-    assert.equal(typeof payload.missingHeader.sessionId, 'string');
-    assert.equal(payload.missingHeader.hasInitializeResult, true);
+    assert.equal(payload.missingHeader.status, 400);
+  });
+
+  it('can allow initialize without protocol header when strict header mode is disabled', () => {
+    const script = `
+      import { startHttpServer } from './dist/http/native.js';
+      import { request } from 'node:http';
+
+      const server = await startHttpServer();
+      const port = server.port;
+
+      const body = JSON.stringify({
+        jsonrpc: '2.0',
+        id: 'init-no-header',
+        method: 'initialize',
+        params: {
+          protocolVersion: '2025-11-25',
+          capabilities: {},
+          clientInfo: { name: 'test-client', version: '1.0.0' },
+        },
+      });
+
+      const result = await new Promise((resolve) => {
+        const req = request(
+          {
+            hostname: '127.0.0.1',
+            port,
+            path: '/mcp',
+            method: 'POST',
+            headers: {
+              'content-type': 'application/json',
+              accept: 'application/json, text/event-stream',
+              authorization: 'Bearer test-token',
+              host: '127.0.0.1',
+            },
+          },
+          (res) => {
+            let raw = '';
+            res.on('data', (chunk) => { raw += chunk; });
+            res.on('end', () => {
+              resolve({
+                status: res.statusCode ?? 0,
+                sessionId: res.headers['mcp-session-id'] ?? null,
+                hasInitializeResult: raw.includes('"protocolVersion"'),
+              });
+            });
+          }
+        );
+        req.on('error', (error) => resolve({ error: error.message }));
+        req.write(body);
+        req.end();
+      });
+
+      await server.shutdown('TEST');
+      console.error('${RESULT_MARKER}' + JSON.stringify({ result }));
+    `;
+
+    const result = runIsolatedNode(script, {
+      HOST: '127.0.0.1',
+      PORT: '0',
+      ACCESS_TOKENS: 'test-token',
+      ALLOW_REMOTE: 'false',
+      MCP_STRICT_PROTOCOL_VERSION_HEADER: 'false',
+    });
+
+    assert.equal(result.status, 0, result.stderr);
+    const payload = parseMarkedJson<{
+      result: {
+        status: number;
+        sessionId: string | null;
+        hasInitializeResult: boolean;
+      };
+    }>(result.stderr);
+
+    assert.equal(payload.result.status, 200);
+    assert.equal(typeof payload.result.sessionId, 'string');
+    assert.equal(payload.result.hasInitializeResult, true);
   });
 
   it('requires protocol header post-init and enforces initialized notification flow', () => {

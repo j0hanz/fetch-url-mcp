@@ -197,7 +197,14 @@ class McpSessionGateway {
         }
       }
     } else {
-      if (!ensureMcpProtocolVersion(ctx.req, ctx.res)) return;
+      if (
+        !ensureMcpProtocolVersion(ctx.req, ctx.res, {
+          requireHeader:
+            config.server.http.requireProtocolVersionHeaderOnSessionInit,
+        })
+      ) {
+        return;
+      }
     }
 
     if (session && isInitNotification) {

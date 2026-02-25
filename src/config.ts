@@ -492,6 +492,10 @@ const blockPrivateConnections = parseBoolean(
   false
 );
 const allowRemote = parseBoolean(env['ALLOW_REMOTE'], false);
+const requireProtocolVersionHeaderOnSessionInit = parseBoolean(
+  env['MCP_STRICT_PROTOCOL_VERSION_HEADER'],
+  true
+);
 
 const baseUrl = new URL(
   `${httpsConfig.enabled ? 'https' : 'http'}://${formatHostForUrl(host)}:${port}`
@@ -523,6 +527,7 @@ export const config = {
       maxHeadersCount,
       maxConnections,
       blockPrivateConnections,
+      requireProtocolVersionHeaderOnSessionInit,
       shutdownCloseIdleConnections: true,
       shutdownCloseAllConnections: false,
     },
@@ -556,7 +561,7 @@ export const config = {
     maxPerOwner: RESOLVED_TASKS_MAX_PER_OWNER,
     emitStatusNotifications: parseBoolean(
       env['TASKS_STATUS_NOTIFICATIONS'],
-      true
+      false
     ),
   },
   cache: {

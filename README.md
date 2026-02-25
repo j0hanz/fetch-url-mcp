@@ -150,35 +150,38 @@ docker compose up --build
 
 ### Runtime Modes
 
-| Flag              | Description                                 |
-| ----------------- | ------------------------------------------- |
-| `--stdio`, `-s`   | Run in stdio mode (for desktop MCP clients) |
-| `--help`, `-h`    | Show usage help                             |
-| `--version`, `-v` | Print server version                        |
+| Flag              | Description                                                |
+| ----------------- | ---------------------------------------------------------- |
+| `--stdio`, `-s`   | Run in stdio mode (for desktop MCP clients; default)       |
+| `--http`          | Run in HTTP mode (Streamable HTTP on port 3000 by default) |
+| `--help`, `-h`    | Show usage help                                            |
+| `--version`, `-v` | Print server version                                       |
 
-When no `--stdio` flag is passed, the server starts in **HTTP mode** (Streamable HTTP on port 3000 by default).
+When no transport flag is passed, the server starts in **stdio mode**.
 
 ### Environment Variables
 
 #### Core Settings
 
-| Variable           | Default                   | Description                                         |
-| ------------------ | ------------------------- | --------------------------------------------------- |
-| `HOST`             | `127.0.0.1`               | HTTP server bind address                            |
-| `PORT`             | `3000`                    | HTTP server port (1024–65535)                       |
-| `LOG_LEVEL`        | `info`                    | Log level: `debug`, `info`, `warn`, `error`         |
-| `FETCH_TIMEOUT_MS` | `15000`                   | HTTP fetch timeout in ms (1000–60000)               |
-| `CACHE_ENABLED`    | `true`                    | Enable/disable in-memory content cache              |
-| `USER_AGENT`       | `fetch-url-mcp/{version}` | Custom User-Agent header                            |
-| `ALLOW_REMOTE`     | `false`                   | Allow remote connections in HTTP mode               |
-| `ALLOWED_HOSTS`    | _(empty)_                 | Comma-separated host/origin allowlist for HTTP mode |
+| Variable                             | Default                   | Description                                                                                             |
+| ------------------------------------ | ------------------------- | ------------------------------------------------------------------------------------------------------- |
+| `HOST`                               | `127.0.0.1`               | HTTP server bind address                                                                                |
+| `PORT`                               | `3000`                    | HTTP server port (1024–65535)                                                                           |
+| `LOG_LEVEL`                          | `info`                    | Log level: `debug`, `info`, `warn`, `error`                                                             |
+| `FETCH_TIMEOUT_MS`                   | `15000`                   | HTTP fetch timeout in ms (1000–60000)                                                                   |
+| `CACHE_ENABLED`                      | `true`                    | Enable/disable in-memory content cache                                                                  |
+| `USER_AGENT`                         | `fetch-url-mcp/{version}` | Custom User-Agent header                                                                                |
+| `ALLOW_REMOTE`                       | `false`                   | Allow remote connections in HTTP mode                                                                   |
+| `ALLOWED_HOSTS`                      | _(empty)_                 | Comma-separated host/origin allowlist for HTTP mode                                                     |
+| `MCP_STRICT_PROTOCOL_VERSION_HEADER` | `true`                    | Require `MCP-Protocol-Version` on HTTP session initialize (`false` allows legacy headerless initialize) |
 
 #### Task Management
 
-| Variable              | Default | Description                                      |
-| --------------------- | ------- | ------------------------------------------------ |
-| `TASKS_MAX_TOTAL`     | `5000`  | Maximum retained task records across all owners  |
-| `TASKS_MAX_PER_OWNER` | `1000`  | Maximum retained task records per session/client |
+| Variable                     | Default | Description                                              |
+| ---------------------------- | ------- | -------------------------------------------------------- |
+| `TASKS_MAX_TOTAL`            | `5000`  | Maximum retained task records across all owners          |
+| `TASKS_MAX_PER_OWNER`        | `1000`  | Maximum retained task records per session/client         |
+| `TASKS_STATUS_NOTIFICATIONS` | `false` | Emit experimental `notifications/tasks/status` extension |
 
 #### Authentication (HTTP Mode)
 
@@ -595,7 +598,7 @@ npm run inspector
 | `VALIDATION_ERROR` on URL | URL is blocked (private IP/localhost) or malformed. Do not retry.                     |
 | `queue_full` error        | Worker pool busy. Wait briefly, then retry or use async task mode.                    |
 | Garbled output            | Binary content (images, PDFs) cannot be converted. Ensure the URL serves HTML.        |
-| No output in stdio mode   | Ensure `--stdio` flag is passed. Without it, the server starts in HTTP mode.          |
+| No output in stdio mode   | If you intended HTTP mode, pass `--http`. Stdio is the default transport.             |
 | Auth errors in HTTP mode  | Set `ACCESS_TOKENS` or `API_KEY` env var and pass as `Authorization: Bearer <token>`. |
 
 ### Stdout / Stderr Guidance
