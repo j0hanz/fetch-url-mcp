@@ -22,7 +22,7 @@ import {
   logWarn,
   runWithRequestContext,
 } from './observability.js';
-import { createToolErrorResponse, handleToolError } from './tool-errors.js';
+import { handleToolError } from './tool-errors.js';
 import {
   appendTruncationMarker,
   type InlineContentResult,
@@ -522,10 +522,6 @@ async function executeFetch(
   extra?: ToolHandlerExtra
 ): Promise<ToolResponseBase> {
   const { url } = input;
-  if (!url) {
-    return createToolErrorResponse('URL is required', '');
-  }
-
   const signal = buildToolAbortSignal(extra?.signal);
   const progress = createProgressReporter(extra);
 

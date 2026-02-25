@@ -1,7 +1,3 @@
-import {
-  InMemoryTaskMessageQueue,
-  InMemoryTaskStore,
-} from '@modelcontextprotocol/sdk/experimental/tasks/stores/in-memory.js';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 
@@ -117,13 +113,8 @@ async function createMcpServerWithOptions(
 ): Promise<McpServer> {
   const localIcon = await getLocalIconInfo();
 
-  const taskStore = new InMemoryTaskStore();
-  const taskMessageQueue = new InMemoryTaskMessageQueue();
-
   const serverConfig: ConstructorParameters<typeof McpServer>[1] = {
     capabilities: createServerCapabilities(),
-    taskStore,
-    taskMessageQueue,
   };
   if (serverInstructions) {
     serverConfig.instructions = serverInstructions;
@@ -142,6 +133,7 @@ async function createMcpServerWithOptions(
   registerCacheResourceTemplate(server, localIcon);
   registerTaskHandlers(server);
   registerLoggingSetLevelHandler(server);
+  attachServerErrorHandler(server);
 
   return server;
 }
@@ -241,7 +233,6 @@ export async function startStdioServer(): Promise<void> {
   const server = await createMcpServer();
   const transport = new StdioServerTransport();
 
-  attachServerErrorHandler(server);
   registerSignalHandlers(createShutdownHandler(server));
   await connectStdioServer(server, transport);
 }

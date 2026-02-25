@@ -161,14 +161,14 @@ export function registerTaskHandlers(server: McpServer): void {
     }
   );
 
-  server.server.setRequestHandler(TaskGetSchema, async (request, extra) => {
+  server.server.setRequestHandler(TaskGetSchema, (request, extra) => {
     const { taskId } = request.params;
     const { ownerKey } = resolveOwnerScopedExtra(extra);
     const task = taskManager.getTask(taskId, ownerKey);
 
     if (!task) throwTaskNotFound();
 
-    return Promise.resolve(toTaskSummary(task));
+    return toTaskSummary(task);
   });
 
   server.server.setRequestHandler(TaskResultSchema, async (request, extra) => {
@@ -205,21 +205,25 @@ export function registerTaskHandlers(server: McpServer): void {
         isError: true,
       };
 
-      return Promise.resolve(withRelatedTaskMeta(fallback, task.taskId));
+      return withRelatedTaskMeta(fallback, task.taskId);
     }
 
     if (task.status === 'cancelled') {
-      throw new McpError(ErrorCode.InvalidRequest, 'Task was cancelled');
+      throw new McpError(ErrorCode.InvalidRequest, 'Task was cancelled', {
+        taskId: task.taskId,
+        status: 'cancelled',
+        ...(task.statusMessage ? { statusMessage: task.statusMessage } : {}),
+      });
     }
 
     const result: ServerResult = isServerResult(task.result)
       ? task.result
       : { content: [] };
 
-    return Promise.resolve(withRelatedTaskMeta(result, task.taskId));
+    return withRelatedTaskMeta(result, task.taskId);
   });
 
-  server.server.setRequestHandler(TaskListSchema, async (request, extra) => {
+  server.server.setRequestHandler(TaskListSchema, (request, extra) => {
     const { ownerKey } = resolveOwnerScopedExtra(extra);
     const cursor = request.params?.cursor;
 
@@ -227,13 +231,13 @@ export function registerTaskHandlers(server: McpServer): void {
       cursor === undefined ? { ownerKey } : { ownerKey, cursor }
     );
 
-    return Promise.resolve({
+    return {
       tasks: tasks.map((task) => toTaskSummary(task)),
       nextCursor,
-    });
+    };
   });
 
-  server.server.setRequestHandler(TaskCancelSchema, async (request, extra) => {
+  server.server.setRequestHandler(TaskCancelSchema, (request, extra) => {
     const { taskId } = request.params;
     const { ownerKey } = resolveOwnerScopedExtra(extra);
 
@@ -244,6 +248,6 @@ export function registerTaskHandlers(server: McpServer): void {
 
     emitTaskStatusNotification(server, task);
 
-    return Promise.resolve(toTaskSummary(task));
+    return toTaskSummary(task);
   });
 }

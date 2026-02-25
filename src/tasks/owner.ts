@@ -24,10 +24,6 @@ export interface ToolCallContext {
   sendNotification?: (notification: ProgressNotification) => Promise<void>;
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return isObject(value);
-}
-
 /** Strip keys whose value is `undefined`, returning an object with only the
  * present keys. Return type correctly omits the `undefined` union so the result
  * is compatible with `exactOptionalPropertyTypes`. */
@@ -141,5 +137,3 @@ export function tryReadToolStructuredError(value: unknown): string | undefined {
     return undefined;
   }
 }
-
-export { isRecord };

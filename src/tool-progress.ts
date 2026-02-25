@@ -37,7 +37,7 @@ export interface ToolHandlerExtra {
 }
 
 export interface ProgressReporter {
-  report: (progress: number, message: string) => Promise<void>;
+  report: (progress: number, message: string) => void;
 }
 
 /* -------------------------------------------------------------------------------------------------
@@ -99,7 +99,7 @@ class ToolProgressReporter implements ProgressReporter {
     );
   }
 
-  async report(progress: number, message: string): Promise<void> {
+  report(progress: number, message: string): void {
     if (this.isTerminal) return;
     const effectiveProgress = Math.max(progress, this.lastProgress);
     const isIncreasing = effectiveProgress > this.lastProgress;
@@ -108,7 +108,9 @@ class ToolProgressReporter implements ProgressReporter {
     if (effectiveProgress >= FETCH_PROGRESS_TOTAL) {
       this.isTerminal = true;
     }
-    if (this.onProgress) {
+    // Only fire onProgress when progress actually increases to avoid duplicate
+    // task status updates (onProgress drives updateWorkingTaskStatus in task mode).
+    if (isIncreasing && this.onProgress) {
       try {
         this.onProgress(effectiveProgress, message);
       } catch (error: unknown) {
@@ -156,8 +158,8 @@ class ToolProgressReporter implements ProgressReporter {
         if (timeoutId) clearTimeout(timeoutId);
       }
     });
-
-    await this.reportQueue;
+    // Do not await reportQueue: notifications drain asynchronously so the caller
+    // is not blocked for up to N × PROGRESS_NOTIFICATION_TIMEOUT_MS.
   }
 
   private createProgressNotification(

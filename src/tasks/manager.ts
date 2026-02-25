@@ -79,7 +79,7 @@ function isTerminalStatus(status: TaskStatus): boolean {
 
 function normalizeTaskTtl(ttl: number | undefined): number {
   if (!Number.isFinite(ttl)) return DEFAULT_TTL_MS;
-  const rounded = Math.trunc(ttl ?? DEFAULT_TTL_MS);
+  const rounded = Math.trunc(Number(ttl));
   if (rounded < MIN_TTL_MS) return MIN_TTL_MS;
   if (rounded > MAX_TTL_MS) return MAX_TTL_MS;
   return rounded;
@@ -233,6 +233,7 @@ class TaskManager {
       status: 'cancelled',
       statusMessage: 'The task was cancelled by request.',
     });
+    this.decrementOwnerCount(task.ownerKey);
 
     return this.tasks.get(taskId);
   }
@@ -253,6 +254,7 @@ class TaskManager {
         status: 'cancelled',
         statusMessage,
       });
+      this.decrementOwnerCount(task.ownerKey);
       cancelled.push(task);
     }
 
@@ -348,13 +350,9 @@ class TaskManager {
 
     if (isTerminalStatus(task.status)) return task;
 
+    // isExpired() above guarantees task.ttl has not elapsed; compute deadlineMs
+    // for the promise-based timeout below.
     const deadlineMs = task._createdAtMs + task.ttl;
-    const now = Date.now();
-
-    if (deadlineMs <= now) {
-      this.removeTask(taskId);
-      return undefined;
-    }
 
     return new Promise((resolve, reject) => {
       const resolveInContext = AsyncLocalStorage.bind(
@@ -472,6 +470,7 @@ class TaskManager {
     const newTtl = elapsed + RESULT_DELIVERY_GRACE_MS;
     if (newTtl < task.ttl) {
       task.ttl = newTtl;
+      task.lastUpdatedAt = new Date().toISOString();
     }
   }
 

@@ -42,6 +42,8 @@ const CACHE_RESOURCE_TEMPLATE_URI = 'internal://cache/{namespace}/{hash}';
 const CACHE_RESOURCE_PREFIX = 'internal://cache/';
 const CACHE_NAMESPACE_PATTERN = /^[a-z0-9_-]{1,64}$/i;
 const CACHE_HASH_PATTERN = /^[a-f0-9.]{8,64}$/i;
+// -32002 is the MCP extension code for resource-not-found. The SDK ErrorCode enum
+// does not export this value, so it is defined locally.
 const RESOURCE_NOT_FOUND_ERROR_CODE = -32002;
 const MAX_COMPLETION_VALUES = 100;
 
@@ -296,6 +298,9 @@ function registerCacheResourceNotifications(server: McpServer): void {
     originalOnClose?.();
   };
 
+  // FIXME: Monkey-patching server.close is fragile if other modules wrap it.
+  // A proper fix requires a first-class lifecycle hook or cleanup registration API
+  // in the SDK. Until then, the cleanedUp guard prevents double-invocation.
   const originalClose = server.close.bind(server);
   server.close = async (): Promise<void> => {
     cleanup();

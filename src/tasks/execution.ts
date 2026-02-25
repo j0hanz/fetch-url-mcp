@@ -13,6 +13,7 @@ import {
   fetchUrlToolHandler,
   type ProgressNotification,
 } from '../tools.js';
+import { isObject } from '../type-guards.js';
 import {
   type CreateTaskResult,
   taskManager,
@@ -20,7 +21,6 @@ import {
 } from './manager.js';
 import {
   compact,
-  isRecord,
   type ToolCallContext,
   tryReadToolStructuredError,
 } from './owner.js';
@@ -200,11 +200,11 @@ function requireFetchUrlArgs(args: unknown): FetchUrlInput {
   return parsed.data;
 }
 
+// -32002 is the MCP extension code for resource-not-found; the SDK ErrorCode enum does not export it.
+const RESOURCE_NOT_FOUND_ERROR_CODE = -32002;
+
 export function throwTaskNotFound(): never {
-  throw new McpError(
-    ErrorCode.InvalidParams,
-    'Failed to retrieve task: Task not found'
-  );
+  throw new McpError(RESOURCE_NOT_FOUND_ERROR_CODE, 'Task not found');
 }
 
 function requireFetchUrlToolName(name: string): void {
@@ -292,7 +292,7 @@ async function runFetchTaskExecution(params: {
         });
 
         const isToolError =
-          isRecord(result) &&
+          isObject(result) &&
           typeof result['isError'] === 'boolean' &&
           result['isError'];
 

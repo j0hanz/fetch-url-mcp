@@ -67,6 +67,7 @@ describe('fetchUrlToolHandler', () => {
     const parsed = JSON.parse((response.content[0] as { text: string })?.text);
     assert.deepEqual(parsed, {
       error: 'URL is required',
+      code: 'VALIDATION_ERROR',
       url: '',
     });
   });
