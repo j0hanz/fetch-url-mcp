@@ -42,8 +42,8 @@ import {
   type ProgressReporter,
   type ToolHandlerExtra,
 } from './tool-progress.js';
-import { isObject } from './type-guards.js';
 import type { ExtractedMetadata } from './transform/types.js';
+import { isObject } from './type-guards.js';
 
 // Re-export public API so existing consumers keep working.
 export { createToolErrorResponse, handleToolError } from './tool-errors.js';

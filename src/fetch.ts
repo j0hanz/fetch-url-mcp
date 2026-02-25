@@ -215,9 +215,7 @@ class UrlNormalizer {
       }
     }
 
-    if (
-      this.blockedHostSuffixes.some((suffix) => hostname.endsWith(suffix))
-    ) {
+    if (this.blockedHostSuffixes.some((suffix) => hostname.endsWith(suffix))) {
       throw createValidationError(
         `Blocked hostname pattern: ${hostname}. Internal domain suffixes are not allowed`
       );
@@ -862,7 +860,10 @@ function mapFetchError(
   }
 
   if (!isError(error))
-    return createFetchError({ kind: 'unknown', message: 'Unexpected error' }, url);
+    return createFetchError(
+      { kind: 'unknown', message: 'Unexpected error' },
+      url
+    );
 
   if (!isSystemError(error)) {
     const err = error as { message: string; cause?: unknown };
