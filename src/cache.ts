@@ -137,8 +137,11 @@ export function createCacheKey(
 
 export function parseCacheKey(cacheKey: string): CacheKeyParts | null {
   if (!cacheKey) return null;
-  const [namespace, ...rest] = cacheKey.split(':');
-  const urlHash = rest.join(':');
+  const separatorIndex = cacheKey.indexOf(':');
+  if (separatorIndex === -1) return null;
+
+  const namespace = cacheKey.slice(0, separatorIndex);
+  const urlHash = cacheKey.slice(separatorIndex + 1);
   if (!namespace || !urlHash) return null;
   return { namespace, urlHash };
 }

@@ -104,14 +104,10 @@ class TaskManager {
 
   private removeExpiredTasks(): void {
     const now = Date.now();
-    const expired: string[] = [];
     for (const [id, task] of this.tasks) {
       if (this.isExpired(task, now)) {
-        expired.push(id);
+        this.removeTask(id);
       }
-    }
-    for (const id of expired) {
-      this.removeTask(id);
     }
   }
 
@@ -210,10 +206,8 @@ class TaskManager {
 
     if (isTerminalStatus(task.status)) return;
 
-    Object.assign(task, {
-      ...updates,
-      lastUpdatedAt: new Date().toISOString(),
-    });
+    Object.assign(task, updates);
+    task.lastUpdatedAt = new Date().toISOString();
 
     this.notifyWaiters(task);
   }
@@ -270,13 +264,12 @@ class TaskManager {
     let collecting = anchorTaskId === null;
     let anchorFound = anchorTaskId === null;
     const now = Date.now();
-    const expired: string[] = [];
 
     for (const task of this.tasks.values()) {
       if (task.ownerKey !== ownerKey) continue;
 
       if (this.isExpired(task, now)) {
-        expired.push(task.taskId);
+        this.removeTask(task.taskId);
         continue;
       }
 
@@ -290,10 +283,6 @@ class TaskManager {
 
       page.push(task);
       if (page.length > pageSize) break;
-    }
-
-    for (const id of expired) {
-      this.removeTask(id);
     }
 
     // Anchor task expired between pages; return empty list so callers stop
@@ -331,6 +320,30 @@ class TaskManager {
     const nextCursor = this.resolveNextCursor(page, hasMore);
 
     return nextCursor ? { tasks: page, nextCursor } : { tasks: page };
+  }
+
+  private addWaiter(taskId: string, waiter: (task: TaskState) => void): void {
+    let set = this.waiters.get(taskId);
+    if (!set) {
+      set = new Set();
+      this.waiters.set(taskId, set);
+    }
+    set.add(waiter);
+  }
+
+  private removeWaiter(
+    taskId: string,
+    waiter: ((task: TaskState) => void) | null
+  ): void {
+    if (!waiter) return;
+
+    const set = this.waiters.get(taskId);
+    if (!set) return;
+
+    set.delete(waiter);
+    if (set.size === 0) {
+      this.waiters.delete(taskId);
+    }
   }
 
   async waitForTerminalTask(
@@ -378,16 +391,6 @@ class TaskManager {
         }
       };
 
-      const removeWaiter = (): void => {
-        if (waiter) {
-          const set = this.waiters.get(taskId);
-          if (set) {
-            set.delete(waiter);
-            if (set.size === 0) this.waiters.delete(taskId);
-          }
-        }
-      };
-
       const settleOnce = (fn: () => void): void => {
         if (settled) return;
         settled = true;
@@ -397,7 +400,7 @@ class TaskManager {
       const onAbort = (): void => {
         settleOnce(() => {
           cleanup();
-          removeWaiter();
+          this.removeWaiter(taskId, waiter);
           rejectInContext(
             new McpError(ErrorCode.ConnectionClosed, 'Request was cancelled')
           );
@@ -420,12 +423,7 @@ class TaskManager {
         return;
       }
 
-      let set = this.waiters.get(taskId);
-      if (!set) {
-        set = new Set();
-        this.waiters.set(taskId, set);
-      }
-      set.add(waiter);
+      this.addWaiter(taskId, waiter);
 
       if (signal) {
         signal.addEventListener('abort', onAbort, { once: true });
@@ -438,7 +436,7 @@ class TaskManager {
         .then(() => {
           settleOnce(() => {
             cleanup();
-            removeWaiter();
+            this.removeWaiter(taskId, waiter);
             this.removeTask(taskId);
             resolveInContext(undefined);
           });

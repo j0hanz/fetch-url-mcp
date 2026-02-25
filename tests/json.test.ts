@@ -68,6 +68,30 @@ describe('stableStringify', () => {
     assert.equal(stableStringify(null), 'null');
   });
 
+  it('matches JSON stringify omission/null behavior for unsupported values', () => {
+    const fn = (): void => {};
+    const sym = Symbol('x');
+    const value = {
+      keep: 1,
+      dropUndefined: undefined,
+      dropFn: fn,
+      dropSymbol: sym,
+      arr: [undefined, fn, sym, 1],
+    };
+
+    const result = stableStringify(value);
+
+    assert.equal(result, '{"arr":[null,null,null,1],"keep":1}');
+  });
+
+  it('treats Date objects as plain objects (no toJSON conversion)', () => {
+    const result = stableStringify({
+      createdAt: new Date('2024-01-01T00:00:00.000Z'),
+    });
+
+    assert.equal(result, '{"createdAt":{}}');
+  });
+
   it('should sort nested object keys', () => {
     const obj = {
       z: { b: 2, a: 1 },
