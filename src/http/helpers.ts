@@ -44,7 +44,7 @@ export interface AuthenticatedContext extends RequestContext {
 // Response helpers
 // ---------------------------------------------------------------------------
 
-export function setNoStoreHeaders(res: ServerResponse): void {
+function setNoStoreHeaders(res: ServerResponse): void {
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('Cache-Control', 'no-store');
 }
@@ -201,9 +201,7 @@ export function createRequestAbortSignal(req: IncomingMessage): {
 // IP & connection helpers
 // ---------------------------------------------------------------------------
 
-export function normalizeRemoteAddress(
-  address: string | undefined
-): string | null {
+function normalizeRemoteAddress(address: string | undefined): string | null {
   if (!address) return null;
   const trimmed = address.trim();
   if (!trimmed) return null;
@@ -343,7 +341,7 @@ export function createTransportAdapter(
 
 type JsonBodyErrorKind = 'payload-too-large' | 'invalid-json' | 'read-failed';
 
-export class JsonBodyError extends Error {
+class JsonBodyError extends Error {
   readonly kind: JsonBodyErrorKind;
 
   constructor(kind: JsonBodyErrorKind, message: string) {

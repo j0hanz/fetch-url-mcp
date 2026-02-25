@@ -13,7 +13,7 @@ interface RateLimitEntry {
   lastAccessed: number;
 }
 
-export interface RateLimitConfig {
+interface RateLimitConfig {
   maxRequests: number;
   windowMs: number;
   cleanupIntervalMs: number;

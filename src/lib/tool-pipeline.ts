@@ -23,7 +23,7 @@ function asRecord(value: unknown): JsonRecord | undefined {
   return isObject(value) ? (value as JsonRecord) : undefined;
 }
 
-export function readUnknown(obj: unknown, key: string): unknown {
+function readUnknown(obj: unknown, key: string): unknown {
   const record = asRecord(obj);
   return record ? record[key] : undefined;
 }

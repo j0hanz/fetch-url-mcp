@@ -9,7 +9,7 @@ import { isObject } from '../lib/type-guards.js';
  * Handler extra parsing & owner-key resolution
  * ------------------------------------------------------------------------------------------------- */
 
-export interface HandlerExtra {
+interface HandlerExtra {
   sessionId?: string;
   authInfo?: { clientId?: string; token?: string };
   signal?: AbortSignal;

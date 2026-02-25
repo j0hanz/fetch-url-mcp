@@ -188,14 +188,12 @@ export const SUPPORTED_MCP_PROTOCOL_VERSIONS = new Set<string>([
   LEGACY_MCP_PROTOCOL_VERSION,
 ]);
 
-export interface McpProtocolVersionCheckOptions {
+interface McpProtocolVersionCheckOptions {
   requireHeader?: boolean;
   expectedVersion?: string;
 }
 
-export function resolveMcpProtocolVersion(
-  req: IncomingMessage
-): string | undefined {
+function resolveMcpProtocolVersion(req: IncomingMessage): string | undefined {
   const versionHeader = getHeaderValue(req, 'mcp-protocol-version');
   if (!versionHeader) return undefined;
 
@@ -485,7 +483,7 @@ function resolveResourceMetadataPath(): string {
   return '/.well-known/oauth-protected-resource/mcp';
 }
 
-export function buildResourceMetadataUrl(req: IncomingMessage): string {
+function buildResourceMetadataUrl(req: IncomingMessage): string {
   return buildRequestScopedProtectedResourceUrls(req).resourceMetadata;
 }
 

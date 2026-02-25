@@ -44,7 +44,7 @@ export interface ProgressReporter {
  * Constants
  * ------------------------------------------------------------------------------------------------- */
 
-export const FETCH_PROGRESS_TOTAL = 4;
+const FETCH_PROGRESS_TOTAL = 4;
 const PROGRESS_NOTIFICATION_TIMEOUT_MS = 5000;
 
 /* -------------------------------------------------------------------------------------------------

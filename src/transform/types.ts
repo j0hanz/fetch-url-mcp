@@ -129,8 +129,6 @@ export interface TransformWorkerResultMessage {
   };
 }
 
-export type TransformWorkerPayload = TransformWorkerResultMessage['result'];
-
 export interface TransformWorkerErrorMessage {
   type: 'error';
   id: string;
