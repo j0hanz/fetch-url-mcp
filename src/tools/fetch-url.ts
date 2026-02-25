@@ -53,7 +53,7 @@ import {
 } from '../tasks/tool-registry.js';
 import type { ExtractedMetadata } from '../transform/types.js';
 
-export interface FetchUrlInput {
+interface FetchUrlInput {
   url: string;
   skipNoiseRemoval?: boolean | undefined;
   forceRefresh?: boolean | undefined;
@@ -323,7 +323,7 @@ function buildResponse(
  * fetch-url tool implementation
  * ------------------------------------------------------------------------------------------------- */
 
-export function getUrlContext(urlStr: string): string {
+function getUrlContext(urlStr: string): string {
   try {
     const u = new URL(urlStr);
     const host = u.hostname.replace(/^www\./, '');
