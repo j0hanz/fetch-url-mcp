@@ -122,22 +122,11 @@ class ToolProgressReporter implements ProgressReporter {
     if (!isIncreasing || this.token === null || !this.sendNotification) return;
     const { sendNotification } = this;
 
-    const notification: ProgressNotification = {
-      method: 'notifications/progress',
-      params: {
-        progressToken: this.token,
-        progress: effectiveProgress,
-        total: FETCH_PROGRESS_TOTAL,
-        message,
-        ...(this.relatedTaskMeta
-          ? {
-              _meta: {
-                'io.modelcontextprotocol/related-task': this.relatedTaskMeta,
-              },
-            }
-          : {}),
-      },
-    };
+    const notification = this.createProgressNotification(
+      this.token,
+      effectiveProgress,
+      message
+    );
 
     this.reportQueue = this.reportQueue.then(async () => {
       let timeoutId: NodeJS.Timeout | undefined;
@@ -169,6 +158,29 @@ class ToolProgressReporter implements ProgressReporter {
     });
 
     await this.reportQueue;
+  }
+
+  private createProgressNotification(
+    token: ProgressToken,
+    progress: number,
+    message: string
+  ): ProgressNotification {
+    return {
+      method: 'notifications/progress',
+      params: {
+        progressToken: token,
+        progress,
+        total: FETCH_PROGRESS_TOTAL,
+        message,
+        ...(this.relatedTaskMeta
+          ? {
+              _meta: {
+                'io.modelcontextprotocol/related-task': this.relatedTaskMeta,
+              },
+            }
+          : {}),
+      },
+    };
   }
 }
 

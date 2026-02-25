@@ -235,6 +235,11 @@ class InMemoryCacheStore {
     return false;
   }
 
+  private evictOldestEntry(): boolean {
+    const firstKey = this.entries.keys().next();
+    return !firstKey.done && this.delete(firstKey.value);
+  }
+
   set(
     cacheKey: string | null,
     content: string,
@@ -262,10 +267,10 @@ class InMemoryCacheStore {
 
     // Evict if needed (size-based)
     while (this.currentBytes + entrySize > this.maxBytes) {
-      const firstKey = this.entries.keys().next();
-      if (firstKey.done) break;
-      if (this.delete(firstKey.value)) {
+      if (this.evictOldestEntry()) {
         listChanged = true;
+      } else {
+        break;
       }
     }
 
@@ -286,11 +291,8 @@ class InMemoryCacheStore {
     this.currentBytes += entrySize;
 
     // Eviction (LRU: first insertion-order key) - Count based
-    if (this.entries.size > this.max) {
-      const firstKey = this.entries.keys().next();
-      if (!firstKey.done && this.delete(firstKey.value)) {
-        listChanged = true;
-      }
+    if (this.entries.size > this.max && this.evictOldestEntry()) {
+      listChanged = true;
     }
 
     this.notify(cacheKey, listChanged);

@@ -116,13 +116,9 @@ function isBashLine(line: string): boolean {
   if (BASH_COMMANDS.has(firstWord)) return true;
 
   // Package Managers
-  let isPkgMgr = false;
-  for (const mgr of BASH_PACKAGE_MANAGERS) {
-    if (firstWord === mgr) {
-      isPkgMgr = true;
-      break;
-    }
-  }
+  const isPkgMgr = BASH_PACKAGE_MANAGERS.includes(
+    firstWord as (typeof BASH_PACKAGE_MANAGERS)[number]
+  );
 
   if (isPkgMgr && spaceIdx !== -1) {
     const rest = trimmed.slice(spaceIdx + 1);

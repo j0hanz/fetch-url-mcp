@@ -79,12 +79,16 @@ export function normalizeIpForBlockList(
   if (!normalizedInput) return null;
 
   const ipType = isIP(normalizedInput);
-  if (ipType === 4) return { ip: normalizedInput, family: 'ipv4' };
-  if (ipType === 6) {
-    const mapped = extractMappedIpv4(normalizedInput);
-    if (mapped) return { ip: mapped, family: 'ipv4' };
-    return { ip: normalizedInput, family: 'ipv6' };
+  switch (ipType) {
+    case 4:
+      return { ip: normalizedInput, family: 'ipv4' };
+    case 6: {
+      const mapped = extractMappedIpv4(normalizedInput);
+      return mapped
+        ? { ip: mapped, family: 'ipv4' }
+        : { ip: normalizedInput, family: 'ipv6' };
+    }
+    default:
+      return null;
   }
-
-  return null;
 }

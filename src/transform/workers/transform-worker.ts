@@ -96,6 +96,20 @@ function resolveHtmlContent(
   return htmlBuffer ? decodeHtmlBuffer(htmlBuffer, encoding) : (html ?? '');
 }
 
+function buildTransformResultMessage(result: {
+  markdown: string;
+  metadata?: unknown;
+  title?: string;
+  truncated: boolean;
+}): Record<string, unknown> {
+  return {
+    markdown: result.markdown,
+    ...(result.metadata ? { metadata: result.metadata } : {}),
+    ...(result.title !== undefined ? { title: result.title } : {}),
+    truncated: result.truncated,
+  };
+}
+
 function handleTransform(msg: Record<string, unknown>): void {
   if (!isValidMessage(msg)) return;
 
@@ -137,19 +151,12 @@ function handleTransform(msg: Record<string, unknown>): void {
     port.postMessage({
       type: 'result',
       id,
-      result:
-        title === undefined
-          ? {
-              markdown,
-              ...(metadata ? { metadata } : {}),
-              truncated,
-            }
-          : {
-              markdown,
-              ...(metadata ? { metadata } : {}),
-              title,
-              truncated,
-            },
+      result: buildTransformResultMessage({
+        markdown,
+        ...(metadata ? { metadata } : {}),
+        ...(title === undefined ? {} : { title }),
+        truncated,
+      }),
     });
   } catch (error: unknown) {
     postError(id, url, error);

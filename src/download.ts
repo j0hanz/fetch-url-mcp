@@ -97,19 +97,24 @@ const DownloadParamsSchema = z.strictObject({
     .max(64),
 });
 
+function writeJsonError(
+  res: ServerResponse,
+  status: number,
+  message: string,
+  code: string
+): void {
+  res.writeHead(status, { 'Content-Type': 'application/json' });
+  res.end(JSON.stringify({ error: message, code }));
+}
+
 export function handleDownload(
   res: ServerResponse,
   namespace: string,
   hash: string
 ): void {
-  const respond = (status: number, msg: string, code: string): void => {
-    res.writeHead(status, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ error: msg, code }));
-  };
-
   const parsed = DownloadParamsSchema.safeParse({ namespace, hash });
   if (!parsed.success) {
-    respond(400, 'Invalid namespace or hash', 'BAD_REQUEST');
+    writeJsonError(res, 400, 'Invalid namespace or hash', 'BAD_REQUEST');
     return;
   }
 
@@ -117,7 +122,7 @@ export function handleDownload(
   const entry = cacheGet(cacheKey, { force: true });
 
   if (!entry) {
-    respond(404, 'Not found or expired', 'NOT_FOUND');
+    writeJsonError(res, 404, 'Not found or expired', 'NOT_FOUND');
     return;
   }
 
@@ -125,7 +130,7 @@ export function handleDownload(
   const content = payload ? resolveCachedPayloadContent(payload) : null;
 
   if (!content) {
-    respond(404, 'Content missing', 'NOT_FOUND');
+    writeJsonError(res, 404, 'Content missing', 'NOT_FOUND');
     return;
   }
 

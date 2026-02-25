@@ -58,13 +58,14 @@ function hasAcceptedMediaType(
   exact: string,
   wildcardPrefix: string
 ): boolean {
-  return mediaTypes.some((mediaType) => {
-    if (!mediaType) return false;
-    if (mediaType === '*/*') return true;
-    if (mediaType === exact) return true;
-    if (mediaType === wildcardPrefix) return true;
-    return false;
-  });
+  return mediaTypes.some(
+    (mediaType) =>
+      typeof mediaType === 'string' &&
+      mediaType.length > 0 &&
+      (mediaType === '*/*' ||
+        mediaType === exact ||
+        mediaType === wildcardPrefix)
+  );
 }
 
 export function acceptsJsonAndEventStream(

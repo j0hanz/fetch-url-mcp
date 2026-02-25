@@ -32,21 +32,13 @@ function assertReadableStreamLike(
   });
 }
 
-function coerceReadableStreamLike(
-  stream: unknown,
-  url: string,
-  stage: string
-): CompatibleReadableStream {
-  assertReadableStreamLike(stream, url, stage);
-  return stream;
-}
-
 export function toNodeReadableStream(
   stream: ReadableStream<Uint8Array>,
   url: string,
   stage: string
 ): NodeReadableStream<Uint8Array> {
-  return coerceReadableStreamLike(stream, url, stage);
+  assertReadableStreamLike(stream, url, stage);
+  return stream;
 }
 
 export function toWebReadableStream(
@@ -55,5 +47,6 @@ export function toWebReadableStream(
   stage: string
 ): ReadableStream<Uint8Array> {
   const converted: unknown = Readable.toWeb(stream);
-  return coerceReadableStreamLike(converted, url, stage);
+  assertReadableStreamLike(converted, url, stage);
+  return converted;
 }

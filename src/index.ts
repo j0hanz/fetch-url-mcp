@@ -56,13 +56,30 @@ function attemptShutdown(signal: string): void {
   void shutdownHandlerRef.current(signal);
 }
 
+function registerOnceSignal(
+  signal: NodeJS.Signals,
+  handler: (signal: string) => void
+): void {
+  process.once(signal, () => {
+    handler(signal);
+  });
+}
+
 function registerHttpSignalHandlers(): void {
-  process.once('SIGINT', () => {
-    if (shouldAttemptShutdown()) attemptShutdown('SIGINT');
-  });
-  process.once('SIGTERM', () => {
-    if (shouldAttemptShutdown()) attemptShutdown('SIGTERM');
-  });
+  const tryShutdown = (signal: string): void => {
+    if (shouldAttemptShutdown()) attemptShutdown(signal);
+  };
+
+  for (const signal of ['SIGINT', 'SIGTERM'] as const) {
+    registerOnceSignal(signal, tryShutdown);
+  }
+}
+
+function writeStartupError(error: Error): void {
+  logError('Failed to start server', error);
+  process.stderr.write(`Failed to start server: ${error.message}\n`);
+  process.exitCode = 1;
+  scheduleForcedExit('Startup failure');
 }
 
 function handleFatalError(label: string, error: Error, signal: string): void {
@@ -100,10 +117,5 @@ try {
     registerHttpSignalHandlers();
   }
 } catch (error: unknown) {
-  const resolvedError = toError(error);
-  logError('Failed to start server', resolvedError);
-  const { message } = resolvedError;
-  process.stderr.write(`Failed to start server: ${message}\n`);
-  process.exitCode = 1;
-  scheduleForcedExit('Startup failure');
+  writeStartupError(toError(error));
 }

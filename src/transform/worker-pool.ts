@@ -457,14 +457,10 @@ class WorkerPool implements TransformWorkerPool {
   private taskIdSeq = 0;
 
   constructor(size: number, timeoutMs: number, spawnWorker: WorkerSpawner) {
-    if (size === 0) {
-      this.capacity = 0;
-    } else {
-      this.capacity = Math.max(
-        this.minCapacity,
-        Math.min(size, this.maxCapacity)
-      );
-    }
+    this.capacity =
+      size === 0
+        ? 0
+        : Math.max(this.minCapacity, Math.min(size, this.maxCapacity));
     this.timeoutMs = timeoutMs;
     this.queueMax = this.maxCapacity * 32;
     this.spawnWorkerImpl = spawnWorker;

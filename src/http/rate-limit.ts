@@ -70,6 +70,25 @@ class RateLimiter implements RateLimitManagerImpl {
     }
   }
 
+  private resetEntry(entry: RateLimitEntry, now: number): void {
+    entry.count = 1;
+    entry.resetTime = now + this.options.windowMs;
+    entry.lastAccessed = now;
+  }
+
+  private incrementEntry(entry: RateLimitEntry, now: number): void {
+    entry.count += 1;
+    entry.lastAccessed = now;
+  }
+
+  private createEntry(now: number): RateLimitEntry {
+    return {
+      count: 1,
+      resetTime: now + this.options.windowMs,
+      lastAccessed: now,
+    };
+  }
+
   check(ctx: RequestContext): boolean {
     if (!this.options.enabled || ctx.method === 'OPTIONS') return true;
 
@@ -80,19 +99,12 @@ class RateLimiter implements RateLimitManagerImpl {
 
     if (entry) {
       if (now > entry.resetTime) {
-        entry.count = 1;
-        entry.resetTime = now + this.options.windowMs;
-        entry.lastAccessed = now;
+        this.resetEntry(entry, now);
       } else {
-        entry.count += 1;
-        entry.lastAccessed = now;
+        this.incrementEntry(entry, now);
       }
     } else {
-      entry = {
-        count: 1,
-        resetTime: now + this.options.windowMs,
-        lastAccessed: now,
-      };
+      entry = this.createEntry(now);
       this.store.set(key, entry);
     }
 

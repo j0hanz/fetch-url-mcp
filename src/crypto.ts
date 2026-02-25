@@ -39,6 +39,16 @@ function padBuffer(buffer: Buffer, length: number): Buffer {
   return padded;
 }
 
+function equalWithPadding(
+  aBuffer: Buffer,
+  bBuffer: Buffer,
+  paddedLength: number
+): boolean {
+  const paddedA = padBuffer(aBuffer, paddedLength);
+  const paddedB = padBuffer(bBuffer, paddedLength);
+  return timingSafeEqual(paddedA, paddedB) && aBuffer.length === bBuffer.length;
+}
+
 export function timingSafeEqualUtf8(a: string, b: string): boolean {
   const aBuffer = Buffer.from(a, 'utf8');
   const bBuffer = Buffer.from(b, 'utf8');
@@ -48,10 +58,7 @@ export function timingSafeEqualUtf8(a: string, b: string): boolean {
 
   // Avoid early return timing differences on length mismatch.
   const maxLength = Math.max(aBuffer.length, bBuffer.length);
-  const paddedA = padBuffer(aBuffer, maxLength);
-  const paddedB = padBuffer(bBuffer, maxLength);
-
-  return timingSafeEqual(paddedA, paddedB) && aBuffer.length === bBuffer.length;
+  return equalWithPadding(aBuffer, bBuffer, maxLength);
 }
 
 function hashHex(

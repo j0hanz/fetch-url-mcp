@@ -268,7 +268,8 @@ class InMemorySessionStore implements SessionStore {
   }
 
   decrementInFlight(): void {
-    this.inflight = Math.max(0, this.inflight - 1);
+    if (this.inflight === 0) return;
+    this.inflight -= 1;
   }
 
   clear(): SessionEntry[] {

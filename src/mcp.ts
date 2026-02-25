@@ -119,6 +119,17 @@ function parseExtendedCallToolRequest(
   throw new McpError(ErrorCode.InvalidParams, 'Invalid tool request');
 }
 
+function resolveOwnerScopedExtra(extra: unknown): {
+  parsedExtra: ReturnType<typeof parseHandlerExtra>;
+  ownerKey: string;
+} {
+  const parsedExtra = parseHandlerExtra(extra);
+  return {
+    parsedExtra,
+    ownerKey: resolveTaskOwnerKey(parsedExtra),
+  };
+}
+
 /* -------------------------------------------------------------------------------------------------
  * Register handlers
  * ------------------------------------------------------------------------------------------------- */
@@ -152,8 +163,7 @@ export function registerTaskHandlers(server: McpServer): void {
 
   server.server.setRequestHandler(TaskGetSchema, async (request, extra) => {
     const { taskId } = request.params;
-    const parsedExtra = parseHandlerExtra(extra);
-    const ownerKey = resolveTaskOwnerKey(parsedExtra);
+    const { ownerKey } = resolveOwnerScopedExtra(extra);
     const task = taskManager.getTask(taskId, ownerKey);
 
     if (!task) throwTaskNotFound();
@@ -163,8 +173,7 @@ export function registerTaskHandlers(server: McpServer): void {
 
   server.server.setRequestHandler(TaskResultSchema, async (request, extra) => {
     const { taskId } = request.params;
-    const parsedExtra = parseHandlerExtra(extra);
-    const ownerKey = resolveTaskOwnerKey(parsedExtra);
+    const { parsedExtra, ownerKey } = resolveOwnerScopedExtra(extra);
 
     const task = await taskManager.waitForTerminalTask(
       taskId,
@@ -211,8 +220,7 @@ export function registerTaskHandlers(server: McpServer): void {
   });
 
   server.server.setRequestHandler(TaskListSchema, async (request, extra) => {
-    const parsedExtra = parseHandlerExtra(extra);
-    const ownerKey = resolveTaskOwnerKey(parsedExtra);
+    const { ownerKey } = resolveOwnerScopedExtra(extra);
     const cursor = request.params?.cursor;
 
     const { tasks, nextCursor } = taskManager.listTasks(
@@ -227,8 +235,7 @@ export function registerTaskHandlers(server: McpServer): void {
 
   server.server.setRequestHandler(TaskCancelSchema, async (request, extra) => {
     const { taskId } = request.params;
-    const parsedExtra = parseHandlerExtra(extra);
-    const ownerKey = resolveTaskOwnerKey(parsedExtra);
+    const { ownerKey } = resolveOwnerScopedExtra(extra);
 
     const task = taskManager.cancelTask(taskId, ownerKey);
     if (!task) throwTaskNotFound();

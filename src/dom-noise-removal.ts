@@ -191,9 +191,8 @@ function getPromoMatchers(
 
 function getContext(): NoiseContext {
   const currentConfig = config.noiseRemoval;
-  if (cachedContext && lastConfigRef === currentConfig) {
+  if (cachedContext !== undefined && lastConfigRef === currentConfig)
     return cachedContext;
-  }
 
   const enabled = new Set(
     currentConfig.enabledCategories

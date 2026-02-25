@@ -43,7 +43,6 @@ function toErrorMessage(error: unknown): string {
 
 type ParsedValues = ReturnType<typeof parseArgs>['values'];
 type CliFlagKey = keyof CliValues;
-const cliFlagKeys: readonly CliFlagKey[] = ['stdio', 'help', 'version'];
 
 function toBoolean(value: ParsedValues[keyof ParsedValues]): boolean {
   return value === true;
@@ -54,14 +53,10 @@ function readCliFlag(values: ParsedValues, key: CliFlagKey): boolean {
 }
 
 function buildCliValues(values: ParsedValues): CliValues {
-  const flags = Object.fromEntries(
-    cliFlagKeys.map((key) => [key, readCliFlag(values, key)])
-  ) as Record<CliFlagKey, boolean>;
-
   return {
-    stdio: flags.stdio,
-    help: flags.help,
-    version: flags.version,
+    stdio: readCliFlag(values, 'stdio'),
+    help: readCliFlag(values, 'help'),
+    version: readCliFlag(values, 'version'),
   };
 }
 

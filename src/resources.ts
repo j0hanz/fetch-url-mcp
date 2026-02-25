@@ -229,13 +229,22 @@ function normalizeSubscriptionUri(uri: string): string {
 function registerCacheResourceNotifications(server: McpServer): void {
   const subscribedResourceUris = new Set<string>();
 
+  const setSubscription = (uri: string, subscribed: boolean): void => {
+    const normalized = normalizeSubscriptionUri(uri);
+    if (subscribed) {
+      subscribedResourceUris.add(normalized);
+    } else {
+      subscribedResourceUris.delete(normalized);
+    }
+  };
+
   server.server.setRequestHandler(SubscribeRequestSchema, async (request) => {
-    subscribedResourceUris.add(normalizeSubscriptionUri(request.params.uri));
+    setSubscription(request.params.uri, true);
     return Promise.resolve({});
   });
 
   server.server.setRequestHandler(UnsubscribeRequestSchema, async (request) => {
-    subscribedResourceUris.delete(normalizeSubscriptionUri(request.params.uri));
+    setSubscription(request.params.uri, false);
     return Promise.resolve({});
   });
 

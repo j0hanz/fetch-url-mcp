@@ -70,7 +70,8 @@ function getRequestContext(): RequestContext | undefined {
 }
 
 export function getRequestId(): string | undefined {
-  return getRequestContext()?.requestId;
+  const context = getRequestContext();
+  return context?.requestId;
 }
 
 function getSessionId(): string | undefined {

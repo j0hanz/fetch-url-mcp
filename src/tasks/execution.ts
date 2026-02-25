@@ -369,16 +369,12 @@ async function handleDirectToolCall(
 ): Promise<ServerResult> {
   const args = requireFetchUrlArgs(params.arguments);
 
-  const extra = {
-    ...(context.signal ? { signal: context.signal } : {}),
-    ...(context.requestId !== undefined
-      ? { requestId: context.requestId }
-      : {}),
-    ...(context.sendNotification
-      ? { sendNotification: context.sendNotification }
-      : {}),
-    ...(params._meta ? { _meta: params._meta } : {}),
-  };
+  const extra = compact({
+    signal: context.signal,
+    requestId: context.requestId,
+    sendNotification: context.sendNotification,
+    _meta: params._meta,
+  });
 
   return fetchUrlToolHandler(args, extra);
 }

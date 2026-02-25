@@ -8,10 +8,9 @@ export function isError(value: unknown): value is Error {
   const { isError: isErrorFn } = Error as {
     isError?: (err: unknown) => boolean;
   };
-  if (typeof isErrorFn === 'function') {
-    return isErrorFn(value);
-  }
-  return value instanceof Error;
+  return typeof isErrorFn === 'function'
+    ? isErrorFn(value)
+    : value instanceof Error;
 }
 
 interface LikeNode {

@@ -326,11 +326,7 @@ class TaskManager {
       page.pop();
     }
 
-    const lastTask = page.at(-1);
-    const nextCursor =
-      hasMore && lastTask !== undefined
-        ? this.encodeCursor(lastTask.taskId)
-        : undefined;
+    const nextCursor = this.resolveNextCursor(page, hasMore);
 
     return nextCursor ? { tasks: page, nextCursor } : { tasks: page };
   }
@@ -493,6 +489,15 @@ class TaskManager {
     } catch {
       return null;
     }
+  }
+
+  private resolveNextCursor(
+    page: TaskState[],
+    hasMore: boolean
+  ): string | undefined {
+    if (!hasMore) return undefined;
+    const lastTask = page.at(-1);
+    return lastTask ? this.encodeCursor(lastTask.taskId) : undefined;
   }
 }
 

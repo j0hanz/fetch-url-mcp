@@ -39,7 +39,7 @@ function isNonEmptyString(value: unknown): value is string {
 function isErrorWithMessage(error: unknown): error is { message: string } {
   if (!isObject(error)) return false;
   const { message } = error;
-  return isNonEmptyString(message);
+  return typeof message === 'string' && message.length > 0;
 }
 
 function formatUnknownError(error: unknown): string {

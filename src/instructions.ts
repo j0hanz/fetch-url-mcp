@@ -2,6 +2,10 @@ import { config } from './config.js';
 import { FETCH_URL_TOOL_NAME } from './tools.js';
 
 export function buildServerInstructions(): string {
+  const maxHtmlSizeMb = config.constants.maxHtmlSize / 1024 / 1024;
+  const cacheSizeMb = config.cache.maxSizeBytes / 1024 / 1024;
+  const cacheTtlHours = config.cache.ttl / 3600;
+
   return `<role>Web Content Extractor</role>
 <task>Fetch public webpages and convert HTML to clean Markdown.</task>
 
@@ -20,8 +24,8 @@ export function buildServerInstructions(): string {
 
 <constraints>
 - Blocked: localhost, private IPs (10.x, 172.16-31.x, 192.168.x), metadata endpoints (169.254.169.254), .local/.internal.
-- Limits: Max HTML ${config.constants.maxHtmlSize / 1024 / 1024}MB. Max ${config.fetcher.maxRedirects} redirects.
-- Cache: ${config.cache.maxKeys} entries, ${config.cache.maxSizeBytes / 1024 / 1024}MB, ${config.cache.ttl / 3600}h TTL.
+- Limits: Max HTML ${maxHtmlSizeMb}MB. Max ${config.fetcher.maxRedirects} redirects.
+- Cache: ${config.cache.maxKeys} entries, ${cacheSizeMb}MB, ${cacheTtlHours}h TTL.
 - No JS: Client-side rendered pages may be incomplete.
 - Binary: Not supported.
 </constraints>

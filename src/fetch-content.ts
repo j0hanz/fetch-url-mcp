@@ -18,12 +18,13 @@ export function getCharsetFromContentType(
 }
 
 function createDecoder(encoding: string | undefined): TextDecoder {
-  if (!encoding) return new TextDecoder(UTF8_ENCODING);
+  const fallback = (): TextDecoder => new TextDecoder(UTF8_ENCODING);
+  if (!encoding) return fallback();
 
   try {
     return new TextDecoder(encoding);
   } catch {
-    return new TextDecoder(UTF8_ENCODING);
+    return fallback();
   }
 }
 

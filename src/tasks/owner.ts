@@ -105,16 +105,12 @@ export function resolveTaskOwnerKey(extra?: HandlerExtra): string {
 }
 
 export function resolveToolCallContext(extra?: HandlerExtra): ToolCallContext {
-  const context: ToolCallContext = {
+  return compact({
     ownerKey: resolveTaskOwnerKey(extra),
-  };
-
-  if (extra?.signal) context.signal = extra.signal;
-  if (extra?.requestId !== undefined) context.requestId = extra.requestId;
-  if (extra?.sendNotification)
-    context.sendNotification = extra.sendNotification;
-
-  return context;
+    signal: extra?.signal,
+    requestId: extra?.requestId,
+    sendNotification: extra?.sendNotification,
+  }) as ToolCallContext;
 }
 
 export function isServerResult(value: unknown): value is ServerResult {

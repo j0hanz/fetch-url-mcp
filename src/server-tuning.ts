@@ -56,7 +56,7 @@ export function applyHttpServerTuning(server: HttpServerTuningTarget): void {
       let lastLoggedAt = 0;
       let droppedSinceLastLog = 0;
 
-      server.on('drop', (data: unknown) => {
+      const onDrop = (data: unknown): void => {
         droppedSinceLastLog += 1;
         const now = Date.now();
         if (now - lastLoggedAt < DROP_LOG_INTERVAL_MS) return;
@@ -69,7 +69,9 @@ export function applyHttpServerTuning(server: HttpServerTuningTarget): void {
 
         lastLoggedAt = now;
         droppedSinceLastLog = 0;
-      });
+      };
+
+      server.on('drop', onDrop);
     }
   }
 }

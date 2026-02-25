@@ -91,8 +91,11 @@ function isBlank(line: string | undefined): boolean {
 
 function hasFollowingContent(lines: string[], startIndex: number): boolean {
   // Optimization: Bound lookahead to avoid checking too many lines in huge files
-  const max = Math.min(lines.length, startIndex + 50);
-  for (let i = startIndex + 1; i < max; i++) {
+  for (
+    let i = startIndex + 1;
+    i < Math.min(lines.length, startIndex + 50);
+    i++
+  ) {
     if (!isBlank(lines[i])) return true;
   }
   return false;

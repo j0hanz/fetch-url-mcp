@@ -100,8 +100,9 @@ class IpBlocker {
     if (this.security.blockedHosts.has(normalized)) return true;
 
     const normalizedIp = normalizeIpForBlockList(normalized);
-    if (!normalizedIp) return false;
-    return this.blockList.check(normalizedIp.ip, normalizedIp.family);
+    return normalizedIp
+      ? this.blockList.check(normalizedIp.ip, normalizedIp.family)
+      : false;
   }
 }
 

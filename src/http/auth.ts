@@ -75,6 +75,11 @@ function isWildcardHost(host: string): boolean {
   return WILDCARD_HOSTS.has(host);
 }
 
+function addNormalizedHost(target: Set<string>, value: string): void {
+  const normalized = normalizeHost(value);
+  if (normalized) target.add(normalized);
+}
+
 function buildAllowedHosts(): ReadonlySet<string> {
   const allowed = new Set<string>(LOOPBACK_HOSTS);
 
@@ -84,8 +89,7 @@ function buildAllowedHosts(): ReadonlySet<string> {
   }
 
   for (const host of config.security.allowedHosts) {
-    const normalized = normalizeHost(host);
-    if (normalized) allowed.add(normalized);
+    addNormalizedHost(allowed, host);
   }
 
   return allowed;

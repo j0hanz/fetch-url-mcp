@@ -149,7 +149,7 @@ class StageTracker {
     stage: string,
     budget?: StageBudget
   ): TransformStageContext | null {
-    if (!this.channel.hasSubscribers && !budget) return null;
+    if (this.shouldSkipTracking(budget)) return null;
 
     const remainingBudgetMs = budget
       ? budget.totalBudgetMs - budget.elapsedMs
@@ -213,7 +213,7 @@ class StageTracker {
   }
 
   run<T>(url: string, stage: string, fn: () => T, budget?: StageBudget): T {
-    if (!this.channel.hasSubscribers && !budget) {
+    if (this.shouldSkipTracking(budget)) {
       return fn();
     }
 
@@ -239,12 +239,20 @@ class StageTracker {
     stage: string,
     fn: () => Promise<T>
   ): Promise<T> {
+    if (this.shouldSkipTracking()) {
+      return fn();
+    }
+
     const ctx = this.start(url, stage);
     try {
       return await fn();
     } finally {
       this.end(ctx);
     }
+  }
+
+  private shouldSkipTracking(budget?: StageBudget): boolean {
+    return !this.channel.hasSubscribers && !budget;
   }
 
   private publish(event: TransformStageEvent): void {

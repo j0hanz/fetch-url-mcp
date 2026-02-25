@@ -43,11 +43,17 @@ function isValidationError(error: unknown): error is NodeJS.ErrnoException {
   );
 }
 
+function isHandledToolError(
+  error: unknown
+): error is FetchError | NodeJS.ErrnoException {
+  return error instanceof FetchError || isValidationError(error);
+}
+
 function resolveToolErrorMessage(
   error: unknown,
   fallbackMessage: string
 ): string {
-  if (isValidationError(error) || error instanceof FetchError) {
+  if (isHandledToolError(error)) {
     return error.message;
   }
   if (error instanceof Error) {
@@ -57,8 +63,8 @@ function resolveToolErrorMessage(
 }
 
 function resolveToolErrorCode(error: unknown): string {
-  if (isValidationError(error)) return 'VALIDATION_ERROR';
   if (error instanceof FetchError) return error.code;
+  if (isValidationError(error)) return 'VALIDATION_ERROR';
   if (error instanceof Error && error.name === 'AbortError') return 'ABORTED';
   return 'FETCH_ERROR';
 }

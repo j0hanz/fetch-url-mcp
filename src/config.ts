@@ -170,8 +170,7 @@ function parseOptionalInteger(
   min?: number,
   max?: number
 ): number | undefined {
-  const parsed = parseIntegerValue(envValue, min, max);
-  return parsed ?? undefined;
+  return parseIntegerValue(envValue, min, max) ?? undefined;
 }
 
 function parseInteger(

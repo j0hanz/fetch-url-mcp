@@ -447,7 +447,8 @@ export async function executeFetchPipeline<T>(
       resolvedUrl.normalizedUrl,
       withSignal(options.signal)
     );
-  const transformUrl = finalUrl || resolvedUrl.normalizedUrl;
+  const resolvedFinalUrl = finalUrl || resolvedUrl.normalizedUrl;
+  const transformUrl = resolvedFinalUrl;
   const data = await options.transform(
     { buffer, encoding, ...(truncated ? { truncated: true } : {}) },
     transformUrl
@@ -458,7 +459,7 @@ export async function executeFetchPipeline<T>(
       cacheKey,
       data,
       serialize: options.serialize,
-      normalizedUrl: finalUrl || resolvedUrl.normalizedUrl,
+      normalizedUrl: resolvedFinalUrl,
       cacheNamespace: options.cacheNamespace,
     });
 

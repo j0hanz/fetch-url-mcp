@@ -9,15 +9,16 @@ interface IconInfo {
 function buildOptionalPromptIcons(
   iconInfo?: IconInfo
 ): { icons: IconInfo[] } | Record<string, never> {
-  if (!iconInfo) return {};
-  return {
-    icons: [
-      {
-        src: iconInfo.src,
-        mimeType: iconInfo.mimeType,
-      },
-    ],
-  };
+  return iconInfo
+    ? {
+        icons: [
+          {
+            src: iconInfo.src,
+            mimeType: iconInfo.mimeType,
+          },
+        ],
+      }
+    : {};
 }
 
 export function registerGetHelpPrompt(

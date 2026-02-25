@@ -11,14 +11,6 @@ function getSortedObjectKeys(obj: object): string[] {
   return Object.keys(obj).sort(compareObjectKeys);
 }
 
-function processChildValue(
-  value: unknown,
-  depth: number,
-  seen: WeakSet<object>
-): unknown {
-  return processValue(value, depth + 1, seen);
-}
-
 function processValue(
   obj: unknown,
   depth: number,
@@ -41,7 +33,7 @@ function processValue(
 
   try {
     if (Array.isArray(obj)) {
-      return obj.map((item) => processChildValue(item, depth, seen));
+      return obj.map((item) => processValue(item, depth + 1, seen));
     }
 
     const keys = getSortedObjectKeys(obj);
@@ -49,7 +41,7 @@ function processValue(
     const sortedObj: Record<string, unknown> = {};
 
     for (const key of keys) {
-      sortedObj[key] = processChildValue(record[key], depth, seen);
+      sortedObj[key] = processValue(record[key], depth + 1, seen);
     }
 
     return sortedObj;

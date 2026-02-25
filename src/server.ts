@@ -215,12 +215,11 @@ function createShutdownHandler(server: McpServer): (signal: string) => void {
 }
 
 function registerSignalHandlers(handler: (signal: string) => void): void {
-  process.once('SIGINT', () => {
-    handler('SIGINT');
-  });
-  process.once('SIGTERM', () => {
-    handler('SIGTERM');
-  });
+  for (const signal of ['SIGINT', 'SIGTERM'] as const) {
+    process.once(signal, () => {
+      handler(signal);
+    });
+  }
 }
 
 async function connectStdioServer(

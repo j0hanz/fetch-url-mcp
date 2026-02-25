@@ -11,10 +11,6 @@ function isAbortError(error: unknown): boolean {
   return isError(error) && error.name === 'AbortError';
 }
 
-function createPendingPromise<T>(): Promise<T> {
-  return new Promise<T>(() => {});
-}
-
 function createAbortSafeTimeoutPromise<T>(
   timeoutMs: number,
   value: T,
@@ -25,7 +21,7 @@ function createAbortSafeTimeoutPromise<T>(
     signal,
   }).catch((err: unknown) => {
     if (isAbortError(err)) {
-      return createPendingPromise<T>();
+      return new Promise<T>(() => {});
     }
     throw err;
   });

@@ -100,8 +100,7 @@ export function getHeaderValue(
 ): string | null {
   const val = req.headers[name];
   if (!val) return null;
-  if (Array.isArray(val)) return val[0] ?? null;
-  return val;
+  return Array.isArray(val) ? (val[0] ?? null) : val;
 }
 
 export function getMcpSessionId(req: IncomingMessage): string | null {

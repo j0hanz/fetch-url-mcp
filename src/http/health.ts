@@ -197,16 +197,6 @@ function isVerboseHealthRoute(ctx: RequestContext): boolean {
   return isGetHealthRoute(ctx) && isVerboseHealthRequest(ctx);
 }
 
-function shouldAllowHealthWithoutAuth(ctx: RequestContext): boolean {
-  return isGetHealthRoute(ctx) && !isVerboseHealthRequest(ctx);
-}
-
-function shouldAllowVerboseHealthWithoutAuth(ctx: RequestContext): boolean {
-  if (!isVerboseHealthRoute(ctx)) return false;
-  // Local-only deployments can expose verbose diagnostics without auth.
-  return !config.security.allowRemote;
-}
-
 function isHealthRoute(ctx: RequestContext): boolean {
   return isGetHealthRoute(ctx);
 }
@@ -216,10 +206,11 @@ function ensureHealthAuthIfNeeded(
   authPresent: boolean
 ): boolean {
   if (!isHealthRoute(ctx)) return true;
-  if (shouldAllowHealthWithoutAuth(ctx)) return true;
-  if (shouldAllowVerboseHealthWithoutAuth(ctx)) return true;
+  const isVerbose = isVerboseHealthRequest(ctx);
+
+  if (!isVerbose) return true;
+  if (!config.security.allowRemote) return true;
   if (authPresent) return true;
-  if (!isVerboseHealthRequest(ctx)) return true;
 
   sendJson(ctx.res, 401, {
     error: 'Authentication required for verbose health metrics',

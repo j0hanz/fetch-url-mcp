@@ -8,14 +8,14 @@ export function normalizeHost(value: string): string | null {
   const first = takeFirstHostValue(trimmedLower);
   if (!first) return null;
 
-  const normalizedSocketAddress = normalizeSocketAddress(first);
-  if (normalizedSocketAddress) return normalizedSocketAddress;
-
-  const parsed = parseHostWithUrl(first);
-  if (parsed) return parsed;
-
-  const normalizedBracketedIpv6 = normalizeBracketedIpv6(first);
-  if (normalizedBracketedIpv6) return normalizedBracketedIpv6;
+  for (const resolveCandidate of [
+    () => normalizeSocketAddress(first),
+    () => parseHostWithUrl(first),
+    () => normalizeBracketedIpv6(first),
+  ]) {
+    const candidate = resolveCandidate();
+    if (candidate !== null) return candidate;
+  }
 
   if (isIpV6Literal(first)) {
     return normalizeHostname(first);

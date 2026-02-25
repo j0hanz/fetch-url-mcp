@@ -111,10 +111,11 @@ function resolveRequestedProtocolVersion(body: unknown): string {
 
   const normalized = value.trim();
   if (normalized.length === 0) return DEFAULT_MCP_PROTOCOL_VERSION;
+  if (!SUPPORTED_MCP_PROTOCOL_VERSIONS.has(normalized)) {
+    return DEFAULT_MCP_PROTOCOL_VERSION;
+  }
 
-  return SUPPORTED_MCP_PROTOCOL_VERSIONS.has(normalized)
-    ? normalized
-    : DEFAULT_MCP_PROTOCOL_VERSION;
+  return normalized;
 }
 
 function isInitializedNotification(method: string): boolean {

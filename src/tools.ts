@@ -491,6 +491,11 @@ async function fetchPipeline(
   pipeline: PipelineResult<MarkdownPipelineResult>;
   inlineResult: InlineContentResult;
 }> {
+  const reportProgress = (step: number, message: string): void => {
+    if (!progress) return;
+    void progress.report(step, message);
+  };
+
   return performSharedFetch({
     url,
     ...withSignal(signal),
@@ -498,13 +503,8 @@ async function fetchPipeline(
     ...(forceRefresh ? { forceRefresh: true } : {}),
     ...(maxInlineChars !== undefined ? { maxInlineChars } : {}),
     transform: async ({ buffer, encoding, truncated }, normalizedUrl) => {
-      if (progress) {
-        const contextStr = getUrlContext(url);
-        void progress.report(
-          2,
-          `fetch-url: ${contextStr} [converting to Markdown]`
-        );
-      }
+      const contextStr = getUrlContext(url);
+      reportProgress(2, `fetch-url: ${contextStr} [converting to Markdown]`);
       return markdownTransform(
         { buffer, encoding, ...(truncated ? { truncated } : {}) },
         normalizedUrl,
