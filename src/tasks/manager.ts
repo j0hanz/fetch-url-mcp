@@ -379,6 +379,7 @@ class TaskManager {
     const deadlineMs = task._createdAtMs + task.ttl;
 
     return new Promise((resolve, reject) => {
+      // Bind resolve/reject to the AsyncLocalStorage context of the caller, so that any context values (e.g. requestId) are preserved when we later call them from a different tick.
       const resolveInContext = AsyncLocalStorage.bind(
         (value: TaskState | undefined): void => {
           resolve(value);
@@ -484,6 +485,8 @@ class TaskManager {
   }
 
   private encodeCursor(taskId: string): string {
+    // Base64url-encode the taskId to produce a compact opaque cursor string.
+    // The taskId is a UUID, which is 36 ASCII chars, so the resulting cursor will be 48 chars (36 * 4/3) plus padding if any.
     return Buffer.from(taskId, 'utf8').toString('base64url');
   }
 

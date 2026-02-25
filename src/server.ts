@@ -161,9 +161,9 @@ function registerLoggingSetLevelHandler(server: McpServer): void {
     })
     .loose();
 
-  server.server.setRequestHandler(SetLevelRequestSchema, async (request) => {
+  server.server.setRequestHandler(SetLevelRequestSchema, (request) => {
     setLogLevel(request.params.level);
-    return Promise.resolve({});
+    return {};
   });
 }
 

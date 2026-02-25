@@ -6,6 +6,7 @@ import {
 } from '@modelcontextprotocol/sdk/types.js';
 
 import { config } from '../config.js';
+import { RESOURCE_NOT_FOUND_ERROR_CODE } from '../errors.js';
 import { logWarn, runWithRequestContext } from '../observability.js';
 import type { ToolHandlerExtra } from '../tool-progress.js';
 import {
@@ -67,6 +68,9 @@ const taskAbortControllers = new Map<string, AbortController>();
 function attachAbortController(taskId: string): AbortController {
   const existing = taskAbortControllers.get(taskId);
   if (existing) {
+    // Abort the previous controller before replacing it — avoids stranding
+    // a running fetch that can no longer be cancelled via abortTaskExecution().
+    existing.abort();
     taskAbortControllers.delete(taskId);
   }
   const controller = new AbortController();
@@ -218,9 +222,6 @@ const TASK_CAPABLE_TOOLS = new Map<string, TaskCapableToolDescriptor>([
   ],
 ]);
 
-// -32002 is the MCP extension code for resource-not-found; the SDK ErrorCode enum does not export it.
-const RESOURCE_NOT_FOUND_ERROR_CODE = -32002;
-
 export function throwTaskNotFound(): never {
   throw new McpError(RESOURCE_NOT_FOUND_ERROR_CODE, 'Task not found');
 }
@@ -229,6 +230,14 @@ function resolveTaskCapableTool(name: string): TaskCapableToolDescriptor {
   const descriptor = TASK_CAPABLE_TOOLS.get(name);
   if (descriptor) return descriptor;
   throw new McpError(ErrorCode.MethodNotFound, `Unknown tool: '${name}'`);
+}
+
+// Validates that the tool name is recognized before we attempt to execute it.
+// This ensures that an unknown tool produces a MethodNotFound error, rather than potentially executing and failing with an internal error if the tool handler does not properly validate its input.
+function assertKnownTool(name: string): void {
+  if (!TASK_CAPABLE_TOOLS.has(name)) {
+    throw new McpError(ErrorCode.MethodNotFound, `Unknown tool: '${name}'`);
+  }
 }
 
 /* -------------------------------------------------------------------------------------------------
@@ -310,10 +319,7 @@ async function runFetchTaskExecution(params: {
           },
         });
 
-        const isToolError =
-          isObject(result) &&
-          typeof result['isError'] === 'boolean' &&
-          result['isError'];
+        const isToolError = isObject(result) && result['isError'] === true;
 
         taskManager.updateTask(taskId, {
           status: isToolError ? 'failed' : 'completed',
@@ -409,13 +415,13 @@ export async function handleToolCallRequest(
 ): Promise<ServerResult> {
   const { params } = request;
 
+  // Validate the tool name first so an unknown tool always produces MethodNotFound,
+  // regardless of whether a task:{} param was supplied (H-4).
+  assertKnownTool(params.name);
+
   if (params.task) {
     return handleTaskToolCall(server, params, context);
   }
 
-  if (TASK_CAPABLE_TOOLS.has(params.name)) {
-    return handleDirectToolCall(params, context);
-  }
-
-  throw new McpError(ErrorCode.MethodNotFound, `Unknown tool: ${params.name}`);
+  return handleDirectToolCall(params, context);
 }

@@ -626,6 +626,13 @@ function applyRegisteredToolExecutionMetadata(
   registeredTool.execution = execution;
 }
 
+/**
+ * Stdio-path guard: ensures a request context (requestId, sessionId) is set
+ * in AsyncLocalStorage before invoking the handler. On the HTTP path the SDK
+ * populates `extra.requestId`/`extra.requestInfo`, so this is a no-op there.
+ * On the stdio path there is no SDK-provided context, so we derive one from
+ * the extra fields or generate a fresh UUID.
+ */
 export function withRequestContextIfMissing<TParams, TResult, TExtra = unknown>(
   handler: (params: TParams, extra?: TExtra) => Promise<TResult>
 ): (params: TParams, extra?: TExtra) => Promise<TResult> {

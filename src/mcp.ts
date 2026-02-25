@@ -216,6 +216,14 @@ export function registerTaskHandlers(server: McpServer): void {
       });
     }
 
+    if (task.status === 'input_required') {
+      throw new McpError(
+        ErrorCode.InvalidRequest,
+        'Task requires additional input',
+        { taskId: task.taskId, status: 'input_required' }
+      );
+    }
+
     const result: ServerResult = isServerResult(task.result)
       ? task.result
       : { content: [] };

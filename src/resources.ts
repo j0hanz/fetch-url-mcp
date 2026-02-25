@@ -19,6 +19,7 @@ import {
   parseCacheKey,
   resolveCachedPayloadContent,
 } from './cache.js';
+import { RESOURCE_NOT_FOUND_ERROR_CODE } from './errors.js';
 import { logWarn } from './observability.js';
 import { isObject } from './type-guards.js';
 
@@ -42,9 +43,6 @@ const CACHE_RESOURCE_TEMPLATE_URI = 'internal://cache/{namespace}/{hash}';
 const CACHE_RESOURCE_PREFIX = 'internal://cache/';
 const CACHE_NAMESPACE_PATTERN = /^[a-z0-9_-]{1,64}$/i;
 const CACHE_HASH_PATTERN = /^[a-f0-9.]{8,64}$/i;
-// -32002 is the MCP extension code for resource-not-found. The SDK ErrorCode enum
-// does not export this value, so it is defined locally.
-const RESOURCE_NOT_FOUND_ERROR_CODE = -32002;
 const MAX_COMPLETION_VALUES = 100;
 type CleanupCallback = () => void;
 const patchedCleanupServers = new WeakSet<McpServer>();
@@ -59,6 +57,9 @@ function getServerCleanupCallbackSet(server: McpServer): Set<CleanupCallback> {
   return callbacks;
 }
 
+// Safety: drainServerCleanupCallbacks is idempotent against double-fire.
+// callbacks.clear() runs before iteration so a second call (e.g. from both
+// server.close and server.server.onclose firing) always sees an empty Set.
 function drainServerCleanupCallbacks(server: McpServer): void {
   const callbacks = serverCleanupCallbacks.get(server);
   if (!callbacks || callbacks.size === 0) return;
@@ -283,6 +284,9 @@ function normalizeSubscriptionUri(uri: string): string {
   return parsedUri.href;
 }
 
+// Must only be called once per server instance; duplicate calls would register
+// redundant Subscribe/Unsubscribe handlers and create a second onCacheUpdate
+// listener, causing duplicate notifications.
 function registerCacheResourceNotifications(server: McpServer): void {
   const subscribedResourceUris = new Set<string>();
 

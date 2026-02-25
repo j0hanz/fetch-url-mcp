@@ -72,3 +72,5 @@ export function isSystemError(error: unknown): error is NodeJS.ErrnoException {
   const { code } = error as { code?: unknown };
   return typeof code === 'string';
 }
+
+export const RESOURCE_NOT_FOUND_ERROR_CODE = -32002;
