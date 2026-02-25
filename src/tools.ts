@@ -575,7 +575,7 @@ const TOOL_DEFINITION = {
   title: 'Fetch URL',
   description: FETCH_URL_TOOL_DESCRIPTION,
   inputSchema: fetchUrlInputSchema,
-  outputSchema: fetchUrlOutputSchema,
+  outputSchema: z.toJSONSchema(fetchUrlOutputSchema),
   handler: fetchUrlToolHandler,
   execution: {
     taskSupport: 'optional',
@@ -591,7 +591,7 @@ const TOOL_DEFINITION = {
   title: string;
   description: string;
   inputSchema: typeof fetchUrlInputSchema;
-  outputSchema: typeof fetchUrlOutputSchema;
+  outputSchema: Record<string, unknown>;
   execution: { taskSupport: 'optional' | 'required' | 'forbidden' };
   annotations: ToolAnnotations;
   handler: FetchUrlToolHandler;
