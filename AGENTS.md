@@ -17,20 +17,12 @@ Fetch public web pages and convert them into clean, AI-readable Markdown.
 ## Safety Boundaries
 
 - **Always**: `npm run lint`, `npm run type-check`, `npm run test`
-- **Ask First**: `installing dependencies`, `deleting files`, `running full builds or e2e suites`, `database/schema migrations`, `deploy or infrastructure changes`, `git push / force push`, `npm run build`, `npm run test:coverage`, `npm run prepublishOnly`, `git push origin master --follow-tags`, `gh release create "v$VERSION" --title "v$VERSION" --generate-notes`, `npm publish --access public --provenance --ignore-scripts`
-- **Never**: commit or expose secrets/credentials; edit generated/vendor directories (`.git`, `dist`, `node_modules`); edit vendor/generated directories; change production config without approval
+- **Ask First**: `installing dependencies`, `deleting files`, `running full builds or e2e suites`, `database/schema migrations`, `deploy or infrastructure changes`, `git push / force push`, `npm run build`, `npm run prepublishOnly`, `git push origin master --follow-tags`, `gh release create "v$VERSION" --title "v$VERSION" --generate-notes`, `npm publish --access public --provenance --ignore-scripts`
+- **Never**: commit or expose secrets/credentials; edit generated/vendor directories (`.git`, `.tmp`, `dist`, `node_modules`); edit vendor/generated directories; change production config without approval
 
 ## Directory Overview
 
 ```text
-.
-├── .github/            # CI/workflows and repo automation
-├── .vscode/
-├── assets/             # static assets
-├── docs/               # documentation
-├── examples/
-├── memory_db/
-├── scripts/            # automation scripts
 ├── src/                # application source
 ├── tests/              # test suites
 ├── .prettierignore     # formatter config
@@ -39,8 +31,8 @@ Fetch public web pages and convert them into clean, AI-readable Markdown.
 ├── Dockerfile          # container image build
 ├── eslint.config.mjs   # lint config
 ├── package.json        # scripts and dependencies
-└── README.md           # usage and setup docs
-└── ...                # 6 more top-level items omitted
+├── README.md           # usage and setup docs
+└── server.json         # published server metadata
 ```
 
 ## Navigation
@@ -54,7 +46,7 @@ Fetch public web pages and convert them into clean, AI-readable Markdown.
 - Don't ignore test failures in CI.
 - Don't use unapproved third-party packages without checking package manager manifests.
 - Don't hardcode secrets or sensitive info in code, tests, docs, or config.
-- Don't edit generated/vendor directories such as `.git`, `dist`, `node_modules`.
+- Don't edit generated/vendor directories such as `.git`, `.tmp`, `dist`.
 - Don't run release/publish/tag/push automation without explicit approval.
 
 ## Change Checklist
