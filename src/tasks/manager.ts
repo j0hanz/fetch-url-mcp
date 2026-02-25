@@ -198,7 +198,10 @@ class TaskManager {
     return task;
   }
 
-  getTask(taskId: string, ownerKey?: string): TaskState | undefined {
+  private lookupActiveTask(
+    taskId: string,
+    ownerKey?: string
+  ): InternalTaskState | undefined {
     const task = this.tasks.get(taskId);
     if (!task) return undefined;
 
@@ -210,6 +213,10 @@ class TaskManager {
     }
 
     return task;
+  }
+
+  getTask(taskId: string, ownerKey?: string): TaskState | undefined {
+    return this.lookupActiveTask(taskId, ownerKey);
   }
 
   updateTask(
@@ -366,15 +373,8 @@ class TaskManager {
     ownerKey: string,
     signal?: AbortSignal
   ): Promise<TaskState | undefined> {
-    const task = this.tasks.get(taskId);
+    const task = this.lookupActiveTask(taskId, ownerKey);
     if (!task) return undefined;
-
-    if (ownerKey && task.ownerKey !== ownerKey) return undefined;
-
-    if (this.isExpired(task)) {
-      this.removeTask(taskId);
-      return undefined;
-    }
 
     if (isTerminalStatus(task.status)) return task;
 
