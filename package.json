@@ -51,20 +51,20 @@
     "start": "node dist/index.js",
     "format": "prettier --write .",
     "type-check": "node scripts/tasks.mjs type-check",
+    "type-check:src": "node node_modules/typescript/bin/tsc -p tsconfig.json --noEmit",
+    "type-check:tests": "node node_modules/typescript/bin/tsc -p tsconfig.test.json --noEmit",
     "type-check:diagnostics": "tsc --noEmit --extendedDiagnostics",
     "type-check:trace": "node -e \"require('fs').rmSync('.ts-trace',{recursive:true,force:true})\" && tsc --noEmit --generateTrace .ts-trace",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "test": "node scripts/tasks.mjs test",
-    "test:fast": "node --test --import tsx/esm src/__tests__/**/*.test.ts",
-    "test:coverage": "node scripts/tasks.mjs test --coverage",
     "knip": "knip",
     "knip:fix": "knip --fix",
-    "inspector": "npm run build && npx -y @modelcontextprotocol/inspector node dist/index.js --stdio",
+    "inspector": "npm run build && npx -y @modelcontextprotocol/inspector node dist/index.js ${workspaceFolder}",
     "prepublishOnly": "npm run lint && npm run type-check && npm run build"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.26.0",
+    "@modelcontextprotocol/sdk": "^1.27.1",
     "@mozilla/readability": "^0.6.0",
     "linkedom": "^0.18.12",
     "node-html-markdown": "^2.0.0",
@@ -75,15 +75,15 @@
     "@eslint/js": "^10.0.1",
     "@trivago/prettier-plugin-sort-imports": "^6.0.2",
     "@types/node": "^24",
-    "eslint": "^10.0.0",
+    "eslint": "^10.0.2",
     "eslint-config-prettier": "^10.1.8",
     "eslint-plugin-de-morgan": "^2.0.0",
     "eslint-plugin-depend": "^1.4.0",
     "eslint-plugin-unused-imports": "^4.4.1",
-    "knip": "^5.83.1",
+    "knip": "^5.85.0",
     "prettier": "^3.8.1",
     "typescript": "^5.9.3",
-    "typescript-eslint": "^8.56.0"
+    "typescript-eslint": "^8.56.1"
   },
   "engines": {
     "node": ">=24"

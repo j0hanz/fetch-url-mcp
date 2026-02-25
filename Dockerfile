@@ -13,7 +13,7 @@ RUN npm ci --ignore-scripts && npm rebuild
 
 # Copy source and build
 COPY src/ ./src/
-COPY tsconfig.json tsconfig.build.json tsconfig.examples.json ./
+COPY tsconfig.json tsconfig.build.json
 COPY examples/ ./examples/
 COPY scripts/ ./scripts/
 COPY assets/ ./assets/

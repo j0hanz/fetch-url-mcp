@@ -19,7 +19,6 @@ const CONFIG = {
       '.tsbuildinfo',
       'tsconfig.tsbuildinfo',
       'tsconfig.build.tsbuildinfo',
-      '.tsbuildinfo.examples',
     ],
     get distAssets() {
       return join(this.dist, 'assets');
@@ -113,7 +112,6 @@ const BuildTasks = {
   async compile() {
     const [cmd, args] = CONFIG.commands.tsc;
     await System.exec(cmd, args);
-    await System.exec(cmd, [BIN.tsc, '-p', 'tsconfig.examples.json']);
   },
 
   async assets() {
