@@ -11,6 +11,7 @@ import { Writable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 
 import { config } from '../lib/config.js';
+import { getErrorMessage, toError } from '../lib/errors.js';
 import {
   createDefaultBlockList,
   normalizeIpForBlockList,
@@ -390,10 +391,7 @@ class JsonBodyReader {
     try {
       return JSON.parse(body);
     } catch (err: unknown) {
-      throw new JsonBodyError(
-        'invalid-json',
-        err instanceof Error ? err.message : String(err)
-      );
+      throw new JsonBodyError('invalid-json', getErrorMessage(err));
     }
   }
 
@@ -480,7 +478,7 @@ class JsonBodyReader {
           chunks.push(buf);
           callback();
         } catch (err: unknown) {
-          callback(err instanceof Error ? err : new Error(String(err)));
+          callback(toError(err));
         }
       },
     });
@@ -497,10 +495,7 @@ class JsonBodyReader {
       if (signal?.aborted || isRequestReadAborted(req)) {
         throw new JsonBodyError('read-failed', 'Request aborted');
       }
-      throw new JsonBodyError(
-        'read-failed',
-        err instanceof Error ? err.message : String(err)
-      );
+      throw new JsonBodyError('read-failed', getErrorMessage(err));
     }
   }
 

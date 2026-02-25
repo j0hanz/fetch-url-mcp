@@ -6,7 +6,10 @@ import {
 } from '@modelcontextprotocol/sdk/types.js';
 
 import { config } from '../lib/config.js';
-import { RESOURCE_NOT_FOUND_ERROR_CODE } from '../lib/errors.js';
+import {
+  getErrorMessage,
+  RESOURCE_NOT_FOUND_ERROR_CODE,
+} from '../lib/errors.js';
 import { logWarn, runWithRequestContext } from '../lib/observability.js';
 import type {
   ProgressNotification,
@@ -315,8 +318,7 @@ async function runTaskToolExecution(params: {
         const task = taskManager.getTask(taskId);
         if (task) emitTaskStatusNotification(server, task);
       } catch (error: unknown) {
-        const errorMessage =
-          error instanceof Error ? error.message : String(error);
+        const errorMessage = getErrorMessage(error);
         const errorPayload =
           error instanceof McpError
             ? {
