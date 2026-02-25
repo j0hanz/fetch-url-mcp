@@ -669,5 +669,6 @@ export function registerTools(server: McpServer): void {
   );
   // SDK workaround: RegisteredTool does not expose `execution` in its public type, so we
   // assign it directly post-registration to enable task-augmented tool calls (taskSupport).
+  // TODO: Remove when @modelcontextprotocol/sdk exposes `execution` in RegisteredTool type.
   registeredTool.execution = TOOL_DEFINITION.execution;
 }

@@ -26,7 +26,8 @@ import {
 
 class CorsPolicy {
   // NOTE: CorsPolicy.handle() is invoked only AFTER hostOriginPolicy.validate() in
-  // HttpRequestPipeline, so Access-Control-Allow-Origin is never reflected for blocked origins.
+  // HttpRequestPipeline. The Origin header is reflected only when it matches an
+  // allowlisted host — arbitrary/unauthenticated origins are never reflected.
   handle(ctx: RequestContext): boolean {
     const { req, res } = ctx;
     const origin = getHeaderValue(req, 'origin');

@@ -1,5 +1,7 @@
 import type { ServerResult } from '@modelcontextprotocol/sdk/types.js';
 
+import { createHash } from 'node:crypto';
+
 import type { ProgressNotification } from '../tools.js';
 import { isObject } from '../type-guards.js';
 
@@ -100,7 +102,8 @@ export function parseHandlerExtra(extra: unknown): HandlerExtra | undefined {
 export function resolveTaskOwnerKey(extra?: HandlerExtra): string {
   if (extra?.sessionId) return `session:${extra.sessionId}`;
   if (extra?.authInfo?.clientId) return `client:${extra.authInfo.clientId}`;
-  if (extra?.authInfo?.token) return `token:${extra.authInfo.token}`;
+  if (extra?.authInfo?.token)
+    return `token:${createHash('sha256').update(extra.authInfo.token).digest('hex')}`;
   return 'default';
 }
 

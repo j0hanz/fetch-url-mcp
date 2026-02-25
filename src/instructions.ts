@@ -28,6 +28,8 @@ export function buildServerInstructions(): string {
 - Cache: ${config.cache.maxKeys} entries, ${cacheSizeMb}MB, ${cacheTtlHours}h TTL.
 - No JS: Client-side rendered pages may be incomplete.
 - Binary: Not supported.
+- Batch JSON-RPC: Array requests (\`[{...}]\`) are rejected with HTTP 400.
+- Tasks API: Experimental (SDK v1.26). \`tasks/get\`, \`tasks/result\`, \`tasks/list\`, \`tasks/cancel\` may change.
 </constraints>
 
 <error_handling>
