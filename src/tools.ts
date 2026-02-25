@@ -493,7 +493,7 @@ async function fetchPipeline(
 }> {
   const reportProgress = (step: number, message: string): void => {
     if (!progress) return;
-    void progress.report(step, message);
+    progress.report(step, message);
   };
 
   return performSharedFetch({
@@ -526,11 +526,11 @@ async function executeFetch(
   const progress = createProgressReporter(extra);
 
   const contextStr = getUrlContext(url);
-  void progress.report(0, `fetch-url: ${contextStr} [starting]`);
+  progress.report(0, `fetch-url: ${contextStr} [starting]`);
   logDebug('Fetching URL', { url });
 
   try {
-    void progress.report(1, `fetch-url: ${contextStr} [fetching HTML]`);
+    progress.report(1, `fetch-url: ${contextStr} [fetching HTML]`);
     const { pipeline, inlineResult } = await fetchPipeline(
       url,
       signal,
@@ -541,14 +541,14 @@ async function executeFetch(
     );
 
     if (pipeline.fromCache) {
-      void progress.report(3, `fetch-url: ${contextStr} [loaded from cache]`);
+      progress.report(3, `fetch-url: ${contextStr} [loaded from cache]`);
     }
 
-    void progress.report(4, `fetch-url: ${contextStr} • completed`);
+    progress.report(4, `fetch-url: ${contextStr} • completed`);
     return buildResponse(pipeline, inlineResult, url);
   } catch (error) {
     const isAbort = error instanceof Error && error.name === 'AbortError';
-    void progress.report(
+    progress.report(
       4,
       `fetch-url: ${contextStr} • ${isAbort ? 'cancelled' : 'failed'}`
     );

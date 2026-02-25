@@ -88,7 +88,7 @@ class ToolProgressReporter implements ProgressReporter {
     const onProgress = extra?.onProgress;
 
     if (token === null && !onProgress) {
-      return { report: async () => {} };
+      return { report: () => {} };
     }
 
     return new ToolProgressReporter(
