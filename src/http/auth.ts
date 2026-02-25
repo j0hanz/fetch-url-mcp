@@ -172,26 +172,60 @@ export function assertHttpModeConfiguration(): void {
 
 const DEFAULT_MCP_PROTOCOL_VERSION = '2025-11-25';
 const LEGACY_MCP_PROTOCOL_VERSION = '2025-03-26';
-const SUPPORTED_MCP_PROTOCOL_VERSIONS = new Set<string>([
+export const SUPPORTED_MCP_PROTOCOL_VERSIONS = new Set<string>([
   DEFAULT_MCP_PROTOCOL_VERSION,
   LEGACY_MCP_PROTOCOL_VERSION,
 ]);
 
-export function ensureMcpProtocolVersion(
-  req: IncomingMessage,
-  res: ServerResponse
-): boolean {
+export interface McpProtocolVersionCheckOptions {
+  requireHeader?: boolean;
+  expectedVersion?: string;
+}
+
+export function resolveMcpProtocolVersion(
+  req: IncomingMessage
+): string | undefined {
   const versionHeader = getHeaderValue(req, 'mcp-protocol-version');
-  if (!versionHeader) {
-    // Backwards-compatible fallback when header is missing.
-    return true;
-  }
+  if (!versionHeader) return undefined;
 
   const version = versionHeader.trim();
-  if (SUPPORTED_MCP_PROTOCOL_VERSIONS.has(version)) return true;
+  return version.length > 0 ? version : undefined;
+}
 
-  sendError(res, -32600, `Unsupported MCP-Protocol-Version: ${version}`);
-  return false;
+export function ensureMcpProtocolVersion(
+  req: IncomingMessage,
+  res: ServerResponse,
+  options?: McpProtocolVersionCheckOptions
+): boolean {
+  const version = resolveMcpProtocolVersion(req);
+  const requireHeader = options?.requireHeader ?? false;
+
+  if (!version) {
+    if (!requireHeader) {
+      // Backwards-compatible fallback when header is missing.
+      return true;
+    }
+
+    sendError(res, -32600, 'Missing MCP-Protocol-Version header');
+    return false;
+  }
+
+  if (!SUPPORTED_MCP_PROTOCOL_VERSIONS.has(version)) {
+    sendError(res, -32600, `Unsupported MCP-Protocol-Version: ${version}`);
+    return false;
+  }
+
+  const expectedVersion = options?.expectedVersion;
+  if (expectedVersion && version !== expectedVersion) {
+    sendError(
+      res,
+      -32600,
+      `MCP-Protocol-Version mismatch: expected ${expectedVersion}, got ${version}`
+    );
+    return false;
+  }
+
+  return true;
 }
 
 // ---------------------------------------------------------------------------
@@ -411,6 +445,64 @@ class AuthService {
 
     return this.buildIntrospectionAuthInfo(token, payload);
   }
+}
+
+function resolvePublicOrigin(req: IncomingMessage): string {
+  const host = getHeaderValue(req, 'host');
+  if (host) {
+    const protocol = config.server.https.enabled ? 'https' : 'http';
+    return `${protocol}://${host}`;
+  }
+
+  return config.auth.resourceUrl.origin;
+}
+
+function resolveResourceMetadataPath(): string {
+  return '/.well-known/oauth-protected-resource/mcp';
+}
+
+export function buildResourceMetadataUrl(req: IncomingMessage): string {
+  const origin = resolvePublicOrigin(req);
+  const path = resolveResourceMetadataPath();
+  return new URL(path, `${origin}/`).href;
+}
+
+export function applyUnauthorizedAuthHeaders(
+  req: IncomingMessage,
+  res: ServerResponse
+): void {
+  const resourceMetadata = buildResourceMetadataUrl(req);
+  res.setHeader(
+    'WWW-Authenticate',
+    `Bearer resource_metadata="${resourceMetadata}"`
+  );
+}
+
+export function buildProtectedResourceMetadataDocument(req: IncomingMessage): {
+  resource: string;
+  resource_metadata: string;
+  authorization_servers: string[];
+  bearer_methods_supported: string[];
+  scopes_supported: string[];
+} {
+  const metadataUrl = buildResourceMetadataUrl(req);
+
+  return {
+    resource: config.auth.resourceUrl.href,
+    resource_metadata: metadataUrl,
+    authorization_servers: config.auth.issuerUrl
+      ? [config.auth.issuerUrl.href]
+      : [],
+    bearer_methods_supported: ['header'],
+    scopes_supported: config.auth.requiredScopes,
+  };
+}
+
+export function isProtectedResourceMetadataPath(pathname: string): boolean {
+  return (
+    pathname === '/.well-known/oauth-protected-resource' ||
+    pathname === '/.well-known/oauth-protected-resource/mcp'
+  );
 }
 
 export const authService = new AuthService();

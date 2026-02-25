@@ -148,6 +148,142 @@ describe('http session initialization', () => {
     assert.equal(payload.missingHeader.hasInitializeResult, true);
   });
 
+  it('requires protocol header post-init and enforces initialized notification flow', () => {
+    const script = `
+      import { startHttpServer } from './dist/http/native.js';
+      import { request } from 'node:http';
+
+      const server = await startHttpServer();
+      const port = server.port;
+
+      function sendRpc(body, sessionId, versionHeader = '2025-11-25') {
+        return new Promise((resolve) => {
+          const headers = {
+            'content-type': 'application/json',
+            accept: 'application/json, text/event-stream',
+            authorization: 'Bearer test-token',
+            host: '127.0.0.1',
+          };
+          if (versionHeader !== undefined) {
+            headers['mcp-protocol-version'] = versionHeader;
+          }
+          if (sessionId) {
+            headers['mcp-session-id'] = sessionId;
+          }
+
+          const req = request(
+            { hostname: '127.0.0.1', port, path: '/mcp', method: 'POST', headers },
+            (res) => {
+              let raw = '';
+              res.on('data', (chunk) => { raw += chunk; });
+              res.on('end', () => {
+                resolve({
+                  status: res.statusCode ?? 0,
+                  bodyPreview: raw.slice(0, 512),
+                  containsTools: raw.includes('"tools"'),
+                  sessionId: res.headers['mcp-session-id'] ?? null,
+                });
+              });
+            }
+          );
+          req.on('error', (error) => resolve({ error: error.message }));
+          req.write(JSON.stringify(body));
+          req.end();
+        });
+      }
+
+      const init = await sendRpc({
+        jsonrpc: '2.0',
+        id: 'init',
+        method: 'initialize',
+        params: {
+          protocolVersion: '2025-11-25',
+          capabilities: {},
+          clientInfo: { name: 'test-client', version: '1.0.0' },
+        },
+      });
+
+      const sid = init.sessionId;
+      const missingHeader = await sendRpc(
+        { jsonrpc: '2.0', id: 'list-1', method: 'tools/list', params: {} },
+        sid,
+        undefined
+      );
+
+      const beforeInitialized = await sendRpc(
+        { jsonrpc: '2.0', id: 'list-2', method: 'tools/list', params: {} },
+        sid,
+        '2025-11-25'
+      );
+
+      const initialized = await sendRpc(
+        { jsonrpc: '2.0', method: 'notifications/initialized', params: {} },
+        sid,
+        '2025-11-25'
+      );
+
+      const afterInitialized = await sendRpc(
+        { jsonrpc: '2.0', id: 'list-3', method: 'tools/list', params: {} },
+        sid,
+        '2025-11-25'
+      );
+
+      await server.shutdown('TEST');
+      console.error('${RESULT_MARKER}' + JSON.stringify({
+        init,
+        missingHeader,
+        beforeInitialized,
+        initialized,
+        afterInitialized,
+      }));
+    `;
+
+    const result = runIsolatedNode(script, {
+      HOST: '127.0.0.1',
+      PORT: '0',
+      ACCESS_TOKENS: 'test-token',
+      ALLOW_REMOTE: 'false',
+    });
+
+    assert.equal(result.status, 0, result.stderr);
+    const payload = parseMarkedJson<{
+      init: { status: number; sessionId: string | null };
+      missingHeader: {
+        status: number;
+        bodyPreview: string;
+        containsTools: boolean;
+      };
+      beforeInitialized: {
+        status: number;
+        bodyPreview: string;
+        containsTools: boolean;
+      };
+      initialized: { status: number };
+      afterInitialized: {
+        status: number;
+        bodyPreview: string;
+        containsTools: boolean;
+      };
+    }>(result.stderr);
+
+    assert.equal(payload.init.status, 200);
+    assert.equal(typeof payload.init.sessionId, 'string');
+
+    assert.equal(payload.missingHeader.status, 400);
+    assert.match(payload.missingHeader.bodyPreview, /Session not initialized/);
+
+    assert.equal(payload.beforeInitialized.status, 400);
+    assert.match(
+      payload.beforeInitialized.bodyPreview,
+      /Session not initialized/
+    );
+
+    assert.equal(payload.initialized.status, 200);
+
+    assert.equal(payload.afterInitialized.status, 200);
+    assert.equal(payload.afterInitialized.containsTools, true);
+  });
+
   it('rejects POST /mcp initialize requests without required Accept media types', () => {
     const script = `
       import { startHttpServer } from './dist/http/native.js';

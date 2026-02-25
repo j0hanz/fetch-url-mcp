@@ -93,6 +93,85 @@ describe('http auth and host/origin validation', () => {
     assert.equal(payload.badOrigin.status, 403);
   });
 
+  it('returns RFC9728 discovery metadata on unauthorized MCP requests', () => {
+    const script = `
+      import { startHttpServer } from './dist/http/native.js';
+      import { request } from 'node:http';
+
+      const server = await startHttpServer();
+      const port = server.port;
+
+      function sendRequest(options) {
+        return new Promise((resolve) => {
+          const req = request(options, (res) => {
+            let raw = '';
+            res.on('data', (chunk) => { raw += chunk; });
+            res.on('end', () =>
+              resolve({
+                status: res.statusCode ?? 0,
+                headers: res.headers,
+                body: raw,
+              })
+            );
+          });
+          req.on('error', (error) => resolve({ error: error.message }));
+          req.end();
+        });
+      }
+
+      const unauthorized = await sendRequest({
+        hostname: '127.0.0.1',
+        port,
+        path: '/mcp',
+        method: 'POST',
+        headers: {
+          host: '127.0.0.1',
+          'content-type': 'application/json',
+          accept: 'application/json, text/event-stream',
+        },
+      });
+
+      const metadata = await sendRequest({
+        hostname: '127.0.0.1',
+        port,
+        path: '/.well-known/oauth-protected-resource/mcp',
+        method: 'GET',
+        headers: { host: '127.0.0.1' },
+      });
+
+      await server.shutdown('TEST');
+      console.error('${RESULT_MARKER}' + JSON.stringify({ unauthorized, metadata }));
+    `;
+
+    const result = runIsolatedNode(script, {
+      HOST: '127.0.0.1',
+      PORT: '0',
+      ACCESS_TOKENS: 'test-token',
+      ALLOW_REMOTE: 'false',
+    });
+
+    assert.equal(result.status, 0, result.stderr);
+    const payload = parseMarkedJson<{
+      unauthorized: {
+        status: number;
+        headers: Record<string, string | string[] | undefined>;
+      };
+      metadata: {
+        status: number;
+        body: string;
+      };
+    }>(result.stderr);
+
+    assert.equal(payload.unauthorized.status, 401);
+    const challenge = payload.unauthorized.headers['www-authenticate'];
+    assert.equal(typeof challenge, 'string');
+    assert.match(challenge, /Bearer resource_metadata=".+"/);
+
+    assert.equal(payload.metadata.status, 200);
+    assert.match(payload.metadata.body, /"resource"/);
+    assert.match(payload.metadata.body, /"bearer_methods_supported"/);
+  });
+
   it('accepts X-API-Key for static auth', () => {
     const script = `
       import { startHttpServer } from './dist/http/native.js';

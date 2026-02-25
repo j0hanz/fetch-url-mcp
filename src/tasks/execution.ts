@@ -135,6 +135,11 @@ export function toTaskSummary(task: {
     lastUpdatedAt: task.lastUpdatedAt,
     ttl: task.ttl,
     pollInterval: task.pollInterval,
+    _meta: {
+      'io.modelcontextprotocol/related-task': {
+        taskId: task.taskId,
+      },
+    },
   };
 }
 

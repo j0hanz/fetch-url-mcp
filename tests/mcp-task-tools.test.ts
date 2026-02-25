@@ -70,10 +70,22 @@ describe('MCP task-augmented tools', () => {
         id: 1,
         method: 'tasks/get',
         params: { taskId, task: { ttl: 10_000 } },
-      })) as { taskId?: string; status?: string };
+      })) as {
+        taskId?: string;
+        status?: string;
+        _meta?: {
+          'io.modelcontextprotocol/related-task'?: {
+            taskId?: string;
+          };
+        };
+      };
 
       assert.equal(taskStatus.taskId, taskId);
       assert.equal(typeof taskStatus.status, 'string');
+      assert.equal(
+        taskStatus._meta?.['io.modelcontextprotocol/related-task']?.taskId,
+        taskId
+      );
 
       const result = (await getTaskResult({
         jsonrpc: '2.0',
@@ -83,6 +95,11 @@ describe('MCP task-augmented tools', () => {
       })) as {
         structuredContent?: { url?: string; markdown?: string };
         isError?: boolean;
+        _meta?: {
+          'io.modelcontextprotocol/related-task'?: {
+            taskId?: string;
+          };
+        };
       };
 
       assert.equal(result.isError, undefined);
@@ -91,6 +108,10 @@ describe('MCP task-augmented tools', () => {
         'https://example.com/task-test'
       );
       assert.equal(typeof result.structuredContent?.markdown, 'string');
+      assert.equal(
+        result._meta?.['io.modelcontextprotocol/related-task']?.taskId,
+        taskId
+      );
     } finally {
       await server.close();
     }
@@ -120,7 +141,16 @@ describe('MCP task-augmented tools', () => {
           arguments: { url: 'https://example.com/task-cancel' },
           task: { ttl: 10_000 },
         },
-      })) as { task?: { taskId?: string } };
+      })) as {
+        task?: {
+          taskId?: string;
+          _meta?: {
+            'io.modelcontextprotocol/related-task'?: {
+              taskId?: string;
+            };
+          };
+        };
+      };
 
       const taskId = createResult.task?.taskId;
       assert.ok(taskId, 'task id should be returned');
@@ -137,10 +167,22 @@ describe('MCP task-augmented tools', () => {
         id: 11,
         method: 'tasks/get',
         params: { taskId, task: { ttl: 10_000 } },
-      })) as { taskId?: string; status?: string };
+      })) as {
+        taskId?: string;
+        status?: string;
+        _meta?: {
+          'io.modelcontextprotocol/related-task'?: {
+            taskId?: string;
+          };
+        };
+      };
 
       assert.equal(taskStatus.taskId, taskId);
       assert.equal(taskStatus.status, 'cancelled');
+      assert.equal(
+        taskStatus._meta?.['io.modelcontextprotocol/related-task']?.taskId,
+        taskId
+      );
 
       await assert.rejects(
         async () =>

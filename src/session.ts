@@ -15,6 +15,7 @@ export interface SessionEntry {
   createdAt: number;
   lastSeen: number;
   protocolInitialized: boolean;
+  negotiatedProtocolVersion: string;
   authFingerprint: string;
 }
 

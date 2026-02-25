@@ -51,6 +51,11 @@ export interface CreateTaskResult {
     lastUpdatedAt: string;
     ttl: number;
     pollInterval: number;
+    _meta?: {
+      'io.modelcontextprotocol/related-task': {
+        taskId: string;
+      };
+    };
   };
   _meta?: Record<string, unknown>;
 }

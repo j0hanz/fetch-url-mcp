@@ -50,13 +50,18 @@ import {
   type SessionStore,
   startSessionCleanupLoop,
 } from '../session.js';
+import { isObject } from '../type-guards.js';
 import {
+  applyUnauthorizedAuthHeaders,
   assertHttpModeConfiguration,
   authService,
   buildAuthFingerprint,
+  buildProtectedResourceMetadataDocument,
   corsPolicy,
   ensureMcpProtocolVersion,
   hostOriginPolicy,
+  isProtectedResourceMetadataPath,
+  SUPPORTED_MCP_PROTOCOL_VERSIONS,
 } from './auth.js';
 import {
   disableEventLoopMonitoring,
@@ -93,6 +98,33 @@ import {
 // MCP session gateway
 // ---------------------------------------------------------------------------
 
+const DEFAULT_MCP_PROTOCOL_VERSION = '2025-11-25';
+
+function resolveRequestedProtocolVersion(body: unknown): string {
+  if (!isObject(body)) return DEFAULT_MCP_PROTOCOL_VERSION;
+
+  const { params } = body;
+  if (!isObject(params)) return DEFAULT_MCP_PROTOCOL_VERSION;
+
+  const { protocolVersion: value } = params;
+  if (typeof value !== 'string') return DEFAULT_MCP_PROTOCOL_VERSION;
+
+  const normalized = value.trim();
+  if (normalized.length === 0) return DEFAULT_MCP_PROTOCOL_VERSION;
+
+  return SUPPORTED_MCP_PROTOCOL_VERSIONS.has(normalized)
+    ? normalized
+    : DEFAULT_MCP_PROTOCOL_VERSION;
+}
+
+function isInitializedNotification(method: string): boolean {
+  return method === 'notifications/initialized';
+}
+
+function isPingRequest(method: string): boolean {
+  return method === 'ping';
+}
+
 class McpSessionGateway {
   constructor(
     private readonly store: SessionStore,
@@ -100,7 +132,6 @@ class McpSessionGateway {
   ) {}
 
   async handlePost(ctx: AuthenticatedContext): Promise<void> {
-    if (!ensureMcpProtocolVersion(ctx.req, ctx.res)) return;
     if (!acceptsJsonAndEventStream(getHeaderValue(ctx.req, 'accept'))) {
       sendJson(ctx.res, 400, {
         error:
@@ -120,21 +151,68 @@ class McpSessionGateway {
     }
 
     const requestId = body.id ?? null;
+    const isInitNotification = isInitializedNotification(body.method);
+    const sessionId = getMcpSessionId(ctx.req);
+
+    let session = sessionId ? this.store.get(sessionId) : undefined;
+    if (sessionId && !session) {
+      sendError(ctx.res, -32600, 'Session not found', 404, requestId);
+      return;
+    }
+
+    if (session) {
+      if (
+        !ensureMcpProtocolVersion(ctx.req, ctx.res, {
+          requireHeader: true,
+          expectedVersion: session.negotiatedProtocolVersion,
+        })
+      ) {
+        return;
+      }
+
+      if (!session.protocolInitialized) {
+        const isPing = isPingRequest(body.method);
+
+        if (!isInitNotification && !isPing) {
+          sendError(ctx.res, -32600, 'Session not initialized', 400, requestId);
+          return;
+        }
+      }
+
+      if (isInitNotification && !session.protocolInitialized) {
+        session.protocolInitialized = true;
+        if (sessionId) this.store.touch(sessionId);
+      }
+    } else {
+      if (!ensureMcpProtocolVersion(ctx.req, ctx.res)) return;
+    }
+
+    if (isInitNotification && body.id === undefined) {
+      sendText(ctx.res, 200, '');
+      return;
+    }
+
     logInfo('[MCP POST]', {
       method: body.method,
       id: body.id,
-      sessionId: getMcpSessionId(ctx.req),
+      sessionId,
     });
 
     const transport = await this.getOrCreateTransport(ctx, requestId);
     if (!transport) return;
 
     await transport.handleRequest(ctx.req, ctx.res, body);
+
+    if (sessionId && isInitNotification) {
+      session = this.store.get(sessionId);
+      if (session) {
+        session.protocolInitialized = true;
+        this.store.touch(sessionId);
+      }
+    }
   }
 
   async handleGet(ctx: AuthenticatedContext): Promise<void> {
-    if (!ensureMcpProtocolVersion(ctx.req, ctx.res)) return;
-
     const sessionId = getMcpSessionId(ctx.req);
     if (!sessionId) {
       sendError(ctx.res, -32600, 'Missing session ID');
@@ -144,6 +222,15 @@ class McpSessionGateway {
     const session = this.store.get(sessionId);
     if (!session) {
       sendError(ctx.res, -32600, 'Session not found', 404);
+      return;
+    }
+
+    if (
+      !ensureMcpProtocolVersion(ctx.req, ctx.res, {
+        requireHeader: true,
+        expectedVersion: session.negotiatedProtocolVersion,
+      })
+    ) {
       return;
     }
 
@@ -158,8 +245,6 @@ class McpSessionGateway {
   }
 
   async handleDelete(ctx: AuthenticatedContext): Promise<void> {
-    if (!ensureMcpProtocolVersion(ctx.req, ctx.res)) return;
-
     const sessionId = getMcpSessionId(ctx.req);
     if (!sessionId) {
       sendError(ctx.res, -32600, 'Missing session ID');
@@ -167,10 +252,22 @@ class McpSessionGateway {
     }
 
     const session = this.store.get(sessionId);
-    if (session) {
-      await session.transport.close();
-      this.cleanupSessionRecord(sessionId, 'session-delete');
+    if (!session) {
+      sendError(ctx.res, -32600, 'Session not found', 404);
+      return;
     }
+
+    if (
+      !ensureMcpProtocolVersion(ctx.req, ctx.res, {
+        requireHeader: true,
+        expectedVersion: session.negotiatedProtocolVersion,
+      })
+    ) {
+      return;
+    }
+
+    await session.transport.close();
+    this.cleanupSessionRecord(sessionId, 'session-delete');
 
     sendText(ctx.res, 200, 'Session closed');
   }
@@ -196,7 +293,8 @@ class McpSessionGateway {
       return null;
     }
 
-    return this.createNewSession(ctx, requestId);
+    const negotiatedProtocolVersion = resolveRequestedProtocolVersion(ctx.body);
+    return this.createNewSession(ctx, requestId, negotiatedProtocolVersion);
   }
 
   private getExistingTransport(
@@ -222,7 +320,8 @@ class McpSessionGateway {
 
   private async createNewSession(
     ctx: AuthenticatedContext,
-    requestId: JsonRpcId
+    requestId: JsonRpcId,
+    negotiatedProtocolVersion: string
   ): Promise<StreamableHTTPServerTransport | null> {
     const authFingerprint = buildAuthFingerprint(ctx.auth);
     if (!authFingerprint) {
@@ -279,6 +378,7 @@ class McpSessionGateway {
       createdAt: Date.now(),
       lastSeen: Date.now(),
       protocolInitialized: false,
+      negotiatedProtocolVersion,
       authFingerprint,
     });
     registerMcpSessionServer(newSessionId, sessionServer);
@@ -396,9 +496,21 @@ class HttpDispatcher {
     return true;
   }
 
+  private tryHandleProtectedResourceMetadataRoute(
+    ctx: RequestContext
+  ): boolean {
+    if (ctx.method !== 'GET') return false;
+    if (!isProtectedResourceMetadataPath(ctx.url.pathname)) return false;
+
+    const document = buildProtectedResourceMetadataDocument(ctx.req);
+    sendJson(ctx.res, 200, document);
+    return true;
+  }
+
   async dispatch(ctx: RequestContext): Promise<void> {
     try {
       if (await this.tryHandleHealthRoute(ctx)) return;
+      if (this.tryHandleProtectedResourceMetadataRoute(ctx)) return;
 
       const auth = await this.authenticateRequest(ctx);
       if (!auth) return;
@@ -444,6 +556,7 @@ class HttpDispatcher {
     try {
       return await authService.authenticate(ctx.req, ctx.signal);
     } catch (err) {
+      applyUnauthorizedAuthHeaders(ctx.req, ctx.res);
       sendJson(ctx.res, 401, {
         error: err instanceof Error ? err.message : 'Unauthorized',
       });
