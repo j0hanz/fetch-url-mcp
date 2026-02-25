@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import * as cache from '../dist/cache.js';
-import { createCacheKey } from '../dist/cache.js';
-import { config } from '../dist/config.js';
-import { normalizeUrl } from '../dist/fetch.js';
-import { executeFetchPipeline } from '../dist/tools.js';
+import * as cache from '../dist/lib/cache.js';
+import { createCacheKey } from '../dist/lib/cache.js';
+import { config } from '../dist/lib/config.js';
+import { normalizeUrl } from '../dist/lib/fetch.js';
+import { executeFetchPipeline } from '../dist/lib/tool-pipeline.js';
 
 type CachedPayload = { value: string };
 

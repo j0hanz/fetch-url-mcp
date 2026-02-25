@@ -2,8 +2,8 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { brotliCompressSync, gzipSync } from 'node:zlib';
 
-import { FetchError } from '../dist/errors.js';
-import { readResponseText } from '../dist/fetch.js';
+import { FetchError } from '../dist/lib/errors.js';
+import { readResponseText } from '../dist/lib/fetch.js';
 
 function createStreamResponse(text: string) {
   const encoder = new TextEncoder();

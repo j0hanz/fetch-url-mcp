@@ -10,7 +10,6 @@ import { randomUUID } from 'node:crypto';
 
 import { z } from 'zod';
 
-import { runWithRequestContext } from './observability.js';
 import {
   abortTaskExecution,
   emitTaskStatusNotification,
@@ -19,21 +18,22 @@ import {
   throwTaskNotFound,
   toTaskSummary,
   withRelatedTaskMeta,
-} from './tasks/execution.js';
-import { taskManager } from './tasks/manager.js';
+} from '../tasks/execution.js';
+import { taskManager } from '../tasks/manager.js';
 import {
   isServerResult,
   parseHandlerExtra,
   resolveTaskOwnerKey,
   resolveToolCallContext,
-} from './tasks/owner.js';
-import { hasTaskCapableTool } from './tasks/tool-registry.js';
+} from '../tasks/owner.js';
+import { hasTaskCapableTool } from '../tasks/tool-registry.js';
+import { runWithRequestContext } from './observability.js';
 
 // Re-export public API so existing consumers (tests, other modules) keep working.
 export {
   cancelTasksForOwner,
   abortAllTaskExecutions,
-} from './tasks/execution.js';
+} from '../tasks/execution.js';
 
 /* -------------------------------------------------------------------------------------------------
  * Tasks API schemas

@@ -1,6 +1,8 @@
 import { z } from 'zod';
 
 import * as cache from './cache.js';
+import { transformBufferToMarkdown } from '../transform/transform.js';
+import type { MarkdownTransformResult } from '../transform/types.js';
 import { config } from './config.js';
 import { getErrorMessage } from './errors.js';
 import {
@@ -9,8 +11,6 @@ import {
   transformToRawUrl,
 } from './fetch.js';
 import { logDebug, logWarn } from './observability.js';
-import { transformBufferToMarkdown } from './transform/transform.js';
-import type { MarkdownTransformResult } from './transform/types.js';
 import { isObject } from './type-guards.js';
 
 /* -------------------------------------------------------------------------------------------------

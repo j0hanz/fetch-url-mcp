@@ -10,21 +10,21 @@ import {
   type TranslatorConfigObject,
 } from 'node-html-markdown';
 
-import { config } from '../config.js';
-import { removeNoiseFromHtml } from '../dom-noise-removal.js';
-import { FetchError, getErrorMessage } from '../errors.js';
-import { isRawTextContentUrl } from '../fetch.js';
+import { config } from '../lib/config.js';
+import { removeNoiseFromHtml } from '../lib/dom-noise-removal.js';
+import { FetchError, getErrorMessage } from '../lib/errors.js';
+import { isRawTextContentUrl } from '../lib/fetch.js';
 import {
   detectLanguageFromCode,
   resolveLanguageFromAttributes,
-} from '../language-detection.js';
+} from '../lib/language-detection.js';
 import {
   addSourceToMarkdown,
   buildMetadataFooter,
   cleanupMarkdownArtifacts,
   extractTitleFromRawMarkdown,
   isRawTextContent,
-} from '../markdown-cleanup.js';
+} from '../lib/markdown-cleanup.js';
 import {
   getOperationId,
   getRequestId,
@@ -33,8 +33,8 @@ import {
   logInfo,
   logWarn,
   redactUrl,
-} from '../observability.js';
-import { isLikeNode, isObject } from '../type-guards.js';
+} from '../lib/observability.js';
+import { isLikeNode, isObject } from '../lib/type-guards.js';
 import type {
   ExtractedArticle,
   ExtractedMetadata,

@@ -5,8 +5,11 @@ import { Buffer } from 'node:buffer';
 import { randomUUID } from 'node:crypto';
 import { setInterval } from 'node:timers';
 
-import { config } from '../config.js';
-import { type CancellableTimeout, createUnrefTimeout } from '../timer-utils.js';
+import { config } from '../lib/config.js';
+import {
+  type CancellableTimeout,
+  createUnrefTimeout,
+} from '../lib/timer-utils.js';
 
 export type TaskStatus =
   | 'working'

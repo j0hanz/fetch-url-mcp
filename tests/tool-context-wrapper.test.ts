@@ -1,8 +1,11 @@
 import assert from 'node:assert/strict';
 import { describe, it, mock } from 'node:test';
 
-import { getRequestId, runWithRequestContext } from '../dist/observability.js';
-import { withRequestContextIfMissing } from '../dist/tools.js';
+import {
+  getRequestId,
+  runWithRequestContext,
+} from '../dist/lib/observability.js';
+import { withRequestContextIfMissing } from '../dist/tools/fetch-url.js';
 
 describe('withRequestContextIfMissing', () => {
   it('establishes a request context when none exists', async () => {
@@ -43,7 +46,8 @@ describe('withRequestContextIfMissing', () => {
 
 describe('Progress notification timeout', () => {
   it('times out progress notifications after 5 seconds', async () => {
-    const { createProgressReporter } = await import('../dist/tools.js');
+    const { createProgressReporter } =
+      await import('../dist/lib/tool-progress.js');
     const startTime = Date.now();
 
     // Mock sendNotification that takes 10 seconds (longer than 5-second timeout)

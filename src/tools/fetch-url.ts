@@ -13,21 +13,17 @@ import { randomUUID } from 'node:crypto';
 
 import { z } from 'zod';
 
-import * as cache from './cache.js';
-import { config } from './config.js';
-import { generateSafeFilename } from './download.js';
+import * as cache from '../lib/cache.js';
+import { config } from '../lib/config.js';
+import { generateSafeFilename } from '../lib/download.js';
 import {
   getRequestId,
   logDebug,
   logError,
   logWarn,
   runWithRequestContext,
-} from './observability.js';
-import {
-  registerTaskCapableTool,
-  unregisterTaskCapableTool,
-} from './tasks/tool-registry.js';
-import { handleToolError } from './tool-errors.js';
+} from '../lib/observability.js';
+import { handleToolError } from '../lib/tool-errors.js';
 import {
   appendTruncationMarker,
   type InlineContentResult,
@@ -41,27 +37,20 @@ import {
   serializeMarkdownResult,
   TRUNCATION_MARKER,
   withSignal,
-} from './tool-pipeline.js';
+} from '../lib/tool-pipeline.js';
 import {
   createProgressReporter,
   type ProgressReporter,
   type ToolHandlerExtra,
-} from './tool-progress.js';
-import type { ExtractedMetadata } from './transform/types.js';
-import { isObject } from './type-guards.js';
-
-// Re-export public API so existing consumers keep working.
-export { createToolErrorResponse, handleToolError } from './tool-errors.js';
-export {
-  executeFetchPipeline,
-  parseCachedMarkdownResult,
-  performSharedFetch,
-} from './tool-pipeline.js';
-export {
-  createProgressReporter,
-  type ProgressNotification,
-  type ProgressNotificationParams,
-} from './tool-progress.js';
+} from '../lib/tool-progress.js';
+import { isObject } from '../lib/type-guards.js';
+import { fetchUrlInputSchema } from '../schemas/inputs.js';
+import { fetchUrlOutputSchema } from '../schemas/outputs.js';
+import {
+  registerTaskCapableTool,
+  unregisterTaskCapableTool,
+} from '../tasks/tool-registry.js';
+import type { ExtractedMetadata } from '../transform/types.js';
 
 export interface FetchUrlInput {
   url: string;
@@ -79,108 +68,6 @@ interface ToolResponseBase {
   structuredContent?: Record<string, unknown> | undefined;
   isError?: boolean;
 }
-
-export const fetchUrlInputSchema = z.strictObject({
-  url: z
-    .url({ protocol: /^https?$/i })
-    .min(1)
-    .max(config.constants.maxUrlLength)
-    .describe(`Target URL. Max ${config.constants.maxUrlLength} chars.`),
-  skipNoiseRemoval: z
-    .boolean()
-    .optional()
-    .describe('Preserve navigation/footers (disable noise filtering).'),
-  forceRefresh: z
-    .boolean()
-    .optional()
-    .describe('Bypass cache and fetch fresh content.'),
-  maxInlineChars: z
-    .number()
-    .int()
-    .min(0)
-    .max(config.constants.maxHtmlSize)
-    .optional()
-    .describe(
-      `Inline markdown limit (0-${config.constants.maxHtmlSize}, 0=unlimited). Lower of this or global limit applies.`
-    ),
-});
-
-export const fetchUrlOutputSchema = z.strictObject({
-  url: z
-    .string()
-    .min(1)
-    .max(config.constants.maxUrlLength)
-    .describe('Fetched URL.'),
-  inputUrl: z
-    .string()
-    .max(config.constants.maxUrlLength)
-    .optional()
-    .describe('Original requested URL.'),
-  resolvedUrl: z
-    .string()
-    .max(config.constants.maxUrlLength)
-    .optional()
-    .describe('Final URL after raw-content transformations.'),
-  finalUrl: z
-    .string()
-    .max(config.constants.maxUrlLength)
-    .optional()
-    .describe('Final URL after HTTP redirects.'),
-  cacheResourceUri: z
-    .string()
-    .max(config.constants.maxUrlLength)
-    .optional()
-    .describe('URI for resources/read to get full markdown.'),
-  title: z.string().max(512).optional().describe('Page title.'),
-  metadata: z
-    .strictObject({
-      title: z.string().max(512).optional().describe('Detected page title.'),
-      description: z
-        .string()
-        .max(2048)
-        .optional()
-        .describe('Detected page description.'),
-      author: z.string().max(512).optional().describe('Detected page author.'),
-      image: z
-        .string()
-        .max(config.constants.maxUrlLength)
-        .optional()
-        .describe('Detected page preview image URL.'),
-      favicon: z
-        .string()
-        .max(config.constants.maxUrlLength)
-        .optional()
-        .describe('Detected page favicon URL.'),
-      publishedAt: z
-        .string()
-        .max(64)
-        .optional()
-        .describe('Detected publication date.'),
-      modifiedAt: z
-        .string()
-        .max(64)
-        .optional()
-        .describe('Detected last modified date.'),
-    })
-    .optional()
-    .describe('Extracted page metadata.'),
-  markdown: (config.constants.maxInlineContentChars > 0
-    ? z.string().max(config.constants.maxInlineContentChars)
-    : z.string()
-  )
-    .optional()
-    .describe('Extracted Markdown. May be truncated (check truncated field).'),
-  fromCache: z.boolean().optional().describe('True if served from cache.'),
-  fetchedAt: z.string().max(64).optional().describe('ISO timestamp of fetch.'),
-  contentSize: z
-    .number()
-    .int()
-    .min(0)
-    .max(config.constants.maxHtmlSize * 4)
-    .optional()
-    .describe('Full markdown size before truncation.'),
-  truncated: z.boolean().optional().describe('True if markdown was truncated.'),
-});
 
 export const FETCH_URL_TOOL_NAME = 'fetch-url';
 const FETCH_URL_TOOL_DESCRIPTION = `

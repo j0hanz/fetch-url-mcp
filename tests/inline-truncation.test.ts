@@ -4,8 +4,8 @@ import { after, describe, it } from 'node:test';
 // Note: We need to import the internal function for testing.
 // Since it's not exported, we'll test through the public API by creating
 // markdown with code fences that exceed the inline limit.
-import { config } from '../dist/config.js';
-import { fetchUrlToolHandler } from '../dist/tools.js';
+import { config } from '../dist/lib/config.js';
+import { fetchUrlToolHandler } from '../dist/tools/fetch-url.js';
 import { shutdownTransformWorkerPool } from '../dist/transform/transform.js';
 
 after(async () => {

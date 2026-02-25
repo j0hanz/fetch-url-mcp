@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { stableStringify } from '../dist/json.js';
+import { stableStringify } from '../dist/lib/json.js';
 
 describe('stableStringify', () => {
   it('serializes shared references without treating them as circular', () => {

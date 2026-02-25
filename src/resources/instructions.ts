@@ -1,5 +1,5 @@
-import { config } from './config.js';
-import { FETCH_URL_TOOL_NAME } from './tools.js';
+import { config } from '../lib/config.js';
+import { FETCH_URL_TOOL_NAME } from '../tools/fetch-url.js';
 
 export function buildServerInstructions(): string {
   const maxHtmlSizeMb = config.constants.maxHtmlSize / 1024 / 1024;

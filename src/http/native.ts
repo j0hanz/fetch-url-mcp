@@ -17,16 +17,16 @@ import {
 import { hostname } from 'node:os';
 import process from 'node:process';
 
-import { config, enableHttpMode } from '../config.js';
-import { handleDownload } from '../download.js';
+import { config, enableHttpMode } from '../lib/config.js';
+import { handleDownload } from '../lib/download.js';
 import {
   acceptsEventStream,
   acceptsJsonAndEventStream,
   isJsonRpcBatchRequest,
   isMcpRequestBody,
   type JsonRpcId,
-} from '../mcp-validator.js';
-import { cancelTasksForOwner } from '../mcp.js';
+} from '../lib/mcp-validator.js';
+import { cancelTasksForOwner } from '../lib/mcp.js';
 import {
   logError,
   logInfo,
@@ -35,12 +35,11 @@ import {
   runWithRequestContext,
   unregisterMcpSessionServer,
   unregisterMcpSessionServerByServer,
-} from '../observability.js';
+} from '../lib/observability.js';
 import {
   applyHttpServerTuning,
   drainConnectionsOnShutdown,
-} from '../server-tuning.js';
-import { createMcpServerForHttpSession } from '../server.js';
+} from '../lib/server-tuning.js';
 import {
   composeCloseHandlers,
   createSessionStore,
@@ -49,8 +48,9 @@ import {
   reserveSessionSlot,
   type SessionStore,
   startSessionCleanupLoop,
-} from '../session.js';
-import { isObject } from '../type-guards.js';
+} from '../lib/session.js';
+import { isObject } from '../lib/type-guards.js';
+import { createMcpServerForHttpSession } from '../server.js';
 import {
   applyUnauthorizedAuthHeaders,
   assertHttpModeConfiguration,

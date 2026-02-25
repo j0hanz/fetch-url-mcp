@@ -2,8 +2,8 @@ import type { ServerResult } from '@modelcontextprotocol/sdk/types.js';
 
 import { createHash } from 'node:crypto';
 
-import type { ProgressNotification } from '../tools.js';
-import { isObject } from '../type-guards.js';
+import type { ProgressNotification } from '../lib/tool-progress.js';
+import { isObject } from '../lib/type-guards.js';
 
 /* -------------------------------------------------------------------------------------------------
  * Handler extra parsing & owner-key resolution

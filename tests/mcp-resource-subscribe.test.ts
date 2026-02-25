@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { describe, it } from 'node:test';
 
-import * as cache from '../dist/cache.js';
+import * as cache from '../dist/lib/cache.js';
 import { createMcpServer } from '../dist/server.js';
 
 interface SubscriptionRequest {

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { after, describe, it } from 'node:test';
 import { Worker } from 'node:worker_threads';
 
-import { config } from '../dist/config.js';
+import { config } from '../dist/lib/config.js';
 import {
   shutdownTransformWorkerPool,
   transformBufferToMarkdown,

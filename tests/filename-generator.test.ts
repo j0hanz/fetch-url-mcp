@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { generateSafeFilename } from '../dist/download.js';
+import { generateSafeFilename } from '../dist/lib/download.js';
 
 type FilenameCase = {
   url: string;

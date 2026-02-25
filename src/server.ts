@@ -6,21 +6,21 @@ import process from 'node:process';
 
 import { z } from 'zod';
 
-import { config } from './config.js';
-import { buildServerInstructions } from './instructions.js';
-import { abortAllTaskExecutions, registerTaskHandlers } from './mcp.js';
+import { config } from './lib/config.js';
+import { abortAllTaskExecutions, registerTaskHandlers } from './lib/mcp.js';
 import {
   logError,
   logInfo,
   setLogLevel,
   setMcpServer,
-} from './observability.js';
-import { registerGetHelpPrompt } from './prompts.js';
+} from './lib/observability.js';
+import { registerGetHelpPrompt } from './prompts/index.js';
 import {
   registerCacheResourceTemplate,
   registerInstructionResource,
-} from './resources.js';
-import { registerTools } from './tools.js';
+} from './resources/index.js';
+import { buildServerInstructions } from './resources/instructions.js';
+import { registerAllTools } from './tools/index.js';
 import { shutdownTransformWorkerPool } from './transform/transform.js';
 
 /* -------------------------------------------------------------------------------------------------
@@ -127,7 +127,7 @@ async function createMcpServerWithOptions(
     setMcpServer(server);
   }
 
-  registerTools(server);
+  registerAllTools(server);
   registerGetHelpPrompt(server, serverInstructions, localIcon);
   registerInstructionResource(server, serverInstructions, localIcon);
   registerCacheResourceTemplate(server, localIcon);

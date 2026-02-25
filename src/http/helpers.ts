@@ -10,14 +10,14 @@ import type { Socket } from 'node:net';
 import { Writable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 
-import { config } from '../config.js';
+import { config } from '../lib/config.js';
 import {
   createDefaultBlockList,
   normalizeIpForBlockList,
-} from '../ip-blocklist.js';
-import type { JsonRpcId } from '../mcp-validator.js';
-import { logWarn } from '../observability.js';
-import { composeCloseHandlers } from '../session.js';
+} from '../lib/ip-blocklist.js';
+import type { JsonRpcId } from '../lib/mcp-validator.js';
+import { logWarn } from '../lib/observability.js';
+import { composeCloseHandlers } from '../lib/session.js';
 
 // ---------------------------------------------------------------------------
 // Shared types

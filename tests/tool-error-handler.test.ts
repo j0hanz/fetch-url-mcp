@@ -1,9 +1,12 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { FetchError } from '../dist/errors.js';
-import { createErrorWithCode } from '../dist/errors.js';
-import { createToolErrorResponse, handleToolError } from '../dist/tools.js';
+import { FetchError } from '../dist/lib/errors.js';
+import { createErrorWithCode } from '../dist/lib/errors.js';
+import {
+  createToolErrorResponse,
+  handleToolError,
+} from '../dist/lib/tool-errors.js';
 
 describe('tool error responses', () => {
   it('wraps structured content for tool errors', () => {

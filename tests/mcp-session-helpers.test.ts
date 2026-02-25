@@ -6,8 +6,8 @@ import {
   createSlotTracker,
   ensureSessionCapacity,
   reserveSessionSlot,
-} from '../dist/session.js';
-import type { SessionStore } from '../dist/session.js';
+} from '../dist/lib/session.js';
+import type { SessionStore } from '../dist/lib/session.js';
 
 function createStore(initialSize: number): SessionStore {
   const store = createSessionStore(60_000);

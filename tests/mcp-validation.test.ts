@@ -6,7 +6,7 @@ import {
   acceptsJsonAndEventStream,
   isJsonRpcBatchRequest,
   isMcpRequestBody,
-} from '../dist/mcp-validator.js';
+} from '../dist/lib/mcp-validator.js';
 
 type Case<T> = {
   input: T;

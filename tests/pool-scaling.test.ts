@@ -1,7 +1,10 @@
 import assert from 'node:assert/strict';
 import { afterEach, describe, it } from 'node:test';
 
-import { getRequestId, runWithRequestContext } from '../dist/observability.js';
+import {
+  getRequestId,
+  runWithRequestContext,
+} from '../dist/lib/observability.js';
 import {
   getTransformPoolStats,
   shutdownTransformWorkerPool,

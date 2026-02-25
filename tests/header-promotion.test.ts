@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { cleanupMarkdownArtifacts } from '../dist/markdown-cleanup.js';
+import { cleanupMarkdownArtifacts } from '../dist/lib/markdown-cleanup.js';
 
 describe('Header Promotion', () => {
   it('promotes orphan short lines to headings', () => {

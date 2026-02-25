@@ -9,11 +9,14 @@ import {
   Worker,
 } from 'node:worker_threads';
 
-import { config } from '../config.js';
-import { FetchError, getErrorMessage } from '../errors.js';
-import { logWarn } from '../observability.js';
-import { type CancellableTimeout, createUnrefTimeout } from '../timer-utils.js';
-import { isObject } from '../type-guards.js';
+import { config } from '../lib/config.js';
+import { FetchError, getErrorMessage } from '../lib/errors.js';
+import { logWarn } from '../lib/observability.js';
+import {
+  type CancellableTimeout,
+  createUnrefTimeout,
+} from '../lib/timer-utils.js';
+import { isObject } from '../lib/type-guards.js';
 import type {
   MarkdownTransformResult,
   TransformWorkerCancelMessage,

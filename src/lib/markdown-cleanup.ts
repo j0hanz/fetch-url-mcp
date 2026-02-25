@@ -1,6 +1,6 @@
+import type { MetadataBlock } from '../transform/types.js';
 import { config } from './config.js';
 import { FetchError } from './errors.js';
-import type { MetadataBlock } from './transform/types.js';
 
 // --- Constants & Regex ---
 

@@ -6,8 +6,8 @@ import {
   recordFetchError,
   recordFetchResponse,
   startFetchTelemetry,
-} from '../dist/fetch.js';
-import { runWithRequestContext } from '../dist/observability.js';
+} from '../dist/lib/fetch.js';
+import { runWithRequestContext } from '../dist/lib/observability.js';
 
 function createCapture() {
   const channel = diagnosticsChannel.channel('fetch-url-mcp.fetch');

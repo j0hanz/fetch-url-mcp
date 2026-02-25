@@ -2,9 +2,9 @@
 import process from 'node:process';
 
 import { parseCliArgs, renderCliUsage } from './cli.js';
-import { serverVersion } from './config.js';
 import { startHttpServer } from './http/native.js';
-import { logError } from './observability.js';
+import { serverVersion } from './lib/config.js';
+import { logError } from './lib/observability.js';
 import { startStdioServer } from './server.js';
 
 const FORCE_EXIT_TIMEOUT_MS = 10_000;

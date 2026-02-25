@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import { after, describe, it } from 'node:test';
 
-import { FetchError } from '../dist/errors.js';
-import { cleanupMarkdownArtifacts } from '../dist/markdown-cleanup.js';
+import { FetchError } from '../dist/lib/errors.js';
+import { cleanupMarkdownArtifacts } from '../dist/lib/markdown-cleanup.js';
 import {
   shutdownTransformWorkerPool,
   transformHtmlToMarkdown,
@@ -13,7 +13,7 @@ after(async () => {
 });
 
 async function withWorkerPoolDisabled<T>(fn: () => Promise<T>): Promise<T> {
-  const { config } = await import('../dist/config.js');
+  const { config } = await import('../dist/lib/config.js');
   const original = config.transform.maxWorkerScale;
   config.transform.maxWorkerScale = 0;
   await shutdownTransformWorkerPool();
@@ -26,7 +26,7 @@ async function withWorkerPoolDisabled<T>(fn: () => Promise<T>): Promise<T> {
 }
 
 async function withWorkerPoolEnabled<T>(fn: () => Promise<T>): Promise<T> {
-  const { config } = await import('../dist/config.js');
+  const { config } = await import('../dist/lib/config.js');
   const original = config.transform.maxWorkerScale;
   config.transform.maxWorkerScale = 1;
   await shutdownTransformWorkerPool();

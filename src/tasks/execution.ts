@@ -5,14 +5,14 @@ import {
   type ServerResult,
 } from '@modelcontextprotocol/sdk/types.js';
 
-import { config } from '../config.js';
-import { RESOURCE_NOT_FOUND_ERROR_CODE } from '../errors.js';
-import { logWarn, runWithRequestContext } from '../observability.js';
+import { config } from '../lib/config.js';
+import { RESOURCE_NOT_FOUND_ERROR_CODE } from '../lib/errors.js';
+import { logWarn, runWithRequestContext } from '../lib/observability.js';
 import type {
   ProgressNotification,
   ToolHandlerExtra,
-} from '../tool-progress.js';
-import { isObject } from '../type-guards.js';
+} from '../lib/tool-progress.js';
+import { isObject } from '../lib/type-guards.js';
 import {
   type CreateTaskResult,
   taskManager,
