@@ -26,6 +26,7 @@ export function buildServerInstructions(): string {
 - Blocked: localhost, private IPs (10.x, 172.16-31.x, 192.168.x), metadata endpoints (169.254.169.254), .local/.internal.
 - Limits: Max HTML ${maxHtmlSizeMb}MB. Max ${config.fetcher.maxRedirects} redirects.
 - Cache: ${config.cache.maxKeys} entries, ${cacheSizeMb}MB, ${cacheTtlHours}h TTL.
+- Cache scope: process-local and ephemeral. Cache URIs are invalid across server restarts or separate CLI invocations (-32002).
 - No JS: Client-side rendered pages may be incomplete.
 - Binary: Not supported.
 - Batch JSON-RPC: Array requests (\`[{...}]\`) are rejected with HTTP 400.

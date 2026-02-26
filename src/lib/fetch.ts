@@ -7,6 +7,7 @@ import { performance } from 'node:perf_hooks';
 import { PassThrough, Readable, Transform } from 'node:stream';
 import { buffer as consumeBuffer } from 'node:stream/consumers';
 import { finished, pipeline } from 'node:stream/promises';
+import tls from 'node:tls';
 import { createBrotliDecompress, createGunzip, createInflate } from 'node:zlib';
 
 import { Agent, type Dispatcher } from 'undici';
@@ -1176,6 +1177,8 @@ class RedirectFollower {
       redirect: 'manual' as RequestRedirect,
     };
     if (ipAddress) {
+      const ca =
+        tls.rootCertificates.length > 0 ? tls.rootCertificates : undefined;
       const agent = new Agent({
         connect: {
           lookup: (hostname, options, callback) => {
@@ -1186,6 +1189,8 @@ class RedirectFollower {
               callback(null, ipAddress, family);
             }
           },
+          timeout: config.fetcher.timeout,
+          ...(ca ? { ca } : {}),
         },
         pipelining: 1,
         connections: 1,
