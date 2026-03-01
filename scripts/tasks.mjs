@@ -2,270 +2,193 @@
 import { spawn } from 'node:child_process';
 import { access, chmod, cp, mkdir, rm } from 'node:fs/promises';
 import { join } from 'node:path';
-import { performance } from 'node:perf_hooks';
-import process from 'node:process';
 
-// --- Configuration (Single Source of Truth) ---
-const BIN = {
-  tsc: join('node_modules', 'typescript', 'bin', 'tsc'),
+const TSC = join('node_modules', 'typescript', 'bin', 'tsc');
+
+const PATHS = {
+  dist: 'dist',
+  tmp: '.tmp',
+  assets: 'assets',
+  executable: 'dist/index.js',
+  distAssets: join('dist', 'assets'),
 };
 
-const CONFIG = {
-  paths: {
-    dist: 'dist',
-    assets: 'assets',
-    executable: 'dist/index.js',
-    tsBuildInfo: [
-      '.tsbuildinfo',
-      'tsconfig.tsbuildinfo',
-      'tsconfig.build.tsbuildinfo',
-    ],
-    get distAssets() {
-      return join(this.dist, 'assets');
-    },
-  },
-  commands: {
-    tsc: ['node', [BIN.tsc, '-p', 'tsconfig.build.json']],
-    tscCheckSrc: ['node', [BIN.tsc, '-p', 'tsconfig.json', '--noEmit']],
-    tscCheckTests: ['node', [BIN.tsc, '-p', 'tsconfig.test.json', '--noEmit']],
-  },
-  test: {
-    patterns: [
-      'src/__tests__/**/*.test.ts',
-      'tests/**/*.test.ts',
-      'node-tests/**/*.test.ts',
-    ],
-  },
-};
+const TEST_PATTERNS = [
+  'src/__tests__/**/*.test.ts',
+  'tests/**/*.test.ts',
+  'node-tests/**/*.test.ts',
+];
 
-// --- Infrastructure Layer (IO & System) ---
-const Logger = {
-  startGroup: (name) => process.stdout.write(`> ${name}... `),
-  endGroupSuccess: (duration) => console.log(`✅ (${duration}s)`),
-  endGroupFail: (err) =>
-    console.log(`❌${err?.message ? ` (${err.message})` : ''}`),
-  shellSuccess: (name, duration) => console.log(`> ${name} ✅ (${duration}s)`),
-  info: (msg) => console.log(msg),
-  error: (err) => console.error(err),
-  newLine: () => console.log(),
-};
+// --- Helpers ---
 
-const System = {
-  async exists(path) {
-    try {
-      await access(path);
-      return true;
-    } catch {
-      return false;
-    }
-  },
-
-  async remove(paths) {
-    const targets = Array.isArray(paths) ? paths : [paths];
-    await Promise.all(
-      targets.map((p) => rm(p, { recursive: true, force: true }))
-    );
-  },
-
-  async copy(src, dest, opts = {}) {
-    await cp(src, dest, opts);
-  },
-
-  async makeDir(path) {
-    await mkdir(path, { recursive: true });
-  },
-
-  async changeMode(path, mode) {
-    await chmod(path, mode);
-  },
-
-  exec(command, args = []) {
-    return new Promise((resolve, reject) => {
-      const resolvedCommand = command === 'node' ? process.execPath : command;
-
-      const proc = spawn(resolvedCommand, args, {
-        stdio: 'inherit',
-        shell: false,
-        windowsHide: true,
-      });
-
-      proc.on('error', (error) => {
-        reject(error);
-      });
-
-      proc.on('close', (code, signal) => {
-        if (code === 0) return resolve();
-        const suffix = signal ? ` (signal ${signal})` : '';
-        reject(new Error(`${command} exited with code ${code}${suffix}`));
-      });
-    });
-  },
-};
-
-// --- Domain Layer (Build & Test Actions) ---
-const BuildTasks = {
-  async clean() {
-    await System.remove(CONFIG.paths.dist);
-    await System.remove(CONFIG.paths.tsBuildInfo);
-  },
-
-  async compile() {
-    const [cmd, args] = CONFIG.commands.tsc;
-    await System.exec(cmd, args);
-  },
-
-  async assets() {
-    await System.makeDir(CONFIG.paths.dist);
-
-    if (await System.exists(CONFIG.paths.assets)) {
-      await System.copy(CONFIG.paths.assets, CONFIG.paths.distAssets, {
-        recursive: true,
-      });
-    }
-  },
-
-  async makeExecutable() {
-    await System.changeMode(CONFIG.paths.executable, '755');
-  },
-};
-
-// --- Test Helpers (Pure Functions) ---
-async function detectTestLoader() {
-  if (await System.exists('node_modules/tsx')) {
-    return ['--import', 'tsx/esm'];
-  }
-  if (await System.exists('node_modules/ts-node')) {
-    return ['--loader', 'ts-node/esm'];
-  }
-  return [];
+function pathExists(p) {
+  return access(p).then(
+    () => true,
+    () => false
+  );
 }
 
-function getCoverageArgs(args) {
-  return args.includes('--coverage') ? ['--experimental-test-coverage'] : [];
+function elapsed(start) {
+  return ((performance.now() - start) / 1000).toFixed(2);
 }
 
-async function findTestPatterns() {
-  const existing = [];
-  for (const pattern of CONFIG.test.patterns) {
-    const basePath = pattern.split('/')[0];
-    if (await System.exists(basePath)) {
-      existing.push(pattern);
+function run(args, { stdio = 'inherit' } = {}) {
+  return new Promise((resolve, reject) => {
+    const proc = spawn(process.execPath, args, {
+      stdio,
+      shell: false,
+      windowsHide: true,
+    });
+
+    const out = [];
+    const err = [];
+    if (stdio === 'pipe') {
+      proc.stdout.on('data', (d) => out.push(d));
+      proc.stderr.on('data', (d) => err.push(d));
     }
-  }
-  return existing;
-}
 
-const TestTasks = {
-  async typeCheck() {
-    await Runner.runShellTask('Type-checking src', async () => {
-      const [cmd, args] = CONFIG.commands.tscCheckSrc;
-      await System.exec(cmd, args);
-    });
-    await Runner.runShellTask('Type-checking tests', async () => {
-      const [cmd, args] = CONFIG.commands.tscCheckTests;
-      await System.exec(cmd, args);
-    });
-  },
-
-  async test(args = []) {
-    await Pipeline.fullBuild();
-
-    const patterns = await findTestPatterns();
-    if (patterns.length === 0) {
-      throw new Error(
-        `No test directories found. Expected one of: ${CONFIG.test.patterns.join(
-          ', '
-        )}`
+    proc.on('error', reject);
+    proc.on('close', (code) => {
+      if (code === 0) return resolve(Buffer.concat(out).toString());
+      const stderr = Buffer.concat(err).toString();
+      const stdout = Buffer.concat(out).toString();
+      reject(
+        new Error(
+          `node ${args[0]} exited with code ${code}\n${stderr || stdout}`
+        )
       );
-    }
-
-    const loader = await detectTestLoader();
-    const coverage = getCoverageArgs(args);
-
-    await Runner.runShellTask('Running tests', async () => {
-      await System.exec('node', [
-        '--test',
-        ...loader,
-        ...coverage,
-        ...patterns,
-      ]);
     });
-  },
-};
+  });
+}
 
-// --- Application Layer (Task Running & Orchestration) ---
-class Runner {
-  static async #run(name, fn, logSuccess) {
-    Logger.startGroup(name);
-    Logger.newLine();
-    const start = performance.now();
-
-    try {
-      await fn();
-      logSuccess(((performance.now() - start) / 1000).toFixed(2));
-    } catch (err) {
-      Logger.endGroupFail(err);
-      throw err;
-    }
-  }
-
-  static runTask(name, fn) {
-    return this.#run(name, fn, Logger.endGroupSuccess);
-  }
-
-  static runShellTask(name, fn) {
-    return this.#run(name, fn, (d) => Logger.shellSuccess(name, d));
+async function runTask(name, fn) {
+  const start = performance.now();
+  console.log(`> ${name}...`);
+  try {
+    await fn();
+    console.log(`> ${name} ✅ (${elapsed(start)}s)`);
+  } catch (err) {
+    console.error(`> ${name} ❌\n${err.message || err}`);
+    throw err;
   }
 }
 
-const Pipeline = {
-  async fullBuild() {
-    Logger.info('🚀 Starting build...');
-    const start = performance.now();
+// --- Tasks ---
 
-    await Runner.runTask('Cleaning dist', BuildTasks.clean);
-    await Runner.runShellTask('Compiling TypeScript', BuildTasks.compile);
-    await Runner.runTask('Copying assets', BuildTasks.assets);
-    await Runner.runTask('Making executable', BuildTasks.makeExecutable);
+function clean() {
+  return Promise.all([
+    rm(PATHS.dist, { recursive: true, force: true }),
+    rm(PATHS.tmp, { recursive: true, force: true }),
+  ]);
+}
 
-    Logger.info(
-      `\n✨ Build completed in ${((performance.now() - start) / 1000).toFixed(
-        2
-      )}s`
-    );
-  },
+function compile() {
+  return run([TSC, '-p', 'tsconfig.build.json']);
+}
+
+async function copyAssets() {
+  await mkdir(PATHS.dist, { recursive: true });
+  if (await pathExists(PATHS.assets)) {
+    await cp(PATHS.assets, PATHS.distAssets, { recursive: true });
+  }
+}
+
+function makeExecutable() {
+  return chmod(PATHS.executable, '755').catch(() => {});
+}
+
+async function build() {
+  const start = performance.now();
+  console.log('🚀 Starting build...');
+  await runTask('Cleaning dist', clean);
+  await runTask('Compiling TypeScript', compile);
+  await runTask('Copying assets', copyAssets);
+  await runTask('Making executable', makeExecutable);
+  console.log(`\n✨ Build completed in ${elapsed(start)}s`);
+}
+
+async function typeCheck() {
+  const start = performance.now();
+  console.log('🚀 Starting concurrent type checks...');
+
+  const results = await Promise.allSettled([
+    run([TSC, '-p', 'tsconfig.json', '--noEmit'], { stdio: 'pipe' }),
+    run([TSC, '-p', 'tsconfig.test.json', '--noEmit'], { stdio: 'pipe' }),
+  ]);
+
+  const labels = ['src', 'tests'];
+  let failed = false;
+  for (const [i, r] of results.entries()) {
+    if (r.status === 'rejected') {
+      console.error(
+        `\n❌ Type-check ${labels[i]} failed:\n${r.reason.message}`
+      );
+      failed = true;
+    } else {
+      console.log(`> Type-check ${labels[i]} ✅`);
+    }
+  }
+
+  if (failed) throw new Error('Type checks failed');
+  console.log(`✨ Type checks passed in ${elapsed(start)}s`);
+}
+
+async function test(args) {
+  await build();
+
+  const dirResults = await Promise.all(
+    TEST_PATTERNS.map(async (p) => ({
+      pattern: p,
+      ok: await pathExists(p.split('/')[0]),
+    }))
+  );
+  const patterns = dirResults.filter((d) => d.ok).map((d) => d.pattern);
+
+  if (patterns.length === 0) throw new Error('No test directories found.');
+
+  const [hasTsx, hasTsNode] = await Promise.all([
+    pathExists('node_modules/tsx'),
+    pathExists('node_modules/ts-node'),
+  ]);
+
+  const loader = hasTsx
+    ? ['--import', 'tsx/esm']
+    : hasTsNode
+      ? ['--loader', 'ts-node/esm']
+      : [];
+
+  const coverage = args.includes('--coverage')
+    ? ['--experimental-test-coverage']
+    : [];
+
+  await runTask('Running tests', () =>
+    run(['--test', ...loader, ...coverage, ...patterns])
+  );
+}
+
+// --- Router ---
+
+const ROUTES = {
+  clean: () => runTask('Cleaning dist', clean),
+  'copy:assets': () => runTask('Copying assets', copyAssets),
+  'make-executable': () => runTask('Making executable', makeExecutable),
+  build,
+  'type-check': typeCheck,
+  test: (restArgs) => test(restArgs),
 };
 
-// --- Interface Layer (CLI) ---
-const CLI = {
-  routes: {
-    clean: () => Runner.runTask('Cleaning', BuildTasks.clean),
-    'copy:assets': () => Runner.runTask('Copying assets', BuildTasks.assets),
-    'make-executable': () =>
-      Runner.runTask('Making executable', BuildTasks.makeExecutable),
-    build: Pipeline.fullBuild,
-    'type-check': () => TestTasks.typeCheck(),
-    test: (args) => TestTasks.test(args),
-  },
+const taskName = process.argv[2] ?? 'build';
+const action = ROUTES[taskName];
 
-  async main(args) {
-    const taskName = args[2] ?? 'build';
-    const restArgs = args.slice(3);
-    const action = this.routes[taskName];
-
-    if (!action) {
-      Logger.error(`Unknown task: ${taskName}`);
-      Logger.error(`Available tasks: ${Object.keys(this.routes).join(', ')}`);
-      process.exitCode = 1;
-      return;
-    }
-
-    try {
-      await action(restArgs);
-    } catch {
-      process.exitCode = 1;
-    }
-  },
-};
-
-CLI.main(process.argv);
+if (!action) {
+  console.error(
+    `Unknown task: ${taskName}\nAvailable tasks: ${Object.keys(ROUTES).join(', ')}`
+  );
+  process.exitCode = 1;
+} else {
+  try {
+    await action(process.argv.slice(3));
+  } catch {
+    process.exitCode = 1;
+  }
+}

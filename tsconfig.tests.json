@@ -1,9 +1,0 @@
-{
-  "extends": "./tsconfig.json",
-  "compilerOptions": {
-    "noEmit": true,
-    "rootDir": ".",
-    "tsBuildInfoFile": "./.tsbuildinfo.tests"
-  },
-  "files": ["tests/cli.test.ts", "tests/mcp-server.test.ts"]
-}

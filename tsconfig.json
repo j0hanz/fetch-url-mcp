@@ -1,9 +1,8 @@
 {
   "compilerOptions": {
-    "target": "ES2022",
+    "target": "ES2024",
     "module": "NodeNext",
-    "moduleResolution": "NodeNext",
-    "lib": ["ES2023", "ESNext.Disposable", "DOM", "DOM.Iterable"],
+    "lib": ["ES2024", "ESNext.Disposable", "DOM", "DOM.Iterable"],
     "moduleDetection": "force",
     "isolatedModules": true,
     "verbatimModuleSyntax": true,
@@ -17,12 +16,15 @@
     "noImplicitReturns": true,
     "noFallthroughCasesInSwitch": true,
     "exactOptionalPropertyTypes": true,
+    "allowUnreachableCode": false,
+    "allowUnusedLabels": false,
     "outDir": "./dist",
     "rootDir": "./src",
     "declaration": true,
     "declarationMap": true,
     "sourceMap": true,
     "incremental": true,
+    "tsBuildInfoFile": ".tmp/tsconfig.tsbuildinfo",
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
     "types": ["node"]
