@@ -174,7 +174,7 @@ export function handleDownload(
   res.end(content);
 }
 const UTF8_ENCODING = 'utf-8';
-export function getCharsetFromContentType(
+function getCharsetFromContentType(
   contentType: string | null
 ): string | undefined {
   if (!contentType) return undefined;
@@ -198,7 +198,7 @@ function createDecoder(encoding: string | undefined): TextDecoder {
     return fallback();
   }
 }
-export function decodeBuffer(buffer: Uint8Array, encoding: string): string {
+function decodeBuffer(buffer: Uint8Array, encoding: string): string {
   return createDecoder(encoding).decode(buffer);
 }
 function normalizeEncodingLabel(encoding: string | undefined): string {
@@ -302,7 +302,7 @@ function detectHtmlDeclaredEncoding(buffer: Uint8Array): string | undefined {
 
   return extractHtmlCharset(headSnippet) ?? extractXmlEncoding(headSnippet);
 }
-export function resolveEncoding(
+function resolveEncoding(
   declaredEncoding: string | undefined,
   sample: Uint8Array
 ): string | undefined {
@@ -350,7 +350,7 @@ function hasNullByte(buffer: Uint8Array, limit: number): boolean {
   const checkLen = Math.min(buffer.length, limit);
   return buffer.subarray(0, checkLen).includes(0x00);
 }
-export function isBinaryContent(
+function isBinaryContent(
   buffer: Uint8Array,
   encoding?: string
 ): boolean {
@@ -360,7 +360,7 @@ export function isBinaryContent(
 
   return !isUnicodeWideEncoding(encoding) && hasNullByte(buffer, 1000);
 }
-export function parseRetryAfter(header: string | null): number {
+function parseRetryAfter(header: string | null): number {
   if (!header) return 60;
 
   const trimmed = header.trim();
@@ -377,7 +377,7 @@ export function parseRetryAfter(header: string | null): number {
 
   return Math.ceil(deltaMs / 1000);
 }
-export type FetchErrorInput =
+type FetchErrorInput =
   | { kind: 'canceled' }
   | { kind: 'aborted' }
   | { kind: 'timeout'; timeout: number }
@@ -387,7 +387,7 @@ export type FetchErrorInput =
   | { kind: 'missing-redirect-location' }
   | { kind: 'network'; message: string }
   | { kind: 'unknown'; message?: string };
-export function createFetchError(
+function createFetchError(
   input: FetchErrorInput,
   url: string
 ): FetchError {
@@ -435,13 +435,13 @@ export function createFetchError(
       return new FetchError(input.message ?? 'Unexpected error', url);
   }
 }
-export function isAbortError(error: unknown): boolean {
+function isAbortError(error: unknown): boolean {
   return (
     isError(error) &&
     (error.name === 'AbortError' || error.name === 'TimeoutError')
   );
 }
-export function isTimeoutError(error: unknown): boolean {
+function isTimeoutError(error: unknown): boolean {
   return isError(error) && error.name === 'TimeoutError';
 }
 function resolveErrorUrl(error: unknown, fallback: string): string {
@@ -451,7 +451,7 @@ function resolveErrorUrl(error: unknown, fallback: string): string {
   const { requestUrl } = error as Record<string, unknown>;
   return typeof requestUrl === 'string' ? requestUrl : fallback;
 }
-export function mapFetchError(
+function mapFetchError(
   error: unknown,
   fallbackUrl: string,
   timeoutMs: number
@@ -501,16 +501,16 @@ export function mapFetchError(
   return createFetchError({ kind: 'network', message: error.message }, url);
 }
 const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
-export function isRedirectStatus(status: number): boolean {
+function isRedirectStatus(status: number): boolean {
   return REDIRECT_STATUSES.has(status);
 }
-export function cancelResponseBody(response: Response): void {
+function cancelResponseBody(response: Response): void {
   const cancelPromise = response.body?.cancel();
   if (!cancelPromise) return;
 
   void cancelPromise.catch(() => undefined);
 }
-export class MaxBytesError extends Error {
+class MaxBytesError extends Error {
   constructor() {
     super('max-bytes-reached');
   }
@@ -521,7 +521,7 @@ type FetchLike = (
 ) => Promise<Response>;
 type NormalizeUrl = (urlString: string) => string;
 type RedirectPreflight = (url: string, signal?: AbortSignal) => Promise<string>;
-export class RedirectFollower {
+class RedirectFollower {
   constructor(
     private readonly fetchFn: FetchLike,
     private readonly normalizeUrl: NormalizeUrl,
@@ -675,7 +675,7 @@ export class RedirectFollower {
     }
   }
 }
-export function resolveResponseError(
+function resolveResponseError(
   response: Response,
   finalUrl: string
 ): FetchError | null {
@@ -729,7 +729,7 @@ function isTextLikeMediaType(mediaType: string): boolean {
     mediaType.endsWith('+markdown')
   );
 }
-export function assertSupportedContentType(
+function assertSupportedContentType(
   contentType: string | null,
   url: string
 ): void {
@@ -838,7 +838,7 @@ function createPumpedStream(
     },
   });
 }
-export async function decodeResponseIfNeeded(
+async function decodeResponseIfNeeded(
   response: Response,
   url: string,
   signal?: AbortSignal
@@ -958,7 +958,7 @@ export async function decodeResponseIfNeeded(
     });
   }
 }
-export class ResponseTextReader {
+class ResponseTextReader {
   async read(
     response: Response,
     url: string,
@@ -1196,7 +1196,7 @@ type ReadDecodedResponseResult =
       size: number;
       truncated: boolean;
     };
-export async function readAndRecordDecodedResponse(
+async function readAndRecordDecodedResponse(
   response: Response,
   finalUrl: string,
   ctx: FetchTelemetryContext,
@@ -1270,7 +1270,7 @@ function assertReadableStreamLike(
     stage,
   });
 }
-export function toNodeReadableStream(
+function toNodeReadableStream(
   stream: ReadableStream<Uint8Array>,
   url: string,
   stage: string
@@ -1278,7 +1278,7 @@ export function toNodeReadableStream(
   assertReadableStreamLike(stream, url, stage);
   return stream;
 }
-export function toWebReadableStream(
+function toWebReadableStream(
   stream: Readable,
   url: string,
   stage: string
@@ -1326,7 +1326,7 @@ type FetchChannelEvent =
       operationId?: string;
     };
 const fetchChannel = diagnosticsChannel.channel('fetch-url-mcp.fetch');
-export interface FetchTelemetryContext {
+interface FetchTelemetryContext {
   requestId: string;
   startTime: number;
   url: string;
@@ -1335,7 +1335,7 @@ export interface FetchTelemetryContext {
   operationId?: string;
 }
 const SLOW_REQUEST_THRESHOLD_MS = 5000;
-export class FetchTelemetry {
+class FetchTelemetry {
   constructor(
     private readonly logger: Logger,
     private readonly context: RequestContextAccessor,

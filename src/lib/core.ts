@@ -21,7 +21,7 @@ import {
 } from './utils.js';
 
 export const serverVersion: string = readServerVersion(import.meta.url);
-export type LogLevel = 'debug' | 'info' | 'warn' | 'error';
+type LogLevel = 'debug' | 'info' | 'warn' | 'error';
 const LOG_LEVELS: readonly LogLevel[] = ['debug', 'info', 'warn', 'error'];
 const ALLOWED_LOG_LEVELS: ReadonlySet<string> = new Set(LOG_LEVELS);
 const DEFAULT_HEADING_KEYWORDS = [

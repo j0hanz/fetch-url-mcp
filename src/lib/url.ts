@@ -7,7 +7,7 @@ import { createErrorWithCode, isError, isSystemError } from './utils.js';
 
 const DNS_LOOKUP_TIMEOUT_MS = 5000;
 const CNAME_LOOKUP_MAX_DEPTH = 5;
-export function normalizeDnsName(value: string): string {
+function normalizeDnsName(value: string): string {
   const normalized = value.trim().toLowerCase().replace(/\.+$/, '');
   return normalized;
 }
@@ -15,7 +15,7 @@ interface AbortRace {
   abortPromise: Promise<never>;
   cleanup: () => void;
 }
-export function createSignalAbortRace(
+function createSignalAbortRace(
   signal: AbortSignal,
   isAbort: () => boolean,
   onTimeout: () => Error,
@@ -43,7 +43,7 @@ export function createSignalAbortRace(
 
   return { abortPromise, cleanup };
 }
-export async function withTimeout<T>(
+async function withTimeout<T>(
   promise: Promise<T>,
   timeoutMs: number,
   onTimeout: () => Error,
@@ -71,7 +71,7 @@ export async function withTimeout<T>(
     abortRace.cleanup();
   }
 }
-export function createAbortSignalError(): Error {
+function createAbortSignalError(): Error {
   const err = new Error('Request was canceled');
   err.name = 'AbortError';
   return err;
@@ -253,7 +253,7 @@ export class SafeDnsResolver {
     }
   }
 }
-export type HostnamePreflight = (
+type HostnamePreflight = (
   url: string,
   signal?: AbortSignal
 ) => Promise<string>;
@@ -443,7 +443,7 @@ export interface TransformResult {
   readonly platform?: string;
 }
 type UrlPatternGroups = Record<string, string | undefined>;
-export function getPatternGroup(
+function getPatternGroup(
   groups: UrlPatternGroups,
   key: string
 ): string | null {
@@ -714,7 +714,7 @@ export interface Logger {
   error(message: string, data?: Record<string, unknown>): void;
 }
 export const VALIDATION_ERROR_CODE = 'VALIDATION_ERROR';
-export function createValidationError(message: string): Error {
+function createValidationError(message: string): Error {
   return createErrorWithCode(message, VALIDATION_ERROR_CODE);
 }
 export const BLOCKED_HOST_SUFFIXES: readonly string[] = ['.local', '.internal'];
@@ -724,13 +724,13 @@ const CLOUD_METADATA_HOSTS: ReadonlySet<string> = new Set([
   '100.100.100.200', // Alibaba Cloud
   'fd00:ec2::254', // AWS IPv6
 ]);
-export function isCloudMetadataHost(hostname: string): boolean {
+function isCloudMetadataHost(hostname: string): boolean {
   const lowered = hostname.toLowerCase();
   if (CLOUD_METADATA_HOSTS.has(lowered)) return true;
   const normalized = normalizeIpForBlockList(lowered);
   return normalized !== null && CLOUD_METADATA_HOSTS.has(normalized.ip);
 }
-export function isLocalFetchAllowed(): boolean {
+function isLocalFetchAllowed(): boolean {
   return process.env['ALLOW_LOCAL_FETCH'] === 'true';
 }
 type SecurityConfig = typeof config.security;

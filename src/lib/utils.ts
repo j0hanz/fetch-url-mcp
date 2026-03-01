@@ -15,11 +15,11 @@ import { config, logDebug, logWarn } from './core.js';
 
 const UNKNOWN_ERROR_MESSAGE = 'Unknown error';
 
-export function getAbortReason(signal: AbortSignal): unknown {
+function getAbortReason(signal: AbortSignal): unknown {
   const record = isObject(signal) ? (signal as Record<string, unknown>) : null;
   return record && 'reason' in record ? record['reason'] : undefined;
 }
-export function isTimeoutAbortReason(reason: unknown): boolean {
+function isTimeoutAbortReason(reason: unknown): boolean {
   return reason instanceof Error && reason.name === 'TimeoutError';
 }
 export function throwIfAborted(

@@ -2,7 +2,7 @@ import { parseArgs } from 'node:util';
 
 import { getErrorMessage } from './lib/utils.js';
 
-export interface CliValues {
+interface CliValues {
   readonly stdio: boolean;
   readonly http: boolean;
   readonly help: boolean;
@@ -19,7 +19,7 @@ interface CliParseFailure {
   readonly message: string;
 }
 
-export type CliParseResult = CliParseSuccess | CliParseFailure;
+type CliParseResult = CliParseSuccess | CliParseFailure;
 
 const usageLines = [
   'Fetch URL MCP server',
