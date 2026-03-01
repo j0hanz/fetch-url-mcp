@@ -181,8 +181,9 @@ export function emitTaskStatusNotification(
   if (!config.tasks.emitStatusNotifications) return;
   if (!server.isConnected()) return;
 
-  // NOTE: 'notifications/tasks/status' is not part of the MCP v2025-11-25 specification.
-  // This relies on the experimental task infrastructure in the SDK and may change.
+  // NOTE: 'notifications/tasks/status' is a non-spec extension (not in MCP v2025-11-25).
+  // Gated by config.tasks.emitStatusNotifications (TASKS_STATUS_NOTIFICATIONS env var).
+  // Clients should NOT depend on this for interoperability — behavior may change.
   void server.server
     .notification({
       method: 'notifications/tasks/status',

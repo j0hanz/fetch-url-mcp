@@ -7,20 +7,26 @@ import { cancelTasksForOwner } from '../dist/lib/mcp-tools.js';
 import { taskManager } from '../dist/tasks/manager.js';
 
 describe('TaskManager.waitForTerminalTask', () => {
-  it('resolves undefined after TTL expiration', { timeout: 2000 }, async () => {
-    const task = taskManager.createTask(
-      { ttl: 30 },
-      'Task started',
-      'ttl-test'
-    );
+  it(
+    'rejects with McpError after TTL expiration',
+    { timeout: 2000 },
+    async () => {
+      const task = taskManager.createTask(
+        { ttl: 30 },
+        'Task started',
+        'ttl-test'
+      );
 
-    const result = await taskManager.waitForTerminalTask(
-      task.taskId,
-      'ttl-test'
-    );
-
-    assert.equal(result, undefined);
-  });
+      await assert.rejects(
+        () => taskManager.waitForTerminalTask(task.taskId, 'ttl-test'),
+        (err: Error) => {
+          assert.equal(err.constructor.name, 'McpError');
+          assert.match(err.message, /Task expired/);
+          return true;
+        }
+      );
+    }
+  );
 
   it('preserves async request context when resolving', async () => {
     const ownerKey = `context-resolve-${Date.now()}`;

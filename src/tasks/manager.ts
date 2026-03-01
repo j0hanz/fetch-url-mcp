@@ -6,7 +6,7 @@ import { randomUUID } from 'node:crypto';
 import { setInterval } from 'node:timers';
 
 import { config } from '../lib/core.js';
-import { toError } from '../lib/utils.js';
+import { RESOURCE_NOT_FOUND_ERROR_CODE, toError } from '../lib/utils.js';
 import { type CancellableTimeout, createUnrefTimeout } from '../lib/utils.js';
 
 export type TaskStatus =
@@ -464,7 +464,11 @@ class TaskManager {
             cleanup();
             this.removeWaiter(taskId, waiter);
             this.removeTask(taskId);
-            resolveInContext(undefined);
+            rejectInContext(
+              new McpError(RESOURCE_NOT_FOUND_ERROR_CODE, 'Task expired', {
+                taskId,
+              })
+            );
           });
         })
         .catch(rejectInContext);

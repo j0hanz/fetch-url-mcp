@@ -476,6 +476,17 @@ class AuthService {
     return info;
   }
 
+  private assertRequiredScopes(tokenScopes: string[]): void {
+    const { requiredScopes } = config.auth;
+    if (requiredScopes.length === 0) return;
+
+    const tokenScopeSet = new Set(tokenScopes);
+    const missing = requiredScopes.filter((s) => !tokenScopeSet.has(s));
+    if (missing.length > 0) {
+      throw new InvalidTokenError('Insufficient scope');
+    }
+  }
+
   private async verifyWithIntrospection(
     token: string,
     signal?: AbortSignal
@@ -502,7 +513,9 @@ class AuthService {
       throw new InvalidTokenError('Token is inactive');
     }
 
-    return this.buildIntrospectionAuthInfo(token, payload);
+    const info = this.buildIntrospectionAuthInfo(token, payload);
+    this.assertRequiredScopes(info.scopes);
+    return info;
   }
 }
 
