@@ -48,14 +48,18 @@ export interface ExtractionResult {
   metadata: ExtractedMetadata;
 }
 
+interface MarkdownPayload {
+  markdown: string;
+  title?: string | undefined;
+  truncated: boolean;
+  metadata?: ExtractedMetadata;
+}
+
 /**
  * Result of HTML to markdown transformation.
  */
-export interface MarkdownTransformResult {
-  markdown: string;
+export interface MarkdownTransformResult extends MarkdownPayload {
   title: string | undefined;
-  truncated: boolean;
-  metadata?: ExtractedMetadata;
 }
 
 /**
@@ -121,12 +125,7 @@ export interface TransformWorkerCancelledMessage {
 export interface TransformWorkerResultMessage {
   type: 'result';
   id: string;
-  result: {
-    markdown: string;
-    title?: string;
-    truncated: boolean;
-    metadata?: ExtractedMetadata;
-  };
+  result: MarkdownPayload;
 }
 
 export interface TransformWorkerErrorMessage {

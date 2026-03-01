@@ -13,6 +13,8 @@ import { inspect } from 'node:util';
 
 import { config, logDebug, logWarn } from './core.js';
 
+const UNKNOWN_ERROR_MESSAGE = 'Unknown error';
+
 export function getAbortReason(signal: AbortSignal): unknown {
   const record = isObject(signal) ? (signal as Record<string, unknown>) : null;
   return record && 'reason' in record ? record['reason'] : undefined;
@@ -157,7 +159,7 @@ function isErrorWithMessage(error: unknown): error is { message: string } {
   return typeof message === 'string' && message.length > 0;
 }
 function formatUnknownError(error: unknown): string {
-  if (error === null || error === undefined) return 'Unknown error';
+  if (error === null || error === undefined) return UNKNOWN_ERROR_MESSAGE;
   try {
     return inspect(error, {
       depth: 2,
@@ -167,7 +169,7 @@ function formatUnknownError(error: unknown): string {
       colors: false,
     });
   } catch {
-    return 'Unknown error';
+    return UNKNOWN_ERROR_MESSAGE;
   }
 }
 export function createErrorWithCode(
@@ -279,11 +281,20 @@ export function applyHttpServerTuning(server: HttpServerTuningTarget): void {
     maxConnections,
   } = config.server.http;
 
-  assignServerValue(server, 'headersTimeout', headersTimeoutMs);
-  assignServerValue(server, 'requestTimeout', requestTimeoutMs);
-  assignServerValue(server, 'keepAliveTimeout', keepAliveTimeoutMs);
-  assignServerValue(server, 'keepAliveTimeoutBuffer', keepAliveTimeoutBufferMs);
-  assignServerValue(server, 'maxHeadersCount', maxHeadersCount);
+  const tuningValues: readonly (readonly [
+    keyof HttpServerTuningTarget,
+    HttpServerTuningTarget[keyof HttpServerTuningTarget] | undefined,
+  ])[] = [
+    ['headersTimeout', headersTimeoutMs],
+    ['requestTimeout', requestTimeoutMs],
+    ['keepAliveTimeout', keepAliveTimeoutMs],
+    ['keepAliveTimeoutBuffer', keepAliveTimeoutBufferMs],
+    ['maxHeadersCount', maxHeadersCount],
+  ];
+
+  for (const [key, value] of tuningValues) {
+    assignServerValue(server, key, value);
+  }
 
   if (typeof maxConnections === 'number' && maxConnections > 0) {
     server.maxConnections = maxConnections;

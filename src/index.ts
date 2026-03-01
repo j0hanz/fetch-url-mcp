@@ -11,6 +11,15 @@ import { startStdioServer } from './server.js';
 const FORCE_EXIT_TIMEOUT_MS = 10_000;
 let forcedExitTimer: NodeJS.Timeout | undefined;
 
+function writeAndExit(
+  stream: NodeJS.WriteStream,
+  text: string,
+  code: number
+): never {
+  stream.write(text);
+  process.exit(code);
+}
+
 function scheduleForcedExit(reason: string): void {
   if (forcedExitTimer) return;
   forcedExitTimer = setTimeout(() => {
@@ -22,20 +31,20 @@ function scheduleForcedExit(reason: string): void {
 
 const parseResult = parseCliArgs(process.argv.slice(2));
 if (!parseResult.ok) {
-  process.stderr.write(`Invalid arguments: ${parseResult.message}\n\n`);
-  process.stderr.write(renderCliUsage());
-  process.exit(1);
+  writeAndExit(
+    process.stderr,
+    `Invalid arguments: ${parseResult.message}\n\n${renderCliUsage()}`,
+    1
+  );
 }
 const { values } = parseResult;
 
 if (values.help) {
-  process.stdout.write(renderCliUsage());
-  process.exit(0);
+  writeAndExit(process.stdout, renderCliUsage(), 0);
 }
 
 if (values.version) {
-  process.stdout.write(`${serverVersion}\n`);
-  process.exit(0);
+  writeAndExit(process.stdout, `${serverVersion}\n`, 0);
 }
 const isStdioMode = !values.http;
 let isShuttingDown = false;
@@ -53,23 +62,23 @@ function attemptShutdown(signal: string): void {
   void shutdownHandlerRef.current(signal);
 }
 
-function registerOnceSignal(
-  signal: NodeJS.Signals,
-  handler: (signal: string) => void
+function registerSignalHandlers(
+  signals: readonly NodeJS.Signals[],
+  handler: (signal: NodeJS.Signals) => void
 ): void {
-  process.once(signal, () => {
-    handler(signal);
-  });
+  for (const signal of signals) {
+    process.once(signal, () => {
+      handler(signal);
+    });
+  }
 }
 
 function registerHttpSignalHandlers(): void {
-  const tryShutdown = (signal: string): void => {
+  const tryShutdown = (signal: NodeJS.Signals): void => {
     if (shouldAttemptShutdown()) attemptShutdown(signal);
   };
 
-  for (const signal of ['SIGINT', 'SIGTERM'] as const) {
-    registerOnceSignal(signal, tryShutdown);
-  }
+  registerSignalHandlers(['SIGINT', 'SIGTERM'], tryShutdown);
 }
 
 function writeStartupError(error: Error): void {

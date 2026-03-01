@@ -23,6 +23,18 @@ import { getErrorMessage, toError } from '../lib/utils.js';
 
 export type NetworkServer = Server | HttpsServer;
 
+function abortControllerBestEffort(controller: AbortController): void {
+  if (!controller.signal.aborted) controller.abort();
+}
+
+function destroyRequestBestEffort(req: IncomingMessage): void {
+  try {
+    req.destroy();
+  } catch {
+    // Best-effort only.
+  }
+}
+
 export interface RequestContext {
   req: IncomingMessage;
   res: ServerResponse;
@@ -156,7 +168,7 @@ export function createRequestAbortSignal(req: IncomingMessage): {
 
   const abortRequest = (): void => {
     if (cleanedUp) return;
-    if (!controller.signal.aborted) controller.abort();
+    abortControllerBestEffort(controller);
   };
 
   if (req.destroyed) {
@@ -367,11 +379,7 @@ class JsonBodyReader {
     if (contentLengthHeader) {
       const contentLength = Number.parseInt(contentLengthHeader, 10);
       if (Number.isFinite(contentLength) && contentLength > limit) {
-        try {
-          req.destroy();
-        } catch {
-          // Best-effort only.
-        }
+        destroyRequestBestEffort(req);
         throw new JsonBodyError('payload-too-large', 'Payload too large');
       }
     }
@@ -413,11 +421,7 @@ class JsonBodyReader {
     if (!signal) return null;
 
     const listener = (): void => {
-      try {
-        req.destroy();
-      } catch {
-        // Best-effort only.
-      }
+      destroyRequestBestEffort(req);
     };
 
     if (signal.aborted) {
@@ -463,7 +467,7 @@ class JsonBodyReader {
           size += buf.length;
 
           if (size > limit) {
-            req.destroy();
+            destroyRequestBestEffort(req);
             callback(
               new JsonBodyError('payload-too-large', 'Payload too large')
             );

@@ -189,26 +189,19 @@ function isVerboseHealthRequest(ctx: RequestContext): boolean {
   return normalized === '1' || normalized === 'true';
 }
 
-function isGetHealthRoute(ctx: RequestContext): boolean {
+function isHealthRoute(ctx: RequestContext): boolean {
   return ctx.method === 'GET' && ctx.url.pathname === '/health';
 }
 
 function isVerboseHealthRoute(ctx: RequestContext): boolean {
-  return isGetHealthRoute(ctx) && isVerboseHealthRequest(ctx);
-}
-
-function isHealthRoute(ctx: RequestContext): boolean {
-  return isGetHealthRoute(ctx);
+  return isHealthRoute(ctx) && isVerboseHealthRequest(ctx);
 }
 
 function ensureHealthAuthIfNeeded(
   ctx: RequestContext,
   authPresent: boolean
 ): boolean {
-  if (!isHealthRoute(ctx)) return true;
-  const isVerbose = isVerboseHealthRequest(ctx);
-
-  if (!isVerbose) return true;
+  if (!isVerboseHealthRoute(ctx)) return true;
   if (!config.security.allowRemote) return true;
   if (authPresent) return true;
 
@@ -222,13 +215,13 @@ function resolveHealthDiagnosticsMode(
   ctx: RequestContext,
   authPresent: boolean
 ): boolean {
-  if (!isVerboseHealthRoute(ctx)) return false;
-  if (authPresent) return true;
-  return !config.security.allowRemote;
+  return (
+    isVerboseHealthRoute(ctx) && (authPresent || !config.security.allowRemote)
+  );
 }
 
 export function shouldHandleHealthRoute(ctx: RequestContext): boolean {
-  return isGetHealthRoute(ctx);
+  return isHealthRoute(ctx);
 }
 
 export function sendHealthRouteResponse(

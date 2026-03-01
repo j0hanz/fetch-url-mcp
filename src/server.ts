@@ -107,6 +107,14 @@ interface CreateMcpServerOptions {
   registerObservabilityServer?: boolean;
 }
 
+const SHUTDOWN_SIGNALS = ['SIGINT', 'SIGTERM'] as const;
+
+function shouldRegisterObservabilityServer(
+  options?: CreateMcpServerOptions
+): boolean {
+  return options?.registerObservabilityServer ?? true;
+}
+
 async function createMcpServerWithOptions(
   options?: CreateMcpServerOptions
 ): Promise<McpServer> {
@@ -122,7 +130,7 @@ async function createMcpServerWithOptions(
   const serverInfo = createServerInfo(localIcon ? [localIcon] : undefined);
   const server = new McpServer(serverInfo, serverConfig);
 
-  if (options?.registerObservabilityServer ?? true) {
+  if (shouldRegisterObservabilityServer(options)) {
     setMcpServer(server);
   }
 
@@ -217,7 +225,7 @@ function createShutdownHandler(server: McpServer): (signal: string) => void {
 }
 
 function registerSignalHandlers(handler: (signal: string) => void): void {
-  for (const signal of ['SIGINT', 'SIGTERM'] as const) {
+  for (const signal of SHUTDOWN_SIGNALS) {
     process.once(signal, () => {
       handler(signal);
     });

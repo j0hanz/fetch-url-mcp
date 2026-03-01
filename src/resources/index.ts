@@ -46,6 +46,16 @@ const CACHE_NAMESPACE_PATTERN = /^[a-z0-9_-]{1,64}$/i;
 const CACHE_HASH_PATTERN = /^[a-f0-9.]{8,64}$/i;
 const MAX_COMPLETION_VALUES = 100;
 
+function normalizeCompletionPrefix(value: string): string {
+  return value.trim().toLowerCase();
+}
+
+function sortAndLimitValues(values: Iterable<string>): string[] {
+  return [...values]
+    .sort((left, right) => left.localeCompare(right))
+    .slice(0, MAX_COMPLETION_VALUES);
+}
+
 function buildOptionalIcons(
   iconInfo?: IconInfo
 ): { icons: IconInfo[] } | Record<string, never> {
@@ -149,17 +159,18 @@ function listCacheNamespaces(): string[] {
 }
 
 function completeCacheNamespaces(value: string): string[] {
-  const normalized = value.trim().toLowerCase();
-  return listCacheNamespaces()
-    .filter((namespace) => namespace.toLowerCase().startsWith(normalized))
-    .slice(0, MAX_COMPLETION_VALUES);
+  const normalized = normalizeCompletionPrefix(value);
+  const namespaces = listCacheNamespaces().filter((namespace) =>
+    namespace.toLowerCase().startsWith(normalized)
+  );
+  return sortAndLimitValues(namespaces);
 }
 
 function completeCacheHashes(
   value: string,
   context?: CompletionContext
 ): string[] {
-  const normalized = value.trim().toLowerCase();
+  const normalized = normalizeCompletionPrefix(value);
   const namespace = context?.arguments?.['namespace']?.trim();
   const hashes = new Set<string>();
 
@@ -173,9 +184,7 @@ function completeCacheHashes(
     hashes.add(parsed.urlHash);
   }
 
-  return [...hashes]
-    .sort((left, right) => left.localeCompare(right))
-    .slice(0, MAX_COMPLETION_VALUES);
+  return sortAndLimitValues(hashes);
 }
 
 function listCacheResources(): {
