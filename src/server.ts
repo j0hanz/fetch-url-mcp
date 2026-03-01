@@ -1,10 +1,9 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
+import { SetLevelRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 
 import * as fs from 'node:fs/promises';
 import process from 'node:process';
-
-import { z } from 'zod';
 
 import { config } from './lib/core.js';
 import { logError, logInfo, setLogLevel, setMcpServer } from './lib/core.js';
@@ -150,24 +149,6 @@ export async function createMcpServerForHttpSession(): Promise<McpServer> {
 }
 
 function registerLoggingSetLevelHandler(server: McpServer): void {
-  const LoggingLevelSchema = z.enum([
-    'debug',
-    'info',
-    'notice',
-    'warning',
-    'error',
-    'critical',
-    'alert',
-    'emergency',
-  ]);
-
-  const SetLevelRequestSchema = z
-    .object({
-      method: z.literal('logging/setLevel'),
-      params: z.object({ level: LoggingLevelSchema }).loose(),
-    })
-    .loose();
-
   server.server.setRequestHandler(SetLevelRequestSchema, (request) => {
     setLogLevel(request.params.level);
     return {};

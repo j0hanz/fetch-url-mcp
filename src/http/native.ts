@@ -153,11 +153,11 @@ class McpSessionGateway {
     }
 
     const requestId = body.id ?? null;
-    const isInitMethod = isInitializedNotification(body.method);
-    const isInitNotification = isInitMethod && body.id === undefined;
+    const isInitializedMethod = isInitializedNotification(body.method);
+    const isInitNotification = isInitializedMethod && body.id === undefined;
     const sessionId = getMcpSessionId(ctx.req);
 
-    if (isInitMethod && !isInitNotification) {
+    if (isInitializedMethod && !isInitNotification) {
       sendError(
         ctx.res,
         -32600,
@@ -461,6 +461,7 @@ class McpSessionGateway {
       return false;
     }
 
+    // Double-check: capacity may have changed during the async eviction window above.
     if (!reserveSessionSlot(this.store, config.server.maxSessions)) {
       sendError(res, -32000, 'Server busy', 503, requestId);
       return false;
@@ -545,7 +546,7 @@ class HttpDispatcher {
 
       const authCtx: AuthenticatedContext = { ...ctx, auth };
 
-      if (this.tryHandleDownloadRoute(ctx)) return;
+      if (this.tryHandleDownloadRoute(authCtx)) return;
 
       if (ctx.url.pathname === '/mcp') {
         const handled = await this.handleMcpRoutes(authCtx);

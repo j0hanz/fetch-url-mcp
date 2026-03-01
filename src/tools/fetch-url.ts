@@ -167,13 +167,15 @@ function appendIfPresent<T>(items: T[], value: T | null | undefined): void {
  * Tool abort signal
  * ------------------------------------------------------------------------------------------------- */
 
+const HARD_TOOL_TIMEOUT_MS = 300_000;
+
 function buildToolAbortSignal(
   extraSignal: AbortSignal | undefined
 ): AbortSignal | undefined {
   const { timeoutMs } = config.tools;
-  if (timeoutMs <= 0) return extraSignal;
+  const effectiveTimeout = timeoutMs > 0 ? timeoutMs : HARD_TOOL_TIMEOUT_MS;
 
-  const timeoutSignal = AbortSignal.timeout(timeoutMs);
+  const timeoutSignal = AbortSignal.timeout(effectiveTimeout);
   if (!extraSignal) return timeoutSignal;
 
   return AbortSignal.any([extraSignal, timeoutSignal]);
@@ -191,19 +193,20 @@ function truncateStr(
   return value.slice(0, max);
 }
 
-const METADATA_FIELD_LIMITS: Record<string, number> = {
-  title: 512,
-  description: 2048,
-  author: 512,
-};
+const METADATA_FIELD_LIMITS: Partial<Record<keyof ExtractedMetadata, number>> =
+  {
+    title: 512,
+    description: 2048,
+    author: 512,
+  };
 
 function truncateMetadata(metadata: ExtractedMetadata): ExtractedMetadata {
   const result = { ...metadata };
-  for (const [key, limit] of Object.entries(METADATA_FIELD_LIMITS)) {
-    const field = key as keyof ExtractedMetadata;
-    const value = result[field];
+  for (const [field, limit] of Object.entries(METADATA_FIELD_LIMITS)) {
+    const key = field as keyof ExtractedMetadata;
+    const value = result[key];
     if (typeof value === 'string' && value.length > limit) {
-      result[field] = value.slice(0, limit);
+      result[key] = value.slice(0, limit);
     }
   }
   return result;

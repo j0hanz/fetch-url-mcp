@@ -35,8 +35,6 @@ class CorsPolicy {
     if (origin) {
       res.setHeader('Access-Control-Allow-Origin', origin);
       res.setHeader('Vary', 'Origin');
-    } else {
-      res.setHeader('Access-Control-Allow-Origin', '*');
     }
 
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS, DELETE');

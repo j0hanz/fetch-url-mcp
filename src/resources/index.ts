@@ -240,7 +240,10 @@ function normalizeSubscriptionUri(uri: string): string {
 // Must only be called once per server instance; duplicate calls would register
 // redundant Subscribe/Unsubscribe handlers and create a second onCacheUpdate
 // listener, causing duplicate notifications.
+let cacheNotificationsRegistered = false;
 function registerCacheResourceNotifications(server: McpServer): void {
+  if (cacheNotificationsRegistered) return;
+  cacheNotificationsRegistered = true;
   const subscribedResourceUris = new Set<string>();
 
   const setSubscription = (uri: string, subscribed: boolean): void => {
