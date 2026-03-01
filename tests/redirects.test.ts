@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { FetchError } from '../dist/lib/errors.js';
-import { fetchWithRedirects } from '../dist/lib/fetch.js';
+import { fetchWithRedirects } from '../dist/lib/http.js';
+import { FetchError } from '../dist/lib/utils.js';
 
 describe('fetchWithRedirects', () => {
   it('follows validated redirect targets', async (t) => {

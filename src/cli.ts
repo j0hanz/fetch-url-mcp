@@ -1,6 +1,6 @@
 import { parseArgs } from 'node:util';
 
-import { getErrorMessage } from './lib/errors.js';
+import { getErrorMessage } from './lib/utils.js';
 
 export interface CliValues {
   readonly stdio: boolean;

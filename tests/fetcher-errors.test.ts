@@ -2,8 +2,8 @@ import assert from 'node:assert/strict';
 import dns from 'node:dns';
 import test from 'node:test';
 
-import { FetchError } from '../dist/lib/errors.js';
-import { fetchNormalizedUrl } from '../dist/lib/fetch.js';
+import { fetchNormalizedUrl } from '../dist/lib/http.js';
+import { FetchError } from '../dist/lib/utils.js';
 
 test('fetchNormalizedUrl throws rate limit error on 429', async (t) => {
   t.mock.method(globalThis, 'fetch', async () => {

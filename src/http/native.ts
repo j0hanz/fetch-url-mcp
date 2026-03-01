@@ -17,17 +17,7 @@ import {
 import { hostname } from 'node:os';
 import process from 'node:process';
 
-import { config, enableHttpMode } from '../lib/config.js';
-import { handleDownload } from '../lib/download.js';
-import { toError } from '../lib/errors.js';
-import {
-  acceptsEventStream,
-  acceptsJsonAndEventStream,
-  isJsonRpcBatchRequest,
-  isMcpRequestBody,
-  type JsonRpcId,
-} from '../lib/mcp-validator.js';
-import { cancelTasksForOwner } from '../lib/mcp.js';
+import { config, enableHttpMode } from '../lib/core.js';
 import {
   logError,
   logInfo,
@@ -36,11 +26,7 @@ import {
   runWithRequestContext,
   unregisterMcpSessionServer,
   unregisterMcpSessionServerByServer,
-} from '../lib/observability.js';
-import {
-  applyHttpServerTuning,
-  drainConnectionsOnShutdown,
-} from '../lib/server-tuning.js';
+} from '../lib/core.js';
 import {
   composeCloseHandlers,
   createSessionStore,
@@ -49,8 +35,22 @@ import {
   reserveSessionSlot,
   type SessionStore,
   startSessionCleanupLoop,
-} from '../lib/session.js';
-import { isObject } from '../lib/type-guards.js';
+} from '../lib/core.js';
+import { handleDownload } from '../lib/http.js';
+import {
+  acceptsEventStream,
+  acceptsJsonAndEventStream,
+  isJsonRpcBatchRequest,
+  isMcpRequestBody,
+  type JsonRpcId,
+} from '../lib/mcp-tools.js';
+import { cancelTasksForOwner } from '../lib/mcp-tools.js';
+import { toError } from '../lib/utils.js';
+import {
+  applyHttpServerTuning,
+  drainConnectionsOnShutdown,
+} from '../lib/utils.js';
+import { isObject } from '../lib/utils.js';
 import { createMcpServerForHttpSession } from '../server.js';
 import {
   applyUnauthorizedAuthHeaders,

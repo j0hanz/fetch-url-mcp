@@ -2,12 +2,12 @@ import assert from 'node:assert/strict';
 import diagnosticsChannel from 'node:diagnostics_channel';
 import { afterEach, describe, it } from 'node:test';
 
+import { runWithRequestContext } from '../dist/lib/core.js';
 import {
   recordFetchError,
   recordFetchResponse,
   startFetchTelemetry,
-} from '../dist/lib/fetch.js';
-import { runWithRequestContext } from '../dist/lib/observability.js';
+} from '../dist/lib/http.js';
 
 type FetchEvent = Record<string, unknown>;
 

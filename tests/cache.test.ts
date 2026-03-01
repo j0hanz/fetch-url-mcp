@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import * as cache from '../dist/lib/cache.js';
-import { config } from '../dist/lib/config.js';
-import { generateSafeFilename } from '../dist/lib/download.js';
+import * as cache from '../dist/lib/core.js';
+import { config } from '../dist/lib/core.js';
+import { generateSafeFilename } from '../dist/lib/http.js';
 
 let keyCounter = 0;
 

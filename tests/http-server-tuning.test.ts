@@ -41,7 +41,7 @@ function parseMarkedJson<T>(output: string): T {
 describe('http server tuning helpers', () => {
   it('applyHttpServerTuning does nothing by default', async () => {
     const script = `
-      import { applyHttpServerTuning } from './dist/lib/server-tuning.js';
+      import { applyHttpServerTuning } from './dist/lib/utils.js';
       const server = { headersTimeout: 123, requestTimeout: 456, keepAliveTimeout: 789 };
       applyHttpServerTuning(server);
       console.error('${RESULT_MARKER}' + JSON.stringify(server));
@@ -66,7 +66,7 @@ describe('http server tuning helpers', () => {
 
   it('drainConnectionsOnShutdown always closes idle connections', async () => {
     const script = `
-      import { drainConnectionsOnShutdown } from './dist/lib/server-tuning.js';
+      import { drainConnectionsOnShutdown } from './dist/lib/utils.js';
       let idleCalls = 0;
       let allCalls = 0;
       const server = {
@@ -93,7 +93,7 @@ describe('http server tuning helpers', () => {
 
   it('drainConnectionsOnShutdown closes idle connections when enabled', async () => {
     const script = `
-      import { drainConnectionsOnShutdown } from './dist/lib/server-tuning.js';
+      import { drainConnectionsOnShutdown } from './dist/lib/utils.js';
       let idleCalls = 0;
       const server = {
         closeIdleConnections: () => { idleCalls += 1; },

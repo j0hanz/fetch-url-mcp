@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { beforeEach, describe, it } from 'node:test';
 
-import { performSharedFetch } from '../dist/lib/tool-pipeline.js';
+import { performSharedFetch } from '../dist/lib/mcp-tools.js';
 
 type SharedFetchOptions = Parameters<typeof performSharedFetch>[0];
 type SharedFetchDeps = NonNullable<Parameters<typeof performSharedFetch>[1]>;

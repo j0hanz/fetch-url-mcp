@@ -5,17 +5,17 @@ import {
   type ServerResult,
 } from '@modelcontextprotocol/sdk/types.js';
 
-import { config } from '../lib/config.js';
-import {
-  getErrorMessage,
-  RESOURCE_NOT_FOUND_ERROR_CODE,
-} from '../lib/errors.js';
-import { logWarn, runWithRequestContext } from '../lib/observability.js';
+import { config } from '../lib/core.js';
+import { logWarn, runWithRequestContext } from '../lib/core.js';
 import type {
   ProgressNotification,
   ToolHandlerExtra,
-} from '../lib/tool-progress.js';
-import { isObject } from '../lib/type-guards.js';
+} from '../lib/mcp-tools.js';
+import {
+  getErrorMessage,
+  RESOURCE_NOT_FOUND_ERROR_CODE,
+} from '../lib/utils.js';
+import { isObject } from '../lib/utils.js';
 import {
   type CreateTaskResult,
   taskManager,

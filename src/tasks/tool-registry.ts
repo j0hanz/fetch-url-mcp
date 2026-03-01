@@ -1,6 +1,6 @@
 import type { ServerResult } from '@modelcontextprotocol/sdk/types.js';
 
-import type { ToolHandlerExtra } from '../lib/tool-progress.js';
+import type { ToolHandlerExtra } from '../lib/mcp-tools.js';
 
 export interface TaskCapableToolDescriptor<TArgs = unknown> {
   name: string;

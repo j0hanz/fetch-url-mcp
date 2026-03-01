@@ -6,7 +6,7 @@ import {
   hmacSha256Hex,
   sha256Hex,
   timingSafeEqualUtf8,
-} from '../dist/lib/crypto.js';
+} from '../dist/lib/utils.js';
 
 describe('timingSafeEqualUtf8', () => {
   it('returns true for identical strings', () => {

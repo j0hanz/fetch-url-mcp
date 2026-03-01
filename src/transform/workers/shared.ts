@@ -1,4 +1,4 @@
-import { FetchError, getErrorMessage } from '../../lib/errors.js';
+import { FetchError, getErrorMessage } from '../../lib/utils.js';
 import type {
   MarkdownTransformResult,
   TransformOptions,

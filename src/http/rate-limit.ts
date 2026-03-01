@@ -1,6 +1,6 @@
-import { isAbortError } from '../lib/errors.js';
-import { logWarn } from '../lib/observability.js';
-import { startAbortableIntervalLoop } from '../lib/timer-utils.js';
+import { logWarn } from '../lib/core.js';
+import { isAbortError } from '../lib/utils.js';
+import { startAbortableIntervalLoop } from '../lib/utils.js';
 import { type RequestContext, sendJson } from './helpers.js';
 
 // ---------------------------------------------------------------------------

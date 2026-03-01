@@ -8,10 +8,10 @@ import { Buffer } from 'node:buffer';
 import { randomBytes } from 'node:crypto';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 
-import { config } from '../lib/config.js';
-import { hmacSha256Hex, timingSafeEqualUtf8 } from '../lib/crypto.js';
-import { normalizeHost } from '../lib/host-normalization.js';
-import { isObject } from '../lib/type-guards.js';
+import { config } from '../lib/core.js';
+import { normalizeHost } from '../lib/url.js';
+import { hmacSha256Hex, timingSafeEqualUtf8 } from '../lib/utils.js';
+import { isObject } from '../lib/utils.js';
 import {
   getHeaderValue,
   type RequestContext,

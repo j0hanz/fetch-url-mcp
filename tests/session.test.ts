@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { setTimeout as delay } from 'node:timers/promises';
 
-import * as http from '../dist/lib/session.js';
+import * as http from '../dist/lib/core.js';
 
 type SessionStore = ReturnType<typeof http.createSessionStore>;
 type SessionEntry = Parameters<SessionStore['set']>[1];

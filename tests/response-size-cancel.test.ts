@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { readResponseText } from '../dist/lib/fetch.js';
+import { readResponseText } from '../dist/lib/http.js';
 
 function createResponseWithTrackableBody(
   bodyText: string,

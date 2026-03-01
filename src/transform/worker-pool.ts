@@ -9,15 +9,12 @@ import {
   Worker,
 } from 'node:worker_threads';
 
-import { createAbortError } from '../lib/abort-utils.js';
-import { config } from '../lib/config.js';
-import { FetchError, getErrorMessage } from '../lib/errors.js';
-import { logWarn } from '../lib/observability.js';
-import {
-  type CancellableTimeout,
-  createUnrefTimeout,
-} from '../lib/timer-utils.js';
-import { isObject } from '../lib/type-guards.js';
+import { config } from '../lib/core.js';
+import { logWarn } from '../lib/core.js';
+import { createAbortError } from '../lib/utils.js';
+import { FetchError, getErrorMessage } from '../lib/utils.js';
+import { type CancellableTimeout, createUnrefTimeout } from '../lib/utils.js';
+import { isObject } from '../lib/utils.js';
 import type {
   MarkdownTransformResult,
   TransformWorkerCancelMessage,

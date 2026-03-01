@@ -6,8 +6,8 @@ import {
   createSlotTracker,
   ensureSessionCapacity,
   reserveSessionSlot,
-} from '../dist/lib/session.js';
-import type { SessionStore } from '../dist/lib/session.js';
+} from '../dist/lib/core.js';
+import type { SessionStore } from '../dist/lib/core.js';
 
 type SessionEntry = Parameters<SessionStore['set']>[1];
 

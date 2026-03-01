@@ -10,15 +10,12 @@ import type { Socket } from 'node:net';
 import { Writable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 
-import { config } from '../lib/config.js';
-import { getErrorMessage, toError } from '../lib/errors.js';
-import {
-  createDefaultBlockList,
-  normalizeIpForBlockList,
-} from '../lib/ip-blocklist.js';
-import type { JsonRpcId } from '../lib/mcp-validator.js';
-import { logWarn } from '../lib/observability.js';
-import { composeCloseHandlers } from '../lib/session.js';
+import { config } from '../lib/core.js';
+import { logWarn } from '../lib/core.js';
+import { composeCloseHandlers } from '../lib/core.js';
+import type { JsonRpcId } from '../lib/mcp-tools.js';
+import { createDefaultBlockList, normalizeIpForBlockList } from '../lib/url.js';
+import { getErrorMessage, toError } from '../lib/utils.js';
 
 // ---------------------------------------------------------------------------
 // Shared types

@@ -5,7 +5,7 @@ import {
   isBlockedIp,
   normalizeUrl,
   validateAndNormalizeUrl,
-} from '../dist/lib/fetch.js';
+} from '../dist/lib/http.js';
 
 describe('validateAndNormalizeUrl', () => {
   it('returns a normalized URL for valid input', () => {

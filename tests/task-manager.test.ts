@@ -1,12 +1,9 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { config } from '../dist/lib/config.js';
-import { cancelTasksForOwner } from '../dist/lib/mcp.js';
-import {
-  getRequestId,
-  runWithRequestContext,
-} from '../dist/lib/observability.js';
+import { config } from '../dist/lib/core.js';
+import { getRequestId, runWithRequestContext } from '../dist/lib/core.js';
+import { cancelTasksForOwner } from '../dist/lib/mcp-tools.js';
 import { taskManager } from '../dist/tasks/manager.js';
 
 describe('TaskManager.waitForTerminalTask', () => {

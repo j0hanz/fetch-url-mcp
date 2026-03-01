@@ -13,18 +13,17 @@ import { randomUUID } from 'node:crypto';
 
 import { z } from 'zod';
 
-import * as cache from '../lib/cache.js';
-import { config } from '../lib/config.js';
-import { generateSafeFilename } from '../lib/download.js';
-import { isAbortError, toError } from '../lib/errors.js';
+import * as cache from '../lib/core.js';
+import { config } from '../lib/core.js';
 import {
   getRequestId,
   logDebug,
   logError,
   logWarn,
   runWithRequestContext,
-} from '../lib/observability.js';
-import { handleToolError } from '../lib/tool-errors.js';
+} from '../lib/core.js';
+import { generateSafeFilename } from '../lib/http.js';
+import { handleToolError } from '../lib/mcp-tools.js';
 import {
   appendTruncationMarker,
   type InlineContentResult,
@@ -38,13 +37,14 @@ import {
   serializeMarkdownResult,
   TRUNCATION_MARKER,
   withSignal,
-} from '../lib/tool-pipeline.js';
+} from '../lib/mcp-tools.js';
 import {
   createProgressReporter,
   type ProgressReporter,
   type ToolHandlerExtra,
-} from '../lib/tool-progress.js';
-import { isObject } from '../lib/type-guards.js';
+} from '../lib/mcp-tools.js';
+import { isAbortError, toError } from '../lib/utils.js';
+import { isObject } from '../lib/utils.js';
 import { fetchUrlInputSchema } from '../schemas/inputs.js';
 import { fetchUrlOutputSchema } from '../schemas/outputs.js';
 import {

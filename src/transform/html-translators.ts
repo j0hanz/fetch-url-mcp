@@ -7,8 +7,8 @@ import {
 import {
   detectLanguageFromCode,
   resolveLanguageFromAttributes,
-} from '../lib/language-detection.js';
-import { isLikeNode, isObject } from '../lib/type-guards.js';
+} from '../lib/content.js';
+import { isLikeNode, isObject } from '../lib/utils.js';
 
 // ---------------------------------------------------------------------------
 // Shared constant

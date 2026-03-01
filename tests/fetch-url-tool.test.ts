@@ -3,10 +3,10 @@ import { after, describe, it } from 'node:test';
 
 import { NodeHtmlMarkdown } from 'node-html-markdown';
 
-import * as cache from '../dist/lib/cache.js';
-import { config } from '../dist/lib/config.js';
-import { normalizeUrl } from '../dist/lib/fetch.js';
-import { cleanupMarkdownArtifacts } from '../dist/lib/markdown-cleanup.js';
+import * as cache from '../dist/lib/core.js';
+import { cleanupMarkdownArtifacts } from '../dist/lib/content.js';
+import { config } from '../dist/lib/core.js';
+import { normalizeUrl } from '../dist/lib/http.js';
 import { fetchUrlToolHandler } from '../dist/tools/fetch-url.js';
 import {
   htmlToMarkdown,

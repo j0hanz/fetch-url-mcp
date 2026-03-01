@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-import { config } from '../lib/config.js';
+import { config } from '../lib/core.js';
 
 export const fetchUrlInputSchema = z.strictObject({
   url: z

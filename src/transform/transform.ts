@@ -5,18 +5,15 @@ import { performance } from 'node:perf_hooks';
 import { isProbablyReaderable, Readability } from '@mozilla/readability';
 import { parseHTML } from 'linkedom';
 
-import { createAbortError, throwIfAborted } from '../lib/abort-utils.js';
-import { config } from '../lib/config.js';
-import { removeNoiseFromHtml } from '../lib/dom-noise-removal.js';
-import { FetchError, getErrorMessage } from '../lib/errors.js';
-import { isRawTextContentUrl } from '../lib/fetch.js';
+import { removeNoiseFromHtml } from '../lib/content.js';
 import {
   addSourceToMarkdown,
   buildMetadataFooter,
   cleanupMarkdownArtifacts,
   extractTitleFromRawMarkdown,
   isRawTextContent,
-} from '../lib/markdown-cleanup.js';
+} from '../lib/content.js';
+import { config } from '../lib/core.js';
 import {
   getOperationId,
   getRequestId,
@@ -25,8 +22,11 @@ import {
   logInfo,
   logWarn,
   redactUrl,
-} from '../lib/observability.js';
-import { isObject } from '../lib/type-guards.js';
+} from '../lib/core.js';
+import { isRawTextContentUrl } from '../lib/http.js';
+import { createAbortError, throwIfAborted } from '../lib/utils.js';
+import { FetchError, getErrorMessage } from '../lib/utils.js';
+import { isObject } from '../lib/utils.js';
 import { translateHtmlFragmentToMarkdown } from './html-translators.js';
 import {
   extractMetadata,

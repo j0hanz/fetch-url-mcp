@@ -18,11 +18,11 @@ import {
   parseCachedPayload,
   parseCacheKey,
   resolveCachedPayloadContent,
-} from '../lib/cache.js';
-import { RESOURCE_NOT_FOUND_ERROR_CODE } from '../lib/errors.js';
-import { registerServerLifecycleCleanup } from '../lib/mcp-lifecycle.js';
-import { logWarn } from '../lib/observability.js';
-import { isObject } from '../lib/type-guards.js';
+} from '../lib/core.js';
+import { logWarn } from '../lib/core.js';
+import { registerServerLifecycleCleanup } from '../lib/mcp-tools.js';
+import { RESOURCE_NOT_FOUND_ERROR_CODE } from '../lib/utils.js';
+import { isObject } from '../lib/utils.js';
 
 interface IconInfo {
   src: string;

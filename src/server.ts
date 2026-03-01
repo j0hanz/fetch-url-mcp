@@ -6,15 +6,13 @@ import process from 'node:process';
 
 import { z } from 'zod';
 
-import { config } from './lib/config.js';
-import { toError } from './lib/errors.js';
-import { abortAllTaskExecutions, registerTaskHandlers } from './lib/mcp.js';
+import { config } from './lib/core.js';
+import { logError, logInfo, setLogLevel, setMcpServer } from './lib/core.js';
 import {
-  logError,
-  logInfo,
-  setLogLevel,
-  setMcpServer,
-} from './lib/observability.js';
+  abortAllTaskExecutions,
+  registerTaskHandlers,
+} from './lib/mcp-tools.js';
+import { toError } from './lib/utils.js';
 import { registerGetHelpPrompt } from './prompts/index.js';
 import {
   registerCacheResourceTemplate,

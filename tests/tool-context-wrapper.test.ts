@@ -1,10 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it, mock } from 'node:test';
 
-import {
-  getRequestId,
-  runWithRequestContext,
-} from '../dist/lib/observability.js';
+import { getRequestId, runWithRequestContext } from '../dist/lib/core.js';
 import { withRequestContextIfMissing } from '../dist/tools/fetch-url.js';
 
 describe('withRequestContextIfMissing', () => {
@@ -46,8 +43,7 @@ describe('withRequestContextIfMissing', () => {
 
 describe('Progress notification timeout', () => {
   it('times out progress notifications after 5 seconds', async () => {
-    const { createProgressReporter } =
-      await import('../dist/lib/tool-progress.js');
+    const { createProgressReporter } = await import('../dist/lib/mcp-tools.js');
     const startTime = Date.now();
 
     // Mock sendNotification that takes 10 seconds (longer than 5-second timeout)

@@ -3,9 +3,9 @@ import { freemem, hostname, totalmem } from 'node:os';
 import { monitorEventLoopDelay, performance } from 'node:perf_hooks';
 import process from 'node:process';
 
-import { keys as cacheKeys } from '../lib/cache.js';
-import { config, serverVersion } from '../lib/config.js';
-import type { SessionStore } from '../lib/session.js';
+import { keys as cacheKeys } from '../lib/core.js';
+import { config, serverVersion } from '../lib/core.js';
+import type { SessionStore } from '../lib/core.js';
 import { getTransformPoolStats } from '../transform/transform.js';
 import { type RequestContext, sendJson } from './helpers.js';
 

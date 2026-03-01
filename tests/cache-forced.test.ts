@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
 import { after, describe, it } from 'node:test';
 
-import * as cache from '../dist/lib/cache.js';
-import { config } from '../dist/lib/config.js';
-import { normalizeUrl } from '../dist/lib/fetch.js';
+import * as cache from '../dist/lib/core.js';
+import { config } from '../dist/lib/core.js';
+import { normalizeUrl } from '../dist/lib/http.js';
 import { fetchUrlToolHandler } from '../dist/tools/fetch-url.js';
 import { shutdownTransformWorkerPool } from '../dist/transform/transform.js';
 
