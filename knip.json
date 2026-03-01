@@ -1,0 +1,19 @@
+{
+  "$schema": "https://unpkg.com/knip@5/schema.json",
+  "project": ["src/**/*.ts!"],
+  "include": [
+    "files",
+    "dependencies",
+    "unlisted",
+    "unresolved",
+    "exports",
+    "nsExports",
+    "classMembers",
+    "types",
+    "nsTypes",
+    "enumMembers",
+    "duplicates"
+  ],
+  "includeEntryExports": true,
+  "treatConfigHintsAsErrors": true
+}
