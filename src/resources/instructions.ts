@@ -32,6 +32,7 @@ export function buildServerInstructions(): string {
 - Batch JSON-RPC: Array requests (\`[{...}]\`) are rejected with HTTP 400.
 - Tasks API: Experimental (SDK v1.26). \`tasks/get\`, \`tasks/result\`, \`tasks/list\`, \`tasks/cancel\` may change.
 - Notifications: Optional non-spec extension. Set \`TASKS_STATUS_NOTIFICATIONS=true\` to emit \`notifications/tasks/status\`.
+- URI scheme: \`internal://\` is a server-scoped custom scheme for cache resources. Not IANA-registered; valid only within this server's session lifetime.
 </constraints>
 
 <error_handling>

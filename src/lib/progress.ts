@@ -78,6 +78,12 @@ class ToolProgressReporter implements ProgressReporter {
     );
   }
 
+  /**
+   * Report progress toward completion. Steps are monotonic (never decrease)
+   * and may be skipped under normal conditions (e.g., fast responses skip
+   * intermediate steps). Clients should treat progress as "at least this far"
+   * rather than expecting every step to fire sequentially.
+   */
   report(progress: number, message: string): void {
     if (this.isTerminal) return;
     const effectiveProgress = Math.max(progress, this.lastProgress);

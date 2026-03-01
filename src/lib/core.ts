@@ -3,7 +3,7 @@ import { type StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/se
 
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { EventEmitter } from 'node:events';
-import { readFileSync } from 'node:fs';
+import { accessSync, constants as fsConstants, readFileSync } from 'node:fs';
 import { findPackageJSON } from 'node:module';
 import { isIP } from 'node:net';
 import process from 'node:process';
@@ -248,6 +248,16 @@ function readOptionalFilePath(value: string | undefined): string | undefined {
   return trimmed.length > 0 ? trimmed : undefined;
 }
 
+function assertFileReadable(filePath: string, envVar: string): void {
+  try {
+    accessSync(filePath, fsConstants.R_OK);
+  } catch {
+    throw new ConfigError(
+      `${envVar} points to "${filePath}" which does not exist or is not readable`
+    );
+  }
+}
+
 const MAX_HTML_BYTES = 10 * 1024 * 1024;
 const MAX_INLINE_CONTENT_CHARS = parseInteger(
   env['MAX_INLINE_CONTENT_CHARS'],
@@ -410,6 +420,10 @@ function buildHttpsConfig(): HttpsConfig {
   const keyFile = readOptionalFilePath(env['SERVER_TLS_KEY_FILE']);
   const certFile = readOptionalFilePath(env['SERVER_TLS_CERT_FILE']);
   const caFile = readOptionalFilePath(env['SERVER_TLS_CA_FILE']);
+
+  if (keyFile) assertFileReadable(keyFile, 'SERVER_TLS_KEY_FILE');
+  if (certFile) assertFileReadable(certFile, 'SERVER_TLS_CERT_FILE');
+  if (caFile) assertFileReadable(caFile, 'SERVER_TLS_CA_FILE');
 
   if ((keyFile && !certFile) || (!keyFile && certFile)) {
     throw new ConfigError(

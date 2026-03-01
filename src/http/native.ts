@@ -586,9 +586,12 @@ class HttpDispatcher {
       return await authService.authenticate(ctx.req, ctx.signal);
     } catch (err) {
       applyUnauthorizedAuthHeaders(ctx.req, ctx.res);
-      sendJson(ctx.res, 401, {
-        error: err instanceof Error ? err.message : 'Unauthorized',
-      });
+      sendError(
+        ctx.res,
+        -32000,
+        err instanceof Error ? err.message : 'Unauthorized',
+        401
+      );
       return null;
     }
   }
@@ -735,13 +738,21 @@ function createNetworkServer(
     );
   }
 
-  const tlsOptions: HttpsServerOptions = {
-    key: readFileSync(keyFile),
-    cert: readFileSync(certFile),
-  };
+  let tlsOptions: HttpsServerOptions;
+  try {
+    tlsOptions = {
+      key: readFileSync(keyFile),
+      cert: readFileSync(certFile),
+    };
 
-  if (caFile) {
-    tlsOptions.ca = readFileSync(caFile);
+    if (caFile) {
+      tlsOptions.ca = readFileSync(caFile);
+    }
+  } catch (err) {
+    throw new Error(
+      `Failed to read TLS files (key=${keyFile}, cert=${certFile}): ${err instanceof Error ? err.message : String(err)}`,
+      { cause: err }
+    );
   }
 
   return createHttpsServer(tlsOptions, listener);
