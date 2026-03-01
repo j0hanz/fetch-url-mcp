@@ -1,6 +1,6 @@
-import type { ServerResult } from '@modelcontextprotocol/sdk/types.js';
-
 import { createHash } from 'node:crypto';
+
+import type { ServerResult } from '@modelcontextprotocol/sdk/types.js';
 
 import type { ProgressNotification } from '../lib/mcp-tools.js';
 import { isObject } from '../lib/utils.js';

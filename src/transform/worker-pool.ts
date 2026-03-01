@@ -15,6 +15,7 @@ import { createAbortError } from '../lib/utils.js';
 import { FetchError, getErrorMessage } from '../lib/utils.js';
 import { type CancellableTimeout, createUnrefTimeout } from '../lib/utils.js';
 import { isObject } from '../lib/utils.js';
+
 import type {
   MarkdownTransformResult,
   TransformWorkerCancelMessage,
@@ -452,7 +453,7 @@ class WorkerPool implements TransformWorkerPool {
         ? 0
         : Math.max(this.minCapacity, Math.min(size, this.maxCapacity));
     this.timeoutMs = timeoutMs;
-    this.queueMax = this.maxCapacity * 32;
+    this.queueMax = this.maxCapacity * 4;
     this.spawnWorkerImpl = spawnWorker;
   }
 

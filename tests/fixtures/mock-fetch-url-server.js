@@ -1,13 +1,12 @@
 #!/usr/bin/env node
+import process from 'node:process';
+
 import {
   InMemoryTaskMessageQueue,
   InMemoryTaskStore,
 } from '@modelcontextprotocol/sdk/experimental/tasks/stores/in-memory.js';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
-
-import process from 'node:process';
-
 import { z } from 'zod';
 
 const args = new Set(process.argv.slice(2));

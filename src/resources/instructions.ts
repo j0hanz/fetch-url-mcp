@@ -1,4 +1,5 @@
 import { config } from '../lib/core.js';
+
 import { FETCH_URL_TOOL_NAME } from '../tools/fetch-url.js';
 
 export function buildServerInstructions(): string {

@@ -1,5 +1,4 @@
 import { type CallToolResult } from '@modelcontextprotocol/sdk/types.js';
-
 import { z } from 'zod';
 
 import { FetchError, isAbortError, isSystemError } from './utils.js';

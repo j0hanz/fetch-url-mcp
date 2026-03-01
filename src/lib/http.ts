@@ -12,9 +12,8 @@ import { type ReadableStream as NodeReadableStream } from 'node:stream/web';
 import tls from 'node:tls';
 import { createBrotliDecompress, createGunzip, createInflate } from 'node:zlib';
 
-import { z } from 'zod';
-
 import { Agent, type Dispatcher } from 'undici';
+import { z } from 'zod';
 
 import {
   get as cacheGet,
@@ -350,10 +349,7 @@ function hasNullByte(buffer: Uint8Array, limit: number): boolean {
   const checkLen = Math.min(buffer.length, limit);
   return buffer.subarray(0, checkLen).includes(0x00);
 }
-function isBinaryContent(
-  buffer: Uint8Array,
-  encoding?: string
-): boolean {
+function isBinaryContent(buffer: Uint8Array, encoding?: string): boolean {
   for (const signature of BINARY_SIGNATURES) {
     if (startsWithBytes(buffer, signature)) return true;
   }
@@ -387,10 +383,7 @@ type FetchErrorInput =
   | { kind: 'missing-redirect-location' }
   | { kind: 'network'; message: string }
   | { kind: 'unknown'; message?: string };
-function createFetchError(
-  input: FetchErrorInput,
-  url: string
-): FetchError {
+function createFetchError(input: FetchErrorInput, url: string): FetchError {
   switch (input.kind) {
     case 'canceled':
       return new FetchError('Request was canceled', url, 499, {

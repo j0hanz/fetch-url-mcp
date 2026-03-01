@@ -1,11 +1,12 @@
 #!/usr/bin/env node
 import process from 'node:process';
 
-import { parseCliArgs, renderCliUsage } from './cli.js';
-import { startHttpServer } from './http/native.js';
 import { serverVersion } from './lib/core.js';
 import { logError } from './lib/core.js';
 import { toError } from './lib/utils.js';
+
+import { parseCliArgs, renderCliUsage } from './cli.js';
+import { startHttpServer } from './http/native.js';
 import { startStdioServer } from './server.js';
 
 const FORCE_EXIT_TIMEOUT_MS = 10_000;

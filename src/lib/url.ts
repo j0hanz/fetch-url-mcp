@@ -253,10 +253,7 @@ export class SafeDnsResolver {
     }
   }
 }
-type HostnamePreflight = (
-  url: string,
-  signal?: AbortSignal
-) => Promise<string>;
+type HostnamePreflight = (url: string, signal?: AbortSignal) => Promise<string>;
 function extractHostname(url: string): string {
   try {
     return new URL(url).hostname;
@@ -443,10 +440,7 @@ export interface TransformResult {
   readonly platform?: string;
 }
 type UrlPatternGroups = Record<string, string | undefined>;
-function getPatternGroup(
-  groups: UrlPatternGroups,
-  key: string
-): string | null {
+function getPatternGroup(groups: UrlPatternGroups, key: string): string | null {
   const value = groups[key];
   if (value === undefined) return null;
   if (value === '') return null;

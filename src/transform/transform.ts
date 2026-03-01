@@ -27,6 +27,7 @@ import { isRawTextContentUrl } from '../lib/http.js';
 import { createAbortError, throwIfAborted } from '../lib/utils.js';
 import { FetchError, getErrorMessage } from '../lib/utils.js';
 import { isObject } from '../lib/utils.js';
+
 import { translateHtmlFragmentToMarkdown } from './html-translators.js';
 import {
   extractMetadata,
@@ -271,11 +272,21 @@ function trimUtf8Buffer(buffer: Buffer, maxBytes: number): Buffer {
 function trimDanglingTagFragment(content: string): string {
   const lastOpen = content.lastIndexOf('<');
   const lastClose = content.lastIndexOf('>');
-  if (
-    lastOpen > lastClose &&
-    /^<([a-zA-Z/!?]|$)/.test(content.substring(lastOpen))
-  ) {
-    return content.substring(0, lastOpen);
+  if (lastOpen > lastClose) {
+    if (lastOpen === content.length - 1) {
+      return content.substring(0, lastOpen);
+    }
+    const code = content.codePointAt(lastOpen + 1);
+    if (
+      code !== undefined &&
+      (code === 47 || // '/'
+        code === 33 || // '!'
+        code === 63 || // '?'
+        (code >= 65 && code <= 90) || // A-Z
+        (code >= 97 && code <= 122)) // a-z
+    ) {
+      return content.substring(0, lastOpen);
+    }
   }
   return content;
 }

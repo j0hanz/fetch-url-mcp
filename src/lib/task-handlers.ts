@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto';
+
 import { type McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import {
   CallToolRequestSchema,
@@ -5,9 +7,6 @@ import {
   McpError,
   type ServerResult,
 } from '@modelcontextprotocol/sdk/types.js';
-
-import { randomUUID } from 'node:crypto';
-
 import { z } from 'zod';
 
 import {

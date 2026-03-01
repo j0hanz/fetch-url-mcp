@@ -1,9 +1,9 @@
+import * as fs from 'node:fs/promises';
+import process from 'node:process';
+
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { SetLevelRequestSchema } from '@modelcontextprotocol/sdk/types.js';
-
-import * as fs from 'node:fs/promises';
-import process from 'node:process';
 
 import { config } from './lib/core.js';
 import { logError, logInfo, setLogLevel, setMcpServer } from './lib/core.js';
@@ -12,6 +12,7 @@ import {
   registerTaskHandlers,
 } from './lib/mcp-tools.js';
 import { toError } from './lib/utils.js';
+
 import { registerGetHelpPrompt } from './prompts/index.js';
 import {
   registerCacheResourceTemplate,

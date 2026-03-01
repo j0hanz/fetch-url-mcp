@@ -1,17 +1,18 @@
+import { Buffer } from 'node:buffer';
+import { randomBytes } from 'node:crypto';
+import type { IncomingMessage, ServerResponse } from 'node:http';
+
 import {
   InvalidTokenError,
   ServerError,
 } from '@modelcontextprotocol/sdk/server/auth/errors.js';
 import type { AuthInfo } from '@modelcontextprotocol/sdk/server/auth/types.js';
 
-import { Buffer } from 'node:buffer';
-import { randomBytes } from 'node:crypto';
-import type { IncomingMessage, ServerResponse } from 'node:http';
-
 import { config } from '../lib/core.js';
 import { normalizeHost } from '../lib/url.js';
 import { hmacSha256Hex, timingSafeEqualUtf8 } from '../lib/utils.js';
 import { isObject } from '../lib/utils.js';
+
 import {
   getHeaderValue,
   type RequestContext,

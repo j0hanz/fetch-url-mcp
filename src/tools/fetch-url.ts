@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto';
+
 import type {
   McpServer,
   ToolCallback,
@@ -8,9 +10,6 @@ import type {
   ToolAnnotations,
 } from '@modelcontextprotocol/sdk/types.js';
 import { ErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js';
-
-import { randomUUID } from 'node:crypto';
-
 import { z } from 'zod';
 
 import * as cache from '../lib/core.js';
@@ -46,6 +45,7 @@ import {
 import { isAbortError, isObject, toError } from '../lib/utils.js';
 import { fetchUrlInputSchema } from '../schemas/inputs.js';
 import { fetchUrlOutputSchema } from '../schemas/outputs.js';
+
 import {
   registerTaskCapableTool,
   unregisterTaskCapableTool,

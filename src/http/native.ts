@@ -1,8 +1,3 @@
-import type { AuthInfo } from '@modelcontextprotocol/sdk/server/auth/types.js';
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
-import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
-
 import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import {
@@ -16,6 +11,11 @@ import {
 } from 'node:https';
 import { hostname } from 'node:os';
 import process from 'node:process';
+
+import type { AuthInfo } from '@modelcontextprotocol/sdk/server/auth/types.js';
+import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
+import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
 
 import { config, enableHttpMode } from '../lib/core.js';
 import {
@@ -51,6 +51,7 @@ import {
   drainConnectionsOnShutdown,
 } from '../lib/utils.js';
 import { isObject } from '../lib/utils.js';
+
 import { createMcpServerForHttpSession } from '../server.js';
 import {
   applyUnauthorizedAuthHeaders,
