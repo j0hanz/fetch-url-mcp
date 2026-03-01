@@ -101,7 +101,7 @@ import {
 
 const DEFAULT_MCP_PROTOCOL_VERSION = '2025-11-25';
 
-function resolveRequestedProtocolVersion(body: unknown): string {
+function resolveRequestedProtocolVersion(body: unknown): string | null {
   if (!isObject(body)) return DEFAULT_MCP_PROTOCOL_VERSION;
 
   const { params } = body;
@@ -113,7 +113,7 @@ function resolveRequestedProtocolVersion(body: unknown): string {
   const normalized = value.trim();
   if (normalized.length === 0) return DEFAULT_MCP_PROTOCOL_VERSION;
   if (!SUPPORTED_MCP_PROTOCOL_VERSIONS.has(normalized)) {
-    return DEFAULT_MCP_PROTOCOL_VERSION;
+    return null;
   }
 
   return normalized;
@@ -311,6 +311,17 @@ class McpSessionGateway {
     }
 
     const negotiatedProtocolVersion = resolveRequestedProtocolVersion(ctx.body);
+    if (!negotiatedProtocolVersion) {
+      sendError(
+        ctx.res,
+        -32602,
+        `Unsupported protocolVersion; supported versions: ${[...SUPPORTED_MCP_PROTOCOL_VERSIONS].join(', ')}`,
+        400,
+        requestId
+      );
+      return null;
+    }
+
     return this.createNewSession(ctx, requestId, negotiatedProtocolVersion);
   }
 

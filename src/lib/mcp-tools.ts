@@ -265,6 +265,13 @@ function getSdkCallToolHandler(server: McpServer): RequestHandlerFn | null {
 export function registerTaskHandlers(server: McpServer): void {
   const sdkCallToolHandler = getSdkCallToolHandler(server);
 
+  if (!sdkCallToolHandler) {
+    logWarn(
+      'Task call interception disabled: SDK tools/call handler unavailable; task-capable tools require MCP SDK compatibility update',
+      { sdkVersion: 'unknown' }
+    );
+  }
+
   if (sdkCallToolHandler) {
     server.server.setRequestHandler(
       CallToolRequestSchema,

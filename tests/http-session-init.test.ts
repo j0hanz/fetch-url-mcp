@@ -93,10 +93,11 @@ describe('http session initialization', () => {
       const first = await initialize('2025-11-25');
       const second = await initialize('2025-11-25');
       const legacy = await initialize('2025-03-26');
+      const unsupported = await initialize('1900-01-01');
       const missingHeader = await initialize(undefined);
 
       await server.shutdown('TEST');
-      console.error('${RESULT_MARKER}' + JSON.stringify({ first, second, legacy, missingHeader }));
+      console.error('${RESULT_MARKER}' + JSON.stringify({ first, second, legacy, unsupported, missingHeader }));
     `;
 
     const result = runIsolatedNode(script, {
@@ -123,6 +124,11 @@ describe('http session initialization', () => {
         sessionId: string | null;
         hasInitializeResult: boolean;
       };
+      unsupported: {
+        status: number;
+        sessionId?: string | null;
+        hasInitializeResult?: boolean;
+      };
       missingHeader: {
         status: number;
         sessionId?: string | null;
@@ -142,6 +148,8 @@ describe('http session initialization', () => {
     assert.equal(payload.legacy.status, 200);
     assert.equal(typeof payload.legacy.sessionId, 'string');
     assert.equal(payload.legacy.hasInitializeResult, true);
+
+    assert.equal(payload.unsupported.status, 400);
 
     assert.equal(payload.missingHeader.status, 400);
   });

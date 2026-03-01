@@ -114,10 +114,18 @@ class HostOriginPolicy {
     const originHeader = getHeaderValue(req, 'origin');
     if (!originHeader) return true;
 
-    const originHost = this.resolveOriginHost(originHeader);
-    if (!originHost) return this.reject(res, 403, 'Invalid Origin header');
-    if (!ALLOWED_HOSTS.has(originHost))
+    const requestOrigin = this.resolveRequestOrigin(req);
+    const origin = this.resolveOrigin(originHeader);
+    if (!requestOrigin || !origin)
+      return this.reject(res, 403, 'Invalid Origin header');
+    if (!ALLOWED_HOSTS.has(origin.host))
       return this.reject(res, 403, 'Origin not allowed');
+
+    const isSameOrigin =
+      requestOrigin.scheme === origin.scheme &&
+      requestOrigin.host === origin.host &&
+      requestOrigin.port === origin.port;
+    if (!isSameOrigin) return this.reject(res, 403, 'Origin not allowed');
 
     return true;
   }
@@ -128,14 +136,56 @@ class HostOriginPolicy {
     return normalizeHost(host);
   }
 
-  private resolveOriginHost(origin: string): string | null {
-    if (origin === 'null') return null;
+  private resolveRequestOrigin(
+    req: IncomingMessage
+  ): { scheme: 'http' | 'https'; host: string; port: string } | null {
+    const hostHeader = getHeaderValue(req, 'host');
+    if (!hostHeader) return null;
+
+    const isEncrypted =
+      (req.socket as { encrypted?: boolean }).encrypted === true;
+    const scheme = isEncrypted ? 'https' : 'http';
     try {
-      const parsed = new URL(origin);
-      return normalizeHost(parsed.host);
+      const parsed = new URL(`${scheme}://${hostHeader}`);
+      const normalizedHost = normalizeHost(parsed.host);
+      if (!normalizedHost) return null;
+
+      return {
+        scheme,
+        host: normalizedHost,
+        port: parsed.port || this.defaultPortForScheme(scheme),
+      };
     } catch {
       return null;
     }
+  }
+
+  private resolveOrigin(
+    origin: string
+  ): { scheme: 'http' | 'https'; host: string; port: string } | null {
+    if (origin === 'null') return null;
+    try {
+      const parsed = new URL(origin);
+      const scheme = parsed.protocol === 'https:' ? 'https' : 'http';
+      if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
+        return null;
+      }
+
+      const normalizedHost = normalizeHost(parsed.host);
+      if (!normalizedHost) return null;
+
+      return {
+        scheme,
+        host: normalizedHost,
+        port: parsed.port || this.defaultPortForScheme(scheme),
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  private defaultPortForScheme(scheme: 'http' | 'https'): string {
+    return scheme === 'https' ? '443' : '80';
   }
 
   private reject(

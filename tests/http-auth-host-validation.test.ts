@@ -69,9 +69,13 @@ describe('http auth and host/origin validation', () => {
         host: '127.0.0.1',
         origin: 'https://evil.com',
       });
+      const badSameHostDifferentScheme = await sendRequest({
+        host: '127.0.0.1',
+        origin: 'https://127.0.0.1',
+      });
 
       await server.shutdown('TEST');
-      console.error('${RESULT_MARKER}' + JSON.stringify({ ok, badHost, badOrigin }));
+      console.error('${RESULT_MARKER}' + JSON.stringify({ ok, badHost, badOrigin, badSameHostDifferentScheme }));
     `;
 
     const result = runIsolatedNode(script, {
@@ -86,11 +90,13 @@ describe('http auth and host/origin validation', () => {
       ok: { status: number };
       badHost: { status: number };
       badOrigin: { status: number };
+      badSameHostDifferentScheme: { status: number };
     }>(result.stderr);
 
     assert.equal(payload.ok.status, 200);
     assert.equal(payload.badHost.status, 403);
     assert.equal(payload.badOrigin.status, 403);
+    assert.equal(payload.badSameHostDifferentScheme.status, 403);
   });
 
   it('returns RFC9728 discovery metadata on unauthorized MCP requests', () => {
@@ -131,7 +137,7 @@ describe('http auth and host/origin validation', () => {
         method: 'POST',
         headers: {
           host: '127.0.0.1:' + port,
-          origin: 'http://127.0.0.1',
+          origin: 'http://127.0.0.1:' + port,
           'content-type': 'application/json',
           accept: 'application/json, text/event-stream',
         },
