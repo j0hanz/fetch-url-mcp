@@ -1,6 +1,6 @@
 import type { MetadataBlock } from '../transform/types.js';
+import { throwIfAborted } from './abort-utils.js';
 import { config } from './config.js';
-import { FetchError } from './errors.js';
 
 // --- Constants & Regex ---
 
@@ -56,18 +56,6 @@ const TYPEDOC_PREFIXES = [
 interface CleanupOptions {
   signal?: AbortSignal;
   url?: string;
-}
-
-function throwIfAborted(
-  signal: AbortSignal | undefined,
-  url: string,
-  stage: string
-): void {
-  if (!signal?.aborted) return;
-  throw new FetchError('Request was canceled', url, 499, {
-    reason: 'aborted',
-    stage,
-  });
 }
 
 function createAbortChecker(options?: CleanupOptions): (stage: string) => void {

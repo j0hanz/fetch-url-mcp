@@ -9,6 +9,7 @@ import {
   Worker,
 } from 'node:worker_threads';
 
+import { createAbortError } from '../lib/abort-utils.js';
 import { config } from '../lib/config.js';
 import { FetchError, getErrorMessage } from '../lib/errors.js';
 import { logWarn } from '../lib/observability.js';
@@ -25,17 +26,6 @@ import type {
   TransformWorkerResultMessage,
   TransformWorkerTransformMessage,
 } from './types.js';
-
-// ---------------------------------------------------------------------------
-// Abort helper (inlined to avoid circular dependency with transform.ts)
-// ---------------------------------------------------------------------------
-
-function createAbortError(url: string, stage: string): FetchError {
-  return new FetchError('Request was canceled', url, 499, {
-    reason: 'aborted',
-    stage,
-  });
-}
 
 // ---------------------------------------------------------------------------
 // Worker message validation
