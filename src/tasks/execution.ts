@@ -279,10 +279,7 @@ function updateWorkingTaskStatus(
   if (current?.status !== 'working') return;
   if (current.statusMessage === statusMessage) return;
 
-  taskManager.updateTask(taskId, { statusMessage });
-
-  const updated = taskManager.getTask(taskId);
-  if (updated) emitTaskStatusNotification(server, updated);
+  updateTaskAndEmitStatus(server, taskId, { statusMessage });
 }
 
 function updateTaskAndEmitStatus(
@@ -320,6 +317,30 @@ function buildTaskFailureState(error: unknown): {
   };
 }
 
+function resolveToolAndArgs(params: ExtendedCallToolRequest['params']): {
+  tool: TaskCapableToolDescriptor;
+  args: unknown;
+} {
+  const tool = resolveTaskCapableTool(params.name);
+  const args = tool.parseArguments(params.arguments);
+  return { tool, args };
+}
+
+function buildTaskCompletionUpdate(
+  result: Awaited<ReturnType<TaskCapableToolDescriptor['execute']>>
+): Parameters<(typeof taskManager)['updateTask']>[1] {
+  const isToolError =
+    isObject(result) && 'isError' in result && result.isError === true;
+
+  return {
+    status: isToolError ? 'failed' : 'completed',
+    statusMessage: isToolError
+      ? (tryReadToolStructuredError(result) ?? 'Tool execution failed')
+      : 'Task completed successfully.',
+    result,
+  };
+}
+
 async function runTaskToolExecution(params: {
   server: McpServer;
   taskId: string;
@@ -354,16 +375,11 @@ async function runTaskToolExecution(params: {
           },
         });
 
-        const isToolError =
-          isObject(result) && 'isError' in result && result.isError === true;
-
-        updateTaskAndEmitStatus(server, taskId, {
-          status: isToolError ? 'failed' : 'completed',
-          statusMessage: isToolError
-            ? (tryReadToolStructuredError(result) ?? 'Tool execution failed')
-            : 'Task completed successfully.',
-          result,
-        });
+        updateTaskAndEmitStatus(
+          server,
+          taskId,
+          buildTaskCompletionUpdate(result)
+        );
       } catch (error: unknown) {
         const failure = buildTaskFailureState(error);
 
@@ -384,8 +400,7 @@ function handleTaskToolCall(
   params: ExtendedCallToolRequest['params'],
   context: ToolCallContext
 ): CreateTaskResult {
-  const tool = resolveTaskCapableTool(params.name);
-  const validArgs = tool.parseArguments(params.arguments);
+  const { tool, args } = resolveToolAndArgs(params);
 
   const task = taskManager.createTask(
     params.task?.ttl !== undefined ? { ttl: params.task.ttl } : undefined,
@@ -396,7 +411,7 @@ function handleTaskToolCall(
   void runTaskToolExecution({
     server,
     taskId: task.taskId,
-    args: validArgs,
+    args,
     tool,
     ...compact({
       meta: params._meta,
@@ -412,8 +427,7 @@ async function handleDirectToolCall(
   params: ExtendedCallToolRequest['params'],
   context: ToolCallContext
 ): Promise<ServerResult> {
-  const tool = resolveTaskCapableTool(params.name);
-  const args = tool.parseArguments(params.arguments);
+  const { tool, args } = resolveToolAndArgs(params);
 
   const extra = compact({
     signal: context.signal,

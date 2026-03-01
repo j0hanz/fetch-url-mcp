@@ -121,6 +121,26 @@ class TaskManager {
     return true;
   }
 
+  private applyTaskUpdate(
+    task: InternalTaskState,
+    updates: Partial<Omit<TaskState, 'taskId' | 'createdAt'>>
+  ): void {
+    Object.assign(task, updates);
+    task.lastUpdatedAt = new Date().toISOString();
+  }
+
+  private cancelActiveTask(
+    task: InternalTaskState,
+    statusMessage: string
+  ): void {
+    this.applyTaskUpdate(task, {
+      status: 'cancelled',
+      statusMessage,
+    });
+    this.notifyWaiters(task);
+    this.releaseOwnerCount(task);
+  }
+
   private releaseOwnerCount(task: InternalTaskState | TaskState): void {
     const internal = task as Partial<InternalTaskState>;
     if (internal._ownerCounted === false) return;
@@ -225,14 +245,13 @@ class TaskManager {
 
     if (isTerminalStatus(task.status)) return;
 
-    Object.assign(task, updates);
-    task.lastUpdatedAt = new Date().toISOString();
+    this.applyTaskUpdate(task, updates);
 
     this.notifyWaiters(task);
   }
 
   cancelTask(taskId: string, ownerKey?: string): TaskState | undefined {
-    const task = this.getTask(taskId, ownerKey);
+    const task = this.lookupActiveTask(taskId, ownerKey);
     if (!task) return undefined;
 
     if (isTerminalStatus(task.status)) {
@@ -242,11 +261,7 @@ class TaskManager {
       );
     }
 
-    this.updateTask(taskId, {
-      status: 'cancelled',
-      statusMessage: 'The task was cancelled by request.',
-    });
-    this.releaseOwnerCount(task);
+    this.cancelActiveTask(task, 'The task was cancelled by request.');
 
     return this.tasks.get(taskId);
   }
@@ -263,11 +278,7 @@ class TaskManager {
       if (task.ownerKey !== ownerKey) continue;
       if (isTerminalStatus(task.status)) continue;
 
-      this.updateTask(task.taskId, {
-        status: 'cancelled',
-        statusMessage,
-      });
-      this.releaseOwnerCount(task);
+      this.cancelActiveTask(task, statusMessage);
       cancelled.push(task);
     }
 
@@ -321,14 +332,7 @@ class TaskManager {
     const { ownerKey, cursor, limit } = options;
 
     const pageSize = limit && limit > 0 ? limit : DEFAULT_PAGE_SIZE;
-    let anchorTaskId: string | null = null;
-    if (cursor !== undefined) {
-      const decoded = this.decodeCursor(cursor);
-      if (decoded === null) {
-        throw new McpError(ErrorCode.InvalidParams, 'Invalid cursor');
-      }
-      ({ anchorTaskId } = decoded);
-    }
+    const anchorTaskId = this.resolveAnchorTaskId(cursor);
 
     const page = this.collectPage(ownerKey, anchorTaskId, pageSize);
     const hasMore = page.length > pageSize;
@@ -339,6 +343,15 @@ class TaskManager {
     const nextCursor = this.resolveNextCursor(page, hasMore);
 
     return nextCursor ? { tasks: page, nextCursor } : { tasks: page };
+  }
+
+  private resolveAnchorTaskId(cursor?: string): string | null {
+    if (cursor === undefined) return null;
+    const decoded = this.decodeCursor(cursor);
+    if (decoded === null) {
+      throw new McpError(ErrorCode.InvalidParams, 'Invalid cursor');
+    }
+    return decoded.anchorTaskId;
   }
 
   private addWaiter(taskId: string, waiter: (task: TaskState) => void): void {
@@ -472,6 +485,10 @@ class TaskManager {
     return now - task._createdAtMs > task.ttl;
   }
 
+  private maybeUpdateLastUpdatedAt(task: InternalTaskState): void {
+    task.lastUpdatedAt = new Date().toISOString();
+  }
+
   shrinkTtlAfterDelivery(taskId: string): void {
     const task = this.tasks.get(taskId);
     if (!task) return;
@@ -481,7 +498,7 @@ class TaskManager {
     const newTtl = elapsed + RESULT_DELIVERY_GRACE_MS;
     if (newTtl < task.ttl) {
       task.ttl = newTtl;
-      task.lastUpdatedAt = new Date().toISOString();
+      this.maybeUpdateLastUpdatedAt(task);
     }
   }
 

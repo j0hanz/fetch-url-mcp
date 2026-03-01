@@ -43,8 +43,7 @@ import {
   type ProgressReporter,
   type ToolHandlerExtra,
 } from '../lib/mcp-tools.js';
-import { isAbortError, toError } from '../lib/utils.js';
-import { isObject } from '../lib/utils.js';
+import { isAbortError, isObject, toError } from '../lib/utils.js';
 import { fetchUrlInputSchema } from '../schemas/inputs.js';
 import { fetchUrlOutputSchema } from '../schemas/outputs.js';
 import {
@@ -382,10 +381,7 @@ async function fetchPipeline(
   pipeline: PipelineResult<MarkdownPipelineResult>;
   inlineResult: InlineContentResult;
 }> {
-  const reportProgress = (step: number, message: string): void => {
-    if (!progress) return;
-    progress.report(step, message);
-  };
+  const contextStr = getUrlContext(url);
 
   return performSharedFetch({
     url,
@@ -394,8 +390,7 @@ async function fetchPipeline(
     ...(forceRefresh ? { forceRefresh: true } : {}),
     ...(maxInlineChars !== undefined ? { maxInlineChars } : {}),
     transform: async ({ buffer, encoding, truncated }, normalizedUrl) => {
-      const contextStr = getUrlContext(url);
-      reportProgress(2, `fetch-url: ${contextStr} [converting to Markdown]`);
+      reportFetchProgress(progress, 2, contextStr, 'converting to Markdown');
       return markdownTransform(
         { buffer, encoding, ...(truncated ? { truncated } : {}) },
         normalizedUrl,
@@ -408,6 +403,23 @@ async function fetchPipeline(
   });
 }
 
+function buildFetchProgressMessage(context: string, state: string): string {
+  if (state === 'completed' || state === 'cancelled' || state === 'failed') {
+    return `fetch-url: ${context} • ${state}`;
+  }
+  return `fetch-url: ${context} [${state}]`;
+}
+
+function reportFetchProgress(
+  progress: ProgressReporter | undefined,
+  step: number,
+  context: string,
+  state: string
+): void {
+  if (!progress) return;
+  progress.report(step, buildFetchProgressMessage(context, state));
+}
+
 async function executeFetch(
   input: FetchUrlInput,
   extra?: ToolHandlerExtra
@@ -417,11 +429,11 @@ async function executeFetch(
   const progress = createProgressReporter(extra);
 
   const contextStr = getUrlContext(url);
-  progress.report(0, `fetch-url: ${contextStr} [starting]`);
+  reportFetchProgress(progress, 0, contextStr, 'starting');
   logDebug('Fetching URL', { url });
 
   try {
-    progress.report(1, `fetch-url: ${contextStr} [fetching HTML]`);
+    reportFetchProgress(progress, 1, contextStr, 'fetching HTML');
     const { pipeline, inlineResult } = await fetchPipeline(
       url,
       signal,
@@ -432,16 +444,18 @@ async function executeFetch(
     );
 
     if (pipeline.fromCache) {
-      progress.report(3, `fetch-url: ${contextStr} [loaded from cache]`);
+      reportFetchProgress(progress, 3, contextStr, 'loaded from cache');
     }
 
-    progress.report(4, `fetch-url: ${contextStr} • completed`);
+    reportFetchProgress(progress, 4, contextStr, 'completed');
     return buildResponse(pipeline, inlineResult, url);
   } catch (error) {
     const isAbort = isAbortError(error);
-    progress.report(
+    reportFetchProgress(
+      progress,
       4,
-      `fetch-url: ${contextStr} • ${isAbort ? 'cancelled' : 'failed'}`
+      contextStr,
+      isAbort ? 'cancelled' : 'failed'
     );
     throw error;
   }
