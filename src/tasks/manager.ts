@@ -91,17 +91,23 @@ class TaskManager {
   private tasks = new Map<string, InternalTaskState>();
   private ownerCounts = new Map<string, number>();
   private waiters = new Map<string, Set<(task: TaskState) => void>>();
+  private cleanupInterval: ReturnType<typeof setInterval> | null = null;
 
-  constructor() {
-    this.startCleanupLoop();
+  private ensureCleanupLoop(): void {
+    if (this.cleanupInterval) return;
+    this.cleanupInterval = setInterval(() => {
+      this.removeExpiredTasks();
+      if (this.tasks.size === 0) {
+        this.stopCleanupLoop();
+      }
+    }, CLEANUP_INTERVAL_MS);
+    this.cleanupInterval.unref();
   }
 
-  private startCleanupLoop(): void {
-    const interval = setInterval(() => {
-      this.removeExpiredTasks();
-    }, CLEANUP_INTERVAL_MS);
-
-    interval.unref();
+  private stopCleanupLoop(): void {
+    if (!this.cleanupInterval) return;
+    clearInterval(this.cleanupInterval);
+    this.cleanupInterval = null;
   }
 
   private removeExpiredTasks(): void {
@@ -212,6 +218,7 @@ class TaskManager {
 
     this.tasks.set(task.taskId, task);
     this.incrementOwnerCount(ownerKey);
+    this.ensureCleanupLoop();
     return task;
   }
 

@@ -147,22 +147,66 @@ function toCacheResourceUri(parts: CacheResourceParts): string {
   return `${CACHE_RESOURCE_PREFIX}${namespace}/${hash}`;
 }
 
-function listCacheNamespaces(): string[] {
-  const namespaces = new Set<string>();
-  for (const key of listCacheKeys()) {
-    const parsed = parseCacheKey(key);
-    if (!parsed) continue;
-    namespaces.add(parsed.namespace);
+class CompletionIndex {
+  private namespaces: string[] | null = null;
+  private hashIndex: Map<string, string[]> | null = null;
+
+  invalidate(): void {
+    this.namespaces = null;
+    this.hashIndex = null;
   }
 
-  return [...namespaces].sort((left, right) => left.localeCompare(right));
+  getNamespaces(): string[] {
+    if (!this.namespaces) {
+      const seen = new Set<string>();
+      for (const key of listCacheKeys()) {
+        const parsed = parseCacheKey(key);
+        if (parsed) seen.add(parsed.namespace);
+      }
+      this.namespaces = [...seen].sort((a, b) => a.localeCompare(b));
+    }
+    return this.namespaces;
+  }
+
+  getHashes(namespace: string | undefined): string[] {
+    if (!this.hashIndex) {
+      const index = new Map<string, Set<string>>();
+      for (const key of listCacheKeys()) {
+        const parsed = parseCacheKey(key);
+        if (!parsed) continue;
+        let set = index.get(parsed.namespace);
+        if (!set) {
+          set = new Set<string>();
+          index.set(parsed.namespace, set);
+        }
+        set.add(parsed.urlHash);
+      }
+      this.hashIndex = new Map<string, string[]>();
+      for (const [ns, set] of index) {
+        this.hashIndex.set(
+          ns,
+          [...set].sort((a, b) => a.localeCompare(b))
+        );
+      }
+    }
+
+    if (namespace) return this.hashIndex.get(namespace) ?? [];
+
+    const all: string[] = [];
+    for (const hashes of this.hashIndex.values()) {
+      all.push(...hashes);
+    }
+    return all.sort((a, b) => a.localeCompare(b));
+  }
 }
+
+const completionIndex = new CompletionIndex();
 
 function completeCacheNamespaces(value: string): string[] {
   const normalized = normalizeCompletionPrefix(value);
-  const namespaces = listCacheNamespaces().filter((namespace) =>
-    namespace.toLowerCase().startsWith(normalized)
-  );
+  const namespaces = completionIndex
+    .getNamespaces()
+    .filter((ns) => ns.toLowerCase().startsWith(normalized));
   return sortAndLimitValues(namespaces);
 }
 
@@ -172,18 +216,9 @@ function completeCacheHashes(
 ): string[] {
   const normalized = normalizeCompletionPrefix(value);
   const namespace = context?.arguments?.['namespace']?.trim();
-  const hashes = new Set<string>();
-
-  for (const key of listCacheKeys()) {
-    const parsed = parseCacheKey(key);
-    if (!parsed) continue;
-
-    if (namespace && parsed.namespace !== namespace) continue;
-    if (!parsed.urlHash.toLowerCase().startsWith(normalized)) continue;
-
-    hashes.add(parsed.urlHash);
-  }
-
+  const hashes = completionIndex
+    .getHashes(namespace)
+    .filter((h) => h.toLowerCase().startsWith(normalized));
   return sortAndLimitValues(hashes);
 }
 
@@ -266,6 +301,8 @@ function registerCacheResourceNotifications(server: McpServer): void {
   });
 
   const unsubscribe = onCacheUpdate((event) => {
+    completionIndex.invalidate();
+
     const changedUri = toCacheResourceUri({
       namespace: event.namespace,
       hash: event.urlHash,
