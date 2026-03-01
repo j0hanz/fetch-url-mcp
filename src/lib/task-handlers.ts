@@ -164,7 +164,17 @@ function parseExtendedCallToolRequest(
 ): ExtendedCallToolRequest {
   const parsed = ExtendedCallToolRequestSchema.safeParse(request);
   if (parsed.success) return parsed.data;
-  throw new McpError(ErrorCode.InvalidParams, 'Invalid tool request');
+
+  const flat = z.flattenError(parsed.error);
+  const details =
+    Object.entries(flat.fieldErrors)
+      .map(([k, v]) => `${k}: ${(v ?? []).join(', ')}`)
+      .join('; ') || flat.formErrors.join('; ');
+
+  throw new McpError(
+    ErrorCode.InvalidParams,
+    `Invalid tool request params: ${details}`
+  );
 }
 function resolveOwnerScopedExtra(extra: unknown): {
   parsedExtra: ReturnType<typeof parseHandlerExtra>;
@@ -178,11 +188,6 @@ function resolveOwnerScopedExtra(extra: unknown): {
 }
 type RequestHandlerFn = (request: unknown, extra?: unknown) => Promise<unknown>;
 
-// WARNING (S-2): Accesses the private SDK internal `_requestHandlers` Map via
-// Reflect.get. This is fragile and will break if the SDK renames or removes the
-// private field. The handler is checked at registration time — if unavailable,
-// task-capable tool interception is disabled gracefully with a warning log.
-// When the SDK exposes a public tool-call interception API, migrate to that.
 function getSdkCallToolHandler(server: McpServer): RequestHandlerFn | null {
   const maybeHandlers: unknown = Reflect.get(server.server, '_requestHandlers');
   if (!(maybeHandlers instanceof Map)) return null;

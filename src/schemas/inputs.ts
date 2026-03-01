@@ -4,7 +4,7 @@ import { config } from '../lib/core.js';
 
 export const fetchUrlInputSchema = z.strictObject({
   url: z
-    .url({ protocol: /^https?$/i })
+    .httpUrl()
     .min(1)
     .max(config.constants.maxUrlLength)
     .describe(`Target URL. Max ${config.constants.maxUrlLength} chars.`),

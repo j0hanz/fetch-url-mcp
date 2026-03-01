@@ -596,9 +596,15 @@ export function registerTools(server: McpServer): void {
     parseArguments: (args) => {
       const parsed = fetchUrlInputSchema.safeParse(args);
       if (!parsed.success) {
+        const flat = z.flattenError(parsed.error);
+        const details =
+          Object.entries(flat.fieldErrors)
+            .map(([k, v]) => `${k}: ${v.join(', ')}`)
+            .join('; ') || flat.formErrors.join('; ');
+
         throw new McpError(
           ErrorCode.InvalidParams,
-          'Invalid arguments for fetch-url'
+          `Invalid arguments for ${FETCH_URL_TOOL_NAME}: ${details}`
         );
       }
       return parsed.data;
