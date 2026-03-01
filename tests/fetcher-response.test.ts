@@ -291,7 +291,7 @@ describe('readResponseText', () => {
     assert.equal(result.size, 5);
   });
 
-  it('falls back to passthrough when declared encoding cannot be decoded', async () => {
+  it('throws FetchError when declared encoding cannot be decoded', async () => {
     const response = new Response('hello', {
       status: 200,
       headers: {
@@ -300,9 +300,14 @@ describe('readResponseText', () => {
       },
     });
 
-    const result = await readResponseText(response, 'https://example.com', 64);
-    assert.equal(result.text, 'hello');
-    assert.equal(result.size, 5);
+    await assert.rejects(
+      () => readResponseText(response, 'https://example.com', 64),
+      (error) => {
+        assert.ok(error instanceof FetchError);
+        assert.ok(error.message.includes('Content-Encoding decode failed'));
+        return true;
+      }
+    );
   });
 
   it('allows responses with identity Content-Encoding', async () => {

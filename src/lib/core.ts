@@ -608,6 +608,7 @@ export const config = {
     allowedHosts: parseAllowedHosts(env['ALLOWED_HOSTS']),
     apiKey: env['API_KEY'],
     allowRemote,
+    allowLocalFetch: parseBoolean(env['ALLOW_LOCAL_FETCH'], false),
   },
   auth: buildAuthConfig(baseUrl),
   rateLimit: {

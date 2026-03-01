@@ -41,6 +41,7 @@ import {
 import {
   createErrorWithCode,
   FetchError,
+  isAbortError,
   isError,
   isObject,
   isSystemError,
@@ -428,12 +429,6 @@ function createFetchError(input: FetchErrorInput, url: string): FetchError {
       return new FetchError(input.message ?? 'Unexpected error', url);
   }
 }
-function isAbortError(error: unknown): boolean {
-  return (
-    isError(error) &&
-    (error.name === 'AbortError' || error.name === 'TimeoutError')
-  );
-}
 function isTimeoutError(error: unknown): boolean {
   return isError(error) && error.name === 'TimeoutError';
 }
@@ -453,7 +448,7 @@ function mapFetchError(
 
   const url = resolveErrorUrl(error, fallbackUrl);
 
-  if (isAbortError(error)) {
+  if (isAbortError(error) || isTimeoutError(error)) {
     return isTimeoutError(error)
       ? createFetchError({ kind: 'timeout', timeout: timeoutMs }, url)
       : createFetchError({ kind: 'canceled' }, url);
@@ -528,12 +523,18 @@ class RedirectFollower {
   ): Promise<{ response: Response; url: string }> {
     let currentUrl = url;
     const redirectLimit = Math.max(0, maxRedirects);
+    const visited = new Set<string>();
 
     for (
       let redirectCount = 0;
       redirectCount <= redirectLimit;
       redirectCount += 1
     ) {
+      if (visited.has(currentUrl)) {
+        throw createFetchError({ kind: 'too-many-redirects' }, currentUrl);
+      }
+      visited.add(currentUrl);
+
       const { response, nextUrl } = await this.withRedirectErrorContext(
         currentUrl,
         async () => {
@@ -572,10 +573,11 @@ class RedirectFollower {
       ...init,
       redirect: 'manual' as RequestRedirect,
     };
+    let agent: Agent | undefined;
     if (ipAddress) {
       const ca =
         tls.rootCertificates.length > 0 ? tls.rootCertificates : undefined;
-      const agent = new Agent({
+      agent = new Agent({
         connect: {
           lookup: (hostname, options, callback) => {
             const family = isIP(ipAddress) === 6 ? 6 : 4;
@@ -596,34 +598,38 @@ class RedirectFollower {
       fetchInit.dispatcher = agent;
     }
 
-    const response = await this.fetchFn(currentUrl, fetchInit);
+    try {
+      const response = await this.fetchFn(currentUrl, fetchInit);
 
-    if (!isRedirectStatus(response.status)) return { response };
+      if (!isRedirectStatus(response.status)) return { response };
 
-    if (redirectCount >= redirectLimit) {
+      if (redirectCount >= redirectLimit) {
+        cancelResponseBody(response);
+        throw createFetchError({ kind: 'too-many-redirects' }, currentUrl);
+      }
+
+      const location = this.getRedirectLocation(response, currentUrl);
       cancelResponseBody(response);
-      throw createFetchError({ kind: 'too-many-redirects' }, currentUrl);
+
+      const nextUrl = this.resolveRedirectTarget(currentUrl, location);
+      const parsedNextUrl = new URL(nextUrl);
+      if (
+        parsedNextUrl.protocol !== 'http:' &&
+        parsedNextUrl.protocol !== 'https:'
+      ) {
+        throw createErrorWithCode(
+          `Unsupported redirect protocol: ${parsedNextUrl.protocol}`,
+          'EUNSUPPORTEDPROTOCOL'
+        );
+      }
+
+      return {
+        response,
+        nextUrl,
+      };
+    } finally {
+      await agent?.close();
     }
-
-    const location = this.getRedirectLocation(response, currentUrl);
-    cancelResponseBody(response);
-
-    const nextUrl = this.resolveRedirectTarget(currentUrl, location);
-    const parsedNextUrl = new URL(nextUrl);
-    if (
-      parsedNextUrl.protocol !== 'http:' &&
-      parsedNextUrl.protocol !== 'https:'
-    ) {
-      throw createErrorWithCode(
-        `Unsupported redirect protocol: ${parsedNextUrl.protocol}`,
-        'EUNSUPPORTEDPROTOCOL'
-      );
-    }
-
-    return {
-      response,
-      nextUrl,
-    };
   }
 
   private getRedirectLocation(response: Response, currentUrl: string): string {
@@ -938,17 +944,12 @@ async function decodeResponseIfNeeded(
     abortDecodePipeline();
     void decodedReader.cancel(error).catch(() => undefined);
 
-    logDebug('Content-Encoding decode failed; using passthrough body', {
-      url: redactUrl(url),
-      encoding: encodingHeader ?? encodings.join(','),
-      error: isError(error) ? error.message : String(error),
-    });
+    void passthroughBranch.cancel().catch(() => undefined);
 
-    return new Response(passthroughBranch, {
-      status: response.status,
-      statusText: response.statusText,
-      headers,
-    });
+    throw new FetchError(
+      `Content-Encoding decode failed for ${redactUrl(url)}: ${isError(error) ? error.message : String(error)}`,
+      url
+    );
   }
 }
 class ResponseTextReader {

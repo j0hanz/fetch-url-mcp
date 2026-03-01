@@ -25,7 +25,7 @@ import {
 } from '../lib/core.js';
 import { isRawTextContentUrl } from '../lib/http.js';
 import { createAbortError, throwIfAborted } from '../lib/utils.js';
-import { FetchError, getErrorMessage } from '../lib/utils.js';
+import { FetchError, getErrorMessage, toError } from '../lib/utils.js';
 import { isObject } from '../lib/utils.js';
 
 import { translateHtmlFragmentToMarkdown } from './html-translators.js';
@@ -270,13 +270,24 @@ function trimUtf8Buffer(buffer: Buffer, maxBytes: number): Buffer {
 }
 
 function trimDanglingTagFragment(content: string): string {
-  const lastOpen = content.lastIndexOf('<');
-  const lastClose = content.lastIndexOf('>');
-  if (lastOpen > lastClose) {
-    if (lastOpen === content.length - 1) {
-      return content.substring(0, lastOpen);
+  let result = content;
+
+  // Trim dangling HTML entity (e.g. "&amp" cut before ";")
+  const lastAmp = result.lastIndexOf('&');
+  if (lastAmp !== -1 && lastAmp > result.length - 10) {
+    const tail = result.slice(lastAmp + 1);
+    if (!tail.includes(';') && /^[#a-zA-Z][a-zA-Z0-9]*$/.test(tail)) {
+      result = result.substring(0, lastAmp);
     }
-    const code = content.codePointAt(lastOpen + 1);
+  }
+
+  const lastOpen = result.lastIndexOf('<');
+  const lastClose = result.lastIndexOf('>');
+  if (lastOpen > lastClose) {
+    if (lastOpen === result.length - 1) {
+      return result.substring(0, lastOpen);
+    }
+    const code = result.codePointAt(lastOpen + 1);
     if (
       code !== undefined &&
       (code === 47 || // '/'
@@ -285,10 +296,10 @@ function trimDanglingTagFragment(content: string): string {
         (code >= 65 && code <= 90) || // A-Z
         (code >= 97 && code <= 122)) // a-z
     ) {
-      return content.substring(0, lastOpen);
+      return result.substring(0, lastOpen);
     }
   }
-  return content;
+  return result;
 }
 
 function truncateHtml(
@@ -1500,6 +1511,8 @@ function resolveWorkerFallback(
   abortPolicy.throwIfAborted(options.signal, url, 'transform:worker-fallback');
 
   if (error instanceof FetchError) throw error;
+
+  if (!(error instanceof Error)) throw toError(error);
 
   const message = getErrorMessage(error);
   logWarn('Transform worker failed; falling back to in-process', {

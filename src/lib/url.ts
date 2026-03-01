@@ -2,7 +2,7 @@ import dns from 'node:dns';
 import { BlockList, isIP, SocketAddress } from 'node:net';
 import { domainToASCII } from 'node:url';
 
-import { type config, logDebug } from './core.js';
+import { config, logDebug } from './core.js';
 import { createErrorWithCode, isError, isSystemError } from './utils.js';
 
 const DNS_LOOKUP_TIMEOUT_MS = 5000;
@@ -115,7 +115,7 @@ export class SafeDnsResolver {
         );
       }
       if (
-        process.env['ALLOW_LOCAL_FETCH'] !== 'true' &&
+        !isLocalFetchAllowed() &&
         this.ipBlocker.isBlockedIp(normalizedHostname)
       ) {
         throw createErrorWithCode(
@@ -725,7 +725,7 @@ function isCloudMetadataHost(hostname: string): boolean {
   return normalized !== null && CLOUD_METADATA_HOSTS.has(normalized.ip);
 }
 function isLocalFetchAllowed(): boolean {
-  return process.env['ALLOW_LOCAL_FETCH'] === 'true';
+  return config.security.allowLocalFetch;
 }
 type SecurityConfig = typeof config.security;
 export class IpBlocker {
