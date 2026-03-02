@@ -1206,37 +1206,31 @@ async function readAndRecordDecodedResponse(
     throw responseError;
   }
 
-  const decodedResponse = await decodeResponseIfNeeded(
-    response,
-    finalUrl,
-    signal
-  );
-
-  const contentType = decodedResponse.headers.get('content-type');
+  const contentType = response.headers.get('content-type');
   assertSupportedContentType(contentType, finalUrl);
 
   const declaredEncoding = getCharsetFromContentType(contentType ?? null);
 
   if (mode === 'text') {
     const { text, size, truncated } = await reader.read(
-      decodedResponse,
+      response,
       finalUrl,
       maxBytes,
       signal,
       declaredEncoding
     );
-    telemetry.recordResponse(ctx, decodedResponse, size);
+    telemetry.recordResponse(ctx, response, size);
     return { kind: 'text', text, size, truncated };
   }
 
   const { buffer, encoding, size, truncated } = await reader.readBuffer(
-    decodedResponse,
+    response,
     finalUrl,
     maxBytes,
     signal,
     declaredEncoding
   );
-  telemetry.recordResponse(ctx, decodedResponse, size);
+  telemetry.recordResponse(ctx, response, size);
   return { kind: 'buffer', buffer, encoding, size, truncated };
 }
 type CompatibleReadableStream = ReadableStream<Uint8Array> &
@@ -1612,8 +1606,9 @@ const DEFAULT_HEADERS: Record<string, string> = {
   Accept:
     'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
   'Accept-Language': 'en-US,en;q=0.5',
-  'Accept-Encoding': 'gzip, deflate, br',
-  Connection: 'keep-alive',
+  // Accept-Encoding and Connection are forbidden Fetch API headers.
+  // The undici-based globalThis.fetch manages content negotiation and
+  // decompression transparently per the Fetch spec.
 };
 function buildHeaders(): Record<string, string> {
   return DEFAULT_HEADERS;
