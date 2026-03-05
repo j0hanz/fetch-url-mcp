@@ -94,17 +94,18 @@ describe('fetchUrlToolHandler', () => {
     assert.equal(structured.fromCache, false);
     assert.equal(typeof structured.fetchedAt, 'string');
     assert.equal(typeof structured.contentSize, 'number');
-    assert.equal(typeof structured.cacheResourceUri, 'string');
-    assert.match(
-      String(structured.cacheResourceUri),
-      /^internal:\/\/cache\/markdown\/[a-f0-9.]+$/i
-    );
-    const resourceLink = response.content.find(
-      (block) => block.type === 'resource_link'
-    );
-    assert.ok(resourceLink && resourceLink.type === 'resource_link');
-    assert.equal(resourceLink.uri, structured.cacheResourceUri);
-    assert.equal(resourceLink.mimeType, 'text/markdown');
+    // DISABLED: VS Code markdown resource rendering issue — uncomment when fixed
+    // assert.equal(typeof structured.cacheResourceUri, 'string');
+    // assert.match(
+    //   String(structured.cacheResourceUri),
+    //   /^internal:\/\/cache\/markdown\/[a-f0-9.]+$/i
+    // );
+    // const resourceLink = response.content.find(
+    //   (block) => block.type === 'resource_link'
+    // );
+    // assert.ok(resourceLink && resourceLink.type === 'resource_link');
+    // assert.equal(resourceLink.uri, structured.cacheResourceUri);
+    // assert.equal(resourceLink.mimeType, 'text/markdown');
     assert.ok((structured.markdown as string).includes('Hello'));
     assertTextBlockMatchesStructured(response);
   });
@@ -242,11 +243,12 @@ describe('fetchUrlToolHandler', () => {
     assert.equal(structured.fromCache, true);
     assert.equal(structured.truncated, true);
     assert.equal(typeof structured.fetchedAt, 'string');
-    assert.equal(typeof structured.cacheResourceUri, 'string');
-    assert.match(
-      String(structured.cacheResourceUri),
-      /^internal:\/\/cache\/markdown\/[a-f0-9.]+$/i
-    );
+    // DISABLED: VS Code markdown resource rendering issue — uncomment when fixed
+    // assert.equal(typeof structured.cacheResourceUri, 'string');
+    // assert.match(
+    //   String(structured.cacheResourceUri),
+    //   /^internal:\/\/cache\/markdown\/[a-f0-9.]+$/i
+    // );
   });
 
   it('adds truncation marker when HTML size truncation occurs', async (t) => {
@@ -398,13 +400,14 @@ describe('fetchUrlToolHandler', () => {
       assert.equal(typeof structured.markdown, 'string');
       assert.ok(String(structured.markdown).includes('[truncated]'));
       assertTextBlockMatchesStructured(response);
-      const embeddedResource = response.content.find(
-        (block) => block.type === 'resource'
-      );
-      assert.ok(
-        embeddedResource,
-        'Embedded resource should be emitted for markdown preview'
-      );
+      // DISABLED: VS Code markdown resource rendering issue — uncomment when fixed
+      // const embeddedResource = response.content.find(
+      //   (block) => block.type === 'resource'
+      // );
+      // assert.ok(
+      //   embeddedResource,
+      //   'Embedded resource should be emitted for markdown preview'
+      // );
     } finally {
       config.runtime.httpMode = originalHttpMode;
       config.cache.enabled = originalCacheEnabled;

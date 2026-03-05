@@ -48,9 +48,15 @@ describe('Forced Cache on Truncation', () => {
       const embeddedResource = response.content.find(
         (b) => b.type === 'resource'
       );
-      assert.ok(
+      // DISABLED: VS Code markdown resource rendering issue — uncomment when fixed
+      // assert.ok(
+      //   embeddedResource,
+      //   'Embedded resource should still be emitted for markdown preview'
+      // );
+      assert.equal(
         embeddedResource,
-        'Embedded resource should still be emitted for markdown preview'
+        undefined,
+        'Embedded resource should not be emitted (resource content disabled)'
       );
 
       const cachedEntry = cache.get(cacheKey, { force: true });

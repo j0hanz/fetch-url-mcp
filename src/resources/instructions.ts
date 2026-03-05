@@ -12,12 +12,12 @@ export function buildServerInstructions(): string {
 
 <capabilities>
 - Tools: \`${FETCH_URL_TOOL_NAME}\` (READ-ONLY).
-- Resources: \`internal://cache/{namespace}/{hash}\` (ephemeral cached Markdown).
+- Resources: \`internal://instructions\` (server usage guidance).
 - Prompts: \`get-help\` (returns these instructions).
 </capabilities>
 
 <workflows>
-1. Standard: Call \`${FETCH_URL_TOOL_NAME}\` -> Read \`markdown\`. If \`truncated: true\`, use \`cacheResourceUri\` with \`resources/read\` for full content.
+1. Standard: Call \`${FETCH_URL_TOOL_NAME}\` -> Read \`markdown\`. If \`truncated: true\`, retry with \`forceRefresh: true\`.
 2. Fresh: Set \`forceRefresh: true\` to bypass cache.
 3. Full-Fidelity: Set \`skipNoiseRemoval: true\` to preserve nav/footers.
 4. Async: Add \`task: { ttl: <ms> }\` to \`tools/call\` -> Poll \`tasks/get\` -> Call \`tasks/result\`.
@@ -27,7 +27,7 @@ export function buildServerInstructions(): string {
 - Blocked: localhost, private IPs (10.x, 172.16-31.x, 192.168.x), metadata endpoints (169.254.169.254), .local/.internal.
 - Limits: Max HTML ${maxHtmlSizeMb}MB. Max ${config.fetcher.maxRedirects} redirects.
 - Cache: ${config.cache.maxKeys} entries, ${cacheSizeMb}MB, ${cacheTtlHours}h TTL.
-- Cache scope: process-local and ephemeral. Cache URIs are invalid across server restarts or separate CLI invocations (-32002).
+- Cache scope: process-local and ephemeral.
 - No JS: Client-side rendered pages may be incomplete.
 - Binary: Not supported.
 - Batch JSON-RPC: Array requests (\`[{...}]\`) are rejected with HTTP 400.

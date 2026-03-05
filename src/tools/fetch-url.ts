@@ -6,13 +6,15 @@ import type {
 } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type {
   ContentBlock,
-  TextResourceContents,
+  // DISABLED: VS Code markdown resource rendering issue — uncomment when fixed
+  // TextResourceContents,
   ToolAnnotations,
 } from '@modelcontextprotocol/sdk/types.js';
 import { ErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js';
 import { z } from 'zod';
 
-import * as cache from '../lib/core.js';
+// DISABLED: VS Code markdown resource rendering issue — uncomment when fixed
+// import * as cache from '../lib/core.js';
 import { config } from '../lib/core.js';
 import {
   getRequestId,
@@ -21,7 +23,8 @@ import {
   logWarn,
   runWithRequestContext,
 } from '../lib/core.js';
-import { generateSafeFilename } from '../lib/http.js';
+// DISABLED: VS Code markdown resource rendering issue — uncomment when fixed
+// import { generateSafeFilename } from '../lib/http.js';
 import { handleToolError } from '../lib/mcp-tools.js';
 import {
   appendTruncationMarker,
@@ -32,7 +35,8 @@ import {
   performSharedFetch,
   type PipelineResult,
   readNestedRecord,
-  readString,
+  // DISABLED: VS Code markdown resource rendering issue — uncomment when fixed
+  // readString,
   serializeMarkdownResult,
   TRUNCATION_MARKER,
   withSignal,
@@ -60,7 +64,8 @@ interface FetchUrlInput {
 }
 
 type ToolContentBlockUnion = ContentBlock;
-type ToolOutputBlock = ToolContentBlockUnion;
+// DISABLED: VS Code markdown resource rendering issue — uncomment when fixed
+// type ToolOutputBlock = ToolContentBlockUnion;
 
 interface ToolResponseBase {
   [key: string]: unknown;
@@ -76,7 +81,7 @@ const FETCH_URL_TOOL_DESCRIPTION = `
 <constraints>
 - READ-ONLY. No JavaScript execution.
 - GitHub/GitLab/Bitbucket URLs auto-transform to raw endpoints (check resolvedUrl).
-- If truncated=true, use cacheResourceUri with resources/read for full content.
+- If truncated=true, full content is available in the next fetch with forceRefresh.
 - For large pages/timeouts, use task mode (task: {}).
 - If error queue_full, retry with task mode.
 </constraints>
@@ -103,6 +108,7 @@ function buildTextBlock(structuredContent: Record<string, unknown>): {
   };
 }
 
+/* DISABLED: VS Code markdown resource rendering issue — uncomment when fixed
 function buildEmbeddedResource(
   content: string,
   url: string,
@@ -124,7 +130,9 @@ function buildEmbeddedResource(
     resource,
   };
 }
+*/
 
+/* DISABLED: VS Code markdown resource rendering issue — uncomment when fixed
 function buildCacheResourceLink(
   cacheResourceUri: string,
   contentSize: number,
@@ -145,7 +153,9 @@ function buildCacheResourceLink(
     },
   };
 }
+*/
 
+/* DISABLED: VS Code markdown resource rendering issue — uncomment when fixed
 function buildToolContentBlocks(
   structuredContent: Record<string, unknown>,
   resourceLink?: ToolContentBlockUnion | null,
@@ -162,6 +172,7 @@ function buildToolContentBlocks(
 function appendIfPresent<T>(items: T[], value: T | null | undefined): void {
   if (value !== null && value !== undefined) items.push(value);
 }
+*/
 
 /* -------------------------------------------------------------------------------------------------
  * Tool abort signal
@@ -217,7 +228,8 @@ function buildStructuredContent(
   inlineResult: InlineContentResult,
   inputUrl: string
 ): Record<string, unknown> {
-  const cacheResourceUri = resolveCacheResourceUri(pipeline.cacheKey);
+  // DISABLED: VS Code markdown resource rendering issue — uncomment when fixed
+  // const cacheResourceUri = resolveCacheResourceUri(pipeline.cacheKey);
   const truncated = inlineResult.truncated ?? pipeline.data.truncated;
   const markdown = applyTruncationMarker(
     inlineResult.content,
@@ -229,7 +241,8 @@ function buildStructuredContent(
     url: pipeline.originalUrl ?? pipeline.url,
     resolvedUrl: pipeline.url,
     ...(pipeline.finalUrl ? { finalUrl: pipeline.finalUrl } : {}),
-    ...(cacheResourceUri ? { cacheResourceUri } : {}),
+    // DISABLED: VS Code markdown resource rendering issue — uncomment when fixed
+    // ...(cacheResourceUri ? { cacheResourceUri } : {}),
     inputUrl,
     title: truncateStr(pipeline.data.title, 512),
     ...(metadata ? { metadata: truncateMetadata(metadata) } : {}),
@@ -249,6 +262,7 @@ function applyTruncationMarker(
   return appendTruncationMarker(content, TRUNCATION_MARKER);
 }
 
+/* DISABLED: VS Code markdown resource rendering issue — uncomment when fixed
 function resolveCacheResourceUri(
   cacheKey: string | null | undefined
 ): string | undefined {
@@ -261,12 +275,15 @@ function resolveCacheResourceUri(
 
   return `internal://cache/${encodeURIComponent(parsed.namespace)}/${encodeURIComponent(parsed.urlHash)}`;
 }
+*/
 
 function buildFetchUrlContentBlocks(
-  structuredContent: Record<string, unknown>,
-  pipeline: PipelineResult<MarkdownPipelineResult>,
-  inlineResult: InlineContentResult
+  structuredContent: Record<string, unknown>
+  // DISABLED: VS Code markdown resource rendering issue — uncomment params when fixed
+  // pipeline: PipelineResult<MarkdownPipelineResult>,
+  // inlineResult: InlineContentResult
 ): ToolContentBlockUnion[] {
+  /* DISABLED: VS Code markdown resource rendering issue — uncomment block and restore params when fixed
   const cacheResourceUri = readString(structuredContent, 'cacheResourceUri');
   const contentToEmbed = config.runtime.httpMode
     ? inlineResult.content
@@ -286,6 +303,8 @@ function buildFetchUrlContentBlocks(
       : null;
 
   return buildToolContentBlocks(structuredContent, resourceLink, embedded);
+  */
+  return [buildTextBlock(structuredContent)];
 }
 
 function buildResponse(
@@ -299,9 +318,10 @@ function buildResponse(
     inputUrl
   );
   const content = buildFetchUrlContentBlocks(
-    structuredContent,
-    pipeline,
-    inlineResult
+    structuredContent
+    // DISABLED: VS Code markdown resource rendering issue — uncomment args when fixed
+    // pipeline,
+    // inlineResult
   );
 
   const validation = fetchUrlOutputSchema.safeParse(structuredContent);

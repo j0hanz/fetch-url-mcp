@@ -15,7 +15,8 @@ import { toError } from './lib/utils.js';
 
 import { registerGetHelpPrompt } from './prompts/index.js';
 import {
-  registerCacheResourceTemplate,
+  // DISABLED: VS Code markdown resource rendering issue — uncomment when fixed
+  // registerCacheResourceTemplate,
   registerInstructionResource,
 } from './resources/index.js';
 import { buildServerInstructions } from './resources/instructions.js';
@@ -56,8 +57,9 @@ function createServerCapabilities(): McpServerCapabilities {
   return {
     logging: {},
     resources: {
-      subscribe: true,
-      listChanged: true,
+      // DISABLED: VS Code markdown resource rendering issue — uncomment when fixed
+      // subscribe: true,
+      // listChanged: true,
     },
     tools: {},
     prompts: {},
@@ -137,7 +139,8 @@ async function createMcpServerWithOptions(
   registerAllTools(server);
   registerGetHelpPrompt(server, serverInstructions, localIcon);
   registerInstructionResource(server, serverInstructions, localIcon);
-  registerCacheResourceTemplate(server, localIcon);
+  // DISABLED: VS Code markdown resource rendering issue — uncomment when fixed
+  // registerCacheResourceTemplate(server, localIcon);
   // NOTE: Internally patches server.close and server.server.onclose for cleanup
   // callbacks, and intercepts tools/call via Reflect.get on private SDK state.
   // See src/lib/task-handlers.ts for risk documentation (S-2, S-3).
