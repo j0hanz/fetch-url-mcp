@@ -23,11 +23,6 @@ export const fetchUrlOutputSchema = z.strictObject({
     .max(config.constants.maxUrlLength)
     .optional()
     .describe('Final URL after HTTP redirects.'),
-  cacheResourceUri: z
-    .string()
-    .max(config.constants.maxUrlLength)
-    .optional()
-    .describe('URI for resources/read to get full markdown.'),
   title: z.string().max(512).optional().describe('Page title.'),
   metadata: z
     .strictObject({

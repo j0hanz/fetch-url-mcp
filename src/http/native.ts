@@ -254,7 +254,9 @@ class McpSessionGateway {
 
     const acceptHeader = getHeaderValue(ctx.req, 'accept');
     if (!acceptsEventStream(acceptHeader)) {
-      sendJson(ctx.res, 405, { error: 'Method Not Allowed' });
+      sendJson(ctx.res, 406, {
+        error: 'Not Acceptable: expected text/event-stream',
+      });
       return;
     }
 
@@ -287,7 +289,7 @@ class McpSessionGateway {
     await session.transport.close();
     this.cleanupSessionRecord(sessionId, 'session-delete');
 
-    sendText(ctx.res, 200, 'Session closed');
+    sendJson(ctx.res, 200, { status: 'closed' });
   }
 
   private async getOrCreateTransport(
