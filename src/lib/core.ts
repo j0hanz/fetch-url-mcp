@@ -4,13 +4,17 @@ import { accessSync, constants as fsConstants, readFileSync } from 'node:fs';
 import { findPackageJSON } from 'node:module';
 import { isIP } from 'node:net';
 import process from 'node:process';
-import { domainToASCII } from 'node:url';
 import { inspect, stripVTControlCharacters } from 'node:util';
 
 import { type McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { type StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { z } from 'zod';
 
+import {
+  buildIpv4,
+  normalizeHostname,
+  stripTrailingDots,
+} from './net-utils.js';
 import {
   getErrorMessage,
   isAbortError,
@@ -68,32 +72,11 @@ function loadEnvFileIfAvailable(): void {
 
 loadEnvFileIfAvailable();
 const { env } = process;
-function buildIpv4(parts: readonly [number, number, number, number]): string {
-  return parts.join('.');
-}
-
-function stripTrailingDots(value: string): string {
-  let result = value;
-  while (result.endsWith('.')) result = result.slice(0, -1);
-  return result;
-}
 
 function formatHostForUrl(hostname: string): string {
   if (hostname.includes(':') && !hostname.startsWith('['))
     return `[${hostname}]`;
   return hostname;
-}
-
-function normalizeHostname(value: string): string | null {
-  const trimmed = value.trim();
-  if (!trimmed) return null;
-
-  const lowered = trimmed.toLowerCase();
-  const ipType = isIP(lowered);
-  if (ipType) return stripTrailingDots(lowered);
-
-  const ascii = domainToASCII(lowered);
-  return ascii ? stripTrailingDots(ascii) : null;
 }
 
 function normalizeHostValue(value: string): string | null {
@@ -936,12 +919,14 @@ export function keys(): readonly string[] {
 }
 export function getEntryMeta(
   cacheKey: string
-): { url: string; title?: string } | undefined {
+): { url: string; title?: string; fetchedAt?: string } | undefined {
   const entry = store.peek(cacheKey);
   if (!entry) return undefined;
-  return entry.title !== undefined
-    ? { url: entry.url, title: entry.title }
-    : { url: entry.url };
+  return {
+    url: entry.url,
+    ...(entry.title !== undefined ? { title: entry.title } : {}),
+    ...(entry.fetchedAt ? { fetchedAt: entry.fetchedAt } : {}),
+  };
 }
 export function isEnabled(): boolean {
   return store.isEnabled();

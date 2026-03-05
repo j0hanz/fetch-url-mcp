@@ -33,6 +33,8 @@ import {
   type TaskCapableToolDescriptor,
 } from './tool-registry.js';
 
+const TASK_NOT_FOUND_ERROR_CODE = RESOURCE_NOT_FOUND_ERROR_CODE;
+
 /* -------------------------------------------------------------------------------------------------
  * Extended tool-call request shape (task-aware)
  * ------------------------------------------------------------------------------------------------- */
@@ -218,7 +220,7 @@ function buildTaskStatusNotificationParams(
  * ------------------------------------------------------------------------------------------------- */
 
 export function throwTaskNotFound(): never {
-  throw new McpError(RESOURCE_NOT_FOUND_ERROR_CODE, 'Task not found');
+  throw new McpError(TASK_NOT_FOUND_ERROR_CODE, 'Task not found');
 }
 
 function resolveTaskCapableTool(name: string): TaskCapableToolDescriptor {

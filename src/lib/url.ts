@@ -1,8 +1,8 @@
 import dns from 'node:dns';
 import { BlockList, isIP, SocketAddress } from 'node:net';
-import { domainToASCII } from 'node:url';
 
 import { config, logDebug } from './core.js';
+import { buildIpv4, normalizeHostname } from './net-utils.js';
 import { createErrorWithCode, isError, isSystemError } from './utils.js';
 
 const DNS_LOOKUP_TIMEOUT_MS = 5000;
@@ -321,15 +321,6 @@ function normalizeBracketedIpv6(value: string): string | null {
   if (!ipv6) return null;
   return normalizeHostname(ipv6);
 }
-function normalizeHostname(value: string): string | null {
-  const trimmed = trimToNull(value)?.toLowerCase();
-  if (!trimmed) return null;
-
-  if (isIP(trimmed)) return stripTrailingDots(trimmed);
-
-  const ascii = domainToASCII(trimmed);
-  return ascii ? stripTrailingDots(ascii) : null;
-}
 function parseHostWithUrl(value: string): string | null {
   const candidateUrl = `http://${value}`;
   if (!URL.canParse(candidateUrl)) return null;
@@ -345,17 +336,8 @@ function trimToNull(value: string): string | null {
   const trimmed = value.trim();
   return trimmed ? trimmed : null;
 }
-function stripTrailingDots(value: string): string {
-  // Keep loop (rather than regex) to preserve exact behavior and avoid hidden allocations.
-  let result = value;
-  while (result.endsWith('.')) result = result.slice(0, -1);
-  return result;
-}
 type IpFamily = 'ipv4' | 'ipv6';
 type IpSegment = number | string;
-function buildIpv4(parts: readonly [number, number, number, number]): string {
-  return parts.join('.');
-}
 function buildIpv6(parts: readonly IpSegment[]): string {
   return parts.map(String).join(':');
 }

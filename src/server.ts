@@ -11,6 +11,7 @@ import {
   abortAllTaskExecutions,
   registerTaskHandlers,
 } from './lib/mcp-tools.js';
+import type { IconInfo } from './lib/types.js';
 import { toError } from './lib/utils.js';
 
 import { registerGetHelpPrompt } from './prompts/index.js';
@@ -22,11 +23,6 @@ import { shutdownTransformWorkerPool } from './transform/transform.js';
 /* -------------------------------------------------------------------------------------------------
  * Icons + server info
  * ------------------------------------------------------------------------------------------------- */
-
-interface IconInfo {
-  src: string;
-  mimeType: string;
-}
 
 async function getLocalIconInfo(): Promise<IconInfo | undefined> {
   const name = 'logo.svg';
@@ -52,7 +48,7 @@ type McpServerCapabilities = NonNullable<
 function createServerCapabilities(): McpServerCapabilities {
   return {
     logging: {},
-    resources: {},
+    resources: { subscribe: true, listChanged: true },
     tools: {},
     prompts: {},
     tasks: {

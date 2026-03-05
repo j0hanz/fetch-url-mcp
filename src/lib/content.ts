@@ -23,7 +23,7 @@ const HEADER_NOISE_PATTERN =
 const FIXED_OR_HIGH_Z_PATTERN = /\b(?:fixed|sticky|z-(?:4\d|50)|isolate)\b/;
 const SKIP_URL_PREFIXES = [
   '#',
-  'java' + 'script:',
+  'javascript:',
   'mailto:',
   'tel:',
   'data:',

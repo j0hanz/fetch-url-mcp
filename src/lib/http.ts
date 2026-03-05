@@ -520,7 +520,7 @@ class RedirectFollower {
     url: string,
     init: RequestInit,
     maxRedirects: number
-  ): Promise<{ response: Response; url: string }> {
+  ): Promise<{ response: Response; url: string; agent?: Agent }> {
     let currentUrl = url;
     const redirectLimit = Math.max(0, maxRedirects);
     const visited = new Set<string>();
@@ -535,27 +535,34 @@ class RedirectFollower {
       }
       visited.add(currentUrl);
 
-      const { response, nextUrl } = await this.withRedirectErrorContext(
-        currentUrl,
-        async () => {
-          let ipAddress: string | undefined;
-          if (this.preflight) {
-            ipAddress = await this.preflight(
-              currentUrl,
-              init.signal ?? undefined
-            );
-          }
-          return this.performFetchCycle(
+      const {
+        response,
+        nextUrl,
+        agent: returnedAgent,
+      } = await this.withRedirectErrorContext(currentUrl, async () => {
+        let ipAddress: string | undefined;
+        if (this.preflight) {
+          ipAddress = await this.preflight(
             currentUrl,
-            init,
-            redirectLimit,
-            redirectCount,
-            ipAddress
+            init.signal ?? undefined
           );
         }
-      );
+        return this.performFetchCycle(
+          currentUrl,
+          init,
+          redirectLimit,
+          redirectCount,
+          ipAddress
+        );
+      });
 
-      if (!nextUrl) return { response, url: currentUrl };
+      if (!nextUrl) {
+        return {
+          response,
+          url: currentUrl,
+          ...(returnedAgent ? { agent: returnedAgent } : {}),
+        };
+      }
       currentUrl = nextUrl;
     }
 
@@ -568,7 +575,7 @@ class RedirectFollower {
     redirectLimit: number,
     redirectCount: number,
     ipAddress?: string
-  ): Promise<{ response: Response; nextUrl?: string }> {
+  ): Promise<{ response: Response; nextUrl?: string; agent?: Agent }> {
     const fetchInit: RequestInit & { dispatcher?: Dispatcher } = {
       ...init,
       redirect: 'manual' as RequestRedirect,
@@ -598,10 +605,14 @@ class RedirectFollower {
       fetchInit.dispatcher = agent;
     }
 
+    let closeAgent = true;
     try {
       const response = await this.fetchFn(currentUrl, fetchInit);
-
-      if (!isRedirectStatus(response.status)) return { response };
+      // Only follow redirects if the status code indicates a redirect and there's a Location header.
+      if (!isRedirectStatus(response.status)) {
+        closeAgent = false;
+        return { response, ...(agent ? { agent } : {}) };
+      }
 
       if (redirectCount >= redirectLimit) {
         cancelResponseBody(response);
@@ -628,7 +639,9 @@ class RedirectFollower {
         nextUrl,
       };
     } finally {
-      await agent?.close();
+      if (closeAgent) {
+        await agent?.close();
+      }
     }
   }
 
@@ -1544,13 +1557,18 @@ class HttpFetcher {
 
     const ctx = this.telemetry.start(normalizedUrl, 'GET');
 
+    let agent: Agent | undefined;
     try {
-      const { response, url: finalUrl } =
-        await this.redirectFollower.fetchWithRedirects(
-          normalizedUrl,
-          init,
-          this.fetcherConfig.maxRedirects
-        );
+      const {
+        response,
+        url: finalUrl,
+        agent: returnedAgent,
+      } = await this.redirectFollower.fetchWithRedirects(
+        normalizedUrl,
+        init,
+        this.fetcherConfig.maxRedirects
+      );
+      agent = returnedAgent;
 
       ctx.url = this.telemetry.redact(finalUrl);
       return await this.readPayload(
@@ -1565,6 +1583,8 @@ class HttpFetcher {
       ctx.url = this.telemetry.redact(mapped.url);
       this.telemetry.recordError(ctx, mapped, mapped.statusCode);
       throw mapped;
+    } finally {
+      await agent?.close();
     }
   }
 
@@ -1707,7 +1727,7 @@ export async function fetchWithRedirects(
   url: string,
   init: RequestInit,
   maxRedirects: number
-): Promise<{ response: Response; url: string }> {
+): Promise<{ response: Response; url: string; agent?: Agent }> {
   return secureRedirectFollower.fetchWithRedirects(url, init, maxRedirects);
 }
 export async function readResponseText(
