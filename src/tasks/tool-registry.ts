@@ -32,3 +32,7 @@ export function getTaskCapableTool(
 export function hasTaskCapableTool(name: string): boolean {
   return taskCapableTools.has(name);
 }
+
+export function hasRegisteredTaskCapableTools(): boolean {
+  return taskCapableTools.size > 0;
+}

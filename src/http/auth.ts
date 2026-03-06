@@ -256,7 +256,7 @@ export function ensureMcpProtocolVersion(
   options?: McpProtocolVersionCheckOptions
 ): boolean {
   const version = resolveMcpProtocolVersion(req);
-  const requireHeader = options?.requireHeader ?? false;
+  const requireHeader = options?.requireHeader ?? config.security.allowRemote;
 
   if (!version) {
     if (!requireHeader) {

@@ -25,7 +25,10 @@ import {
   resolveTaskOwnerKey,
   resolveToolCallContext,
 } from '../tasks/owner.js';
-import { hasTaskCapableTool } from '../tasks/tool-registry.js';
+import {
+  hasRegisteredTaskCapableTools,
+  hasTaskCapableTool,
+} from '../tasks/tool-registry.js';
 import { logWarn, runWithRequestContext } from './core.js';
 
 /* -------------------------------------------------------------------------------------------------
@@ -188,6 +191,15 @@ function resolveOwnerScopedExtra(extra: unknown): {
 }
 type RequestHandlerFn = (request: unknown, extra?: unknown) => Promise<unknown>;
 
+export interface TaskHandlerRegistrationOptions {
+  requireInterception?: boolean;
+}
+
+export interface TaskHandlerRegistrationResult {
+  interceptedToolsCall: boolean;
+  taskCapableToolsRegistered: boolean;
+}
+
 function getSdkCallToolHandler(server: McpServer): RequestHandlerFn | null {
   // S-2: see tests/sdk-compat-guard.test.ts
   const maybeHandlers: unknown = Reflect.get(server.server, '_requestHandlers');
@@ -196,10 +208,21 @@ function getSdkCallToolHandler(server: McpServer): RequestHandlerFn | null {
   const handler: unknown = maybeHandlers.get('tools/call');
   return typeof handler === 'function' ? (handler as RequestHandlerFn) : null;
 }
-export function registerTaskHandlers(server: McpServer): void {
+export function registerTaskHandlers(
+  server: McpServer,
+  options?: TaskHandlerRegistrationOptions
+): TaskHandlerRegistrationResult {
   const sdkCallToolHandler = getSdkCallToolHandler(server);
+  const taskCapableToolsRegistered = hasRegisteredTaskCapableTools();
+  const requireInterception = options?.requireInterception ?? true;
 
   if (!sdkCallToolHandler) {
+    if (taskCapableToolsRegistered && requireInterception) {
+      throw new Error(
+        'Task-capable tools are registered but SDK tools/call interception is unavailable. Upgrade compatibility or disable strict interception with TASKS_REQUIRE_INTERCEPTION=false.'
+      );
+    }
+
     logWarn(
       'Task call interception disabled: SDK tools/call handler unavailable; task-capable tools require MCP SDK compatibility update',
       { sdkVersion: 'unknown' }
@@ -344,4 +367,9 @@ export function registerTaskHandlers(server: McpServer): void {
 
     return toTaskSummary(task);
   });
+
+  return {
+    interceptedToolsCall: sdkCallToolHandler !== null,
+    taskCapableToolsRegistered,
+  };
 }

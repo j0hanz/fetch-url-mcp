@@ -533,6 +533,7 @@ export const config = {
       env['TASKS_STATUS_NOTIFICATIONS'],
       false
     ),
+    requireInterception: parseBoolean(env['TASKS_REQUIRE_INTERCEPTION'], true),
   },
   cache: {
     enabled: parseBoolean(env['CACHE_ENABLED'], true),

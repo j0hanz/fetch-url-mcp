@@ -129,7 +129,9 @@ async function createMcpServerWithOptions(
   // NOTE: Internally patches server.close and server.server.onclose for cleanup
   // callbacks, and intercepts tools/call via Reflect.get on private SDK state.
   // See src/lib/task-handlers.ts for risk documentation (S-2, S-3).
-  registerTaskHandlers(server);
+  registerTaskHandlers(server, {
+    requireInterception: config.tasks.requireInterception,
+  });
   registerLoggingSetLevelHandler(server);
   attachServerErrorHandler(server);
 
