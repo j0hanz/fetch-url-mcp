@@ -8,7 +8,7 @@ import {
 } from '@modelcontextprotocol/sdk/server/auth/errors.js';
 import type { AuthInfo } from '@modelcontextprotocol/sdk/server/auth/types.js';
 
-import { config } from '../lib/core.js';
+import { config, logWarn } from '../lib/core.js';
 import { normalizeHost } from '../lib/url.js';
 import { hmacSha256Hex, timingSafeEqualUtf8 } from '../lib/utils.js';
 import { isObject } from '../lib/utils.js';
@@ -263,6 +263,12 @@ export function ensureMcpProtocolVersion(
       // Permissive backward-compat fallback: clients predating MCP 2025-03-26 do not
       // send MCP-Protocol-Version. Accepting requests without the header keeps older
       // integrations working. Pass requireHeader: true to enforce strict version checking.
+      logWarn(
+        'MCP-Protocol-Version header missing; defaulting to permissive fallback',
+        {
+          remoteAddress: req.socket.remoteAddress,
+        }
+      );
       return true;
     }
 

@@ -189,6 +189,7 @@ function resolveOwnerScopedExtra(extra: unknown): {
 type RequestHandlerFn = (request: unknown, extra?: unknown) => Promise<unknown>;
 
 function getSdkCallToolHandler(server: McpServer): RequestHandlerFn | null {
+  // S-2: see tests/sdk-compat-guard.test.ts
   const maybeHandlers: unknown = Reflect.get(server.server, '_requestHandlers');
   if (!(maybeHandlers instanceof Map)) return null;
 
@@ -299,6 +300,8 @@ export function registerTaskHandlers(server: McpServer): void {
       });
     }
 
+    // Forward-compat: input_required is a valid MCP task status but not currently
+    // produced by any tool in this server. Kept for future spec support.
     if (task.status === 'input_required') {
       throw new McpError(
         ErrorCode.InvalidRequest,

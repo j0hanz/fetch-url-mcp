@@ -243,6 +243,12 @@ class McpSessionGateway {
       return;
     }
 
+    const fingerprint = buildAuthFingerprint(ctx.auth);
+    if (!fingerprint || session.authFingerprint !== fingerprint) {
+      sendError(ctx.res, -32600, 'Session not found', 404);
+      return;
+    }
+
     if (
       !ensureMcpProtocolVersion(ctx.req, ctx.res, {
         requireHeader: true,
@@ -273,6 +279,12 @@ class McpSessionGateway {
 
     const session = this.store.get(sessionId);
     if (!session) {
+      sendError(ctx.res, -32600, 'Session not found', 404);
+      return;
+    }
+
+    const fingerprint = buildAuthFingerprint(ctx.auth);
+    if (!fingerprint || session.authFingerprint !== fingerprint) {
       sendError(ctx.res, -32600, 'Session not found', 404);
       return;
     }
