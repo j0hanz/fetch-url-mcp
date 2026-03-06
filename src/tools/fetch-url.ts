@@ -283,8 +283,6 @@ async function fetchPipeline(
   pipeline: PipelineResult<MarkdownPipelineResult>;
   inlineResult: InlineContentResult;
 }> {
-  const contextStr = getUrlContext(url);
-
   return performSharedFetch({
     url,
     ...withSignal(signal),
@@ -292,7 +290,7 @@ async function fetchPipeline(
     ...(forceRefresh ? { forceRefresh: true } : {}),
     ...(maxInlineChars !== undefined ? { maxInlineChars } : {}),
     transform: async ({ buffer, encoding, truncated }, normalizedUrl) => {
-      reportFetchProgress(progress, 2, contextStr, 'converting to Markdown');
+      reportProgress(progress, 2, 'Parsing HTML → Markdown');
       return markdownTransform(
         { buffer, encoding, ...(truncated ? { truncated } : {}) },
         normalizedUrl,
@@ -305,21 +303,19 @@ async function fetchPipeline(
   });
 }
 
-function buildFetchProgressMessage(context: string, state: string): string {
-  if (state === 'completed' || state === 'cancelled' || state === 'failed') {
-    return `fetch-url: ${context} • ${state}`;
-  }
-  return `fetch-url: ${context} [${state}]`;
+function formatContentSize(chars: number): string {
+  if (chars < 1000) return `${chars} chars`;
+  if (chars < 1_000_000) return `${(chars / 1024).toFixed(1)} KB`;
+  return `${(chars / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-function reportFetchProgress(
+function reportProgress(
   progress: ProgressReporter | undefined,
   step: number,
-  context: string,
-  state: string
+  message: string
 ): void {
   if (!progress) return;
-  progress.report(step, buildFetchProgressMessage(context, state));
+  progress.report(step, message);
 }
 
 async function executeFetch(
@@ -330,12 +326,11 @@ async function executeFetch(
   const signal = buildToolAbortSignal(extra?.signal);
   const progress = createProgressReporter(extra);
 
-  const contextStr = getUrlContext(url);
-  reportFetchProgress(progress, 0, contextStr, 'starting');
+  const context = getUrlContext(url);
   logDebug('Fetching URL', { url });
 
   try {
-    reportFetchProgress(progress, 1, contextStr, 'fetching HTML');
+    reportProgress(progress, 1, `Fetching ${context}`);
     const { pipeline, inlineResult } = await fetchPipeline(
       url,
       signal,
@@ -346,19 +341,15 @@ async function executeFetch(
     );
 
     if (pipeline.fromCache) {
-      reportFetchProgress(progress, 3, contextStr, 'loaded from cache');
+      reportProgress(progress, 3, 'Loaded from cache');
     }
 
-    reportFetchProgress(progress, 4, contextStr, 'completed');
+    const size = formatContentSize(inlineResult.contentSize);
+    reportProgress(progress, 4, `Done — ${size}`);
     return buildResponse(pipeline, inlineResult, url);
   } catch (error) {
     const isAbort = isAbortError(error);
-    reportFetchProgress(
-      progress,
-      4,
-      contextStr,
-      isAbort ? 'cancelled' : 'failed'
-    );
+    reportProgress(progress, 4, isAbort ? 'Cancelled' : 'Failed');
     throw error;
   }
 }
