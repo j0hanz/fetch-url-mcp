@@ -50,24 +50,24 @@ import {
   shutdownWorkerPool,
 } from './worker-pool.js';
 
-const utf8Decoder = new TextDecoder('utf-8');
-
 function decodeInput(input: string | Uint8Array, encoding?: string): string {
   if (typeof input === 'string') return input;
 
   const normalizedEncoding = encoding?.trim().toLowerCase();
+
   if (
     !normalizedEncoding ||
     normalizedEncoding === 'utf-8' ||
     normalizedEncoding === 'utf8'
   ) {
-    return utf8Decoder.decode(input);
+    const buf = Buffer.isBuffer(input) ? input : Buffer.from(input);
+    return buf.toString('utf8');
   }
-
   try {
     return new TextDecoder(normalizedEncoding).decode(input);
   } catch {
-    return utf8Decoder.decode(input);
+    const buf = Buffer.isBuffer(input) ? input : Buffer.from(input);
+    return buf.toString('utf8');
   }
 }
 
@@ -1352,11 +1352,14 @@ function hasBinaryIndicators(content: string): boolean {
   if (content.includes('\x00')) return true;
 
   const sampleSize = Math.min(content.length, 2000);
-  const sample = content.slice(0, sampleSize);
   let replacementCount = 0;
+  let i = -1;
 
-  for (const char of sample) {
-    if (char === REPLACEMENT_CHAR) replacementCount++;
+  while (
+    (i = content.indexOf(REPLACEMENT_CHAR, i + 1)) !== -1 &&
+    i < sampleSize
+  ) {
+    replacementCount++;
   }
 
   return replacementCount > sampleSize * BINARY_INDICATOR_THRESHOLD;

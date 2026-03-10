@@ -1,8 +1,6 @@
 import { AsyncLocalStorage, AsyncResource } from 'node:async_hooks';
 import { Buffer } from 'node:buffer';
-import { fork } from 'node:child_process';
 import { availableParallelism } from 'node:os';
-import { fileURLToPath } from 'node:url';
 import { isSharedArrayBuffer } from 'node:util/types';
 import {
   type Transferable as NodeTransferable,
@@ -18,16 +16,13 @@ import { isObject } from '../lib/utils.js';
 
 import type {
   MarkdownTransformResult,
-  TransformWorkerCancelMessage,
   TransformWorkerErrorMessage,
   TransformWorkerOutgoingMessage,
   TransformWorkerResultMessage,
   TransformWorkerTransformMessage,
 } from './types.js';
 
-// ---------------------------------------------------------------------------
 // Worker message validation
-// ---------------------------------------------------------------------------
 
 function isWorkerResultPayload(
   value: unknown
@@ -106,9 +101,7 @@ function isWorkerResponse(raw: unknown): raw is TransformWorkerOutgoingMessage {
   return false;
 }
 
-// ---------------------------------------------------------------------------
 // Task context (preserves async context across worker callbacks)
-// ---------------------------------------------------------------------------
 
 interface TaskContext {
   run: (fn: () => void) => void;
@@ -134,9 +127,7 @@ function createTaskContext(): TaskContext {
   };
 }
 
-// ---------------------------------------------------------------------------
 // Task & worker types
-// ---------------------------------------------------------------------------
 
 interface PendingTask {
   id: string;
@@ -170,10 +161,7 @@ function ensureTightBuffer(buffer: Uint8Array): Uint8Array {
   return Buffer.from(buffer);
 }
 
-function buildWorkerDispatchPayload(
-  task: PendingTask,
-  supportsTransferList: boolean
-): WorkerDispatchPayload {
+function buildWorkerDispatchPayload(task: PendingTask): WorkerDispatchPayload {
   const message: TransformWorkerTransformMessage = {
     type: 'transform',
     id: task.id,
@@ -189,12 +177,6 @@ function buildWorkerDispatchPayload(
   }
 
   const htmlBuffer = ensureTightBuffer(task.htmlBuffer);
-  if (!supportsTransferList) {
-    message.htmlBuffer = htmlBuffer;
-    if (task.encoding) message.encoding = task.encoding;
-    return { message };
-  }
-
   const transferableHtmlBuffer = Uint8Array.from(htmlBuffer);
   message.htmlBuffer = transferableHtmlBuffer;
   if (task.encoding) message.encoding = task.encoding;
@@ -215,32 +197,8 @@ interface InflightTask {
   cancelPending: boolean;
 }
 
-type TransformWorkerMessage =
-  | TransformWorkerTransformMessage
-  | TransformWorkerCancelMessage;
-
-interface WorkerHost {
-  kind: 'thread' | 'process';
-  supportsTransferList: boolean;
-  threadId?: number;
-  pid?: number;
-  postMessage: (
-    message: TransformWorkerMessage,
-    transferList?: NodeTransferable[]
-  ) => void;
-  terminate: () => Promise<void>;
-  unref: () => void;
-  onMessage: (handler: (raw: unknown) => void) => void;
-  onError: (handler: (error: unknown) => void) => void;
-  onExit: (
-    handler: (code: number | null, signal: NodeJS.Signals | null) => void
-  ) => void;
-}
-
-type WorkerSpawner = (workerIndex: number, name: string) => WorkerHost;
-
 interface WorkerSlot {
-  host: WorkerHost;
+  worker: Worker;
   busy: boolean;
   currentTaskId: string | null;
   name: string;
@@ -263,41 +221,9 @@ interface TransformWorkerPool {
   getCapacity(): number;
 }
 
-// ---------------------------------------------------------------------------
 // Pool sizing & constants
-// ---------------------------------------------------------------------------
 
-/**
- * Worker Pool Sizing Configuration
- *
- * Default: min(4, floor(availableParallelism() / 2)), constrained to [2, N]
- *
- * Tuning Guidance:
- * - **Default behavior**: Appropriate for most deployments. Uses half of available
- *   CPU threads (capped at 4) to balance throughput with system resource availability.
- *
- * - **CPU-limited containers**: If running in a container with strict CPU limits
- *   (e.g., Docker with --cpus=2), the default may over-subscribe. Consider setting
- *   maxWorkerScale to match the container's CPU limit.
- *
- * - **High-concurrency workloads**: For dedicated servers handling many concurrent
- *   fetch requests, increasing maxWorkerScale to (availableParallelism() + 2) may
- *   improve throughput by overlapping I/O wait with computation.
- *
- * - **Memory-constrained environments**: Each worker allocates ~50-100MB for DOM
- *   parsing. If memory is limited, reduce maxWorkerScale to (availableParallelism() / 2)
- *   or lower to prevent OOM errors.
- *
- * - **Shared hosting**: On shared systems where CPU is contested, reducing the pool
- *   size prevents starving other processes. Consider maxWorkerScale = 2 or using
- *   process-based workers (TRANSFORM_WORKER_MODE=process) for better isolation.
- *
- * Configuration:
- * - TRANSFORM_MAX_WORKER_SCALE env var (default: availableParallelism())
- * - TRANSFORM_WORKER_MODE env var: 'threads' (default) or 'process'
- *
- * See config.ts for full worker configuration options.
- */
+// Core tuning: ~half of available CPUs as baseline, capped by config limits.
 const POOL_MIN_WORKERS = Math.max(
   2,
   Math.min(4, Math.floor(availableParallelism() / 2))
@@ -307,118 +233,12 @@ const POOL_SCALE_THRESHOLD = 0.5;
 const WORKER_NAME_PREFIX = 'fetch-url-mcp-transform';
 
 const DEFAULT_TIMEOUT_MS = config.transform.timeoutMs;
-const TRANSFORM_CHILD_PATH = fileURLToPath(
-  new URL('./workers/transform-child.js', import.meta.url)
+const TRANSFORM_WORKER_PATH = new URL(
+  './workers/transform-worker.js',
+  import.meta.url
 );
 
-// ---------------------------------------------------------------------------
-// Worker host spawners
-// ---------------------------------------------------------------------------
-
-function createThreadWorkerHost(
-  _workerIndex: number,
-  name: string
-): WorkerHost {
-  const resourceLimits = config.transform.workerResourceLimits;
-  const worker = new Worker(
-    new URL('./workers/transform-worker.js', import.meta.url),
-    {
-      name,
-      ...(resourceLimits ? { resourceLimits } : {}),
-    }
-  );
-
-  return {
-    kind: 'thread',
-    supportsTransferList: true,
-    threadId: worker.threadId,
-    postMessage: (message, transferList) => {
-      worker.postMessage(message, transferList);
-    },
-    terminate: async () => {
-      await worker.terminate();
-    },
-    unref: () => {
-      worker.unref();
-    },
-    onMessage: (handler) => {
-      worker.on('message', handler);
-    },
-    onError: (handler) => {
-      worker.on('error', handler);
-      worker.on('messageerror', handler);
-    },
-    onExit: (handler) => {
-      worker.on('exit', (code) => {
-        handler(code, null);
-      });
-    },
-  };
-}
-
-function createProcessWorkerHost(
-  workerIndex: number,
-  name: string
-): WorkerHost {
-  const child = fork(TRANSFORM_CHILD_PATH, [], {
-    stdio: ['ignore', 'ignore', 'ignore', 'ipc'],
-    serialization: 'advanced',
-    env: {
-      ...process.env,
-      FETCH_URL_MCP_WORKER_INDEX: String(workerIndex),
-      FETCH_URL_MCP_WORKER_NAME: name,
-    },
-  });
-
-  if (child.pid === undefined) {
-    throw new Error('Failed to fork process');
-  }
-
-  return {
-    kind: 'process',
-    supportsTransferList: false,
-    pid: child.pid,
-    postMessage: (message) => {
-      if (!child.connected) {
-        throw new Error('Transform worker IPC channel is closed');
-      }
-      child.send(message);
-    },
-    terminate: () =>
-      new Promise((resolve) => {
-        if (child.exitCode !== null || child.killed) {
-          resolve();
-          return;
-        }
-        child.once('exit', () => {
-          resolve();
-        });
-        try {
-          child.kill();
-        } catch {
-          resolve();
-        }
-      }),
-    unref: () => {
-      child.unref();
-    },
-    onMessage: (handler) => {
-      child.on('message', handler);
-    },
-    onError: (handler) => {
-      child.on('error', handler);
-    },
-    onExit: (handler) => {
-      child.on('exit', (code, signal) => {
-        handler(code, signal);
-      });
-    },
-  };
-}
-
-// ---------------------------------------------------------------------------
 // WorkerPool
-// ---------------------------------------------------------------------------
 
 class WorkerPool implements TransformWorkerPool {
   private static readonly CLOSED_MESSAGE = 'Transform worker pool closed';
@@ -442,19 +262,16 @@ class WorkerPool implements TransformWorkerPool {
 
   private readonly timeoutMs: number;
   private readonly queueMax: number;
-  private readonly spawnWorkerImpl: WorkerSpawner;
-
   private closed = false;
   private taskIdSeq = 0;
 
-  constructor(size: number, timeoutMs: number, spawnWorker: WorkerSpawner) {
+  constructor(size: number, timeoutMs: number) {
     this.capacity =
       size === 0
         ? 0
         : Math.max(this.minCapacity, Math.min(size, this.maxCapacity));
     this.timeoutMs = timeoutMs;
     this.queueMax = this.maxCapacity * 4;
-    this.spawnWorkerImpl = spawnWorker;
   }
 
   async transform(
@@ -542,8 +359,8 @@ class WorkerPool implements TransformWorkerPool {
     this.closed = true;
 
     const terminations = this.workers
-      .map((slot) => slot?.host.terminate())
-      .filter((p): p is Promise<void> => p !== undefined);
+      .map((slot) => slot?.worker.terminate().catch(() => undefined))
+      .filter((p): p is Promise<number> => p !== undefined);
 
     this.workers.fill(undefined);
     this.workers.length = 0;
@@ -708,7 +525,7 @@ class WorkerPool implements TransformWorkerPool {
     }
     if (slot) {
       try {
-        slot.host.postMessage({ type: 'cancel', id });
+        slot.worker.postMessage({ type: 'cancel', id });
       } catch {
         // Worker may be unavailable; failure is acceptable during abort
       }
@@ -737,24 +554,37 @@ class WorkerPool implements TransformWorkerPool {
 
   private spawnWorker(workerIndex: number): WorkerSlot {
     const name = `${WORKER_NAME_PREFIX}-${workerIndex + 1}`;
-    const host = this.spawnWorkerImpl(workerIndex, name);
-    host.unref();
+    const resourceLimits = config.transform.workerResourceLimits;
+    const worker = new Worker(TRANSFORM_WORKER_PATH, {
+      name,
+      ...(resourceLimits ? { resourceLimits } : {}),
+    });
 
-    host.onMessage((raw: unknown) => {
+    worker.unref();
+
+    worker.on('message', (raw: unknown) => {
       this.onWorkerMessage(workerIndex, raw);
     });
-    host.onError((error: unknown) => {
+    worker.on('error', (error: unknown) => {
       this.onWorkerBroken(
         workerIndex,
         `Transform worker error: ${getErrorMessage(error)}`
       );
     });
-    host.onExit((code: number | null, signal: NodeJS.Signals | null) => {
-      const suffix = signal ? `signal ${signal}` : `code ${code ?? 'unknown'}`;
-      this.onWorkerBroken(workerIndex, `Transform worker exited (${suffix})`);
+    worker.on('messageerror', (error: unknown) => {
+      this.onWorkerBroken(
+        workerIndex,
+        `Transform worker error: ${getErrorMessage(error)}`
+      );
+    });
+    worker.on('exit', (code: number | null) => {
+      this.onWorkerBroken(
+        workerIndex,
+        `Transform worker exited (code ${code ?? 'unknown'})`
+      );
     });
 
-    return { host, busy: false, currentTaskId: null, name };
+    return { worker, busy: false, currentTaskId: null, name };
   }
 
   private onWorkerBroken(workerIndex: number, message: string): void {
@@ -766,11 +596,8 @@ class WorkerPool implements TransformWorkerPool {
     logWarn('Transform worker unavailable; restarting', {
       reason: message,
       workerIndex,
-      workerKind: slot.host.kind,
       workerName: slot.name,
-      ...(slot.host.kind === 'process'
-        ? { pid: slot.host.pid }
-        : { threadId: slot.host.threadId }),
+      threadId: slot.worker.threadId,
     });
 
     if (slot.busy && slot.currentTaskId) {
@@ -788,7 +615,7 @@ class WorkerPool implements TransformWorkerPool {
 
     const target = slot ?? this.workers[workerIndex];
     if (target) {
-      target.host.terminate().catch(() => undefined);
+      target.worker.terminate().catch(() => undefined);
     }
 
     this.workers[workerIndex] = this.spawnWorker(workerIndex);
@@ -957,7 +784,7 @@ class WorkerPool implements TransformWorkerPool {
     void timeout.promise
       .then(() => {
         try {
-          slot.host.postMessage({ type: 'cancel', id: task.id });
+          slot.worker.postMessage({ type: 'cancel', id: task.id });
         } catch {
           // Worker may be unavailable; proceed with timeout handling
         }
@@ -992,11 +819,8 @@ class WorkerPool implements TransformWorkerPool {
     });
 
     try {
-      const { message, transferList } = buildWorkerDispatchPayload(
-        task,
-        slot.host.supportsTransferList
-      );
-      slot.host.postMessage(message, transferList);
+      const { message, transferList } = buildWorkerDispatchPayload(task);
+      slot.worker.postMessage(message, transferList);
     } catch (error: unknown) {
       timeout.cancel();
       this.clearAbortListener(task.signal, task.abortListener);
@@ -1043,25 +867,13 @@ class WorkerPool implements TransformWorkerPool {
   }
 }
 
-// ---------------------------------------------------------------------------
 // Pool singleton management
-// ---------------------------------------------------------------------------
 
 let workerPool: WorkerPool | null = null;
 
-function resolveWorkerSpawner(): WorkerSpawner {
-  return config.transform.workerMode === 'process'
-    ? createProcessWorkerHost
-    : createThreadWorkerHost;
-}
-
 export function getOrCreateWorkerPool(): WorkerPool {
   const size = config.transform.maxWorkerScale === 0 ? 0 : POOL_MIN_WORKERS;
-  workerPool ??= new WorkerPool(
-    size,
-    DEFAULT_TIMEOUT_MS,
-    resolveWorkerSpawner()
-  );
+  workerPool ??= new WorkerPool(size, DEFAULT_TIMEOUT_MS);
   return workerPool;
 }
 
