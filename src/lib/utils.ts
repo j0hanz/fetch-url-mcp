@@ -69,20 +69,6 @@ function assertAllowedAlgorithm(
     throw new Error(`Hash algorithm not allowed: ${algorithm}`);
   }
 }
-function padBuffer(buffer: Buffer, length: number): Buffer {
-  const padded = Buffer.alloc(length);
-  buffer.copy(padded);
-  return padded;
-}
-function equalWithPadding(
-  aBuffer: Buffer,
-  bBuffer: Buffer,
-  paddedLength: number
-): boolean {
-  const paddedA = padBuffer(aBuffer, paddedLength);
-  const paddedB = padBuffer(bBuffer, paddedLength);
-  return timingSafeEqual(paddedA, paddedB) && aBuffer.length === bBuffer.length;
-}
 export function timingSafeEqualUtf8(a: string, b: string): boolean {
   const aBuffer = Buffer.from(a, 'utf8');
   const bBuffer = Buffer.from(b, 'utf8');
@@ -90,9 +76,13 @@ export function timingSafeEqualUtf8(a: string, b: string): boolean {
     return timingSafeEqual(aBuffer, bBuffer);
   }
 
-  // Avoid early return timing differences on length mismatch.
+  // If lengths differ, compare against a buffer of the same length filled with zeros.
   const maxLength = Math.max(aBuffer.length, bBuffer.length);
-  return equalWithPadding(aBuffer, bBuffer, maxLength);
+  const paddedA = Buffer.alloc(maxLength);
+  aBuffer.copy(paddedA);
+  const paddedB = Buffer.alloc(maxLength);
+  bBuffer.copy(paddedB);
+  return timingSafeEqual(paddedA, paddedB) && aBuffer.length === bBuffer.length;
 }
 function hashHex(
   algorithm: AllowedHashAlgorithm,
@@ -135,30 +125,18 @@ export class FetchError extends Error {
     this.statusCode = httpStatus ?? DEFAULT_HTTP_STATUS;
     this.code = httpStatus ? `HTTP_${httpStatus}` : 'FETCH_ERROR';
     this.details = Object.freeze({ url, httpStatus, ...details });
-    Error.captureStackTrace(this, this.constructor);
   }
 }
 export function getErrorMessage(error: unknown): string {
   if (isError(error)) return error.message;
-  if (isNonEmptyString(error)) return error;
-  if (isErrorWithMessage(error)) return error.message;
-  return formatUnknownError(error);
-}
-export function toError(error: unknown): Error {
-  return isError(error) ? error : new Error(getErrorMessage(error));
-}
-export function isAbortError(error: unknown): boolean {
-  return isError(error) && error.name === 'AbortError';
-}
-function isNonEmptyString(value: unknown): value is string {
-  return typeof value === 'string' && value.length > 0;
-}
-function isErrorWithMessage(error: unknown): error is { message: string } {
-  if (!isObject(error)) return false;
-  const { message } = error;
-  return typeof message === 'string' && message.length > 0;
-}
-function formatUnknownError(error: unknown): string {
+  if (typeof error === 'string' && error.length > 0) return error;
+  if (
+    isObject(error) &&
+    typeof error.message === 'string' &&
+    error.message.length > 0
+  ) {
+    return error.message;
+  }
   if (error === null || error === undefined) return UNKNOWN_ERROR_MESSAGE;
   try {
     return inspect(error, {
@@ -171,6 +149,12 @@ function formatUnknownError(error: unknown): string {
   } catch {
     return UNKNOWN_ERROR_MESSAGE;
   }
+}
+export function toError(error: unknown): Error {
+  return isError(error) ? error : new Error(getErrorMessage(error));
+}
+export function isAbortError(error: unknown): boolean {
+  return isError(error) && error.name === 'AbortError';
 }
 export function createErrorWithCode(
   message: string,
@@ -186,62 +170,38 @@ export function isSystemError(error: unknown): error is NodeJS.ErrnoException {
   const { code } = error as { code?: unknown };
   return typeof code === 'string';
 }
-export const RESOURCE_NOT_FOUND_ERROR_CODE = -32002;
 const MAX_DEPTH = 20;
-const MAX_DEPTH_ERROR = `stableStringify: Max depth (${MAX_DEPTH}) exceeded`;
 const CIRCULAR_ERROR = 'stableStringify: Circular reference detected';
-function compareObjectKeys(a: string, b: string): number {
-  if (a === b) return 0;
-  return a < b ? -1 : 1;
-}
-function getSortedObjectKeys(obj: object): string[] {
-  return Object.keys(obj).sort(compareObjectKeys);
-}
-function processValue(
-  obj: unknown,
-  depth: number,
-  seen: WeakSet<object>
-): unknown {
-  if (typeof obj !== 'object' || obj === null) {
-    return obj;
-  }
+export function stableStringify(obj: unknown): string {
+  const seen = new WeakSet<object>();
 
-  // Depth guard
-  if (depth > MAX_DEPTH) {
-    throw new Error(MAX_DEPTH_ERROR);
-  }
-
-  // Cycle detection (track active recursion stack only).
-  if (seen.has(obj)) {
-    throw new Error(CIRCULAR_ERROR);
-  }
-  seen.add(obj);
-
-  try {
-    if (Array.isArray(obj)) {
-      return obj.map((item) => processValue(item, depth + 1, seen));
+  const process = (value: unknown, depth: number): unknown => {
+    if (typeof value !== 'object' || value === null) return value;
+    if (depth > MAX_DEPTH) {
+      throw new Error(`stableStringify: Max depth (${MAX_DEPTH}) exceeded`);
     }
-
-    const keys = getSortedObjectKeys(obj);
-    const record = obj as Record<string, unknown>;
-    const sortedObj: Record<string, unknown> = {};
-
-    for (const key of keys) {
-      sortedObj[key] = processValue(record[key], depth + 1, seen);
+    if (seen.has(value)) {
+      throw new Error(CIRCULAR_ERROR);
     }
+    seen.add(value);
 
-    return sortedObj;
-  } finally {
-    seen.delete(obj);
-  }
-}
-export function stableStringify(
-  obj: unknown,
-  depth = 0,
-  seen = new WeakSet()
-): string {
-  const processed = processValue(obj, depth, seen);
-  return JSON.stringify(processed);
+    try {
+      if (Array.isArray(value)) {
+        return value.map((item) => process(item, depth + 1));
+      }
+
+      const record = value as Record<string, unknown>;
+      const sorted: Record<string, unknown> = {};
+      for (const key of Object.keys(record).sort()) {
+        sorted[key] = process(record[key], depth + 1);
+      }
+      return sorted;
+    } finally {
+      seen.delete(value);
+    }
+  };
+
+  return JSON.stringify(process(obj, 0));
 }
 interface HttpServerTuningTarget {
   headersTimeout?: number;
@@ -255,22 +215,6 @@ interface HttpServerTuningTarget {
   closeAllConnections?: () => void;
 }
 const DROP_LOG_INTERVAL_MS = 10_000;
-function setIfDefined<T>(
-  value: T | undefined,
-  setter: (resolved: T) => void
-): void {
-  if (value === undefined) return;
-  setter(value);
-}
-function assignServerValue<T extends keyof HttpServerTuningTarget>(
-  server: HttpServerTuningTarget,
-  key: T,
-  value: HttpServerTuningTarget[T] | undefined
-): void {
-  setIfDefined(value, (resolved) => {
-    server[key] = resolved;
-  });
-}
 export function applyHttpServerTuning(server: HttpServerTuningTarget): void {
   const {
     headersTimeoutMs,
@@ -281,20 +225,13 @@ export function applyHttpServerTuning(server: HttpServerTuningTarget): void {
     maxConnections,
   } = config.server.http;
 
-  const tuningValues: readonly (readonly [
-    keyof HttpServerTuningTarget,
-    HttpServerTuningTarget[keyof HttpServerTuningTarget] | undefined,
-  ])[] = [
-    ['headersTimeout', headersTimeoutMs],
-    ['requestTimeout', requestTimeoutMs],
-    ['keepAliveTimeout', keepAliveTimeoutMs],
-    ['keepAliveTimeoutBuffer', keepAliveTimeoutBufferMs],
-    ['maxHeadersCount', maxHeadersCount],
-  ];
-
-  for (const [key, value] of tuningValues) {
-    assignServerValue(server, key, value);
-  }
+  if (headersTimeoutMs !== undefined) server.headersTimeout = headersTimeoutMs;
+  if (requestTimeoutMs !== undefined) server.requestTimeout = requestTimeoutMs;
+  if (keepAliveTimeoutMs !== undefined)
+    server.keepAliveTimeout = keepAliveTimeoutMs;
+  if (keepAliveTimeoutBufferMs !== undefined)
+    server.keepAliveTimeoutBuffer = keepAliveTimeoutBufferMs;
+  if (maxHeadersCount !== undefined) server.maxHeadersCount = maxHeadersCount;
 
   if (typeof maxConnections === 'number' && maxConnections > 0) {
     server.maxConnections = maxConnections;

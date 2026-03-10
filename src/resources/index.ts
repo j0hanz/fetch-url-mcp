@@ -22,8 +22,9 @@ import {
 import { logWarn } from '../lib/core.js';
 import { registerServerLifecycleCleanup } from '../lib/mcp-tools.js';
 import type { IconInfo } from '../lib/types.js';
-import { RESOURCE_NOT_FOUND_ERROR_CODE } from '../lib/utils.js';
 import { isObject } from '../lib/utils.js';
+
+const RESOURCE_NOT_FOUND_ERROR_CODE = -32002;
 
 interface CompletionContext {
   arguments?: Record<string, string> | undefined;

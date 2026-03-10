@@ -11,38 +11,6 @@ function normalizeDnsName(value: string): string {
   const normalized = value.trim().toLowerCase().replace(/\.+$/, '');
   return normalized;
 }
-interface AbortRace {
-  abortPromise: Promise<never>;
-  cleanup: () => void;
-}
-function createSignalAbortRace(
-  signal: AbortSignal,
-  isAbort: () => boolean,
-  onTimeout: () => Error,
-  onAbort: () => Error
-): AbortRace {
-  let abortListener: (() => void) | null = null;
-
-  const abortPromise = new Promise<never>((_, reject) => {
-    abortListener = () => {
-      reject(isAbort() ? onAbort() : onTimeout());
-    };
-    signal.addEventListener('abort', abortListener, { once: true });
-    if (signal.aborted) abortListener();
-  });
-
-  const cleanup = (): void => {
-    if (!abortListener) return;
-    try {
-      signal.removeEventListener('abort', abortListener);
-    } catch {
-      // Ignore listener cleanup failures; they are non-fatal by design.
-    }
-    abortListener = null;
-  };
-
-  return { abortPromise, cleanup };
-}
 async function withTimeout<T>(
   promise: Promise<T>,
   timeoutMs: number,
@@ -58,18 +26,30 @@ async function withTimeout<T>(
       : (signal ?? timeoutSignal);
   if (!raceSignal) return promise;
 
-  const abortRace = createSignalAbortRace(
-    raceSignal,
-    () => signal?.aborted === true,
-    onTimeout,
-    onAbort ?? (() => new Error('Request was canceled'))
-  );
-
-  try {
-    return await Promise.race([promise, abortRace.abortPromise]);
-  } finally {
-    abortRace.cleanup();
-  }
+  return new Promise<T>((resolve, reject) => {
+    const onAborted = (): void => {
+      reject(
+        signal?.aborted
+          ? (onAbort?.() ?? new Error('Request was canceled'))
+          : onTimeout()
+      );
+    };
+    if (raceSignal.aborted) {
+      onAborted();
+      return;
+    }
+    raceSignal.addEventListener('abort', onAborted, { once: true });
+    promise.then(
+      (value) => {
+        raceSignal.removeEventListener('abort', onAborted);
+        resolve(value);
+      },
+      (err: unknown) => {
+        raceSignal.removeEventListener('abort', onAborted);
+        reject(err instanceof Error ? err : new Error(String(err)));
+      }
+    );
+  });
 }
 function createAbortSignalError(): Error {
   const err = new Error('Request was canceled');
@@ -78,6 +58,10 @@ function createAbortSignalError(): Error {
 }
 
 export class SafeDnsResolver {
+  private readonly cnameResolver = new dns.promises.Resolver({
+    timeout: DNS_LOOKUP_TIMEOUT_MS,
+  });
+
   constructor(
     private readonly ipBlocker: IpBlocker,
     private readonly security: SecurityConfig,
@@ -177,10 +161,7 @@ export class SafeDnsResolver {
   }
 
   private isBlockedHostname(hostname: string): boolean {
-    if (isCloudMetadataHost(hostname)) return true;
-    if (isLocalFetchAllowed()) return false;
-    if (this.security.blockedHosts.has(hostname)) return true;
-    return this.blockedHostSuffixes.some((suffix) => hostname.endsWith(suffix));
+    return this.ipBlocker.isHostBlocked(hostname, this.blockedHostSuffixes);
   }
 
   private async assertNoBlockedCname(
@@ -215,18 +196,8 @@ export class SafeDnsResolver {
     signal?: AbortSignal
   ): Promise<string[]> {
     try {
-      const resultPromise = dns.promises.resolveCname(hostname);
-      const cnames = await withTimeout(
-        resultPromise,
-        DNS_LOOKUP_TIMEOUT_MS,
-        () =>
-          createErrorWithCode(
-            `DNS CNAME lookup timed out for ${hostname}`,
-            'ETIMEOUT'
-          ),
-        signal,
-        createAbortSignalError
-      );
+      if (signal?.aborted) throw createAbortSignalError();
+      const cnames = await this.cnameResolver.resolveCname(hostname);
 
       return cnames
         .map((value) => normalizeDnsName(value))
@@ -240,7 +211,8 @@ export class SafeDnsResolver {
         isSystemError(error) &&
         (error.code === 'ENODATA' ||
           error.code === 'ENOTFOUND' ||
-          error.code === 'ENODOMAIN')
+          error.code === 'ENODOMAIN' ||
+          error.code === 'ETIMEOUT')
       ) {
         return [];
       }
@@ -255,11 +227,9 @@ export class SafeDnsResolver {
 }
 type HostnamePreflight = (url: string, signal?: AbortSignal) => Promise<string>;
 function extractHostname(url: string): string {
-  try {
-    return new URL(url).hostname;
-  } catch {
-    throw createErrorWithCode('Invalid URL', 'EINVAL');
-  }
+  const parsed = URL.parse(url);
+  if (!parsed) throw createErrorWithCode('Invalid URL', 'EINVAL');
+  return parsed.hostname;
 }
 export function createDnsPreflight(
   dnsResolver: SafeDnsResolver
@@ -276,61 +246,19 @@ export function normalizeHost(value: string): string | null {
   const first = takeFirstHostValue(trimmedLower);
   if (!first) return null;
 
-  for (const resolveCandidate of [
-    () => normalizeSocketAddress(first),
-    () => parseHostWithUrl(first),
-    () => normalizeBracketedIpv6(first),
-  ]) {
-    const candidate = resolveCandidate();
-    if (candidate !== null) return candidate;
-  }
+  const socketAddr = SocketAddress.parse(first);
+  if (socketAddr) return normalizeHostname(socketAddr.address);
 
-  if (isIpV6Literal(first)) {
-    return normalizeHostname(first);
-  }
+  const parsed = URL.parse(`http://${first}`);
+  if (parsed) return normalizeHostname(parsed.hostname);
 
-  return normalizeHostname(stripPortIfPresent(first));
+  return normalizeHostname(first);
 }
 function takeFirstHostValue(value: string): string | null {
   // Faster than split(',') for large forwarded headers; preserves behavior.
   const commaIndex = value.indexOf(',');
   const first = commaIndex === -1 ? value : value.slice(0, commaIndex);
   return first ? trimToNull(first) : null;
-}
-function stripIpv6Brackets(value: string): string | null {
-  if (!value.startsWith('[')) return null;
-  const end = value.indexOf(']');
-  if (end === -1) return null;
-  return value.slice(1, end);
-}
-function stripPortIfPresent(value: string): string {
-  const colonIndex = value.indexOf(':');
-  if (colonIndex === -1) return value;
-  return value.slice(0, colonIndex);
-}
-function isIpV6Literal(value: string): boolean {
-  return isIP(value) === 6;
-}
-function normalizeSocketAddress(value: string): string | null {
-  const socketAddress = SocketAddress.parse(value);
-  if (!socketAddress) return null;
-  return normalizeHostname(socketAddress.address);
-}
-function normalizeBracketedIpv6(value: string): string | null {
-  const ipv6 = stripIpv6Brackets(value);
-  if (!ipv6) return null;
-  return normalizeHostname(ipv6);
-}
-function parseHostWithUrl(value: string): string | null {
-  const candidateUrl = `http://${value}`;
-  if (!URL.canParse(candidateUrl)) return null;
-
-  try {
-    const parsed = new URL(candidateUrl);
-    return normalizeHostname(parsed.hostname);
-  } catch {
-    return null;
-  }
 }
 function trimToNull(value: string): string | null {
   const trimmed = value.trim();
@@ -384,22 +312,15 @@ export function createDefaultBlockList(): BlockList {
   }
   return list;
 }
-function extractMappedIpv4(ip: string): string | null {
-  if (!ip.startsWith(IPV6_MAPPED_PREFIX)) return null;
-  const mapped = ip.slice(IPV6_MAPPED_PREFIX.length);
-  return isIP(mapped) === 4 ? mapped : null;
-}
-function stripIpv6ZoneId(ip: string): string {
-  const zoneIndex = ip.indexOf('%');
-  if (zoneIndex <= 0) return ip;
-  return ip.slice(0, zoneIndex);
-}
 export function normalizeIpForBlockList(
   input: string
 ): { ip: string; family: IpFamily } | null {
   const lowered = input.trim().toLowerCase();
   if (!lowered) return null;
-  const normalizedInput = stripIpv6ZoneId(lowered);
+
+  // Strip IPv6 zone ID (e.g. %eth0)
+  const zoneIndex = lowered.indexOf('%');
+  const normalizedInput = zoneIndex > 0 ? lowered.slice(0, zoneIndex) : lowered;
   if (!normalizedInput) return null;
 
   const ipType = isIP(normalizedInput);
@@ -407,10 +328,12 @@ export function normalizeIpForBlockList(
     case 4:
       return { ip: normalizedInput, family: 'ipv4' };
     case 6: {
-      const mapped = extractMappedIpv4(normalizedInput);
-      return mapped
-        ? { ip: mapped, family: 'ipv4' }
-        : { ip: normalizedInput, family: 'ipv6' };
+      // Extract mapped IPv4 from ::ffff: prefix
+      if (normalizedInput.startsWith(IPV6_MAPPED_PREFIX)) {
+        const mapped = normalizedInput.slice(IPV6_MAPPED_PREFIX.length);
+        if (isIP(mapped) === 4) return { ip: mapped, family: 'ipv4' };
+      }
+      return { ip: normalizedInput, family: 'ipv6' };
     }
     default:
       return null;
@@ -485,11 +408,12 @@ export class RawUrlTransformer {
     let hash: string;
     let parsed: URL | undefined;
 
-    try {
-      parsed = new URL(url);
+    const maybeParsed = URL.parse(url);
+    if (maybeParsed) {
+      parsed = maybeParsed;
       base = parsed.origin + parsed.pathname;
       ({ hash } = parsed);
-    } catch {
+    } else {
       ({ base, hash } = this.splitParams(url));
     }
 
@@ -509,21 +433,19 @@ export class RawUrlTransformer {
     if (!urlString) return false;
     if (this.isRawUrl(urlString)) return true;
 
-    try {
-      const url = new URL(urlString);
-      const pathname = url.pathname.toLowerCase();
+    const parsed = URL.parse(urlString);
+    if (parsed) {
+      const pathname = parsed.pathname.toLowerCase();
       const lastDot = pathname.lastIndexOf('.');
       if (lastDot === -1) return false;
-
       return RAW_TEXT_EXTENSIONS.has(pathname.slice(lastDot));
-    } catch {
-      const { base } = this.splitParams(urlString);
-      const lowerBase = base.toLowerCase();
-      const lastDot = lowerBase.lastIndexOf('.');
-      if (lastDot === -1) return false;
-
-      return RAW_TEXT_EXTENSIONS.has(lowerBase.slice(lastDot));
     }
+
+    const { base } = this.splitParams(urlString);
+    const lowerBase = base.toLowerCase();
+    const lastDot = lowerBase.lastIndexOf('.');
+    if (lastDot === -1) return false;
+    return RAW_TEXT_EXTENSIONS.has(lowerBase.slice(lastDot));
   }
 
   private isRawUrl(url: string): boolean {
@@ -553,15 +475,7 @@ export class RawUrlTransformer {
     hash: string,
     preParsed?: URL
   ): { url: string; platform: string } | null {
-    let parsed: URL | null = preParsed ?? null;
-
-    if (!parsed) {
-      try {
-        parsed = new URL(base);
-      } catch {
-        // Ignore invalid URLs
-      }
-    }
+    const parsed = preParsed ?? URL.parse(base);
     if (!parsed) return null;
 
     if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:')
@@ -727,6 +641,16 @@ export class IpBlocker {
       ? this.blockList.check(normalizedIp.ip, normalizedIp.family)
       : false;
   }
+
+  isHostBlocked(
+    hostname: string,
+    blockedHostSuffixes: readonly string[]
+  ): boolean {
+    if (isCloudMetadataHost(hostname)) return true;
+    if (isLocalFetchAllowed()) return false;
+    if (this.security.blockedHosts.has(hostname)) return true;
+    return blockedHostSuffixes.some((suffix) => hostname.endsWith(suffix));
+  }
 }
 type ConstantsConfig = typeof config.constants;
 export class UrlNormalizer {
@@ -744,10 +668,8 @@ export class UrlNormalizer {
         `URL exceeds maximum length of ${this.constants.maxUrlLength} characters`
       );
     }
-    let url: URL;
-    try {
-      url = new URL(trimmedUrl);
-    } catch {
+    const url = URL.parse(trimmedUrl);
+    if (!url) {
       throw createValidationError('Invalid URL format');
     }
     if (url.protocol !== 'http:' && url.protocol !== 'https:') {
@@ -799,18 +721,16 @@ export class UrlNormalizer {
       );
     }
 
-    if (!isLocalFetchAllowed()) {
-      if (this.security.blockedHosts.has(hostname)) {
-        throw createValidationError(
-          `Blocked host: ${hostname}. Internal hosts are not allowed`
-        );
-      }
+    if (!isLocalFetchAllowed() && this.security.blockedHosts.has(hostname)) {
+      throw createValidationError(
+        `Blocked host: ${hostname}. Internal hosts are not allowed`
+      );
+    }
 
-      if (this.ipBlocker.isBlockedIp(hostname)) {
-        throw createValidationError(
-          `Blocked IP range: ${hostname}. Private IPs are not allowed`
-        );
-      }
+    if (!isLocalFetchAllowed() && this.ipBlocker.isBlockedIp(hostname)) {
+      throw createValidationError(
+        `Blocked IP range: ${hostname}. Private IPs are not allowed`
+      );
     }
 
     if (this.blockedHostSuffixes.some((suffix) => hostname.endsWith(suffix))) {
