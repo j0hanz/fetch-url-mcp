@@ -4,7 +4,11 @@ import { accessSync, constants as fsConstants, readFileSync } from 'node:fs';
 import { findPackageJSON } from 'node:module';
 import { isIP } from 'node:net';
 import process from 'node:process';
-import { inspect, stripVTControlCharacters } from 'node:util';
+import {
+  getSystemErrorMessage,
+  inspect,
+  stripVTControlCharacters,
+} from 'node:util';
 
 import { type McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { type StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
@@ -83,13 +87,10 @@ function normalizeHostValue(value: string): string | null {
   const raw = value.trim();
   if (!raw) return null;
 
-  // Full URL
-  if (raw.includes('://')) {
-    if (!URL.canParse(raw)) return null;
+  if (raw.includes('://') && URL.canParse(raw)) {
     return normalizeHostname(new URL(raw).hostname);
   }
 
-  // host[:port]
   const candidateUrl = `http://${raw}`;
   if (URL.canParse(candidateUrl)) {
     return normalizeHostname(new URL(candidateUrl).hostname);
@@ -97,17 +98,14 @@ function normalizeHostValue(value: string): string | null {
 
   const lowered = raw.toLowerCase();
 
-  // [::1]:port
   if (lowered.startsWith('[')) {
     const end = lowered.indexOf(']');
     if (end === -1) return null;
     return normalizeHostname(lowered.slice(1, end));
   }
 
-  // Bare IPv6
   if (isIP(lowered) === 6) return stripTrailingDots(lowered);
 
-  // Split host:port (single colon only)
   const firstColon = lowered.indexOf(':');
   if (firstColon === -1) return normalizeHostname(lowered);
   if (lowered.includes(':', firstColon + 1)) return null;
@@ -159,7 +157,7 @@ function parseList(envValue: string | undefined): string[] {
   return envValue
     .split(/[\s,]+/)
     .map((entry) => entry.trim())
-    .filter((entry) => entry.length > 0);
+    .filter(Boolean);
 }
 
 function parseListOrDefault(
@@ -216,12 +214,11 @@ function readUrlEnv(name: string): URL | undefined {
 }
 
 function parseAllowedHosts(envValue: string | undefined): Set<string> {
-  const hosts = new Set<string>();
-  for (const entry of parseList(envValue)) {
-    const normalized = normalizeHostValue(entry);
-    if (normalized) hosts.add(normalized);
-  }
-  return hosts;
+  return new Set(
+    parseList(envValue)
+      .map(normalizeHostValue)
+      .filter((h): h is string => h !== null)
+  );
 }
 
 function readOptionalFilePath(value: string | undefined): string | undefined {
@@ -378,9 +375,9 @@ function resolveAuthMode(urls: OAuthModeInputs): AuthMode {
 }
 
 function collectStaticTokens(): string[] {
-  const staticTokens = new Set<string>(parseList(env['ACCESS_TOKENS']));
-  if (env['API_KEY']) staticTokens.add(env['API_KEY']);
-  return [...staticTokens];
+  const tokens = parseList(env['ACCESS_TOKENS']);
+  if (env['API_KEY']) tokens.push(env['API_KEY']);
+  return [...new Set(tokens)];
 }
 
 function buildAuthConfig(baseUrl: URL): AuthConfig {
@@ -650,8 +647,7 @@ const CACHE_CONSTANTS = {
 } as const;
 export function parseCachedPayload(raw: string): CachedPayload | null {
   try {
-    const parsed: unknown = JSON.parse(raw);
-    return CachedPayloadSchema.parse(parsed);
+    return CachedPayloadSchema.parse(JSON.parse(raw));
   } catch {
     return null;
   }
@@ -693,21 +689,18 @@ export function createCacheKey(
 
   const urlHash = createHashFragment(url, CACHE_CONSTANTS.URL_HASH_LENGTH);
 
-  let varyHash: string | undefined;
+  if (!vary) return buildCacheKey(namespace, urlHash);
 
-  if (vary) {
-    const varyString = resolveVaryString(vary);
-    if (varyString === null) return null;
+  const varyString = resolveVaryString(vary);
+  if (varyString === null) return null;
 
-    if (varyString) {
-      varyHash = createHashFragment(
-        varyString,
-        CACHE_CONSTANTS.VARY_HASH_LENGTH
-      );
-    }
-  }
-
-  return buildCacheKey(namespace, urlHash, varyHash);
+  return buildCacheKey(
+    namespace,
+    urlHash,
+    varyString
+      ? createHashFragment(varyString, CACHE_CONSTANTS.VARY_HASH_LENGTH)
+      : undefined
+  );
 }
 export function parseCacheKey(cacheKey: string): CacheKeyParts | null {
   if (!cacheKey) return null;
@@ -933,9 +926,11 @@ export function isEnabled(): boolean {
   return store.isEnabled();
 }
 function hasPackageJsonVersion(value: unknown): value is { version: string } {
-  if (typeof value !== 'object' || value === null) return false;
-  const record = value as { version?: unknown };
-  return typeof record.version === 'string';
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    typeof (value as { version?: unknown }).version === 'string'
+  );
 }
 function readServerVersion(moduleUrl: string): string {
   const packageJsonPath = findPackageJSON(moduleUrl);
@@ -1088,20 +1083,20 @@ function shouldLog(level: LogLevel): boolean {
 function mapToMcpLevel(
   level: LogLevel
 ): 'debug' | 'info' | 'warning' | 'error' {
-  switch (level) {
-    case 'warn':
-      return 'warning';
-    case 'error':
-      return 'error';
-    case 'debug':
-      return 'debug';
-    case 'info':
-    default:
-      return 'info';
-  }
+  return level === 'warn' ? 'warning' : level;
 }
 function resolveErrorText(err: unknown): string {
-  if (err instanceof Error) return err.message;
+  if (err instanceof Error) {
+    if ('errno' in err && typeof err.errno === 'number') {
+      try {
+        const sysMsg = getSystemErrorMessage(err.errno);
+        if (sysMsg) return `${err.message} (${sysMsg})`;
+      } catch {
+        // ignore
+      }
+    }
+    return err.message;
+  }
   if (typeof err === 'string') return err;
   return 'unknown error';
 }
@@ -1170,29 +1165,43 @@ export function logDebug(message: string, meta?: LogMetadata): void {
 export function logWarn(message: string, meta?: LogMetadata): void {
   writeLog('warn', message, meta);
 }
+function formatErrorMeta(error: Error): LogMetadata {
+  const meta: LogMetadata = { error: error.message, stack: error.stack };
+  if ('errno' in error && typeof error.errno === 'number') {
+    try {
+      const sysMsg = getSystemErrorMessage(error.errno);
+      if (sysMsg) meta['sysError'] = sysMsg;
+    } catch {
+      // ignore
+    }
+  }
+  return meta;
+}
+
 export function logError(message: string, error?: Error | LogMetadata): void {
   const errorMeta: LogMetadata =
-    error instanceof Error
-      ? { error: error.message, stack: error.stack }
-      : (error ?? {});
+    error instanceof Error ? formatErrorMeta(error) : (error ?? {});
   writeLog('error', message, errorMeta);
 }
 export function setLogLevel(level: string): void {
-  const normalized = level.toLowerCase();
-  // Map MCP logging levels (RFC 5424 subset) to internal levels.
-  if (normalized === 'debug') {
-    config.logging.level = 'debug';
-  } else if (normalized === 'info' || normalized === 'notice') {
-    config.logging.level = 'info';
-  } else if (normalized === 'warning' || normalized === 'warn') {
-    config.logging.level = 'warn';
-  } else if (
-    normalized === 'error' ||
-    normalized === 'critical' ||
-    normalized === 'alert' ||
-    normalized === 'emergency'
-  ) {
-    config.logging.level = 'error';
+  switch (level.toLowerCase()) {
+    case 'debug':
+      config.logging.level = 'debug';
+      break;
+    case 'info':
+    case 'notice':
+      config.logging.level = 'info';
+      break;
+    case 'warning':
+    case 'warn':
+      config.logging.level = 'warn';
+      break;
+    case 'error':
+    case 'critical':
+    case 'alert':
+    case 'emergency':
+      config.logging.level = 'error';
+      break;
   }
 }
 export function redactUrl(rawUrl: string): string {
@@ -1263,22 +1272,17 @@ function handleSessionCleanupError(error: unknown): void {
   if (isAbortError(error)) return;
   logWarn('Session cleanup loop failed', { error: getErrorMessage(error) });
 }
-function getRejectedSettledResult<T>(
-  result: PromiseSettledResult<T>
-): PromiseRejectedResult | undefined {
-  return result.status === 'rejected' ? result : undefined;
-}
 function logRejectedSettledResults(
   results: readonly PromiseSettledResult<unknown>[],
   message: string
 ): void {
   for (const result of results) {
-    const rejected = getRejectedSettledResult(result);
-    if (!rejected) continue;
-
-    logWarn(message, { error: getErrorMessage(rejected.reason) });
+    if (result.status === 'rejected') {
+      logWarn(message, { error: getErrorMessage(result.reason) });
+    }
   }
 }
+
 function isSessionExpired(
   session: SessionEntry,
   now: number,
@@ -1287,13 +1291,7 @@ function isSessionExpired(
   if (sessionTtlMs <= 0) return false;
   return now - session.lastSeen > sessionTtlMs;
 }
-function chunkArray<T>(items: readonly T[], size: number): T[][] {
-  const chunks: T[][] = [];
-  for (let index = 0; index < items.length; index += size) {
-    chunks.push(items.slice(index, index + size));
-  }
-  return chunks;
-}
+
 class SessionCleanupLoop {
   constructor(
     private readonly store: SessionStore,
@@ -1323,9 +1321,10 @@ class SessionCleanupLoop {
   private async handleTick(now: number, signal: AbortSignal): Promise<void> {
     const evicted = this.store.evictExpired();
 
-    for (const batch of chunkArray(evicted, SESSION_CLOSE_BATCH_SIZE)) {
+    for (let i = 0; i < evicted.length; i += SESSION_CLOSE_BATCH_SIZE) {
+      const batch = evicted.slice(i, i + SESSION_CLOSE_BATCH_SIZE);
       const results = await Promise.allSettled(
-        batch.map(async (session) => this.closeExpiredSession(session))
+        batch.map((session) => this.closeExpiredSession(session))
       );
 
       logRejectedSettledResults(
@@ -1368,11 +1367,12 @@ class SessionCleanupLoop {
       session.server.close(),
     ]);
 
-    const transportRejected = getRejectedSettledResult(transportResult);
-    const serverRejected = getRejectedSettledResult(serverResult);
-
-    this.logCloseFailure('transport', transportRejected?.reason);
-    this.logCloseFailure('server', serverRejected?.reason);
+    if (transportResult.status === 'rejected') {
+      this.logCloseFailure('transport', transportResult.reason);
+    }
+    if (serverResult.status === 'rejected') {
+      this.logCloseFailure('server', serverResult.reason);
+    }
   }
 
   private logCloseFailure(
