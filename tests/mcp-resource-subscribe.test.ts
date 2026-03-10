@@ -73,8 +73,7 @@ function getSubscriptionHandler(
 }
 
 describe('resource subscriptions', () => {
-  // DISABLED: VS Code markdown resource rendering issue — uncomment when fixed
-  it.skip('sends resources/updated only for subscribed cache URIs', async () => {
+  it('sends resources/updated only for subscribed cache URIs', async () => {
     const server = await createMcpServer();
     const mutableServer = getMutableServerMethods(server);
     const mutableProtocol = getMutableProtocolMethods(server.server);

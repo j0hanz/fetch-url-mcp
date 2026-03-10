@@ -67,10 +67,11 @@ describe('MCP task-augmented tools', () => {
           arguments: { url: 'https://example.com/task-test' },
           task: { ttl: 10_000 },
         },
-      })) as { task?: { taskId?: string } };
+      })) as { task?: { taskId?: string }; _meta?: unknown };
 
       const taskId = createResult.task?.taskId;
       assert.ok(taskId, 'task id should be returned');
+      assert.equal('_meta' in createResult, false);
 
       const taskStatus = (await getTask({
         jsonrpc: '2.0',
@@ -80,19 +81,11 @@ describe('MCP task-augmented tools', () => {
       })) as {
         taskId?: string;
         status?: string;
-        _meta?: {
-          'io.modelcontextprotocol/related-task'?: {
-            taskId?: string;
-          };
-        };
       };
 
       assert.equal(taskStatus.taskId, taskId);
       assert.equal(typeof taskStatus.status, 'string');
-      assert.equal(
-        taskStatus._meta?.['io.modelcontextprotocol/related-task']?.taskId,
-        taskId
-      );
+      assert.equal('_meta' in taskStatus, false);
 
       const result = (await getTaskResult({
         jsonrpc: '2.0',
@@ -149,18 +142,13 @@ describe('MCP task-augmented tools', () => {
           task: { ttl: 10_000 },
         },
       })) as {
-        task?: {
-          taskId?: string;
-          _meta?: {
-            'io.modelcontextprotocol/related-task'?: {
-              taskId?: string;
-            };
-          };
-        };
+        task?: { taskId?: string };
+        _meta?: unknown;
       };
 
       const taskId = createResult.task?.taskId;
       assert.ok(taskId, 'task id should be returned');
+      assert.equal('_meta' in createResult, false);
 
       await cancelTask({
         jsonrpc: '2.0',
@@ -177,19 +165,11 @@ describe('MCP task-augmented tools', () => {
       })) as {
         taskId?: string;
         status?: string;
-        _meta?: {
-          'io.modelcontextprotocol/related-task'?: {
-            taskId?: string;
-          };
-        };
       };
 
       assert.equal(taskStatus.taskId, taskId);
       assert.equal(taskStatus.status, 'cancelled');
-      assert.equal(
-        taskStatus._meta?.['io.modelcontextprotocol/related-task']?.taskId,
-        taskId
-      );
+      assert.equal('_meta' in taskStatus, false);
 
       await assert.rejects(
         async () =>
@@ -201,6 +181,30 @@ describe('MCP task-augmented tools', () => {
           }),
         (error: unknown) =>
           error instanceof Error && error.message.includes('Task was cancelled')
+      );
+    } finally {
+      await server.close();
+    }
+  });
+
+  it('returns InvalidParams for unknown task ids', async () => {
+    const server = await createMcpServer();
+
+    try {
+      const getTask = getRequestHandler(server, 'tasks/get');
+
+      await assert.rejects(
+        async () =>
+          getTask({
+            jsonrpc: '2.0',
+            id: 20,
+            method: 'tasks/get',
+            params: { taskId: 'missing-task-id' },
+          }),
+        (error: unknown) =>
+          error instanceof Error &&
+          /Task not found/.test(error.message) &&
+          (error as Error & { code?: number }).code === -32602
       );
     } finally {
       await server.close();

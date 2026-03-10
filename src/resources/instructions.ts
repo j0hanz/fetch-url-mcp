@@ -13,7 +13,9 @@ export function buildServerInstructions(): string {
 <capabilities>
 - Tools: \`${FETCH_URL_TOOL_NAME}\` (READ-ONLY).
 - Resources: \`internal://instructions\` (server usage guidance).
+- Resource templates: \`internal://cache/{namespace}/{hash}\` (cached markdown entries).
 - Prompts: \`get-help\` (returns these instructions).
+- Completions: resource-template argument completion for cache entries.
 </capabilities>
 
 <workflows>

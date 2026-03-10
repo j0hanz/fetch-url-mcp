@@ -53,8 +53,7 @@ function getCompletionHandler(
 }
 
 describe('MCP completion handler', () => {
-  // DISABLED: VS Code markdown resource rendering issue — uncomment when fixed
-  it.skip('completes cache resource template variables', async () => {
+  it('completes cache resource template variables', async () => {
     cache.set(
       'markdown:abc123def456',
       JSON.stringify({ markdown: '# cached' }),

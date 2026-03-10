@@ -6,7 +6,7 @@ import { setInterval } from 'node:timers';
 import { ErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js';
 
 import { config } from '../lib/core.js';
-import { RESOURCE_NOT_FOUND_ERROR_CODE, toError } from '../lib/utils.js';
+import { toError } from '../lib/utils.js';
 import { type CancellableTimeout, createUnrefTimeout } from '../lib/utils.js';
 
 export type TaskStatus =
@@ -45,6 +45,7 @@ interface CreateTaskOptions {
 }
 
 export interface CreateTaskResult {
+  [key: string]: unknown;
   task: {
     taskId: string;
     status: TaskStatus;
@@ -53,13 +54,7 @@ export interface CreateTaskResult {
     lastUpdatedAt: string;
     ttl: number;
     pollInterval: number;
-    _meta?: {
-      'io.modelcontextprotocol/related-task': {
-        taskId: string;
-      };
-    };
   };
-  _meta?: Record<string, unknown>;
 }
 
 const DEFAULT_TTL_MS = 60_000;
@@ -474,7 +469,7 @@ class TaskManager {
             this.removeWaiter(taskId, waiter);
             this.removeTask(taskId);
             rejectInContext(
-              new McpError(RESOURCE_NOT_FOUND_ERROR_CODE, 'Task expired', {
+              new McpError(ErrorCode.InvalidParams, 'Task expired', {
                 taskId,
               })
             );

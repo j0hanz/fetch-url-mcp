@@ -23,8 +23,7 @@ function getMutableServerMethods(target: unknown): MutableServerMethods {
 }
 
 describe('cache resource list changed notifications', () => {
-  // DISABLED: VS Code markdown resource rendering issue — uncomment when fixed
-  it.skip('emits when cache key set changes and stops after close', async () => {
+  it('emits when cache key set changes and stops after close', async () => {
     const server = await createMcpServer();
     const mutable = getMutableServerMethods(server);
     const originalIsConnected = mutable.isConnected;

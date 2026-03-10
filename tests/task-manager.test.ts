@@ -19,8 +19,9 @@ describe('TaskManager.waitForTerminalTask', () => {
 
       await assert.rejects(
         () => taskManager.waitForTerminalTask(task.taskId, 'ttl-test'),
-        (err: Error) => {
+        (err: Error & { code?: number }) => {
           assert.equal(err.constructor.name, 'McpError');
+          assert.equal(err.code, -32602);
           assert.match(err.message, /Task expired/);
           return true;
         }

@@ -11,10 +11,7 @@ import type {
   ProgressNotification,
   ToolHandlerExtra,
 } from '../lib/mcp-tools.js';
-import {
-  getErrorMessage,
-  RESOURCE_NOT_FOUND_ERROR_CODE,
-} from '../lib/utils.js';
+import { getErrorMessage } from '../lib/utils.js';
 import { isObject } from '../lib/utils.js';
 
 import {
@@ -33,7 +30,7 @@ import {
   type TaskCapableToolDescriptor,
 } from './tool-registry.js';
 
-const TASK_NOT_FOUND_ERROR_CODE = RESOURCE_NOT_FOUND_ERROR_CODE;
+const TASK_NOT_FOUND_ERROR_CODE = ErrorCode.InvalidParams;
 
 /* -------------------------------------------------------------------------------------------------
  * Extended tool-call request shape (task-aware)
@@ -131,10 +128,6 @@ interface TaskStatusNotificationParams extends Record<string, unknown> {
 
 type TaskSummary = CreateTaskResult['task'];
 
-interface RelatedTaskMeta {
-  'io.modelcontextprotocol/related-task': { taskId: string };
-}
-
 export function toTaskSummary(task: {
   taskId: string;
   status: TaskState['status'];
@@ -152,11 +145,6 @@ export function toTaskSummary(task: {
     lastUpdatedAt: task.lastUpdatedAt,
     ttl: task.ttl,
     pollInterval: task.pollInterval,
-    _meta: {
-      'io.modelcontextprotocol/related-task': {
-        taskId: task.taskId,
-      },
-    },
   };
 }
 
@@ -164,7 +152,7 @@ export function withRelatedTaskMeta(
   result: ServerResult,
   taskId: string
 ): ServerResult {
-  const relatedTaskMeta: RelatedTaskMeta = {
+  const relatedTaskMeta = {
     'io.modelcontextprotocol/related-task': { taskId },
   };
 
@@ -254,20 +242,7 @@ function buildRelatedTaskMeta(
 function buildCreateTaskResult(
   task: CreateTaskResult['task']
 ): CreateTaskResult {
-  return {
-    task,
-    _meta: {
-      'io.modelcontextprotocol/related-task': {
-        taskId: task.taskId,
-        status: task.status,
-        ...(task.statusMessage ? { statusMessage: task.statusMessage } : {}),
-        createdAt: task.createdAt,
-        lastUpdatedAt: task.lastUpdatedAt,
-        ttl: task.ttl,
-        pollInterval: task.pollInterval,
-      },
-    },
-  };
+  return { task };
 }
 
 /* -------------------------------------------------------------------------------------------------

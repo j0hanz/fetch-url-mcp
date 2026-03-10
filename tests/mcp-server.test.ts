@@ -79,15 +79,15 @@ describe('MCP Server', () => {
       );
 
       const capabilities = getPrivateObject<{
+        completions?: Record<string, never>;
         resources?: { subscribe?: boolean; listChanged?: boolean };
       }>(server.server, '_capabilities');
-      // DISABLED: VS Code markdown resource rendering issue — uncomment when fixed
-      // assert.equal(capabilities?.resources?.subscribe, true);
-      // assert.equal(capabilities?.resources?.listChanged, true);
       assert.ok(
-        capabilities?.resources,
-        'resources capability should still exist'
+        capabilities?.completions,
+        'completions capability should exist'
       );
+      assert.equal(capabilities?.resources?.subscribe, true);
+      assert.equal(capabilities?.resources?.listChanged, true);
     });
   });
 

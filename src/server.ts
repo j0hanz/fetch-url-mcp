@@ -15,7 +15,10 @@ import type { IconInfo } from './lib/types.js';
 import { toError } from './lib/utils.js';
 
 import { registerGetHelpPrompt } from './prompts/index.js';
-import { registerInstructionResource } from './resources/index.js';
+import {
+  registerCacheResourceTemplate,
+  registerInstructionResource,
+} from './resources/index.js';
 import { buildServerInstructions } from './resources/instructions.js';
 import { registerAllTools } from './tools/index.js';
 import { shutdownTransformWorkerPool } from './transform/transform.js';
@@ -47,6 +50,7 @@ type McpServerCapabilities = NonNullable<
 
 function createServerCapabilities(): McpServerCapabilities {
   return {
+    completions: {},
     logging: {},
     resources: { subscribe: true, listChanged: true },
     tools: {},
@@ -126,6 +130,7 @@ async function createMcpServerWithOptions(
   registerAllTools(server);
   registerGetHelpPrompt(server, serverInstructions, localIcon);
   registerInstructionResource(server, serverInstructions, localIcon);
+  registerCacheResourceTemplate(server, localIcon);
   // NOTE: Internally patches server.close and server.server.onclose for cleanup
   // callbacks, and intercepts tools/call via Reflect.get on private SDK state.
   // See src/lib/task-handlers.ts for risk documentation (S-2, S-3).
