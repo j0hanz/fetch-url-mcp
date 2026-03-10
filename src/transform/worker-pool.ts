@@ -1,9 +1,12 @@
 import { AsyncLocalStorage, AsyncResource } from 'node:async_hooks';
 import { Buffer } from 'node:buffer';
 import { availableParallelism } from 'node:os';
+import process from 'node:process';
 import { isSharedArrayBuffer } from 'node:util/types';
 import {
+  isMainThread,
   type Transferable as NodeTransferable,
+  parentPort,
   Worker,
 } from 'node:worker_threads';
 
@@ -14,6 +17,8 @@ import { FetchError, getErrorMessage } from '../lib/utils.js';
 import { type CancellableTimeout, createUnrefTimeout } from '../lib/utils.js';
 import { isObject } from '../lib/utils.js';
 
+import { createTransformMessageHandler } from './shared.js';
+import { transformHtmlToMarkdownInProcess } from './transform.js';
 import type {
   MarkdownTransformResult,
   TransformWorkerErrorMessage,
@@ -233,10 +238,7 @@ const POOL_SCALE_THRESHOLD = 0.5;
 const WORKER_NAME_PREFIX = 'fetch-url-mcp-transform';
 
 const DEFAULT_TIMEOUT_MS = config.transform.timeoutMs;
-const TRANSFORM_WORKER_PATH = new URL(
-  './workers/transform-worker.js',
-  import.meta.url
-);
+const TRANSFORM_WORKER_PATH = new URL(import.meta.url);
 
 // WorkerPool
 
@@ -894,4 +896,25 @@ export async function shutdownWorkerPool(): Promise<void> {
   if (!workerPool) return;
   await workerPool.close();
   workerPool = null;
+}
+
+// Worker thread message handling
+if (!isMainThread && parentPort) {
+  const port = parentPort;
+  const onMessage = createTransformMessageHandler({
+    sendMessage: (message) => {
+      port.postMessage(message);
+    },
+    runTransform: transformHtmlToMarkdownInProcess,
+  });
+  port.on('message', onMessage);
+} else if (process.send) {
+  const send = process.send.bind(process);
+  const onMessage = createTransformMessageHandler({
+    sendMessage: (message) => {
+      send(message);
+    },
+    runTransform: transformHtmlToMarkdownInProcess,
+  });
+  process.on('message', onMessage);
 }

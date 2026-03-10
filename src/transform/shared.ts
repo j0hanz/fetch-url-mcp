@@ -1,10 +1,11 @@
-import { FetchError, getErrorMessage } from '../../lib/utils.js';
+import { FetchError, getErrorMessage } from '../lib/utils.js';
+
 import type {
   MarkdownTransformResult,
   TransformOptions,
   TransformWorkerOutgoingMessage,
   TransformWorkerTransformMessage,
-} from '../types.js';
+} from './types.js';
 
 interface WorkerMessageHandlerOptions {
   sendMessage: (message: TransformWorkerOutgoingMessage) => void;
