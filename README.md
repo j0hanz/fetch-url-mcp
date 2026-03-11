@@ -6,19 +6,19 @@
 
 [![Add to LM Studio](https://files.lmstudio.ai/deeplink/mcp-install-light.svg)](https://lmstudio.ai/install-mcp?name=fetch-url-mcp&config=eyJjb21tYW5kIjoibnB4IiwiYXJncyI6WyIteSIsIkBqMGhhbnovZmV0Y2gtdXJsLW1jcEBsYXRlc3QiXX0%3D) [![Install in Cursor](https://cursor.com/deeplink/mcp-install-dark.svg)](https://cursor.com/en/install-mcp?name=fetch-url-mcp&config=eyJjb21tYW5kIjoibnB4IiwiYXJncyI6WyIteSIsIkBqMGhhbnovZmV0Y2gtdXJsLW1jcEBsYXRlc3QiXX0%3D) [![Install in Goose](https://block.github.io/goose/img/extension-install-dark.svg)](https://block.github.io/goose/extension?cmd=npx&arg=-y&arg=%40j0hanz%2Ffetch-url-mcp%40latest&id=%40j0hanz%2Ffetch-url-mcp&name=fetch-url-mcp&description=fetch-url-mcp%20MCP%20server)
 
-Intelligent web content fetcher MCP server that converts HTML to clean, AI-readable Markdown
+A web content fetcher MCP server that converts HTML to clean, AI and human readable markdown.
 
 ## Overview
 
-`@j0hanz/fetch-url-mcp` is an MCP server for fetching public web pages and converting them into cleaned Markdown. It exposes one read-only tool, one built-in help prompt, and one internal instructions resource. The default transport is stdio, and `--http` enables Streamable HTTP mode.
+The Fetch URL MCP Server provides a standardized interface for fetching public web content and transforming it into Markdown enriched with structured metadata. It validates URLs, applies noise removal heuristics, and caches results for reuse. The server supports both inline and task-based execution modes, making it suitable for a wide range of client applications and LLM interactions.
 
 ## Key Features
 
-- `fetch-url` returns cleaned Markdown, metadata, redirect information, cache status, and structured output.
-- The tool is explicitly annotated as read-only, idempotent, and open-world, with optional task support for large fetches.
-- GitHub, GitLab, and Bitbucket page URLs are normalized to raw-content endpoints when appropriate.
-- `get-help` exposes the server instructions, and `internal://instructions` makes the same guidance available as a resource.
-- HTTP mode includes auth, host/origin validation, rate limiting, health checks, and OAuth protected-resource metadata routes.
+- `fetch-url` validates public HTTP(S) URLs, fetches the page, and returns cleaned Markdown plus structured metadata.
+- The tool advertises optional task support and emits progress updates while fetching and transforming larger pages.
+- GitHub, GitLab, Bitbucket, and Gist page URLs are rewritten to raw-content endpoints when possible before fetch.
+- `internal://instructions` and `internal://cache/{namespace}/{hash}` expose built-in guidance and cached Markdown as MCP resources.
+- HTTP mode adds host/origin validation, auth, rate limiting, health checks, OAuth protected-resource metadata, and cached-download URLs.
 
 ## Requirements
 
@@ -53,6 +53,7 @@ Add to `.vscode/mcp.json`:
 {
   "servers": {
     "fetch-url-mcp": {
+      "type": "stdio",
       "command": "npx",
       "args": ["-y", "@j0hanz/fetch-url-mcp@latest"]
     }
@@ -81,6 +82,7 @@ Add to `.vscode/mcp.json`:
 {
   "servers": {
     "fetch-url-mcp": {
+      "type": "stdio",
       "command": "npx",
       "args": ["-y", "@j0hanz/fetch-url-mcp@latest"]
     }
@@ -125,12 +127,13 @@ For more info, see [Cursor MCP docs](https://docs.cursor.com/context/model-conte
 
 [![Install in Visual Studio](https://img.shields.io/badge/Visual_Studio-Install_Server-C16FDE?logo=visualstudio&logoColor=white)](https://vs-open.link/mcp-install?%7B%22fetch-url-mcp%22%3A%7B%22command%22%3A%22npx%22%2C%22args%22%3A%5B%22-y%22%2C%22%40j0hanz%2Ffetch-url-mcp%40latest%22%5D%7D%7D)
 
-Add to `mcp.json (VS integrated)`:
+For solution-scoped setup, add this to `.mcp.json` at the solution root:
 
 ```json
 {
-  "mcpServers": {
+  "servers": {
     "fetch-url-mcp": {
+      "type": "stdio",
       "command": "npx",
       "args": ["-y", "@j0hanz/fetch-url-mcp@latest"]
     }
@@ -145,22 +148,22 @@ For more info, see [Visual Studio MCP docs](https://learn.microsoft.com/en-us/vi
 <details>
 <summary><b>Install in Goose</b></summary>
 
-[![Install in Goose](https://block.github.io/goose/img/extension-install-dark.svg)](https://block.github.io/goose/extension?cmd=npx&arg=-y&arg=%40j0hanz%2Ffetch-url-mcp%40latest&id=%40j0hanz%2Ffetch-url-mcp&name=fetch-url-mcp&description=Intelligent%20web%20content%20fetcher%20MCP%20server%20that%20converts%20HTML%20to%20clean%2C%20AI-readable%20Markdown)
+[![Install in Goose](https://block.github.io/goose/img/extension-install-dark.svg)](https://block.github.io/goose/extension?cmd=npx&arg=-y&arg=%40j0hanz%2Ffetch-url-mcp%40latest&id=%40j0hanz%2Ffetch-url-mcp&name=fetch-url-mcp&description=A%20web%20content%20fetcher%20MCP%20server%20that%20converts%20HTML%20to%20clean%2C%20AI%20and%20human%20readable%20markdown.)
 
-Add to `Goose extension registry`:
+Add to `~/.config/goose/config.yaml` on macOS/Linux or `%APPDATA%\Block\goose\config\config.yaml` on Windows:
 
-```json
-{
-  "mcpServers": {
-    "fetch-url-mcp": {
-      "command": "npx",
-      "args": ["-y", "@j0hanz/fetch-url-mcp@latest"]
-    }
-  }
-}
+```yaml
+extensions:
+  fetch-url-mcp:
+    name: fetch-url-mcp
+    cmd: npx
+    args: ['-y', '@j0hanz/fetch-url-mcp@latest']
+    enabled: true
+    type: stdio
+    timeout: 300
 ```
 
-For more info, see [Goose MCP docs](https://block.github.io/goose/docs/getting-started/using-extensions).
+For more info, see [Goose extension docs](https://block.github.io/goose/docs/getting-started/using-extensions/).
 
 </details>
 
@@ -169,7 +172,7 @@ For more info, see [Goose MCP docs](https://block.github.io/goose/docs/getting-s
 
 [![Add to LM Studio](https://files.lmstudio.ai/deeplink/mcp-install-light.svg)](https://lmstudio.ai/install-mcp?name=fetch-url-mcp&config=eyJjb21tYW5kIjoibnB4IiwiYXJncyI6WyIteSIsIkBqMGhhbnovZmV0Y2gtdXJsLW1jcEBsYXRlc3QiXX0%3D)
 
-Add to `LM Studio MCP config`:
+Add to `~/.lmstudio/mcp.json` on macOS/Linux or `%USERPROFILE%/.lmstudio/mcp.json` on Windows:
 
 ```json
 {
@@ -209,26 +212,27 @@ For more info, see [Claude Desktop MCP docs](https://modelcontextprotocol.io/qui
 <details>
 <summary><b>Install in Claude Code</b></summary>
 
-Add to `Claude Code CLI`:
+Use the CLI:
+
+```sh
+claude mcp add fetch-url-mcp -- npx -y @j0hanz/fetch-url-mcp@latest
+```
+
+For project-scoped config, Claude Code writes `.mcp.json` with:
 
 ```json
 {
   "mcpServers": {
     "fetch-url-mcp": {
       "command": "npx",
-      "args": ["-y", "@j0hanz/fetch-url-mcp@latest"]
+      "args": ["-y", "@j0hanz/fetch-url-mcp@latest"],
+      "env": {}
     }
   }
 }
 ```
 
-Or install via CLI:
-
-```sh
-claude mcp add fetch-url-mcp -- npx -y @j0hanz/fetch-url-mcp@latest
-```
-
-For more info, see [Claude Code MCP docs](https://docs.anthropic.com/en/docs/agents-and-tools/claude-code/tutorials#set-up-model-context-protocol-mcp).
+For more info, see [Claude Code MCP docs](https://docs.anthropic.com/en/docs/claude-code/mcp).
 
 </details>
 
@@ -248,18 +252,18 @@ Add to `~/.codeium/windsurf/mcp_config.json`:
 }
 ```
 
-For more info, see [Windsurf MCP docs](https://docs.windsurf.com/windsurf/mcp).
+For more info, see [Windsurf MCP docs](https://docs.windsurf.com/windsurf/cascade/mcp).
 
 </details>
 
 <details>
 <summary><b>Install in Amp</b></summary>
 
-Add to `Amp MCP config`:
+Add to `~/.config/amp/settings.json` on macOS/Linux, `%USERPROFILE%\.config\amp\settings.json` on Windows, or `.amp/settings.json` for workspace-scoped config:
 
 ```json
 {
-  "mcpServers": {
+  "amp.mcpServers": {
     "fetch-url-mcp": {
       "command": "npx",
       "args": ["-y", "@j0hanz/fetch-url-mcp@latest"]
@@ -274,14 +278,14 @@ Or install via CLI:
 amp mcp add fetch-url-mcp -- npx -y @j0hanz/fetch-url-mcp@latest
 ```
 
-For more info, see [Amp MCP docs](https://docs.amp.dev).
+For more info, see [Amp docs](https://ampcode.com/manual).
 
 </details>
 
 <details>
 <summary><b>Install in Cline</b></summary>
 
-Add to `cline_mcp_settings.json`:
+Open the MCP Servers panel, choose `Configure MCP Servers`, and add this to `cline_mcp_settings.json`:
 
 ```json
 {
@@ -294,27 +298,28 @@ Add to `cline_mcp_settings.json`:
 }
 ```
 
-For more info, see [Cline MCP docs](https://docs.cline.bot/mcp-servers/configuring-mcp-servers).
+For more info, see [Cline MCP docs](https://docs.cline.bot/mcp/configuring-mcp-servers).
 
 </details>
 
 <details>
 <summary><b>Install in Codex CLI</b></summary>
 
-Add to `~/.codex/config.yaml or codex CLI`:
+Use the CLI:
 
-```json
-{
-  "mcpServers": {
-    "fetch-url-mcp": {
-      "command": "npx",
-      "args": ["-y", "@j0hanz/fetch-url-mcp@latest"]
-    }
-  }
-}
+```sh
+codex mcp add fetch-url-mcp -- npx -y @j0hanz/fetch-url-mcp@latest
 ```
 
-For more info, see [Codex CLI MCP docs](https://github.com/openai/codex).
+Or add this to `~/.codex/config.toml` or project-scoped `.codex/config.toml`:
+
+```toml
+[mcp_servers.fetch-url-mcp]
+command = "npx"
+args = ["-y", "@j0hanz/fetch-url-mcp@latest"]
+```
+
+For more info, see [Codex MCP docs](https://developers.openai.com/codex/mcp/).
 
 </details>
 
@@ -327,6 +332,7 @@ Add to `.vscode/mcp.json`:
 {
   "servers": {
     "fetch-url-mcp": {
+      "type": "stdio",
       "command": "npx",
       "args": ["-y", "@j0hanz/fetch-url-mcp@latest"]
     }
@@ -341,7 +347,12 @@ For more info, see [GitHub Copilot MCP docs](https://code.visualstudio.com/docs/
 <details>
 <summary><b>Install in Warp</b></summary>
 
-Add to `Warp MCP config`:
+Open `Personal > MCP Servers` in Warp, choose `+ Add`, and either add a CLI server with:
+
+- `command`: `npx`
+- `args`: `["-y", "@j0hanz/fetch-url-mcp@latest"]`
+
+Or paste this JSON snippet when using Warp's multi-server import flow:
 
 ```json
 {
@@ -354,27 +365,21 @@ Add to `Warp MCP config`:
 }
 ```
 
-For more info, see [Warp MCP docs](https://docs.warp.dev/features/mcp-model-context-protocol).
+For more info, see [Warp MCP docs](https://docs.warp.dev/features/warp-ai/mcp).
 
 </details>
 
 <details>
 <summary><b>Install in Kiro</b></summary>
 
-Add to `.kiro/settings/mcp.json`:
+Use Kiro's MCP Servers panel or the `Add to Kiro` install flow. Kiro stores workspace-scoped MCP config in `.kiro/settings/mcp.json` and user-scoped config in `~/.kiro/settings/mcp.json`.
 
-```json
-{
-  "mcpServers": {
-    "fetch-url-mcp": {
-      "command": "npx",
-      "args": ["-y", "@j0hanz/fetch-url-mcp@latest"]
-    }
-  }
-}
-```
+For this server, use:
 
-For more info, see [Kiro MCP docs](https://kiro.dev/docs/mcp/overview/).
+- `command`: `npx`
+- `args`: `["-y", "@j0hanz/fetch-url-mcp@latest"]`
+
+For more info, see [Kiro MCP docs](https://kiro.dev/blog/unlock-your-development-productivity-with-kiro-and-mcp/).
 
 </details>
 
@@ -394,7 +399,7 @@ Add to `~/.gemini/settings.json`:
 }
 ```
 
-For more info, see [Gemini CLI MCP docs](https://github.com/google-gemini/gemini-cli).
+For more info, see [Gemini CLI MCP docs](https://google-gemini.github.io/gemini-cli/docs/tools/mcp-server.html).
 
 </details>
 
@@ -407,118 +412,101 @@ Add to `~/.config/zed/settings.json`:
 {
   "context_servers": {
     "fetch-url-mcp": {
-      "settings": {
-        "command": "npx",
-        "args": ["-y", "@j0hanz/fetch-url-mcp@latest"]
-      }
+      "command": "npx",
+      "args": ["-y", "@j0hanz/fetch-url-mcp@latest"],
+      "env": {}
     }
   }
 }
 ```
 
-For more info, see [Zed MCP docs](https://zed.dev/docs/assistant/model-context-protocol).
+For more info, see [Zed MCP docs](https://zed.dev/docs/ai/mcp).
 
 </details>
 
 <details>
 <summary><b>Install in Augment</b></summary>
 
-Add to `VS Code settings.json`:
-
-> Add to your VS Code `settings.json` under `augment.advanced`.
+Use the Augment Settings panel and either add the server manually or choose `Import from JSON`:
 
 ```json
 {
-  "augment.advanced": {
-    "mcpServers": [
-      {
-        "id": "fetch-url-mcp",
-        "command": "npx",
-        "args": ["-y", "@j0hanz/fetch-url-mcp@latest"]
-      }
-    ]
+  "mcpServers": {
+    "fetch-url-mcp": {
+      "command": "npx",
+      "args": ["-y", "@j0hanz/fetch-url-mcp@latest"]
+    }
   }
 }
 ```
 
-For more info, see [Augment MCP docs](https://docs.augmentcode.com/setup-mcp-servers).
+For more info, see [Augment MCP docs](https://docs.augmentcode.com/setup-augment/mcp).
 
 </details>
 
 <details>
 <summary><b>Install in Roo Code</b></summary>
 
-Add to `Roo Code MCP settings`:
+Use Roo Code's MCP Servers UI or marketplace flow.
 
-```json
-{
-  "mcpServers": {
-    "fetch-url-mcp": {
-      "command": "npx",
-      "args": ["-y", "@j0hanz/fetch-url-mcp@latest"]
-    }
-  }
-}
-```
+For this server, use:
 
-For more info, see [Roo Code MCP docs](https://docs.roocode.com/features/mcp/using-mcp-in-roo).
+- `command`: `npx`
+- `args`: `["-y", "@j0hanz/fetch-url-mcp@latest"]`
+
+For more info, see [Roo Code docs](https://docs.roocode.com/).
 
 </details>
 
 <details>
 <summary><b>Install in Kilo Code</b></summary>
 
-Add to `Kilo Code MCP settings`:
+Use Kilo Code's MCP Servers UI or marketplace flow.
 
-```json
-{
-  "mcpServers": {
-    "fetch-url-mcp": {
-      "command": "npx",
-      "args": ["-y", "@j0hanz/fetch-url-mcp@latest"]
-    }
-  }
-}
-```
+For this server, use:
 
-For more info, see [Kilo Code MCP docs](https://kilocode.ai/docs/features/mcp/using-mcp-servers).
+- `command`: `npx`
+- `args`: `["-y", "@j0hanz/fetch-url-mcp@latest"]`
+
+For more info, see [Kilo Code docs](https://kilocode.ai/docs).
 
 </details>
 
 ## Use Cases
 
 - Fetch documentation pages, blog posts, or reference material into Markdown before sending them to an LLM.
-- Retrieve repository-hosted content from GitHub, GitLab, or Bitbucket and let the server rewrite page URLs to raw endpoints when possible.
-- Force a fresh fetch for time-sensitive pages with `forceRefresh`, or preserve navigation and boilerplate with `skipNoiseRemoval`.
-- Use MCP task mode for large pages or slower sites when the inline response would otherwise be truncated or delayed.
+- Retrieve repository-hosted content from GitHub, GitLab, Bitbucket, or Gists and let the server rewrite page URLs to raw endpoints when possible.
+- Reuse cached Markdown through `internal://cache/{namespace}/{hash}` or bypass the cache with `forceRefresh` for time-sensitive pages.
+- Use task mode for large pages or slower sites when the inline response would otherwise be truncated or delayed.
 
 ## Architecture
 
 ```text
 [MCP Client]
-  -> stdio -> `dist/index.js` -> `startStdioServer()` -> `createMcpServer()`
-  -> HTTP -> `dist/index.js --http` -> `startHttpServer()` -> `/mcp`
+  ├─ stdio -> `src/index.ts` -> `startStdioServer()` -> `createMcpServer()`
+  └─ HTTP (`--http`) -> `src/index.ts` -> `startHttpServer()` -> HTTP dispatcher
+       ├─ `GET /health`
+       ├─ `GET /.well-known/oauth-protected-resource`
+       ├─ `GET /.well-known/oauth-protected-resource/mcp`
+       ├─ `GET /mcp/downloads/{namespace}/{hash}`
+       └─ `POST|GET|DELETE /mcp`
 
 `createMcpServer()`
-  -> registers tool: `fetch-url`
-  -> registers prompt: `get-help`
-  -> registers resource: `internal://instructions`
-  -> enables logging, resources notifications, prompts, and task handlers
+  ├─ registers tool: `fetch-url`
+  ├─ registers prompt: `get-help`
+  ├─ registers resources:
+  │    - `internal://instructions`
+  │    - `internal://cache/{namespace}/{hash}`
+  ├─ enables capabilities: completions, logging, resources, prompts, tasks
+  └─ installs task handlers, log-level handling, and shutdown cleanup
 
-HTTP request flow
-  -> host/origin validation
-  -> CORS handling
-  -> rate limiting
-  -> authentication
-  -> health / OAuth metadata / download route dispatch
-  -> MCP session gateway for `POST /mcp`, `GET /mcp`, `DELETE /mcp`
-
-Tool execution flow
-  -> validate input with `fetchUrlInputSchema`
-  -> fetch via shared pipeline
-  -> transform HTML to Markdown
-  -> validate structured output with `fetchUrlOutputSchema`
-  -> return text content plus `structuredContent`
+`fetch-url` execution
+  ├─ validate input with `fetchUrlInputSchema`
+  ├─ normalize URL and block local/private targets unless allowed
+  ├─ rewrite supported code-host URLs to raw endpoints when possible
+  ├─ fetch and cache content via the shared pipeline
+  ├─ transform HTML into Markdown in the transform worker path
+  └─ validate `structuredContent` with `fetchUrlOutputSchema`
 ```
 
 ### Request Lifecycle
@@ -528,7 +516,7 @@ Tool execution flow
 [Server] -- {protocolVersion, capabilities, serverInfo} --> [Client]
 [Client] -- notifications/initialized --> [Server]
 [Client] -- tools/call {name, arguments} --> [Server]
-[Server] -- {content: [{type, text}], isError?} --> [Client]
+[Server] -- {content: [{type, text}], structuredContent?, isError?} --> [Client]
 ```
 
 ## MCP Surface
@@ -537,34 +525,31 @@ Tool execution flow
 
 #### `fetch-url`
 
-Fetch public webpages and convert HTML into AI-readable Markdown. The tool is read-only, does not execute page JavaScript, can bypass cache with `forceRefresh`, and supports task mode for larger or slower fetches.
+Fetch public webpages and convert HTML into AI-readable Markdown. The tool is read-only, does not execute page JavaScript, can bypass the cache with `forceRefresh`, and supports optional task mode for larger or slower fetches.
 
-| Parameter          | Type      | Required | Description                                                                             |
-| ------------------ | --------- | -------- | --------------------------------------------------------------------------------------- |
-| `url`              | `string`  | yes      | Target URL. Max 2048 chars.                                                             |
-| `skipNoiseRemoval` | `boolean` | no       | Preserve navigation/footers (disable noise filtering).                                  |
-| `forceRefresh`     | `boolean` | no       | Bypass cache and fetch fresh content.                                                   |
-| `maxInlineChars`   | `integer` | no       | Inline markdown limit (0-10485760, 0=unlimited). Lower of this or global limit applies. |
+| Parameter          | Type      | Required | Description                                                                                 |
+| ------------------ | --------- | -------- | ------------------------------------------------------------------------------------------- |
+| `url`              | `string`  | yes      | Target URL. Max 2048 chars.                                                                 |
+| `skipNoiseRemoval` | `boolean` | no       | Preserve navigation/footers (disable noise filtering).                                      |
+| `forceRefresh`     | `boolean` | no       | Bypass cache and fetch fresh content.                                                       |
+| `maxInlineChars`   | `integer` | no       | Inline markdown limit (0-10485760, 0=unlimited). Lower of this or the global limit applies. |
 
-<details>
-<summary>Data Flow</summary>
+The response is returned as MCP text content and, when validation succeeds, as `structuredContent` containing `url`, `resolvedUrl`, `finalUrl`, `title`, `metadata`, `markdown`, `fromCache`, `fetchedAt`, `contentSize`, and `truncated`.
 
 ```text
-1. Client calls `fetch-url` with `url` and optional fetch flags.
-2. `fetchUrlInputSchema` validates the payload.
-3. `performSharedFetch()` downloads the page and applies cache policy.
-4. `markdownTransform()` converts the response body into Markdown and metadata.
-5. The result is assembled into `content` plus `structuredContent`.
-6. `fetchUrlOutputSchema` validates the structured payload before it is returned.
+1. [Client] -- tools/call {name: "fetch-url", arguments} --> [Server]
+2. [Server] -- dispatch("fetch-url") --> [src/tools/fetch-url.ts]
+3. [Handler] -- validate(fetchUrlInputSchema) --> normalize / fetch / transform
+4. [Handler] -- validate(fetchUrlOutputSchema) --> assemble content + structuredContent
+5. [Server] -- result or tool error --> [Client]
 ```
-
-</details>
 
 ### Resources
 
-| Resource                     | URI                       | MIME Type     | Description                                  |
-| ---------------------------- | ------------------------- | ------------- | -------------------------------------------- |
-| `fetch-url-mcp-instructions` | `internal://instructions` | text/markdown | Guidance for using the Fetch URL MCP server. |
+| Resource                     | URI                                   | MIME Type       | Description                                                   |
+| ---------------------------- | ------------------------------------- | --------------- | ------------------------------------------------------------- |
+| `fetch-url-mcp-instructions` | `internal://instructions`             | `text/markdown` | Guidance for using the Fetch URL MCP server.                  |
+| `fetch-url-mcp-cache-entry`  | `internal://cache/{namespace}/{hash}` | `text/markdown` | Read cached markdown generated by previous `fetch-url` calls. |
 
 ### Prompts
 
@@ -574,26 +559,27 @@ Fetch public webpages and convert HTML into AI-readable Markdown. The tool is re
 
 ## MCP Capabilities
 
-| Capability                      | Status    | Evidence                                                                                                      |
-| ------------------------------- | --------- | ------------------------------------------------------------------------------------------------------------- |
-| logging                         | confirmed | `createServerCapabilities()` advertises logging support and `SetLevelRequestSchema` is handled by the server. |
-| resources subscribe/listChanged | confirmed | `createServerCapabilities()` enables resource subscriptions and list change notifications.                    |
-| prompts                         | confirmed | `get-help` is registered during server startup.                                                               |
-| tasks                           | confirmed | Task capabilities are advertised and task handlers are registered during startup.                             |
-| progress notifications          | confirmed | Tool execution reports progress through the task/progress helpers.                                            |
+| Capability                      | Status    | Notes                                                                                                                     |
+| ------------------------------- | --------- | ------------------------------------------------------------------------------------------------------------------------- |
+| completions                     | confirmed | Advertised in `createServerCapabilities()` and used by the cache resource template for `namespace` and `hash` completion. |
+| logging                         | confirmed | Advertised in `createServerCapabilities()` and handled through `SetLevelRequestSchema`.                                   |
+| resources subscribe/listChanged | confirmed | Advertised in `createServerCapabilities()` and implemented for cache resource subscriptions and list changes.             |
+| prompts                         | confirmed | `get-help` is registered during server startup.                                                                           |
+| tasks                           | confirmed | Advertised in `createServerCapabilities()` and backed by registered task handlers plus optional tool task support.        |
+| progress notifications          | confirmed | Tool execution reports `notifications/progress` updates during fetch and transform stages.                                |
 
 ### Tool Annotations
 
-| Annotation        | Detected | Evidence                   |
-| ----------------- | -------- | -------------------------- |
-| `readOnlyHint`    | yes      | src/tools/fetch-url.ts:406 |
-| `destructiveHint` | yes      | src/tools/fetch-url.ts:407 |
-| `openWorldHint`   | yes      | src/tools/fetch-url.ts:409 |
-| `idempotentHint`  | yes      | src/tools/fetch-url.ts:408 |
+| Annotation        | Value   |
+| ----------------- | ------- |
+| `readOnlyHint`    | `true`  |
+| `destructiveHint` | `false` |
+| `idempotentHint`  | `true`  |
+| `openWorldHint`   | `true`  |
 
 ### Structured Output
 
-- `fetch-url` publishes an explicit `outputSchema` and returns `structuredContent` when the output passes validation.
+- `fetch-url` publishes an explicit `outputSchema` and returns `structuredContent` when the assembled response passes validation.
 
 ## Configuration
 
@@ -602,11 +588,13 @@ Fetch public webpages and convert HTML into AI-readable Markdown. The tool is re
 | `HOST`                                     | `127.0.0.1`               | HTTP mode         | Bind address. Non-loopback bindings also require `ALLOW_REMOTE=true`. |
 | `PORT`                                     | `3000`                    | HTTP mode         | Listening port for `--http`.                                          |
 | `ALLOW_REMOTE`                             | `false`                   | HTTP mode         | Must be enabled to bind to a non-loopback interface.                  |
-| `ACCESS_TOKENS`                            | unset                     | HTTP mode         | Comma/space separated static bearer tokens.                           |
+| `ACCESS_TOKENS`                            | unset                     | HTTP mode         | Comma- or space-separated static bearer tokens.                       |
 | `API_KEY`                                  | unset                     | HTTP mode         | Alternate static token source for header auth.                        |
 | `OAUTH_ISSUER_URL`                         | unset                     | HTTP mode         | Enables OAuth mode when combined with the other OAuth URLs.           |
 | `OAUTH_AUTHORIZATION_URL`                  | unset                     | HTTP mode         | Optional explicit authorization endpoint.                             |
 | `OAUTH_TOKEN_URL`                          | unset                     | HTTP mode         | Optional explicit token endpoint.                                     |
+| `OAUTH_REVOCATION_URL`                     | unset                     | HTTP mode         | Optional OAuth revocation endpoint.                                   |
+| `OAUTH_REGISTRATION_URL`                   | unset                     | HTTP mode         | Optional OAuth dynamic client registration endpoint.                  |
 | `OAUTH_INTROSPECTION_URL`                  | unset                     | HTTP mode         | Required for OAuth token introspection.                               |
 | `OAUTH_REQUIRED_SCOPES`                    | empty                     | HTTP mode         | Required scopes enforced after auth.                                  |
 | `OAUTH_CLIENT_ID`                          | unset                     | HTTP mode         | Optional introspection client ID.                                     |
@@ -623,13 +611,15 @@ Fetch public webpages and convert HTML into AI-readable Markdown. The tool is re
 | `SERVER_BLOCK_PRIVATE_CONNECTIONS`         | `false`                   | HTTP mode         | Enables inbound private-network protections.                          |
 | `MCP_STRICT_PROTOCOL_VERSION_HEADER`       | `true`                    | HTTP mode         | Requires `MCP-Protocol-Version` on session init.                      |
 | `ALLOWED_HOSTS`                            | empty                     | HTTP mode         | Additional allowed `Host` and `Origin` values.                        |
-| `ALLOW_LOCAL_FETCH`                        | `false`                   | Fetching          | Allows local/loopback fetch targets.                                  |
+| `ALLOW_LOCAL_FETCH`                        | `false`                   | Fetching          | Allows loopback and private-network fetch targets.                    |
 | `FETCH_TIMEOUT_MS`                         | `15000`                   | Fetching          | Network fetch timeout in milliseconds.                                |
+| `USER_AGENT`                               | `fetch-url-mcp/<version>` | Fetching          | Override the outbound user agent string.                              |
 | `MAX_INLINE_CONTENT_CHARS`                 | `0`                       | Tool output       | `0` means no explicit inline truncation limit.                        |
 | `CACHE_ENABLED`                            | `true`                    | Caching           | Enables in-memory fetch result caching.                               |
 | `TASKS_MAX_TOTAL`                          | `5000`                    | Tasks             | Total task capacity.                                                  |
 | `TASKS_MAX_PER_OWNER`                      | `1000`                    | Tasks             | Per-owner task cap, clamped to the total cap.                         |
 | `TASKS_STATUS_NOTIFICATIONS`               | `false`                   | Tasks             | Enables status notifications for tasks.                               |
+| `TASKS_REQUIRE_INTERCEPTION`               | `true`                    | Tasks             | Requires task interception for task-capable tool execution.           |
 | `TRANSFORM_CANCEL_ACK_TIMEOUT_MS`          | `200`                     | Transform workers | Cancellation acknowledgement timeout.                                 |
 | `TRANSFORM_WORKER_MODE`                    | `threads`                 | Transform workers | Worker execution mode.                                                |
 | `TRANSFORM_WORKER_MAX_OLD_GENERATION_MB`   | unset                     | Transform workers | Optional worker memory limit.                                         |
@@ -640,11 +630,10 @@ Fetch public webpages and convert HTML into AI-readable Markdown. The tool is re
 | `FETCH_URL_MCP_EXTRA_NOISE_SELECTORS`      | empty                     | Content cleanup   | Extra DOM selectors for noise removal.                                |
 | `FETCH_URL_MCP_LOCALE`                     | system default            | Content cleanup   | Locale override for extraction heuristics.                            |
 | `MARKDOWN_HEADING_KEYWORDS`                | built-in list             | Markdown cleanup  | Override heading keywords used by cleanup.                            |
-| `USER_AGENT`                               | `fetch-url-mcp/<version>` | Fetching          | Override outbound user agent string.                                  |
 | `LOG_LEVEL`                                | `info`                    | Logging           | `debug`, `info`, `warn`, or `error`.                                  |
-| `LOG_FORMAT`                               | `text`                    | Logging           | `json` switches logger output format.                                 |
+| `LOG_FORMAT`                               | `text`                    | Logging           | Set to `json` for structured logs.                                    |
 
-## HTTP Mode Endpoints
+## HTTP Endpoints
 
 | Method   | Path                                        | Auth                                       | Purpose                                                 |
 | -------- | ------------------------------------------- | ------------------------------------------ | ------------------------------------------------------- |
@@ -654,18 +643,19 @@ Fetch public webpages and convert HTML into AI-readable Markdown. The tool is re
 | `POST`   | `/mcp`                                      | yes                                        | Session initialization and JSON-RPC requests.           |
 | `GET`    | `/mcp`                                      | yes                                        | Session-bound server-to-client stream handling.         |
 | `DELETE` | `/mcp`                                      | yes                                        | Session shutdown.                                       |
-| `GET`    | `/mcp/downloads/{namespace}/{hash}`         | yes                                        | Download route used by HTTP-mode fetch results.         |
+| `GET`    | `/mcp/downloads/{namespace}/{hash}`         | yes                                        | Download route used by HTTP-mode cached fetch results.  |
 
 ## Security
 
-| Control                    | Status      | Notes                                                                    |
-| -------------------------- | ----------- | ------------------------------------------------------------------------ |
-| Host and origin validation | implemented | HTTP requests are checked against an allowlist before dispatch.          |
-| Authentication             | implemented | HTTP mode supports static bearer tokens or OAuth introspection.          |
-| Protocol version checks    | implemented | Supported MCP protocol versions are validated on HTTP sessions.          |
-| Rate limiting              | implemented | Requests pass through the HTTP rate limiter before route dispatch.       |
-| TLS                        | optional    | HTTPS is enabled when both TLS key and certificate files are configured. |
-| Stdio logging safety       | implemented | Server logs are written to stderr, not stdout.                           |
+| Control                    | Status      | Notes                                                                                                                                    |
+| -------------------------- | ----------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| Host and origin validation | implemented | HTTP requests are rejected unless `Host` and `Origin` match the allowlist built from loopback, the configured host, and `ALLOWED_HOSTS`. |
+| Authentication             | implemented | HTTP mode supports static bearer tokens locally or OAuth token introspection; remote bindings require OAuth.                             |
+| Protocol version checks    | implemented | HTTP sessions validate `MCP-Protocol-Version` and pin it to the negotiated session version.                                              |
+| Rate limiting              | implemented | Requests pass through the HTTP rate limiter before route dispatch.                                                                       |
+| Outbound SSRF protections  | implemented | Local/private IPs, metadata endpoints, and `.local`/`.internal` hosts are blocked unless `ALLOW_LOCAL_FETCH=true`.                       |
+| TLS                        | optional    | HTTPS is enabled when both TLS key and certificate files are configured.                                                                 |
+| Stdio logging safety       | implemented | Server logs are written to stderr, not stdout, so stdio MCP traffic stays clean.                                                         |
 
 ## Development
 
@@ -697,15 +687,15 @@ Fetch public webpages and convert HTML into AI-readable Markdown. The tool is re
 
 ## Build and Release
 
-- CI workflows detected: .github/workflows/docker-republish.yml, .github/workflows/release.yml
-- Docker build signal detected (`Dockerfile` present).
-- Publish/release script signal detected in `package.json`.
+- The repository includes release automation under `.github/workflows/`.
+- `Dockerfile` and `docker-compose.yml` are available for container-based packaging and local runs.
+- `npm run prepublishOnly` runs the release gate: lint, type-check, and build.
 
 ## Troubleshooting
 
 - For stdio mode, avoid writing logs to stdout; keep logs on stderr.
 - For HTTP mode, verify MCP protocol headers and endpoint routing.
-- Re-run discovery and fact extraction after surface changes to keep documentation aligned.
+- Update client snippets when client MCP configuration formats change.
 
 ## Credits
 
