@@ -2,7 +2,7 @@
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.j0hanz/fetch-url-mcp",
   "title": "Fetch URL MCP Server",
-  "description": "Intelligent web content fetcher MCP server that converts HTML to clean, AI-readable Markdown",
+  "description": "A web content fetcher MCP server that converts HTML to clean, AI and human readable markdown.",
   "repository": {
     "url": "https://github.com/j0hanz/fetch-url-mcp",
     "source": "github"

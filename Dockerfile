@@ -16,7 +16,7 @@ FROM node:24-alpine
 ARG VERSION
 ENV NODE_ENV=production
 LABEL org.opencontainers.image.title="Fetch URL MCP Server" \
-      org.opencontainers.image.description="Intelligent web content fetcher MCP server that converts HTML to clean, AI-readable Markdown" \
+      org.opencontainers.image.description="A web content fetcher MCP server that converts HTML to clean, AI and human readable markdown." \
       org.opencontainers.image.version="${VERSION}" \
       org.opencontainers.image.source="https://github.com/j0hanz/fetch-url-mcp" \
       org.opencontainers.image.licenses="MIT" \
