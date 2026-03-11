@@ -13,18 +13,51 @@ interface McpRequestParams {
   [key: string]: unknown;
 }
 const paramsSchema = z.looseObject({}) as z.ZodType<McpRequestParams>;
-const mcpRequestSchema = z.strictObject({
+const jsonRpcRequestIdSchema = z.union([z.string(), z.number()]);
+const jsonRpcRequestSchema = z.strictObject({
   jsonrpc: z.literal('2.0'),
   method: z.string().min(1),
-  id: z.union([z.string(), z.number(), z.null()]).optional(),
+  id: jsonRpcRequestIdSchema.optional(),
   params: paramsSchema.optional(),
 });
-type McpRequestBody = z.infer<typeof mcpRequestSchema>;
+const jsonRpcResultResponseSchema = z.strictObject({
+  jsonrpc: z.literal('2.0'),
+  id: z.union([z.string(), z.number()]),
+  result: z.record(z.string(), z.unknown()),
+});
+const jsonRpcErrorResponseSchema = z.strictObject({
+  jsonrpc: z.literal('2.0'),
+  id: z.union([z.string(), z.number(), z.null()]).optional(),
+  error: z.strictObject({
+    code: z.number().int(),
+    message: z.string(),
+    data: z.unknown().optional(),
+  }),
+});
+const jsonRpcResponseSchema = z.union([
+  jsonRpcResultResponseSchema,
+  jsonRpcErrorResponseSchema,
+]);
+const jsonRpcMessageSchema = z.union([
+  jsonRpcRequestSchema,
+  jsonRpcResponseSchema,
+]);
+type McpRequestBody = z.infer<typeof jsonRpcRequestSchema>;
+type JsonRpcResponseBody = z.infer<typeof jsonRpcResponseSchema>;
+type JsonRpcMessageBody = z.infer<typeof jsonRpcMessageSchema>;
 export function isJsonRpcBatchRequest(body: unknown): boolean {
   return Array.isArray(body);
 }
 export function isMcpRequestBody(body: unknown): body is McpRequestBody {
-  return mcpRequestSchema.safeParse(body).success;
+  return jsonRpcRequestSchema.safeParse(body).success;
+}
+export function isJsonRpcResponseBody(
+  body: unknown
+): body is JsonRpcResponseBody {
+  return jsonRpcResponseSchema.safeParse(body).success;
+}
+export function isMcpMessageBody(body: unknown): body is JsonRpcMessageBody {
+  return jsonRpcMessageSchema.safeParse(body).success;
 }
 function parseAcceptMediaTypes(
   header: string | null | undefined

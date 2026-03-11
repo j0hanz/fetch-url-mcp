@@ -41,6 +41,7 @@ import {
   acceptsEventStream,
   acceptsJsonAndEventStream,
   isJsonRpcBatchRequest,
+  isMcpMessageBody,
   isMcpRequestBody,
   type JsonRpcId,
 } from '../lib/mcp-tools.js';
@@ -54,6 +55,7 @@ import { isObject } from '../lib/utils.js';
 
 import { createMcpServerForHttpSession } from '../server.js';
 import {
+  applyInsufficientScopeAuthHeaders,
   applyUnauthorizedAuthHeaders,
   assertHttpModeConfiguration,
   authService,
@@ -62,6 +64,8 @@ import {
   corsPolicy,
   ensureMcpProtocolVersion,
   hostOriginPolicy,
+  isInsufficientScopeError,
+  isOAuthMetadataEnabled,
   isProtectedResourceMetadataPath,
   SUPPORTED_MCP_PROTOCOL_VERSIONS,
 } from './auth.js';
@@ -87,9 +91,9 @@ import {
   type NetworkServer,
   registerInboundBlockList,
   type RequestContext,
+  sendEmpty,
   sendError,
   sendJson,
-  sendText,
 } from './helpers.js';
 import {
   createRateLimitManagerImpl,
@@ -159,13 +163,15 @@ class McpSessionGateway {
       sendError(ctx.res, -32600, 'Batch requests not supported');
       return;
     }
-    if (!isMcpRequestBody(body)) {
+    if (!isMcpMessageBody(body)) {
       sendError(ctx.res, -32600, 'Invalid request body');
       return;
     }
 
     const requestId = body.id ?? null;
-    const isInitializedMethod = isInitializedNotification(body.method);
+    const method = isMcpRequestBody(body) ? body.method : null;
+    const isInitializedMethod =
+      method !== null && isInitializedNotification(method);
     const isInitNotification = isInitializedMethod && body.id === undefined;
     const sessionId = getMcpSessionId(ctx.req);
 
@@ -199,7 +205,7 @@ class McpSessionGateway {
       if (!this.ensureSessionProtocolVersion(ctx, session)) return;
 
       if (!session.protocolInitialized) {
-        const isPing = isPingRequest(body.method);
+        const isPing = method !== null && isPingRequest(method);
 
         if (!isInitNotification && !isPing) {
           sendError(ctx.res, -32600, 'Session not initialized', 400, requestId);
@@ -219,12 +225,12 @@ class McpSessionGateway {
 
     if (session && isInitNotification) {
       this.markSessionInitialized(sessionId, session);
-      sendText(ctx.res, 200, '');
+      sendEmpty(ctx.res, 202);
       return;
     }
 
     logInfo('[MCP POST]', {
-      method: body.method,
+      method: method ?? 'response',
       id: body.id,
       sessionId,
     });
@@ -295,7 +301,7 @@ class McpSessionGateway {
       );
     }
 
-    if (!isInitializeRequest(ctx.body)) {
+    if (!isMcpRequestBody(ctx.body) || !isInitializeRequest(ctx.body)) {
       sendError(ctx.res, -32600, 'Missing session ID', 400, requestId);
       return null;
     }
@@ -587,6 +593,7 @@ class HttpDispatcher {
     ctx: RequestContext
   ): boolean {
     if (ctx.method !== 'GET') return false;
+    if (!isOAuthMetadataEnabled()) return false;
     if (!isProtectedResourceMetadataPath(ctx.url.pathname)) return false;
 
     const document = buildProtectedResourceMetadataDocument(ctx.req);
@@ -643,13 +650,20 @@ class HttpDispatcher {
     try {
       return await authService.authenticate(ctx.req, ctx.signal);
     } catch (err) {
+      const message = err instanceof Error ? err.message : 'Unauthorized';
+      if (isInsufficientScopeError(err)) {
+        applyInsufficientScopeAuthHeaders(
+          ctx.req,
+          ctx.res,
+          err.requiredScopes,
+          message
+        );
+        sendError(ctx.res, -32000, message, 403);
+        return null;
+      }
+
       applyUnauthorizedAuthHeaders(ctx.req, ctx.res);
-      sendError(
-        ctx.res,
-        -32000,
-        err instanceof Error ? err.message : 'Unauthorized',
-        401
-      );
+      sendError(ctx.res, -32000, message, 401);
       return null;
     }
   }

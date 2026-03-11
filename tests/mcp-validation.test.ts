@@ -5,6 +5,8 @@ import {
   acceptsEventStream,
   acceptsJsonAndEventStream,
   isJsonRpcBatchRequest,
+  isJsonRpcResponseBody,
+  isMcpMessageBody,
   isMcpRequestBody,
 } from '../dist/lib/mcp-tools.js';
 
@@ -186,11 +188,11 @@ describe('mcp-validation', () => {
       );
     });
 
-    it('accepts null id for JSON-RPC compatibility', () => {
+    it('rejects null id because MCP requests require string or number ids', () => {
       assertCase(
         {
           input: { jsonrpc: '2.0', method: 'test', id: null },
-          expected: true,
+          expected: false,
         },
         isMcpRequestBody
       );
@@ -203,6 +205,49 @@ describe('mcp-validation', () => {
           expected: false,
         },
         isMcpRequestBody
+      );
+    });
+  });
+
+  describe('JSON-RPC responses', () => {
+    it('accepts valid result responses', () => {
+      assert.equal(
+        isJsonRpcResponseBody({
+          jsonrpc: '2.0',
+          id: 'resp-1',
+          result: { ok: true },
+        }),
+        true
+      );
+    });
+
+    it('accepts valid error responses', () => {
+      assert.equal(
+        isJsonRpcResponseBody({
+          jsonrpc: '2.0',
+          id: null,
+          error: { code: -32600, message: 'Invalid request' },
+        }),
+        true
+      );
+    });
+
+    it('accepts request and response bodies through the shared HTTP validator', () => {
+      assert.equal(
+        isMcpMessageBody({
+          jsonrpc: '2.0',
+          method: 'tools/list',
+          id: 'req-1',
+        }),
+        true
+      );
+      assert.equal(
+        isMcpMessageBody({
+          jsonrpc: '2.0',
+          id: 'resp-1',
+          result: { ok: true },
+        }),
+        true
       );
     });
   });

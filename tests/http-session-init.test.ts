@@ -435,7 +435,7 @@ describe('http session initialization', () => {
       /Session not initialized/
     );
 
-    assert.equal(payload.initialized.status, 200);
+    assert.equal(payload.initialized.status, 202);
 
     assert.equal(payload.afterInitialized.status, 200);
     assert.equal(payload.afterInitialized.containsTools, true);
@@ -649,7 +649,7 @@ describe('http session initialization', () => {
     assert.equal(payload.stillBlocked.containsTools, false);
     assert.match(payload.stillBlocked.bodyPreview, /Session not initialized/);
 
-    assert.equal(payload.validInitialized.status, 200);
+    assert.equal(payload.validInitialized.status, 202);
 
     assert.equal(payload.unlocked.status, 200);
     assert.equal(payload.unlocked.containsTools, true);

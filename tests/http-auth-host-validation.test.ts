@@ -99,7 +99,7 @@ describe('http auth and host/origin validation', () => {
     assert.equal(payload.badSameHostDifferentScheme.status, 403);
   });
 
-  it('returns RFC9728 discovery metadata on unauthorized MCP requests', () => {
+  it('returns RFC9728 discovery metadata on unauthorized MCP requests in OAuth mode', () => {
     const script = `
       import { startHttpServer } from './dist/http/native.js';
       import { request } from 'node:http';
@@ -158,7 +158,7 @@ describe('http auth and host/origin validation', () => {
     const result = runIsolatedNode(script, {
       HOST: '127.0.0.1',
       PORT: '0',
-      ACCESS_TOKENS: 'test-token',
+      OAUTH_ISSUER_URL: 'https://auth.example.com',
       ALLOW_REMOTE: 'false',
     });
 
@@ -175,6 +175,7 @@ describe('http auth and host/origin validation', () => {
         parsedBody: {
           resource?: string;
           resource_metadata?: string;
+          authorization_servers?: string[];
         } | null;
       };
     }>(result.stderr);
@@ -205,6 +206,293 @@ describe('http auth and host/origin validation', () => {
     assert.equal(
       payload.metadata.parsedBody?.resource_metadata,
       `http://127.0.0.1:${payload.port}/.well-known/oauth-protected-resource/mcp`
+    );
+    assert.deepEqual(payload.metadata.parsedBody?.authorization_servers, [
+      'https://auth.example.com/',
+    ]);
+  });
+
+  it('does not advertise OAuth discovery in static auth mode', () => {
+    const script = `
+      import { startHttpServer } from './dist/http/native.js';
+      import { request } from 'node:http';
+
+      const server = await startHttpServer();
+      const port = server.port;
+
+      function sendRequest(options) {
+        return new Promise((resolve) => {
+          const req = request(options, (res) => {
+            let raw = '';
+            res.on('data', (chunk) => { raw += chunk; });
+            res.on('end', () => {
+              resolve({
+                status: res.statusCode ?? 0,
+                headers: res.headers,
+                body: raw,
+              });
+            });
+          });
+          req.on('error', (error) => resolve({ error: error.message }));
+          req.end();
+        });
+      }
+
+      const unauthorized = await sendRequest({
+        hostname: '127.0.0.1',
+        port,
+        path: '/mcp',
+        method: 'POST',
+        headers: {
+          host: '127.0.0.1:' + port,
+          origin: 'http://127.0.0.1:' + port,
+          'content-type': 'application/json',
+          accept: 'application/json, text/event-stream',
+        },
+      });
+
+      const metadata = await sendRequest({
+        hostname: '127.0.0.1',
+        port,
+        path: '/.well-known/oauth-protected-resource/mcp',
+        method: 'GET',
+        headers: {
+          host: '127.0.0.1:' + port,
+          'x-api-key': 'test-token',
+        },
+      });
+
+      await server.shutdown('TEST');
+      console.error('${RESULT_MARKER}' + JSON.stringify({ unauthorized, metadata }));
+    `;
+
+    const result = runIsolatedNode(script, {
+      HOST: '127.0.0.1',
+      PORT: '0',
+      ACCESS_TOKENS: 'test-token',
+      ALLOW_REMOTE: 'false',
+    });
+
+    assert.equal(result.status, 0, result.stderr);
+    const payload = parseMarkedJson<{
+      unauthorized: {
+        status: number;
+        headers: Record<string, string | string[] | undefined>;
+      };
+      metadata: {
+        status: number;
+      };
+    }>(result.stderr);
+
+    assert.equal(payload.unauthorized.status, 401);
+    assert.equal(payload.unauthorized.headers['www-authenticate'], undefined);
+    assert.equal(payload.metadata.status, 404);
+  });
+
+  it('returns 403 insufficient_scope with scope guidance when token scopes are missing', () => {
+    const script = `
+      import { createServer as createHttpServer, request } from 'node:http';
+
+      const introspectionServer = createHttpServer((req, res) => {
+        req.on('data', () => {});
+        req.on('end', () => {
+          res.writeHead(200, { 'content-type': 'application/json' });
+          res.end(JSON.stringify({
+            active: true,
+            client_id: 'test-client',
+            scope: 'fetch:read',
+            aud: ['http://127.0.0.1:0/mcp'],
+          }));
+        });
+      });
+
+      await new Promise((resolve) =>
+        introspectionServer.listen(0, '127.0.0.1', resolve)
+      );
+      const introspectionPort = introspectionServer.address().port;
+
+      process.env.OAUTH_ISSUER_URL = 'https://auth.example.com';
+      process.env.OAUTH_INTROSPECTION_URL = 'http://127.0.0.1:' + introspectionPort + '/introspect';
+      process.env.OAUTH_REQUIRED_SCOPES = 'fetch:read fetch:write';
+
+      const { startHttpServer } = await import('./dist/http/native.js');
+
+      const server = await startHttpServer();
+      const port = server.port;
+
+      const response = await new Promise((resolve) => {
+        const req = request(
+          {
+            hostname: '127.0.0.1',
+            port,
+            path: '/mcp',
+            method: 'POST',
+            headers: {
+              host: '127.0.0.1:' + port,
+              origin: 'http://127.0.0.1:' + port,
+              authorization: 'Bearer test-token',
+              'content-type': 'application/json',
+              accept: 'application/json, text/event-stream',
+              'mcp-protocol-version': '2025-11-25',
+            },
+          },
+          (res) => {
+            let raw = '';
+            res.on('data', (chunk) => { raw += chunk; });
+            res.on('end', () => {
+              resolve({
+                status: res.statusCode ?? 0,
+                headers: res.headers,
+                body: raw,
+              });
+            });
+          }
+        );
+        req.on('error', (error) => resolve({ error: error.message }));
+        req.write(JSON.stringify({
+          jsonrpc: '2.0',
+          id: 'init',
+          method: 'initialize',
+          params: {
+            protocolVersion: '2025-11-25',
+            capabilities: {},
+            clientInfo: { name: 'test-client', version: '1.0.0' },
+          },
+        }));
+        req.end();
+      });
+
+      await server.shutdown('TEST');
+      await new Promise((resolve) => introspectionServer.close(resolve));
+      console.error('${RESULT_MARKER}' + JSON.stringify({ response }));
+    `;
+
+    const result = runIsolatedNode(script, {
+      HOST: '127.0.0.1',
+      PORT: '0',
+      ALLOW_REMOTE: 'false',
+    });
+
+    assert.equal(result.status, 0, result.stderr);
+    const payload = parseMarkedJson<{
+      response: {
+        status: number;
+        headers: Record<string, string | string[] | undefined>;
+        body: string;
+      };
+    }>(result.stderr);
+
+    assert.equal(payload.response.status, 403);
+    const challenge = payload.response.headers['www-authenticate'];
+    assert.equal(typeof challenge, 'string');
+    if (typeof challenge !== 'string') {
+      throw new Error('Expected WWW-Authenticate header');
+    }
+    assert.match(challenge, /error="insufficient_scope"/);
+    assert.match(challenge, /scope="fetch:write"/);
+    assert.match(
+      challenge,
+      /resource_metadata="http:\/\/127\.0\.0\.1:\d+\/\.well-known\/oauth-protected-resource\/mcp"/
+    );
+    assert.match(payload.response.body, /Insufficient scope/);
+  });
+
+  it('rejects OAuth tokens whose audience does not match this MCP server', () => {
+    const script = `
+      import { createServer as createHttpServer, request } from 'node:http';
+
+      const introspectionServer = createHttpServer((req, res) => {
+        req.on('data', () => {});
+        req.on('end', () => {
+          res.writeHead(200, { 'content-type': 'application/json' });
+          res.end(JSON.stringify({
+            active: true,
+            client_id: 'test-client',
+            scope: 'fetch:read fetch:write',
+            aud: ['https://other.example.com/mcp'],
+          }));
+        });
+      });
+
+      await new Promise((resolve) =>
+        introspectionServer.listen(0, '127.0.0.1', resolve)
+      );
+      const introspectionPort = introspectionServer.address().port;
+
+      process.env.OAUTH_ISSUER_URL = 'https://auth.example.com';
+      process.env.OAUTH_INTROSPECTION_URL = 'http://127.0.0.1:' + introspectionPort + '/introspect';
+      process.env.OAUTH_REQUIRED_SCOPES = 'fetch:read';
+
+      const { startHttpServer } = await import('./dist/http/native.js');
+      const server = await startHttpServer();
+      const port = server.port;
+
+      const response = await new Promise((resolve) => {
+        const req = request(
+          {
+            hostname: '127.0.0.1',
+            port,
+            path: '/mcp',
+            method: 'POST',
+            headers: {
+              host: '127.0.0.1:' + port,
+              origin: 'http://127.0.0.1:' + port,
+              authorization: 'Bearer test-token',
+              'content-type': 'application/json',
+              accept: 'application/json, text/event-stream',
+              'mcp-protocol-version': '2025-11-25',
+            },
+          },
+          (res) => {
+            let raw = '';
+            res.on('data', (chunk) => { raw += chunk; });
+            res.on('end', () => {
+              resolve({
+                status: res.statusCode ?? 0,
+                headers: res.headers,
+                body: raw,
+              });
+            });
+          }
+        );
+        req.on('error', (error) => resolve({ error: error.message }));
+        req.write(JSON.stringify({
+          jsonrpc: '2.0',
+          id: 'init',
+          method: 'initialize',
+          params: {
+            protocolVersion: '2025-11-25',
+            capabilities: {},
+            clientInfo: { name: 'test-client', version: '1.0.0' },
+          },
+        }));
+        req.end();
+      });
+
+      await server.shutdown('TEST');
+      await new Promise((resolve) => introspectionServer.close(resolve));
+      console.error('${RESULT_MARKER}' + JSON.stringify({ response }));
+    `;
+
+    const result = runIsolatedNode(script, {
+      HOST: '127.0.0.1',
+      PORT: '0',
+      ALLOW_REMOTE: 'false',
+    });
+
+    assert.equal(result.status, 0, result.stderr);
+    const payload = parseMarkedJson<{
+      response: {
+        status: number;
+        headers: Record<string, string | string[] | undefined>;
+        body: string;
+      };
+    }>(result.stderr);
+
+    assert.equal(payload.response.status, 401);
+    assert.match(
+      payload.response.body,
+      /Token audience does not match this MCP server/
     );
   });
 

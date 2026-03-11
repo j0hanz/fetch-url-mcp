@@ -63,6 +63,22 @@ export const corsPolicy = new CorsPolicy();
 const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '::1']);
 const WILDCARD_HOSTS = new Set(['0.0.0.0', '::']);
 
+export class InsufficientScopeError extends InvalidTokenError {
+  constructor(
+    readonly requiredScopes: readonly string[],
+    message = 'Insufficient scope'
+  ) {
+    super(message);
+    this.name = 'InsufficientScopeError';
+  }
+}
+
+export function isInsufficientScopeError(
+  error: unknown
+): error is InsufficientScopeError {
+  return error instanceof InsufficientScopeError;
+}
+
 function hasConstantTimeMatch(
   candidates: readonly string[],
   input: string
@@ -219,6 +235,12 @@ export function assertHttpModeConfiguration(): void {
     throw new Error('OAuth authentication is required for remote bindings');
   }
 
+  if (config.auth.mode === 'oauth' && !config.auth.issuerUrl) {
+    throw new Error(
+      'OAuth mode requires OAUTH_ISSUER_URL to serve RFC9728 metadata'
+    );
+  }
+
   if (config.auth.mode === 'static' && config.auth.staticTokens.length === 0) {
     throw new Error(
       'Static auth requires ACCESS_TOKENS or API_KEY to be configured'
@@ -292,6 +314,10 @@ export function ensureMcpProtocolVersion(
   }
 
   return true;
+}
+
+export function isOAuthMetadataEnabled(): boolean {
+  return config.auth.mode === 'oauth';
 }
 
 // ---------------------------------------------------------------------------
@@ -401,6 +427,61 @@ class AuthService {
     return clean.href;
   }
 
+  private canonicalizeResourceUri(value: string): string | null {
+    if (!URL.canParse(value)) return null;
+
+    const url = new URL(value);
+    url.hash = '';
+    url.protocol = url.protocol.toLowerCase();
+    url.hostname = url.hostname.toLowerCase();
+
+    const { href } = url;
+    if (url.pathname === '/' && !url.search && href.endsWith('/')) {
+      return href.slice(0, -1);
+    }
+
+    return href;
+  }
+
+  private readAudienceValues(payload: Record<string, unknown>): string[] {
+    const values: string[] = [];
+    for (const key of ['aud', 'resource'] as const) {
+      const raw = payload[key];
+      if (typeof raw === 'string') {
+        values.push(raw);
+        continue;
+      }
+      if (!Array.isArray(raw)) continue;
+
+      values.push(
+        ...raw.filter((value): value is string => typeof value === 'string')
+      );
+    }
+    return values;
+  }
+
+  private assertTokenAudience(payload: Record<string, unknown>): void {
+    const expected = this.canonicalizeResourceUri(
+      this.stripHash(config.auth.resourceUrl)
+    );
+    if (!expected) {
+      throw new ServerError('Configured resource URL is invalid');
+    }
+
+    const audiences = this.readAudienceValues(payload)
+      .map((value) => this.canonicalizeResourceUri(value))
+      .filter((value): value is string => value !== null);
+
+    if (audiences.length === 0) {
+      throw new InvalidTokenError('Token missing audience binding');
+    }
+    if (!audiences.includes(expected)) {
+      throw new InvalidTokenError(
+        'Token audience does not match this MCP server'
+      );
+    }
+  }
+
   private buildBasicAuthHeader(
     clientId: string,
     clientSecret: string | undefined
@@ -490,7 +571,7 @@ class AuthService {
     const tokenScopeSet = new Set(tokenScopes);
     const missing = requiredScopes.filter((s) => !tokenScopeSet.has(s));
     if (missing.length > 0) {
-      throw new InvalidTokenError('Insufficient scope');
+      throw new InsufficientScopeError(missing);
     }
   }
 
@@ -519,6 +600,8 @@ class AuthService {
     if (!isObject(payload) || payload['active'] !== true) {
       throw new InvalidTokenError('Token is inactive');
     }
+
+    this.assertTokenAudience(payload);
 
     const info = this.buildIntrospectionAuthInfo(token, payload);
     this.assertRequiredScopes(info.scopes);
@@ -559,11 +642,34 @@ export function applyUnauthorizedAuthHeaders(
   req: IncomingMessage,
   res: ServerResponse
 ): void {
+  if (!isOAuthMetadataEnabled()) return;
+
   const resourceMetadata = buildResourceMetadataUrl(req);
-  res.setHeader(
-    'WWW-Authenticate',
-    `Bearer resource_metadata="${resourceMetadata}"`
-  );
+  const challengeParts = [`resource_metadata="${resourceMetadata}"`];
+  if (config.auth.requiredScopes.length > 0) {
+    challengeParts.push(`scope="${config.auth.requiredScopes.join(' ')}"`);
+  }
+
+  res.setHeader('WWW-Authenticate', `Bearer ${challengeParts.join(', ')}`);
+}
+
+export function applyInsufficientScopeAuthHeaders(
+  req: IncomingMessage,
+  res: ServerResponse,
+  requiredScopes: readonly string[],
+  message = 'Additional authorization scope is required'
+): void {
+  if (!isOAuthMetadataEnabled()) return;
+
+  const resourceMetadata = buildResourceMetadataUrl(req);
+  const challengeParts = [
+    'error="insufficient_scope"',
+    `scope="${requiredScopes.join(' ')}"`,
+    `resource_metadata="${resourceMetadata}"`,
+    `error_description="${message.replaceAll('"', "'")}"`,
+  ];
+
+  res.setHeader('WWW-Authenticate', `Bearer ${challengeParts.join(', ')}`);
 }
 
 export function buildProtectedResourceMetadataDocument(req: IncomingMessage): {
@@ -574,13 +680,16 @@ export function buildProtectedResourceMetadataDocument(req: IncomingMessage): {
   scopes_supported: string[];
 } {
   const urls = buildRequestScopedProtectedResourceUrls(req);
+  if (!config.auth.issuerUrl) {
+    throw new ServerError(
+      'OAuth issuer URL is required for protected resource metadata'
+    );
+  }
 
   return {
     resource: urls.resource,
     resource_metadata: urls.resourceMetadata,
-    authorization_servers: config.auth.issuerUrl
-      ? [config.auth.issuerUrl.href]
-      : [],
+    authorization_servers: [config.auth.issuerUrl.href],
     bearer_methods_supported: ['header'],
     scopes_supported: config.auth.requiredScopes,
   };
