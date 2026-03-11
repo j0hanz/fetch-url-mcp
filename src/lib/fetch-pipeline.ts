@@ -234,9 +234,11 @@ export type SharedFetchStage =
   | 'resolve_url'
   | 'check_cache'
   | 'cache_hit'
+  | 'cache_restore'
   | 'fetch_remote'
   | 'response_ready'
   | 'transform_start'
+  | 'prepare_output'
   | 'finalize_output';
 interface UrlResolution {
   normalizedUrl: string;
@@ -455,6 +457,7 @@ export async function executeFetchPipeline<T>(
     });
     if (cachedResult) {
       options.onStage?.('cache_hit');
+      options.onStage?.('cache_restore');
       return { ...cachedResult, originalUrl: resolvedUrl.originalUrl };
     }
   }
@@ -613,6 +616,7 @@ export async function performSharedFetch(
   const pipeline = await executePipeline(
     buildSharedFetchPipelineOptions(options)
   );
+  options.onStage?.('prepare_output');
   options.onStage?.('finalize_output');
   const inlineResult = applyInlineContentLimit(
     pipeline.data.content,

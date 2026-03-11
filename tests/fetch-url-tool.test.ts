@@ -144,7 +144,7 @@ describe('fetchUrlToolHandler', () => {
     assert.match(String(progressEvents.at(-1)?.message), /^Done — .+/);
   });
 
-  it('skips remote-only progress steps on a cache hit', async () => {
+  it('emits all 8 progress steps on a cache hit', async () => {
     const url = 'https://example.com/progress-cache-hit';
     const normalizedUrl = normalizeUrl(url).normalizedUrl;
     const cacheKey = cache.createCacheKey('markdown', normalizedUrl);
@@ -170,6 +170,8 @@ describe('fetchUrlToolHandler', () => {
       { progress: 2, message: 'Resolving URL' },
       { progress: 3, message: 'Checking cache' },
       { progress: 4, message: 'Loaded from cache' },
+      { progress: 5, message: 'Restoring cached content' },
+      { progress: 6, message: 'Preparing output' },
       { progress: 7, message: 'Finalizing output' },
     ]);
     assert.deepEqual(progressEvents.at(-1)?.progress, 8);

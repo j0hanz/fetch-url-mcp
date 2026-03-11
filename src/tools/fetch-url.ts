@@ -273,12 +273,16 @@ function mapFetchStageToProgress(
       return { step: 3, message: 'Checking cache' };
     case 'cache_hit':
       return { step: 4, message: 'Loaded from cache' };
+    case 'cache_restore':
+      return { step: 5, message: 'Restoring cached content' };
     case 'fetch_remote':
       return { step: 4, message: `Fetching ${context}` };
     case 'response_ready':
       return { step: 5, message: 'Received response' };
     case 'transform_start':
       return { step: 6, message: 'Parsing HTML → Markdown' };
+    case 'prepare_output':
+      return { step: 6, message: 'Preparing output' };
     case 'finalize_output':
       return { step: 7, message: 'Finalizing output' };
   }
