@@ -13,8 +13,6 @@ import {
 import { type McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { type StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 
-import { type CachedPayload, cachedPayloadSchema } from '../schemas/cache.js';
-
 import {
   buildIpv4,
   normalizeHostname,
@@ -640,30 +638,6 @@ const CACHE_CONSTANTS = {
   URL_HASH_LENGTH: 32,
   VARY_HASH_LENGTH: 16,
 } as const;
-export function parseCachedPayload(raw: string): CachedPayload | null {
-  try {
-    const parsed = JSON.parse(raw) as unknown;
-    const result = cachedPayloadSchema.safeParse(parsed);
-    if (!result.success) {
-      logWarn('Rejected invalid cached payload', {
-        issues: result.error.issues.map((issue) => ({
-          path: issue.path,
-          message: issue.message,
-          code: issue.code,
-        })),
-      });
-      return null;
-    }
-    return result.data;
-  } catch {
-    return null;
-  }
-}
-export function resolveCachedPayloadContent(
-  payload: CachedPayload
-): string | null {
-  return payload.markdown ?? payload.content ?? null;
-}
 function createHashFragment(input: string, length: number): string {
   return sha256Hex(input).substring(0, length);
 }

@@ -15,14 +15,14 @@ import {
   getEntryMeta,
   keys as listCacheKeys,
   onCacheUpdate,
-  parseCachedPayload,
   parseCacheKey,
-  resolveCachedPayloadContent,
 } from '../lib/core.js';
 import { logWarn } from '../lib/core.js';
 import { registerServerLifecycleCleanup } from '../lib/mcp-tools.js';
 import { buildOptionalIcons, type IconInfo } from '../lib/types.js';
 import { isObject } from '../lib/utils.js';
+
+import { parseCachedPayload, resolveCachedPayloadContent } from '../schemas.js';
 
 const RESOURCE_NOT_FOUND_ERROR_CODE = -32002;
 

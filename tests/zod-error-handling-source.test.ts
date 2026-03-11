@@ -8,10 +8,11 @@ import { handleDownload } from '../src/lib/http.js';
 import { handleToolError } from '../src/lib/mcp-tools.js';
 import { FetchError } from '../src/lib/utils.js';
 import {
+  fetchUrlOutputSchema,
   normalizeExtractedMetadata,
   normalizePageTitle,
-} from '../src/schemas/metadata.js';
-import { fetchUrlOutputSchema } from '../src/schemas/outputs.js';
+  parseCachedPayload,
+} from '../src/schemas.js';
 
 type ResponseState = {
   headers: Record<string, string>;
@@ -153,7 +154,7 @@ describe('zod + error-handling source regressions', () => {
       unexpected: 'noise',
     });
 
-    const parsed = cache.parseCachedPayload(raw);
+    const parsed = parseCachedPayload(raw);
 
     assert.ok(parsed);
     assert.deepEqual(parsed, {

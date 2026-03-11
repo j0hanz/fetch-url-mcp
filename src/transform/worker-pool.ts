@@ -17,8 +17,8 @@ import { logWarn } from '../lib/core.js';
 import { createAbortError } from '../lib/utils.js';
 import { FetchError, getErrorMessage } from '../lib/utils.js';
 import { type CancellableTimeout, createUnrefTimeout } from '../lib/utils.js';
-import { normalizeExtractedMetadata } from '../schemas/metadata.js';
 
+import { normalizeExtractedMetadata } from '../schemas.js';
 import { createTransformMessageHandler } from './shared.js';
 import { transformHtmlToMarkdownInProcess } from './transform.js';
 import type {

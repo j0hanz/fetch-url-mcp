@@ -4,6 +4,10 @@ import { describe, it } from 'node:test';
 import * as cache from '../dist/lib/core.js';
 import { config } from '../dist/lib/core.js';
 import { generateSafeFilename } from '../dist/lib/http.js';
+import {
+  parseCachedPayload,
+  resolveCachedPayloadContent,
+} from '../dist/schemas.js';
 
 let keyCounter = 0;
 
@@ -166,7 +170,7 @@ function registerCachedPayloadParsingTest(): void {
       title: 'Test Title',
     });
 
-    const parsed = cache.parseCachedPayload(raw);
+    const parsed = parseCachedPayload(raw);
     assert.ok(parsed, 'Should parse valid payload');
     assert.strictEqual(parsed.markdown, '# Test Content');
     assert.strictEqual(parsed.title, 'Test Title');
@@ -177,18 +181,18 @@ function registerCachedPayloadParsingTest(): void {
       content: 'Plain text content',
     });
 
-    const parsed = cache.parseCachedPayload(raw);
+    const parsed = parseCachedPayload(raw);
     assert.ok(parsed, 'Should parse legacy payload');
     assert.strictEqual(parsed.content, 'Plain text content');
   });
 
   it('returns null for invalid JSON', () => {
-    const parsed = cache.parseCachedPayload('not json{]');
+    const parsed = parseCachedPayload('not json{]');
     assert.strictEqual(parsed, null, 'Should return null for invalid JSON');
   });
 
   it('returns null for non-object payloads', () => {
-    const parsed = cache.parseCachedPayload('"just a string"');
+    const parsed = parseCachedPayload('"just a string"');
     assert.strictEqual(parsed, null, 'Should return null for non-object');
   });
 }
@@ -196,13 +200,13 @@ function registerCachedPayloadParsingTest(): void {
 function registerCacheContentResolutionTest(): void {
   it('resolves content from markdown field', () => {
     const payload = { markdown: '# Markdown Content' };
-    const content = cache.resolveCachedPayloadContent(payload);
+    const content = resolveCachedPayloadContent(payload);
     assert.strictEqual(content, '# Markdown Content');
   });
 
   it('resolves content from legacy content field', () => {
     const payload = { content: 'Plain content' };
-    const content = cache.resolveCachedPayloadContent(payload);
+    const content = resolveCachedPayloadContent(payload);
     assert.strictEqual(content, 'Plain content');
   });
 
@@ -211,13 +215,13 @@ function registerCacheContentResolutionTest(): void {
       markdown: '# Markdown',
       content: 'Plain',
     };
-    const content = cache.resolveCachedPayloadContent(payload);
+    const content = resolveCachedPayloadContent(payload);
     assert.strictEqual(content, '# Markdown', 'Should prefer markdown field');
   });
 
   it('returns null when no content field exists', () => {
     const payload = { title: 'Only Title' };
-    const content = cache.resolveCachedPayloadContent(payload);
+    const content = resolveCachedPayloadContent(payload);
     assert.strictEqual(content, null);
   });
 }

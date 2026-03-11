@@ -40,13 +40,13 @@ import {
 } from '../lib/mcp-tools.js';
 import { isAbortError, isObject, toError } from '../lib/utils.js';
 import { formatZodError } from '../lib/zod.js';
-import { fetchUrlInputSchema } from '../schemas/inputs.js';
+
 import {
+  fetchUrlInputSchema,
+  fetchUrlOutputSchema,
   normalizeExtractedMetadata,
   normalizePageTitle,
-} from '../schemas/metadata.js';
-import { fetchUrlOutputSchema } from '../schemas/outputs.js';
-
+} from '../schemas.js';
 import {
   registerTaskCapableTool,
   unregisterTaskCapableTool,

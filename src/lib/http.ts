@@ -15,6 +15,7 @@ import { createBrotliDecompress, createGunzip, createInflate } from 'node:zlib';
 import { Agent, type Dispatcher } from 'undici';
 import { z } from 'zod';
 
+import { parseCachedPayload, resolveCachedPayloadContent } from '../schemas.js';
 import {
   get as cacheGet,
   config,
@@ -23,9 +24,7 @@ import {
   logDebug,
   logError,
   logWarn,
-  parseCachedPayload,
   redactUrl,
-  resolveCachedPayloadContent,
 } from './core.js';
 import {
   BLOCKED_HOST_SUFFIXES,

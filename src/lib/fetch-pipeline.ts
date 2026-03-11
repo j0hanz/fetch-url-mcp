@@ -1,6 +1,8 @@
-import { type CachedPayload } from '../schemas/cache.js';
-import { normalizeExtractedMetadata } from '../schemas/metadata.js';
-
+import {
+  type CachedPayload,
+  normalizeExtractedMetadata,
+  parseCachedPayload,
+} from '../schemas.js';
 import { transformBufferToMarkdown } from '../transform/transform.js';
 import { type MarkdownTransformResult } from '../transform/types.js';
 import {
@@ -10,7 +12,6 @@ import {
   isEnabled,
   logDebug,
   logWarn,
-  parseCachedPayload,
   set,
 } from './core.js';
 import {
