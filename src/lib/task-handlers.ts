@@ -30,6 +30,7 @@ import {
   hasTaskCapableTool,
 } from '../tasks/tool-registry.js';
 import { logWarn, runWithRequestContext } from './core.js';
+import { formatZodError } from './zod.js';
 
 /* -------------------------------------------------------------------------------------------------
  * Server lifecycle cleanup hooks
@@ -99,84 +100,65 @@ export {
  * Task handler schemas and registration
  * ------------------------------------------------------------------------------------------------- */
 
-const TaskGetSchema = z
-  .object({
-    method: z.literal('tasks/get'),
-    params: z.object({ taskId: z.string() }).loose(),
-  })
-  .loose();
-const TaskListSchema = z
-  .object({
-    method: z.literal('tasks/list'),
-    params: z
-      .object({
-        cursor: z.string().optional(),
-      })
-      .loose()
-      .optional(),
-  })
-  .loose();
-const TaskCancelSchema = z
-  .object({
-    method: z.literal('tasks/cancel'),
-    params: z.object({ taskId: z.string() }).loose(),
-  })
-  .loose();
-const TaskResultSchema = z
-  .object({
-    method: z.literal('tasks/result'),
-    params: z.object({ taskId: z.string() }).loose(),
-  })
-  .loose();
+const TaskGetSchema = z.looseObject({
+  method: z.literal('tasks/get'),
+  params: z.looseObject({ taskId: z.string() }),
+});
+const TaskListSchema = z.looseObject({
+  method: z.literal('tasks/list'),
+  params: z
+    .looseObject({
+      cursor: z.string().optional(),
+    })
+    .optional(),
+});
+const TaskCancelSchema = z.looseObject({
+  method: z.literal('tasks/cancel'),
+  params: z.looseObject({ taskId: z.string() }),
+});
+const TaskResultSchema = z.looseObject({
+  method: z.literal('tasks/result'),
+  params: z.looseObject({ taskId: z.string() }),
+});
 const MIN_TASK_TTL_MS = 1_000;
 const MAX_TASK_TTL_MS = 86_400_000;
-const ExtendedCallToolRequestSchema: z.ZodType<ExtendedCallToolRequest> = z
-  .object({
+const ExtendedCallToolRequestSchema: z.ZodType<ExtendedCallToolRequest> =
+  z.looseObject({
     method: z.literal('tools/call'),
-    params: z
-      .object({
-        name: z.string().min(1),
-        arguments: z.record(z.string(), z.unknown()).optional(),
-        task: z
-          .strictObject({
-            ttl: z
-              .number()
-              .int()
-              .min(MIN_TASK_TTL_MS)
-              .max(MAX_TASK_TTL_MS)
-              .optional(),
-          })
-          .optional(),
-        _meta: z
-          .object({
-            progressToken: z.union([z.string(), z.number()]).optional(),
-            'io.modelcontextprotocol/related-task': z
-              .strictObject({
-                taskId: z.string(),
-              })
-              .optional(),
-          })
-          .loose()
-          .optional(),
-      })
-      .loose(),
-  })
-  .loose();
+    params: z.looseObject({
+      name: z.string().min(1),
+      arguments: z.record(z.string(), z.unknown()).optional(),
+      task: z
+        .strictObject({
+          ttl: z
+            .number()
+            .int()
+            .min(MIN_TASK_TTL_MS)
+            .max(MAX_TASK_TTL_MS)
+            .optional(),
+        })
+        .optional(),
+      _meta: z
+        .looseObject({
+          progressToken: z.union([z.string(), z.number()]).optional(),
+          'io.modelcontextprotocol/related-task': z
+            .strictObject({
+              taskId: z.string(),
+            })
+            .optional(),
+        })
+        .optional(),
+    }),
+  });
 function parseExtendedCallToolRequest(
   request: unknown
 ): ExtendedCallToolRequest {
   const parsed = ExtendedCallToolRequestSchema.safeParse(request);
   if (parsed.success) return parsed.data;
 
-  const flat = z.flattenError(parsed.error);
-  const details =
-    Object.entries(flat.fieldErrors)
-      .map(([k, v]) => `${k}: ${(v ?? []).join(', ')}`)
-      .join('; ') || flat.formErrors.join('; ');
-
   throw new McpError(
     ErrorCode.InvalidParams,
-    `Invalid tool request params: ${details}`
+    `Invalid tool request params: ${formatZodError(parsed.error)}`
   );
 }
 function resolveOwnerScopedExtra(extra: unknown): {

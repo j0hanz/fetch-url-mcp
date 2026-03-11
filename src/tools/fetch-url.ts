@@ -39,6 +39,7 @@ import {
   type ToolHandlerExtra,
 } from '../lib/mcp-tools.js';
 import { isAbortError, isObject, toError } from '../lib/utils.js';
+import { formatZodError } from '../lib/zod.js';
 import { fetchUrlInputSchema } from '../schemas/inputs.js';
 import { fetchUrlOutputSchema } from '../schemas/outputs.js';
 
@@ -48,12 +49,7 @@ import {
 } from '../tasks/tool-registry.js';
 import type { ExtractedMetadata } from '../transform/types.js';
 
-interface FetchUrlInput {
-  url: string;
-  skipNoiseRemoval?: boolean | undefined;
-  forceRefresh?: boolean | undefined;
-  maxInlineChars?: number | undefined;
-}
+type FetchUrlInput = z.infer<typeof fetchUrlInputSchema>;
 
 type ToolContentBlockUnion = ContentBlock;
 
@@ -516,15 +512,9 @@ export function registerTools(server: McpServer): void {
     parseArguments: (args) => {
       const parsed = fetchUrlInputSchema.safeParse(args);
       if (!parsed.success) {
-        const flat = z.flattenError(parsed.error);
-        const details =
-          Object.entries(flat.fieldErrors)
-            .map(([k, v]) => `${k}: ${v.join(', ')}`)
-            .join('; ') || flat.formErrors.join('; ');
-
         throw new McpError(
           ErrorCode.InvalidParams,
-          `Invalid arguments for ${FETCH_URL_TOOL_NAME}: ${details}`
+          `Invalid arguments for ${FETCH_URL_TOOL_NAME}: ${formatZodError(parsed.error)}`
         );
       }
       return parsed.data;

@@ -3,23 +3,19 @@ import { z } from 'zod';
 import { config } from '../lib/core.js';
 
 export const fetchUrlOutputSchema = z.strictObject({
-  url: z
-    .string()
-    .min(1)
-    .max(config.constants.maxUrlLength)
-    .describe('Fetched URL.'),
+  url: z.httpUrl().max(config.constants.maxUrlLength).describe('Fetched URL.'),
   inputUrl: z
-    .string()
+    .httpUrl()
     .max(config.constants.maxUrlLength)
     .optional()
     .describe('Original requested URL.'),
   resolvedUrl: z
-    .string()
+    .httpUrl()
     .max(config.constants.maxUrlLength)
     .optional()
     .describe('Final URL after raw-content transformations.'),
   finalUrl: z
-    .string()
+    .httpUrl()
     .max(config.constants.maxUrlLength)
     .optional()
     .describe('Final URL after HTTP redirects.'),
@@ -63,7 +59,7 @@ export const fetchUrlOutputSchema = z.strictObject({
     .optional()
     .describe('Extracted Markdown. May be truncated (check truncated field).'),
   fromCache: z.boolean().optional().describe('True if served from cache.'),
-  fetchedAt: z.string().max(64).optional().describe('ISO timestamp of fetch.'),
+  fetchedAt: z.iso.datetime().optional().describe('ISO timestamp of fetch.'),
   contentSize: z
     .number()
     .int()

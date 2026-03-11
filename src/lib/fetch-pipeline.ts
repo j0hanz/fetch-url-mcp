@@ -1,4 +1,4 @@
-import { z } from 'zod';
+import { type CachedPayload, cachedPayloadSchema } from '../schemas/cache.js';
 
 import { transformBufferToMarkdown } from '../transform/transform.js';
 import { type MarkdownTransformResult } from '../transform/types.js';
@@ -519,35 +519,11 @@ function normalizeExtractedMetadata(
 
   return Object.keys(normalized).length > 0 ? normalized : undefined;
 }
-const cachedMarkdownSchema = z
-  .object({
-    markdown: z.string().optional(),
-    content: z.string().optional(),
-    title: z.string().optional(),
-    metadata: z
-      .strictObject({
-        title: z.string().optional(),
-        description: z.string().optional(),
-        author: z.string().optional(),
-        image: z.string().optional(),
-        favicon: z.string().optional(),
-        publishedAt: z.string().optional(),
-        modifiedAt: z.string().optional(),
-      })
-      .optional(),
-    truncated: z.boolean().optional(),
-  })
-  .catchall(z.unknown())
-  .refine(
-    (value) =>
-      typeof value.markdown === 'string' || typeof value.content === 'string',
-    { message: 'Missing markdown/content' }
-  );
 export function parseCachedMarkdownResult(
   cached: string
 ): MarkdownPipelineResult | undefined {
   const parsed = safeJsonParse(cached);
-  const result = cachedMarkdownSchema.safeParse(parsed);
+  const result = cachedPayloadSchema.safeParse(parsed);
   if (!result.success) return undefined;
 
   const markdown = result.data.markdown ?? result.data.content;
@@ -591,12 +567,14 @@ export function serializeMarkdownResult(
     ? appendTruncationMarker(result.markdown, TRUNCATION_MARKER)
     : result.markdown;
 
-  return JSON.stringify({
+  const payload: CachedPayload = {
     markdown: persistedMarkdown,
     title: result.title,
     metadata: result.metadata,
     truncated: result.truncated,
-  });
+  };
+
+  return JSON.stringify(payload);
 }
 
 /* -------------------------------------------------------------------------------------------------

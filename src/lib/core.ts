@@ -12,7 +12,8 @@ import {
 
 import { type McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { type StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
-import { z } from 'zod';
+
+import { type CachedPayload, cachedPayloadSchema } from '../schemas/cache.js';
 
 import {
   buildIpv4,
@@ -604,12 +605,6 @@ export function enableHttpMode(): void {
   runtimeState.httpMode = true;
 }
 
-const CachedPayloadSchema = z.strictObject({
-  content: z.string().optional(),
-  markdown: z.string().optional(),
-  title: z.string().optional(),
-});
-type CachedPayload = z.infer<typeof CachedPayloadSchema>;
 interface CacheEntry {
   url: string;
   title?: string;
@@ -647,7 +642,9 @@ const CACHE_CONSTANTS = {
 } as const;
 export function parseCachedPayload(raw: string): CachedPayload | null {
   try {
-    return CachedPayloadSchema.parse(JSON.parse(raw));
+    const parsed = JSON.parse(raw) as unknown;
+    const result = cachedPayloadSchema.safeParse(parsed);
+    return result.success ? result.data : null;
   } catch {
     return null;
   }

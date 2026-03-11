@@ -12,19 +12,14 @@ interface McpRequestParams {
   _meta?: Record<string, unknown>;
   [key: string]: unknown;
 }
-interface McpRequestBody {
-  jsonrpc: '2.0';
-  method: string;
-  id?: JsonRpcId;
-  params?: McpRequestParams;
-}
-const paramsSchema = z.looseObject({});
+const paramsSchema = z.looseObject({}) as z.ZodType<McpRequestParams>;
 const mcpRequestSchema = z.strictObject({
   jsonrpc: z.literal('2.0'),
   method: z.string().min(1),
   id: z.union([z.string(), z.number(), z.null()]).optional(),
   params: paramsSchema.optional(),
 });
+type McpRequestBody = z.infer<typeof mcpRequestSchema>;
 export function isJsonRpcBatchRequest(body: unknown): boolean {
   return Array.isArray(body);
 }
@@ -131,7 +126,10 @@ function resolveToolErrorMessage(
   return `${fallbackMessage}: Unknown error`;
 }
 function resolveToolErrorCode(error: unknown): string {
-  if (error instanceof FetchError) return error.code;
+  if (error instanceof FetchError) {
+    const detailsCode = error.details['code'];
+    return typeof detailsCode === 'string' ? detailsCode : error.code;
+  }
   if (isValidationError(error)) return 'VALIDATION_ERROR';
   if (isAbortError(error)) return 'ABORTED';
   return 'FETCH_ERROR';

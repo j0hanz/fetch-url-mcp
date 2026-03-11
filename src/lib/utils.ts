@@ -123,8 +123,14 @@ export class FetchError extends Error {
     super(message, options);
     this.name = 'FetchError';
     this.statusCode = httpStatus ?? DEFAULT_HTTP_STATUS;
-    this.code = httpStatus ? `HTTP_${httpStatus}` : 'FETCH_ERROR';
     this.details = Object.freeze({ url, httpStatus, ...details });
+    const explicitCode = this.details['code'];
+    this.code =
+      typeof explicitCode === 'string'
+        ? explicitCode
+        : httpStatus
+          ? `HTTP_${httpStatus}`
+          : 'FETCH_ERROR';
   }
 }
 export function getErrorMessage(error: unknown): string {

@@ -988,6 +988,8 @@ const REGEX = {
   SPACING_ESCAPES: /\\([[\].])/g,
   SPACING_LIST_NUM_COMBINED:
     /^((?![-*+] |\d+\. |[ \t]).+)\n((?:[-*+]|\d+\.) )/gm,
+  PUNCT_ONLY_LIST_ARTIFACT:
+    /^(?:[-*+]|\d+\.)\s*(?:\\[-*+|/]|[-*+|/])(?:\s+(?:\\[-*+|/]|[-*+|/]))*\s*$/gm,
   NESTED_LIST_INDENT: /^( +)((?:[-*+])|\d+\.)\s/gm,
   TYPEDOC_COMMENT: /(`+)(?:(?!\1)[\s\S])*?\1|\s?\/\\?\*[\s\S]*?\\?\*\//g,
 } as const;
@@ -1251,6 +1253,7 @@ function applyGlobalRegexes(text: string, options?: CleanupOptions): string {
     .replace(REGEX.SPACING_CODE_DASH, '$1 - ')
     .replace(REGEX.SPACING_ESCAPES, '$1')
     .replace(REGEX.SPACING_LIST_NUM_COMBINED, '$1\n\n$2')
+    .replace(REGEX.PUNCT_ONLY_LIST_ARTIFACT, '')
     .replace(REGEX.DOUBLE_NEWLINE_REDUCER, '\n\n');
 
   result = normalizeNestedListIndentation(result);
