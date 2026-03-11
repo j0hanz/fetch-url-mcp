@@ -10,100 +10,67 @@ import {
   Worker,
 } from 'node:worker_threads';
 
+import { z } from 'zod';
+
 import { config } from '../lib/core.js';
 import { logWarn } from '../lib/core.js';
 import { createAbortError } from '../lib/utils.js';
 import { FetchError, getErrorMessage } from '../lib/utils.js';
 import { type CancellableTimeout, createUnrefTimeout } from '../lib/utils.js';
-import { isObject } from '../lib/utils.js';
+import { normalizeExtractedMetadata } from '../schemas/metadata.js';
 
 import { createTransformMessageHandler } from './shared.js';
 import { transformHtmlToMarkdownInProcess } from './transform.js';
 import type {
   MarkdownTransformResult,
-  TransformWorkerErrorMessage,
   TransformWorkerOutgoingMessage,
-  TransformWorkerResultMessage,
   TransformWorkerTransformMessage,
 } from './types.js';
 
 // Worker message validation
 
-function isWorkerResultPayload(
-  value: unknown
-): value is TransformWorkerResultMessage['result'] {
-  if (!isObject(value)) return false;
-  const { markdown, metadata, title, truncated } = value;
-  const isMetadataObject = metadata === undefined || isObject(metadata);
+const workerResultPayloadSchema = z.object({
+  markdown: z.string(),
+  title: z.string().optional(),
+  metadata: z
+    .unknown()
+    .transform((value) => normalizeExtractedMetadata(value))
+    .optional(),
+  truncated: z.boolean(),
+});
 
-  if (!isMetadataObject) return false;
+const workerErrorPayloadSchema = z.strictObject({
+  name: z.string(),
+  message: z.string(),
+  url: z.string(),
+  statusCode: z.number().optional(),
+  details: z.record(z.string(), z.unknown()).optional(),
+});
 
-  if (metadata && !isExtractedMetadataPayload(metadata)) {
-    return false;
-  }
+const workerResponseSchema = z.union([
+  z.strictObject({
+    type: z.literal('result'),
+    id: z.string(),
+    result: workerResultPayloadSchema,
+  }),
+  z.strictObject({
+    type: z.literal('error'),
+    id: z.string(),
+    error: workerErrorPayloadSchema,
+  }),
+  z.strictObject({
+    type: z.literal('cancelled'),
+    id: z.string(),
+  }),
+]);
 
-  return (
-    typeof markdown === 'string' &&
-    typeof truncated === 'boolean' &&
-    (title === undefined || typeof title === 'string')
-  );
-}
-
-function isExtractedMetadataPayload(value: unknown): boolean {
-  if (!isObject(value)) return false;
-
-  const {
-    author,
-    description,
-    favicon,
-    image,
-    modifiedAt,
-    publishedAt,
-    title,
-  } = value;
-
-  return (
-    (title === undefined || typeof title === 'string') &&
-    (description === undefined || typeof description === 'string') &&
-    (author === undefined || typeof author === 'string') &&
-    (image === undefined || typeof image === 'string') &&
-    (favicon === undefined || typeof favicon === 'string') &&
-    (publishedAt === undefined || typeof publishedAt === 'string') &&
-    (modifiedAt === undefined || typeof modifiedAt === 'string')
-  );
-}
-
-function isWorkerErrorPayload(
-  value: unknown
-): value is TransformWorkerErrorMessage['error'] {
-  if (!isObject(value)) return false;
-  const { details, message, name, statusCode, url } = value;
-  return (
-    typeof name === 'string' &&
-    typeof message === 'string' &&
-    typeof url === 'string' &&
-    (statusCode === undefined || typeof statusCode === 'number') &&
-    (details === undefined || isObject(details))
-  );
-}
-
-function isWorkerResponse(raw: unknown): raw is TransformWorkerOutgoingMessage {
-  if (!isObject(raw)) return false;
-  if (typeof raw['id'] !== 'string') return false;
-
-  if (raw['type'] === 'result') {
-    return isWorkerResultPayload(raw['result']);
-  }
-
-  if (raw['type'] === 'error') {
-    return isWorkerErrorPayload(raw['error']);
-  }
-
-  if (raw['type'] === 'cancelled') {
-    return true;
-  }
-
-  return false;
+function parseWorkerResponse(
+  raw: unknown
+): TransformWorkerOutgoingMessage | undefined {
+  const parsed = workerResponseSchema.safeParse(raw);
+  return parsed.success
+    ? (parsed.data as TransformWorkerOutgoingMessage)
+    : undefined;
 }
 
 // Task context (preserves async context across worker callbacks)
@@ -625,9 +592,8 @@ class WorkerPool implements TransformWorkerPool {
   }
 
   private onWorkerMessage(workerIndex: number, raw: unknown): void {
-    if (!isWorkerResponse(raw)) return;
-
-    const message = raw;
+    const message = parseWorkerResponse(raw);
+    if (!message) return;
 
     if (message.type === 'cancelled') {
       this.resolveCancelAck(message.id);

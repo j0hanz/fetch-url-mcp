@@ -47,6 +47,7 @@ import {
   isSystemError,
   toError,
 } from './utils.js';
+import { formatZodError } from './zod.js';
 
 const FILENAME_RULES = {
   MAX_LEN: 200,
@@ -135,7 +136,12 @@ export function handleDownload(
 ): void {
   const parsed = DownloadParamsSchema.safeParse({ namespace, hash });
   if (!parsed.success) {
-    writeJsonError(res, 400, 'Invalid namespace or hash', 'BAD_REQUEST');
+    writeJsonError(
+      res,
+      400,
+      `Invalid download parameters: ${formatZodError(parsed.error)}`,
+      'BAD_REQUEST'
+    );
     return;
   }
 

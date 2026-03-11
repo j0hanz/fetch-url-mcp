@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 
 import type { ServerResult } from '@modelcontextprotocol/sdk/types.js';
+import { z } from 'zod';
 
 import type { ProgressNotification } from '../lib/mcp-tools.js';
 import { isObject } from '../lib/utils.js';
@@ -120,21 +121,28 @@ export function isServerResult(value: unknown): value is ServerResult {
   );
 }
 
+const toolErrorContentSchema = z.strictObject({
+  error: z.string(),
+});
+
+const toolErrorBlockSchema = z.strictObject({
+  type: z.literal('text'),
+  text: z.string(),
+});
+
 export function tryReadToolStructuredError(value: unknown): string | undefined {
   if (!isObject(value)) return undefined;
   const record = value as { content?: unknown[] };
   if (!Array.isArray(record.content) || record.content.length === 0)
     return undefined;
-  const firstBlock = record.content[0];
-  if (
-    !isObject(firstBlock) ||
-    firstBlock['type'] !== 'text' ||
-    typeof firstBlock['text'] !== 'string'
-  )
-    return undefined;
+  const parsedBlock = toolErrorBlockSchema.safeParse(record.content[0]);
+  if (!parsedBlock.success) return undefined;
+
   try {
-    const parsed = JSON.parse(firstBlock['text']) as { error?: unknown };
-    return typeof parsed.error === 'string' ? parsed.error : undefined;
+    const parsed = toolErrorContentSchema.safeParse(
+      JSON.parse(parsedBlock.data.text)
+    );
+    return parsed.success ? parsed.data.error : undefined;
   } catch {
     return undefined;
   }

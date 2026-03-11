@@ -1,22 +1,37 @@
 import { z } from 'zod';
 
-const extractedMetadataSchema = z.strictObject({
-  title: z.string().optional(),
-  description: z.string().optional(),
-  author: z.string().optional(),
-  image: z.string().optional(),
-  favicon: z.string().optional(),
-  publishedAt: z.string().optional(),
-  modifiedAt: z.string().optional(),
-});
+import { normalizeExtractedMetadata, normalizePageTitle } from './metadata.js';
+
+function normalizeString(value: unknown): string | undefined {
+  return typeof value === 'string' ? value : undefined;
+}
+
+function normalizeBoolean(value: unknown): boolean | undefined {
+  return typeof value === 'boolean' ? value : undefined;
+}
 
 export const cachedPayloadSchema = z
-  .looseObject({
-    markdown: z.string().optional(),
-    content: z.string().optional(),
-    title: z.string().optional(),
-    metadata: extractedMetadataSchema.optional(),
-    truncated: z.boolean().optional(),
+  .object({
+    markdown: z
+      .unknown()
+      .transform((value) => normalizeString(value))
+      .optional(),
+    content: z
+      .unknown()
+      .transform((value) => normalizeString(value))
+      .optional(),
+    title: z
+      .unknown()
+      .transform((value) => normalizePageTitle(value))
+      .optional(),
+    metadata: z
+      .unknown()
+      .transform((value) => normalizeExtractedMetadata(value))
+      .optional(),
+    truncated: z
+      .unknown()
+      .transform((value) => normalizeBoolean(value))
+      .optional(),
   })
   .refine(
     (value) =>

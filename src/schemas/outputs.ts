@@ -2,6 +2,8 @@ import { z } from 'zod';
 
 import { config } from '../lib/core.js';
 
+import { extractedMetadataSchema } from './metadata.js';
+
 export const fetchUrlOutputSchema = z.strictObject({
   url: z.httpUrl().max(config.constants.maxUrlLength).describe('Fetched URL.'),
   inputUrl: z
@@ -20,36 +22,7 @@ export const fetchUrlOutputSchema = z.strictObject({
     .optional()
     .describe('Final URL after HTTP redirects.'),
   title: z.string().max(512).optional().describe('Page title.'),
-  metadata: z
-    .strictObject({
-      title: z.string().max(512).optional().describe('Detected page title.'),
-      description: z
-        .string()
-        .max(2048)
-        .optional()
-        .describe('Detected page description.'),
-      author: z.string().max(512).optional().describe('Detected page author.'),
-      image: z
-        .string()
-        .max(config.constants.maxUrlLength)
-        .optional()
-        .describe('Detected page preview image URL.'),
-      favicon: z
-        .string()
-        .max(config.constants.maxUrlLength)
-        .optional()
-        .describe('Detected page favicon URL.'),
-      publishedAt: z
-        .string()
-        .max(64)
-        .optional()
-        .describe('Detected publication date.'),
-      modifiedAt: z
-        .string()
-        .max(64)
-        .optional()
-        .describe('Detected last modified date.'),
-    })
+  metadata: extractedMetadataSchema
     .optional()
     .describe('Extracted page metadata.'),
   markdown: (config.constants.maxInlineContentChars > 0

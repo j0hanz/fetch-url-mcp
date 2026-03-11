@@ -41,13 +41,16 @@ import {
 import { isAbortError, isObject, toError } from '../lib/utils.js';
 import { formatZodError } from '../lib/zod.js';
 import { fetchUrlInputSchema } from '../schemas/inputs.js';
+import {
+  normalizeExtractedMetadata,
+  normalizePageTitle,
+} from '../schemas/metadata.js';
 import { fetchUrlOutputSchema } from '../schemas/outputs.js';
 
 import {
   registerTaskCapableTool,
   unregisterTaskCapableTool,
 } from '../tasks/tool-registry.js';
-import type { ExtractedMetadata } from '../transform/types.js';
 
 type FetchUrlInput = z.infer<typeof fetchUrlInputSchema>;
 
@@ -122,25 +125,6 @@ function truncateStr(
   return value.slice(0, max);
 }
 
-const METADATA_FIELD_LIMITS: Partial<Record<keyof ExtractedMetadata, number>> =
-  {
-    title: 512,
-    description: 2048,
-    author: 512,
-  };
-
-function truncateMetadata(metadata: ExtractedMetadata): ExtractedMetadata {
-  const result = { ...metadata };
-  for (const [field, limit] of Object.entries(METADATA_FIELD_LIMITS)) {
-    const key = field as keyof ExtractedMetadata;
-    const value = result[key];
-    if (typeof value === 'string' && value.length > limit) {
-      result[key] = value.slice(0, limit);
-    }
-  }
-  return result;
-}
-
 function buildStructuredContent(
   pipeline: PipelineResult<MarkdownPipelineResult>,
   inlineResult: InlineContentResult,
@@ -154,15 +138,16 @@ function buildStructuredContent(
   const maxChars = config.constants.maxInlineContentChars;
   const markdown =
     maxChars > 0 ? truncateStr(rawMarkdown, maxChars) : rawMarkdown;
-  const { metadata } = pipeline.data;
+  const metadata = normalizeExtractedMetadata(pipeline.data.metadata);
+  const title = normalizePageTitle(pipeline.data.title);
 
   return {
     url: pipeline.originalUrl ?? pipeline.url,
     resolvedUrl: pipeline.url,
     ...(pipeline.finalUrl ? { finalUrl: pipeline.finalUrl } : {}),
     inputUrl,
-    title: truncateStr(pipeline.data.title, 512),
-    ...(metadata ? { metadata: truncateMetadata(metadata) } : {}),
+    ...(title ? { title } : {}),
+    ...(metadata ? { metadata } : {}),
     markdown,
     fromCache: pipeline.fromCache,
     fetchedAt: pipeline.fetchedAt,
@@ -201,7 +186,7 @@ function buildResponse(
   if (!validation.success) {
     logWarn('Tool output schema validation failed', {
       url: inputUrl,
-      issues: validation.error.issues,
+      issues: formatZodError(validation.error),
     });
     // Omit structuredContent so the SDK does not receive data that fails its
     // output schema validation. The client still gets the payload via content[0].text.

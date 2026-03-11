@@ -1,4 +1,5 @@
 import { type CachedPayload } from '../schemas/cache.js';
+import { normalizeExtractedMetadata } from '../schemas/metadata.js';
 
 import { transformBufferToMarkdown } from '../transform/transform.js';
 import { type MarkdownTransformResult } from '../transform/types.js';
@@ -492,27 +493,6 @@ export async function executeFetchPipeline<T>(
 export type MarkdownPipelineResult = MarkdownTransformResult & {
   readonly content: string;
 };
-function normalizeExtractedMetadata(
-  metadata:
-    | {
-        title?: string | undefined;
-        description?: string | undefined;
-        author?: string | undefined;
-        image?: string | undefined;
-        favicon?: string | undefined;
-        publishedAt?: string | undefined;
-        modifiedAt?: string | undefined;
-      }
-    | undefined
-): MarkdownPipelineResult['metadata'] | undefined {
-  if (!metadata) return undefined;
-
-  const normalized = Object.fromEntries(
-    Object.entries(metadata).filter(([, v]) => Boolean(v))
-  );
-
-  return Object.keys(normalized).length > 0 ? normalized : undefined;
-}
 export function parseCachedMarkdownResult(
   cached: string
 ): MarkdownPipelineResult | undefined {

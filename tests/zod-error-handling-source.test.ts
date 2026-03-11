@@ -2,10 +2,16 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 import * as cache from '../src/lib/core.js';
+import { config } from '../src/lib/core.js';
 import { serializeMarkdownResult } from '../src/lib/fetch-pipeline.js';
 import { handleDownload } from '../src/lib/http.js';
 import { handleToolError } from '../src/lib/mcp-tools.js';
 import { FetchError } from '../src/lib/utils.js';
+import {
+  normalizeExtractedMetadata,
+  normalizePageTitle,
+} from '../src/schemas/metadata.js';
+import { fetchUrlOutputSchema } from '../src/schemas/outputs.js';
 
 type ResponseState = {
   headers: Record<string, string>;
@@ -109,5 +115,63 @@ describe('zod + error-handling source regressions', () => {
     assert.equal(payload.code, 'EBLOCKED');
     assert.equal(payload.statusCode, 400);
     assert.equal(payload.details, undefined);
+  });
+
+  it('keeps structuredContent valid by dropping oversized metadata fields', () => {
+    const oversizedImage =
+      'https://example.com/' + 'a'.repeat(config.constants.maxUrlLength);
+    const structured = {
+      url: 'https://example.com/article',
+      resolvedUrl: 'https://example.com/article',
+      inputUrl: 'https://example.com/article',
+      title: normalizePageTitle(' Example Title '),
+      metadata: normalizeExtractedMetadata({ image: oversizedImage }),
+      markdown: '# Body',
+      fromCache: false,
+      fetchedAt: new Date().toISOString(),
+      contentSize: 6,
+    };
+
+    const validation = fetchUrlOutputSchema.safeParse(structured);
+
+    assert.equal(validation.success, true);
+    if (!validation.success) return;
+
+    assert.equal(validation.data.title, 'Example Title');
+    assert.equal(validation.data.metadata?.image, undefined);
+  });
+
+  it('drops unknown cache keys and invalid metadata instead of carrying them through', () => {
+    const raw = JSON.stringify({
+      markdown: '# Cached',
+      title: '  Cached Title  ',
+      metadata: {
+        description: '  Useful description  ',
+        image: 'x'.repeat(config.constants.maxUrlLength + 1),
+        unused: 'noise',
+      },
+      unexpected: 'noise',
+    });
+
+    const parsed = cache.parseCachedPayload(raw);
+
+    assert.ok(parsed);
+    assert.deepEqual(parsed, {
+      markdown: '# Cached',
+      title: 'Cached Title',
+      metadata: { description: 'Useful description' },
+    });
+  });
+
+  it('returns field-level download validation errors', () => {
+    const { res, getJson, getStatus } = createResponseCapture();
+    handleDownload(res as never, 'invalid', 'bad');
+
+    assert.equal(getStatus(), 400);
+    assert.deepEqual(getJson(), {
+      error:
+        'Invalid download parameters: namespace: Invalid input: expected "markdown"; hash: Too small: expected string to have >=8 characters',
+      code: 'BAD_REQUEST',
+    });
   });
 });
