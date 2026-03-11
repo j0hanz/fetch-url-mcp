@@ -59,6 +59,35 @@ describe('TaskManager.waitForTerminalTask', () => {
 
     assert.equal(contextRequestId, 'ctx-task-request');
   });
+
+  it(
+    'does not extend ttl when task status updates while working',
+    { timeout: 2000 },
+    async () => {
+      const ownerKey = `ttl-fixed-${Date.now()}`;
+      const task = taskManager.createTask(
+        { ttl: 40 },
+        'Task started',
+        ownerKey
+      );
+
+      setTimeout(() => {
+        taskManager.updateTask(task.taskId, {
+          statusMessage: 'Still working',
+        });
+      }, 20);
+
+      await assert.rejects(
+        () => taskManager.waitForTerminalTask(task.taskId, ownerKey),
+        (err: Error & { code?: number }) => {
+          assert.equal(err.constructor.name, 'McpError');
+          assert.equal(err.code, -32602);
+          assert.match(err.message, /Task expired/);
+          return true;
+        }
+      );
+    }
+  );
 });
 
 describe('TaskManager.listTasks cursor', () => {

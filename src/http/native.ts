@@ -121,6 +121,16 @@ function resolveRequestedProtocolVersion(body: unknown): string | null {
   return normalized;
 }
 
+function resolveProtocolVersionHeader(
+  req: IncomingMessage
+): string | undefined {
+  const header = getHeaderValue(req, 'mcp-protocol-version');
+  if (!header) return undefined;
+
+  const normalized = header.trim();
+  return normalized.length > 0 ? normalized : undefined;
+}
+
 function isInitializedNotification(method: string): boolean {
   return method === 'notifications/initialized';
 }
@@ -296,6 +306,21 @@ class McpSessionGateway {
         ctx.res,
         -32602,
         `Unsupported protocolVersion; supported versions: ${[...SUPPORTED_MCP_PROTOCOL_VERSIONS].join(', ')}`,
+        400,
+        requestId
+      );
+      return null;
+    }
+
+    const headerProtocolVersion = resolveProtocolVersionHeader(ctx.req);
+    if (
+      headerProtocolVersion &&
+      headerProtocolVersion !== negotiatedProtocolVersion
+    ) {
+      sendError(
+        ctx.res,
+        -32600,
+        `initialize protocolVersion mismatch: header=${headerProtocolVersion}, body=${negotiatedProtocolVersion}`,
         400,
         requestId
       );

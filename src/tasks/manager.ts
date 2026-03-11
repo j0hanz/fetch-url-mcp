@@ -128,8 +128,6 @@ class TaskManager {
   ): void {
     Object.assign(task, updates);
     task.lastUpdatedAt = new Date().toISOString();
-    // Slide TTL window on every activity so long-running tasks don't expire mid-flight.
-    task._createdAtMs = Date.now();
   }
 
   private cancelActiveTask(

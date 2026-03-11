@@ -963,6 +963,8 @@ const requestContext = new AsyncLocalStorage<RequestContext>({
 });
 let mcpServer: McpServer | undefined;
 const sessionServers = new Map<string, McpServer>();
+const sessionMcpLogLevels = new Map<string, LogLevel>();
+let stdioMcpLogLevel: LogLevel | undefined;
 let stderrAvailable = true;
 process.stderr.on('error', () => {
   stderrAvailable = false;
@@ -980,11 +982,13 @@ export function registerMcpSessionServer(
 export function unregisterMcpSessionServer(sessionId: string): void {
   if (!sessionId) return;
   sessionServers.delete(sessionId);
+  sessionMcpLogLevels.delete(sessionId);
 }
 export function unregisterMcpSessionServerByServer(server: McpServer): void {
   for (const [sessionId, mappedServer] of sessionServers.entries()) {
     if (mappedServer !== server) continue;
     sessionServers.delete(sessionId);
+    sessionMcpLogLevels.delete(sessionId);
   }
 }
 export function resolveMcpSessionIdByServer(
@@ -1008,7 +1012,7 @@ export function getRequestId(): string | undefined {
   const context = getRequestContext();
   return context?.requestId;
 }
-function getSessionId(): string | undefined {
+export function getSessionId(): string | undefined {
   return getRequestContext()?.sessionId;
 }
 export function getOperationId(): string | undefined {
@@ -1080,6 +1084,35 @@ const LEVEL_PRIORITY: Readonly<Record<LogLevel, number>> = {
 function shouldLog(level: LogLevel): boolean {
   return LEVEL_PRIORITY[level] >= LEVEL_PRIORITY[config.logging.level];
 }
+function normalizeLogLevel(level: string): LogLevel | undefined {
+  switch (level.toLowerCase()) {
+    case 'debug':
+      return 'debug';
+    case 'info':
+    case 'notice':
+      return 'info';
+    case 'warning':
+    case 'warn':
+      return 'warn';
+    case 'error':
+    case 'critical':
+    case 'alert':
+    case 'emergency':
+      return 'error';
+    default:
+      return undefined;
+  }
+}
+function resolveMcpLogLevel(sessionId?: string): LogLevel {
+  if (sessionId) {
+    return sessionMcpLogLevels.get(sessionId) ?? config.logging.level;
+  }
+
+  return stdioMcpLogLevel ?? config.logging.level;
+}
+function shouldForwardMcpLog(level: LogLevel, sessionId?: string): boolean {
+  return LEVEL_PRIORITY[level] >= LEVEL_PRIORITY[resolveMcpLogLevel(sessionId)];
+}
 function mapToMcpLevel(
   level: LogLevel
 ): 'debug' | 'info' | 'warning' | 'error' {
@@ -1114,17 +1147,16 @@ function safeWriteStderr(line: string): void {
   }
 }
 function writeLog(level: LogLevel, message: string, meta?: LogMetadata): void {
-  if (!shouldLog(level)) return;
-
-  const line = formatLogEntry(level, message, meta);
-  safeWriteStderr(`${stripVTControlCharacters(line)}\n`);
-
   const sessionId = getSessionId();
-  const server = sessionId
-    ? (sessionServers.get(sessionId) ?? mcpServer)
-    : mcpServer;
+  if (shouldLog(level)) {
+    const line = formatLogEntry(level, message, meta);
+    safeWriteStderr(`${stripVTControlCharacters(line)}\n`);
+  }
+
+  const server = sessionId ? sessionServers.get(sessionId) : mcpServer;
   if (!server) return;
   if (!server.isConnected()) return;
+  if (!shouldForwardMcpLog(level, sessionId)) return;
 
   try {
     server.server
@@ -1183,26 +1215,19 @@ export function logError(message: string, error?: Error | LogMetadata): void {
     error instanceof Error ? formatErrorMeta(error) : (error ?? {});
   writeLog('error', message, errorMeta);
 }
-export function setLogLevel(level: string): void {
-  switch (level.toLowerCase()) {
-    case 'debug':
-      config.logging.level = 'debug';
-      break;
-    case 'info':
-    case 'notice':
-      config.logging.level = 'info';
-      break;
-    case 'warning':
-    case 'warn':
-      config.logging.level = 'warn';
-      break;
-    case 'error':
-    case 'critical':
-    case 'alert':
-    case 'emergency':
-      config.logging.level = 'error';
-      break;
+export function getMcpLogLevel(sessionId?: string): LogLevel {
+  return resolveMcpLogLevel(sessionId);
+}
+export function setLogLevel(level: string, sessionId?: string): void {
+  const normalized = normalizeLogLevel(level);
+  if (!normalized) return;
+
+  if (sessionId) {
+    sessionMcpLogLevels.set(sessionId, normalized);
+    return;
   }
+
+  stdioMcpLogLevel = normalized;
 }
 export function redactUrl(rawUrl: string): string {
   try {

@@ -6,7 +6,13 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { SetLevelRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 
 import { config } from './lib/core.js';
-import { logError, logInfo, setLogLevel, setMcpServer } from './lib/core.js';
+import {
+  getSessionId,
+  logError,
+  logInfo,
+  setLogLevel,
+  setMcpServer,
+} from './lib/core.js';
 import {
   abortAllTaskExecutions,
   registerTaskHandlers,
@@ -131,9 +137,6 @@ async function createMcpServerWithOptions(
   registerGetHelpPrompt(server, serverInstructions, localIcon);
   registerInstructionResource(server, serverInstructions, localIcon);
   registerCacheResourceTemplate(server, localIcon);
-  // NOTE: Internally patches server.close and server.server.onclose for cleanup
-  // callbacks, and intercepts tools/call via Reflect.get on private SDK state.
-  // See src/lib/task-handlers.ts for risk documentation (S-2, S-3).
   registerTaskHandlers(server, {
     requireInterception: config.tasks.requireInterception,
   });
@@ -149,7 +152,7 @@ export async function createMcpServerForHttpSession(): Promise<McpServer> {
 
 function registerLoggingSetLevelHandler(server: McpServer): void {
   server.server.setRequestHandler(SetLevelRequestSchema, (request) => {
-    setLogLevel(request.params.level);
+    setLogLevel(request.params.level, getSessionId());
     return {};
   });
 }
