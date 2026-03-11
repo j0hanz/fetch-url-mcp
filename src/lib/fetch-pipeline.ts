@@ -372,6 +372,61 @@ function persistCache<T>(params: {
     });
   }
 }
+interface CacheWriteTarget {
+  cacheKey: string;
+  normalizedUrl: string;
+}
+function buildCacheWriteTargets(params: {
+  primaryCacheKey: string | null;
+  cacheNamespace: string;
+  cacheVary: Record<string, unknown> | string | undefined;
+  requestedUrl: string;
+  finalUrl: string | undefined;
+}): CacheWriteTarget[] {
+  const { primaryCacheKey, cacheNamespace, cacheVary, requestedUrl, finalUrl } =
+    params;
+  const targets: CacheWriteTarget[] = [];
+
+  if (primaryCacheKey) {
+    targets.push({
+      cacheKey: primaryCacheKey,
+      normalizedUrl: finalUrl ?? requestedUrl,
+    });
+  }
+
+  if (!finalUrl || finalUrl === requestedUrl) {
+    return targets;
+  }
+
+  const finalCacheKey = createCacheKey(cacheNamespace, finalUrl, cacheVary);
+  if (!finalCacheKey || finalCacheKey === primaryCacheKey) {
+    return targets;
+  }
+
+  targets.push({
+    cacheKey: finalCacheKey,
+    normalizedUrl: finalUrl,
+  });
+
+  return targets;
+}
+function persistCacheTargets<T>(params: {
+  targets: readonly CacheWriteTarget[];
+  data: T;
+  serialize: ((result: T) => string) | undefined;
+  cacheNamespace: string;
+}): void {
+  const { targets, data, serialize, cacheNamespace } = params;
+  for (const target of targets) {
+    persistCache({
+      cacheKey: target.cacheKey,
+      data,
+      serialize,
+      normalizedUrl: target.normalizedUrl,
+      cacheNamespace,
+    });
+  }
+}
 export async function executeFetchPipeline<T>(
   options: FetchPipelineOptions<T>
 ): Promise<PipelineResult<T>> {
@@ -411,30 +466,18 @@ export async function executeFetchPipeline<T>(
   );
 
   if (isEnabled()) {
-    persistCache({
-      cacheKey,
+    persistCacheTargets({
+      targets: buildCacheWriteTargets({
+        primaryCacheKey: cacheKey,
+        cacheNamespace: options.cacheNamespace,
+        cacheVary: options.cacheVary,
+        requestedUrl: resolvedUrl.normalizedUrl,
+        finalUrl,
+      }),
       data,
       serialize: options.serialize,
-      normalizedUrl: resolvedFinalUrl,
       cacheNamespace: options.cacheNamespace,
     });
-
-    if (finalUrl && finalUrl !== resolvedUrl.normalizedUrl) {
-      const finalCacheKey = createCacheKey(
-        options.cacheNamespace,
-        finalUrl,
-        options.cacheVary
-      );
-      if (finalCacheKey && finalCacheKey !== cacheKey) {
-        persistCache({
-          cacheKey: finalCacheKey,
-          data,
-          serialize: options.serialize,
-          normalizedUrl: finalUrl,
-          cacheNamespace: options.cacheNamespace,
-        });
-      }
-    }
   }
 
   return {
@@ -576,16 +619,10 @@ interface SharedFetchOptions {
 interface SharedFetchDeps {
   readonly executeFetchPipeline?: typeof executeFetchPipeline;
 }
-export async function performSharedFetch(
-  options: SharedFetchOptions,
-  deps: SharedFetchDeps = {}
-): Promise<{
-  pipeline: PipelineResult<MarkdownPipelineResult>;
-  inlineResult: InlineContentResult;
-}> {
-  const executePipeline = deps.executeFetchPipeline ?? executeFetchPipeline;
-
-  const pipelineOptions: FetchPipelineOptions<MarkdownPipelineResult> = {
+function buildSharedFetchPipelineOptions(
+  options: SharedFetchOptions
+): FetchPipelineOptions<MarkdownPipelineResult> {
+  return {
     url: options.url,
     cacheNamespace: 'markdown',
     ...withSignal(options.signal),
@@ -595,8 +632,18 @@ export async function performSharedFetch(
     ...(options.serialize ? { serialize: options.serialize } : {}),
     ...(options.deserialize ? { deserialize: options.deserialize } : {}),
   };
-
-  const pipeline = await executePipeline(pipelineOptions);
+}
+export async function performSharedFetch(
+  options: SharedFetchOptions,
+  deps: SharedFetchDeps = {}
+): Promise<{
+  pipeline: PipelineResult<MarkdownPipelineResult>;
+  inlineResult: InlineContentResult;
+}> {
+  const executePipeline = deps.executeFetchPipeline ?? executeFetchPipeline;
+  const pipeline = await executePipeline(
+    buildSharedFetchPipelineOptions(options)
+  );
   const inlineResult = applyInlineContentLimit(
     pipeline.data.content,
     options.maxInlineChars

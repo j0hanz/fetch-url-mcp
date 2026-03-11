@@ -224,6 +224,49 @@ function buildResponse(
  * fetch-url tool implementation
  * ------------------------------------------------------------------------------------------------- */
 
+function isCodeHost(host: string): boolean {
+  return (
+    host === 'github.com' || host === 'gitlab.com' || host === 'bitbucket.org'
+  );
+}
+
+function summarizeCodeHostPath(host: string, parts: string[]): string | null {
+  if (!isCodeHost(host) || parts.length < 2) return null;
+
+  const p0 = parts[0] ?? '';
+  const p1 = parts[1] ?? '';
+  return `${host}/${p0}/${p1}`;
+}
+
+function summarizeWikipediaPath(parts: string[]): string | null {
+  if (parts[0] !== 'wiki' || parts.length < 2) return null;
+
+  const p1 = parts[1] ?? '';
+  return `wikipedia.org/${p1}`;
+}
+
+function truncatePathSegment(segment: string, max = 20): string {
+  if (segment.length <= max) return segment;
+  return `${segment.substring(0, max - 3)}...`;
+}
+
+function summarizeUrlPath(host: string, parts: string[]): string {
+  const codeHostSummary = summarizeCodeHostPath(host, parts);
+  if (codeHostSummary) return codeHostSummary;
+
+  if (host.endsWith('wikipedia.org')) {
+    const wikipediaSummary = summarizeWikipediaPath(parts);
+    if (wikipediaSummary) return wikipediaSummary;
+  }
+
+  const basename = truncatePathSegment(parts.at(-1) ?? '');
+  if (parts.length === 1) {
+    return `${host}/${basename}`;
+  }
+
+  return basename ? `${host}/…/${basename}` : host;
+}
+
 function getUrlContext(urlStr: string): string {
   try {
     const u = new URL(urlStr);
@@ -233,57 +276,21 @@ function getUrlContext(urlStr: string): string {
 
     const parts = path.split('/').filter(Boolean);
     if (parts.length === 0) return host;
-
-    // Special case for GitHub/GitLab/Bitbucket
-    if (
-      host === 'github.com' ||
-      host === 'gitlab.com' ||
-      host === 'bitbucket.org'
-    ) {
-      if (parts.length >= 2) {
-        const p0 = parts[0] ?? '';
-        const p1 = parts[1] ?? '';
-        return `${host}/${p0}/${p1}`;
-      }
-    }
-
-    // Special case for Wikipedia
-    if (
-      host.endsWith('wikipedia.org') &&
-      parts[0] === 'wiki' &&
-      parts.length >= 2
-    ) {
-      const p1 = parts[1] ?? '';
-      return `wikipedia.org/${p1}`;
-    }
-
-    let basename = parts.pop() ?? '';
-    if (basename && basename.length > 20) {
-      basename = `${basename.substring(0, 17)}...`;
-    }
-
-    if (parts.length === 0) {
-      return `${host}/${basename}`;
-    }
-
-    return basename ? `${host}/…/${basename}` : host;
+    return summarizeUrlPath(host, parts);
   } catch {
     return 'unknown';
   }
 }
 
-async function fetchPipeline(
+function buildFetchOptions(
   url: string,
-  signal?: AbortSignal,
-  progress?: ProgressReporter,
+  signal: AbortSignal | undefined,
+  progress: ProgressReporter | undefined,
   skipNoiseRemoval?: boolean,
   forceRefresh?: boolean,
   maxInlineChars?: number
-): Promise<{
-  pipeline: PipelineResult<MarkdownPipelineResult>;
-  inlineResult: InlineContentResult;
-}> {
-  return performSharedFetch({
+): Parameters<typeof performSharedFetch>[0] {
+  return {
     url,
     ...withSignal(signal),
     ...(skipNoiseRemoval ? { cacheVary: { skipNoiseRemoval: true } } : {}),
@@ -300,7 +307,30 @@ async function fetchPipeline(
     },
     serialize: serializeMarkdownResult,
     deserialize: parseCachedMarkdownResult,
-  });
+  };
+}
+
+async function fetchPipeline(
+  url: string,
+  signal?: AbortSignal,
+  progress?: ProgressReporter,
+  skipNoiseRemoval?: boolean,
+  forceRefresh?: boolean,
+  maxInlineChars?: number
+): Promise<{
+  pipeline: PipelineResult<MarkdownPipelineResult>;
+  inlineResult: InlineContentResult;
+}> {
+  return performSharedFetch(
+    buildFetchOptions(
+      url,
+      signal,
+      progress,
+      skipNoiseRemoval,
+      forceRefresh,
+      maxInlineChars
+    )
+  );
 }
 
 function formatContentSize(chars: number): string {

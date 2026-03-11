@@ -101,6 +101,7 @@ import {
 // ---------------------------------------------------------------------------
 
 const DEFAULT_MCP_PROTOCOL_VERSION = '2025-11-25';
+type SessionRecord = NonNullable<ReturnType<SessionStore['get']>>;
 
 function resolveRequestedProtocolVersion(body: unknown): string | null {
   if (!isObject(body)) return DEFAULT_MCP_PROTOCOL_VERSION;
@@ -169,11 +170,15 @@ class McpSessionGateway {
       return;
     }
 
-    const session = sessionId ? this.store.get(sessionId) : undefined;
-    if (sessionId && !session) {
-      sendError(ctx.res, -32600, 'Session not found', 404, requestId);
-      return;
-    }
+    const session = sessionId
+      ? this.getAuthenticatedSessionById(
+          sessionId,
+          ctx.auth,
+          ctx.res,
+          requestId
+        )
+      : undefined;
+    if (sessionId && !session) return;
 
     if (!session && isInitNotification) {
       sendError(ctx.res, -32600, 'Missing session ID', 400, requestId);
@@ -181,14 +186,7 @@ class McpSessionGateway {
     }
 
     if (session) {
-      if (
-        !ensureMcpProtocolVersion(ctx.req, ctx.res, {
-          requireHeader: true,
-          expectedVersion: session.negotiatedProtocolVersion,
-        })
-      ) {
-        return;
-      }
+      if (!this.ensureSessionProtocolVersion(ctx, session)) return;
 
       if (!session.protocolInitialized) {
         const isPing = isPingRequest(body.method);
@@ -210,10 +208,7 @@ class McpSessionGateway {
     }
 
     if (session && isInitNotification) {
-      if (!session.protocolInitialized) {
-        session.protocolInitialized = true;
-      }
-      if (sessionId) this.store.touch(sessionId);
+      this.markSessionInitialized(sessionId, session);
       sendText(ctx.res, 200, '');
       return;
     }
@@ -231,32 +226,17 @@ class McpSessionGateway {
   }
 
   async handleGet(ctx: AuthenticatedContext): Promise<void> {
-    const sessionId = getMcpSessionId(ctx.req);
-    if (!sessionId) {
-      sendError(ctx.res, -32600, 'Missing session ID');
-      return;
-    }
+    const sessionId = this.getRequiredSessionId(ctx.req, ctx.res);
+    if (!sessionId) return;
 
-    const session = this.store.get(sessionId);
-    if (!session) {
-      sendError(ctx.res, -32600, 'Session not found', 404);
-      return;
-    }
+    const session = this.getAuthenticatedSessionById(
+      sessionId,
+      ctx.auth,
+      ctx.res
+    );
+    if (!session) return;
 
-    const fingerprint = buildAuthFingerprint(ctx.auth);
-    if (!fingerprint || session.authFingerprint !== fingerprint) {
-      sendError(ctx.res, -32600, 'Session not found', 404);
-      return;
-    }
-
-    if (
-      !ensureMcpProtocolVersion(ctx.req, ctx.res, {
-        requireHeader: true,
-        expectedVersion: session.negotiatedProtocolVersion,
-      })
-    ) {
-      return;
-    }
+    if (!this.ensureSessionProtocolVersion(ctx, session)) return;
 
     const acceptHeader = getHeaderValue(ctx.req, 'accept');
     if (!acceptsEventStream(acceptHeader)) {
@@ -271,32 +251,17 @@ class McpSessionGateway {
   }
 
   async handleDelete(ctx: AuthenticatedContext): Promise<void> {
-    const sessionId = getMcpSessionId(ctx.req);
-    if (!sessionId) {
-      sendError(ctx.res, -32600, 'Missing session ID');
-      return;
-    }
+    const sessionId = this.getRequiredSessionId(ctx.req, ctx.res);
+    if (!sessionId) return;
 
-    const session = this.store.get(sessionId);
-    if (!session) {
-      sendError(ctx.res, -32600, 'Session not found', 404);
-      return;
-    }
+    const session = this.getAuthenticatedSessionById(
+      sessionId,
+      ctx.auth,
+      ctx.res
+    );
+    if (!session) return;
 
-    const fingerprint = buildAuthFingerprint(ctx.auth);
-    if (!fingerprint || session.authFingerprint !== fingerprint) {
-      sendError(ctx.res, -32600, 'Session not found', 404);
-      return;
-    }
-
-    if (
-      !ensureMcpProtocolVersion(ctx.req, ctx.res, {
-        requireHeader: true,
-        expectedVersion: session.negotiatedProtocolVersion,
-      })
-    ) {
-      return;
-    }
+    if (!this.ensureSessionProtocolVersion(ctx, session)) return;
 
     await session.transport.close();
     this.cleanupSessionRecord(sessionId, 'session-delete');
@@ -346,19 +311,72 @@ class McpSessionGateway {
     res: ServerResponse,
     requestId: JsonRpcId
   ): StreamableHTTPServerTransport | null {
+    const session = this.getAuthenticatedSessionById(
+      sessionId,
+      authFingerprint,
+      res,
+      requestId
+    );
+    if (!session) return null;
+
+    this.store.touch(sessionId);
+    return session.transport;
+  }
+
+  private getRequiredSessionId(
+    req: IncomingMessage,
+    res: ServerResponse,
+    requestId: JsonRpcId = null
+  ): string | null {
+    const sessionId = getMcpSessionId(req);
+    if (sessionId) return sessionId;
+
+    sendError(res, -32600, 'Missing session ID', 400, requestId);
+    return null;
+  }
+
+  private getAuthenticatedSessionById(
+    sessionId: string,
+    auth: AuthInfo | string | null,
+    res: ServerResponse,
+    requestId: JsonRpcId = null
+  ): SessionRecord | null {
     const session = this.store.get(sessionId);
     if (!session) {
       sendError(res, -32600, 'Session not found', 404, requestId);
       return null;
     }
 
-    if (!authFingerprint || session.authFingerprint !== authFingerprint) {
+    const fingerprint =
+      typeof auth === 'string' || auth === null
+        ? auth
+        : buildAuthFingerprint(auth);
+    if (!fingerprint || session.authFingerprint !== fingerprint) {
       sendError(res, -32600, 'Session not found', 404, requestId);
       return null;
     }
 
-    this.store.touch(sessionId);
-    return session.transport;
+    return session;
+  }
+
+  private ensureSessionProtocolVersion(
+    ctx: AuthenticatedContext,
+    session: SessionRecord
+  ): boolean {
+    return ensureMcpProtocolVersion(ctx.req, ctx.res, {
+      requireHeader: true,
+      expectedVersion: session.negotiatedProtocolVersion,
+    });
+  }
+
+  private markSessionInitialized(
+    sessionId: string | null,
+    session: SessionRecord
+  ): void {
+    if (!session.protocolInitialized) {
+      session.protocolInitialized = true;
+    }
+    if (sessionId) this.store.touch(sessionId);
   }
 
   private async createNewSession(
