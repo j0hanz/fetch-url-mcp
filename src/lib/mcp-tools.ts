@@ -110,6 +110,43 @@ export function acceptsJsonAndEventStream(
 type ToolErrorResponse = CallToolResult & {
   isError: true;
 };
+
+const PUBLIC_ERROR_REASONS = new Set(['aborted', 'queue_full', 'timeout']);
+
+function sanitizeToolErrorDetails(
+  details: Readonly<Record<string, unknown>>
+): Record<string, unknown> | undefined {
+  const sanitized: Record<string, unknown> = {};
+
+  const { retryAfter, timeout, reason } = details;
+  if (
+    typeof retryAfter === 'number' ||
+    typeof retryAfter === 'string' ||
+    retryAfter === null
+  ) {
+    sanitized['retryAfter'] = retryAfter;
+  }
+
+  if (typeof timeout === 'number' && Number.isFinite(timeout) && timeout >= 0) {
+    sanitized['timeout'] = timeout;
+  }
+
+  if (typeof reason === 'string' && PUBLIC_ERROR_REASONS.has(reason)) {
+    sanitized['reason'] = reason;
+  }
+
+  return Object.keys(sanitized).length > 0 ? sanitized : undefined;
+}
+
+function resolvePublicFetchErrorCode(error: FetchError): string | undefined {
+  const { code: detailsCode, reason } = error.details;
+  if (typeof detailsCode === 'string') return detailsCode;
+
+  if (reason === 'queue_full') return 'queue_full';
+
+  return undefined;
+}
+
 export function createToolErrorResponse(
   message: string,
   url: string,
@@ -160,8 +197,7 @@ function resolveToolErrorMessage(
 }
 function resolveToolErrorCode(error: unknown): string {
   if (error instanceof FetchError) {
-    const detailsCode = error.details['code'];
-    return typeof detailsCode === 'string' ? detailsCode : error.code;
+    return resolvePublicFetchErrorCode(error) ?? error.code;
   }
   if (isValidationError(error)) return 'VALIDATION_ERROR';
   if (isAbortError(error)) return 'ABORTED';
@@ -175,10 +211,11 @@ export function handleToolError(
   const message = resolveToolErrorMessage(error, fallbackMessage);
   const code = resolveToolErrorCode(error);
   if (error instanceof FetchError) {
+    const details = sanitizeToolErrorDetails(error.details);
     return createToolErrorResponse(message, url, {
       code,
       statusCode: error.statusCode,
-      details: error.details,
+      ...(details ? { details } : {}),
     });
   }
   return createToolErrorResponse(message, url, { code });

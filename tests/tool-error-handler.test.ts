@@ -39,6 +39,30 @@ describe('tool error responses', () => {
     assert.equal(parsed.error, 'Fetch failed');
   });
 
+  it('sanitizes internal fetch error details', () => {
+    const error = new FetchError('Queue is full', 'https://example.com', 503, {
+      reason: 'queue_full',
+      stage: 'transform:enqueue',
+      elapsedMs: 25,
+      totalBudgetMs: 50,
+    });
+
+    const response = handleToolError(error, 'https://example.com');
+    const parsed = JSON.parse((response.content[0] as { text: string })?.text);
+
+    assert.equal(parsed.code, 'queue_full');
+    assert.deepEqual(parsed.details, { reason: 'queue_full' });
+    assert.equal('stage' in (parsed.details as Record<string, unknown>), false);
+    assert.equal(
+      'elapsedMs' in (parsed.details as Record<string, unknown>),
+      false
+    );
+    assert.equal(
+      'totalBudgetMs' in (parsed.details as Record<string, unknown>),
+      false
+    );
+  });
+
   it('falls back to default message for generic errors', () => {
     const error = new Error('Boom');
     const response = handleToolError(error, 'https://example.com');

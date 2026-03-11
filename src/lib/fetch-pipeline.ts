@@ -1,4 +1,4 @@
-import { type CachedPayload, cachedPayloadSchema } from '../schemas/cache.js';
+import { type CachedPayload } from '../schemas/cache.js';
 
 import { transformBufferToMarkdown } from '../transform/transform.js';
 import { type MarkdownTransformResult } from '../transform/types.js';
@@ -9,6 +9,7 @@ import {
   isEnabled,
   logDebug,
   logWarn,
+  parseCachedPayload,
   set,
 } from './core.js';
 import {
@@ -44,13 +45,6 @@ export function readNestedRecord(
     if (current === undefined) return undefined;
   }
   return asRecord(current);
-}
-function safeJsonParse(value: string): unknown {
-  try {
-    return JSON.parse(value) as unknown;
-  } catch {
-    return undefined;
-  }
 }
 export function withSignal(
   signal?: AbortSignal
@@ -522,16 +516,15 @@ function normalizeExtractedMetadata(
 export function parseCachedMarkdownResult(
   cached: string
 ): MarkdownPipelineResult | undefined {
-  const parsed = safeJsonParse(cached);
-  const result = cachedPayloadSchema.safeParse(parsed);
-  if (!result.success) return undefined;
+  const payload = parseCachedPayload(cached);
+  if (!payload) return undefined;
 
-  const markdown = result.data.markdown ?? result.data.content;
+  const markdown = payload.markdown ?? payload.content;
   if (typeof markdown !== 'string') return undefined;
 
-  const metadata = normalizeExtractedMetadata(result.data.metadata);
+  const metadata = normalizeExtractedMetadata(payload.metadata);
 
-  const truncated = result.data.truncated ?? false;
+  const truncated = payload.truncated ?? false;
   const persistedMarkdown = truncated
     ? appendTruncationMarker(markdown, TRUNCATION_MARKER)
     : markdown;
@@ -539,7 +532,7 @@ export function parseCachedMarkdownResult(
   return {
     content: persistedMarkdown,
     markdown: persistedMarkdown,
-    title: result.data.title,
+    title: payload.title,
     ...(metadata ? { metadata } : {}),
     truncated,
   };

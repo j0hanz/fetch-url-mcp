@@ -582,7 +582,9 @@ describe('fetchUrlToolHandler', () => {
     );
     assert.ok(structured);
     assert.equal(structured.statusCode, 429);
-    const details = structured.details as { retryAfter?: number } | undefined;
+    const details = structured.details as
+      | { retryAfter?: number | string | null }
+      | undefined;
     assert.equal(details?.retryAfter, 30);
   });
 

@@ -108,6 +108,6 @@ describe('zod + error-handling source regressions', () => {
 
     assert.equal(payload.code, 'EBLOCKED');
     assert.equal(payload.statusCode, 400);
-    assert.equal(payload.details?.code, 'EBLOCKED');
+    assert.equal(payload.details, undefined);
   });
 });

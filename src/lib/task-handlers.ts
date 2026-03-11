@@ -102,30 +102,30 @@ export {
 
 const TaskGetSchema = z.looseObject({
   method: z.literal('tasks/get'),
-  params: z.looseObject({ taskId: z.string() }),
+  params: z.strictObject({ taskId: z.string() }),
 });
 const TaskListSchema = z.looseObject({
   method: z.literal('tasks/list'),
   params: z
-    .looseObject({
+    .strictObject({
       cursor: z.string().optional(),
     })
     .optional(),
 });
 const TaskCancelSchema = z.looseObject({
   method: z.literal('tasks/cancel'),
-  params: z.looseObject({ taskId: z.string() }),
+  params: z.strictObject({ taskId: z.string() }),
 });
 const TaskResultSchema = z.looseObject({
   method: z.literal('tasks/result'),
-  params: z.looseObject({ taskId: z.string() }),
+  params: z.strictObject({ taskId: z.string() }),
 });
 const MIN_TASK_TTL_MS = 1_000;
 const MAX_TASK_TTL_MS = 86_400_000;
 const ExtendedCallToolRequestSchema: z.ZodType<ExtendedCallToolRequest> =
   z.looseObject({
     method: z.literal('tools/call'),
-    params: z.looseObject({
+    params: z.strictObject({
       name: z.string().min(1),
       arguments: z.record(z.string(), z.unknown()).optional(),
       task: z
@@ -139,7 +139,7 @@ const ExtendedCallToolRequestSchema: z.ZodType<ExtendedCallToolRequest> =
         })
         .optional(),
       _meta: z
-        .looseObject({
+        .strictObject({
           progressToken: z.union([z.string(), z.number()]).optional(),
           'io.modelcontextprotocol/related-task': z
             .strictObject({

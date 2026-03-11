@@ -77,7 +77,7 @@ describe('MCP task-augmented tools', () => {
         jsonrpc: '2.0',
         id: 1,
         method: 'tasks/get',
-        params: { taskId, task: { ttl: 10_000 } },
+        params: { taskId },
       })) as {
         taskId?: string;
         status?: string;
@@ -91,7 +91,7 @@ describe('MCP task-augmented tools', () => {
         jsonrpc: '2.0',
         id: 2,
         method: 'tasks/result',
-        params: { taskId, task: { ttl: 10_000 } },
+        params: { taskId },
       })) as {
         structuredContent?: { url?: string; markdown?: string };
         isError?: boolean;
@@ -154,14 +154,14 @@ describe('MCP task-augmented tools', () => {
         jsonrpc: '2.0',
         id: 10,
         method: 'tasks/cancel',
-        params: { taskId, task: { ttl: 10_000 } },
+        params: { taskId },
       });
 
       const taskStatus = (await getTask({
         jsonrpc: '2.0',
         id: 11,
         method: 'tasks/get',
-        params: { taskId, task: { ttl: 10_000 } },
+        params: { taskId },
       })) as {
         taskId?: string;
         status?: string;
@@ -177,7 +177,7 @@ describe('MCP task-augmented tools', () => {
             jsonrpc: '2.0',
             id: 12,
             method: 'tasks/result',
-            params: { taskId, task: { ttl: 10_000 } },
+            params: { taskId },
           }),
         (error: unknown) =>
           error instanceof Error && error.message.includes('Task was cancelled')
@@ -205,6 +205,27 @@ describe('MCP task-augmented tools', () => {
           error instanceof Error &&
           /Task not found/.test(error.message) &&
           (error as Error & { code?: number }).code === -32602
+      );
+    } finally {
+      await server.close();
+    }
+  });
+
+  it('rejects unknown params on task requests', async () => {
+    const server = await createMcpServer();
+
+    try {
+      const getTask = getRequestHandler(server, 'tasks/get');
+
+      await assert.rejects(
+        async () =>
+          getTask({
+            jsonrpc: '2.0',
+            id: 21,
+            method: 'tasks/get',
+            params: { taskId: 'missing-task-id', task: { ttl: 10_000 } },
+          }),
+        (error: unknown) => /Unrecognized key/.test(String(error))
       );
     } finally {
       await server.close();

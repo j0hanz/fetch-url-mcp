@@ -644,7 +644,17 @@ export function parseCachedPayload(raw: string): CachedPayload | null {
   try {
     const parsed = JSON.parse(raw) as unknown;
     const result = cachedPayloadSchema.safeParse(parsed);
-    return result.success ? result.data : null;
+    if (!result.success) {
+      logWarn('Rejected invalid cached payload', {
+        issues: result.error.issues.map((issue) => ({
+          path: issue.path,
+          message: issue.message,
+          code: issue.code,
+        })),
+      });
+      return null;
+    }
+    return result.data;
   } catch {
     return null;
   }
