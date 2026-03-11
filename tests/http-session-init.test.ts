@@ -654,4 +654,118 @@ describe('http session initialization', () => {
     assert.equal(payload.unlocked.status, 200);
     assert.equal(payload.unlocked.containsTools, true);
   });
+
+  it('allows ping before notifications/initialized while blocking other requests', () => {
+    const script = `
+      import { startHttpServer } from './dist/http/native.js';
+      import { request } from 'node:http';
+
+      const server = await startHttpServer();
+      const port = server.port;
+
+      function sendRpc(body, sessionId) {
+        return new Promise((resolve) => {
+          const headers = {
+            'content-type': 'application/json',
+            accept: 'application/json, text/event-stream',
+            authorization: 'Bearer test-token',
+            host: '127.0.0.1',
+            'mcp-protocol-version': '2025-11-25',
+          };
+          if (sessionId) headers['mcp-session-id'] = sessionId;
+
+          const req = request(
+            { hostname: '127.0.0.1', port, path: '/mcp', method: 'POST', headers },
+            (res) => {
+              let raw = '';
+              res.on('data', (chunk) => { raw += chunk; });
+              res.on('end', () => {
+                resolve({
+                  status: res.statusCode ?? 0,
+                  bodyPreview: raw.slice(0, 512),
+                  sessionId: res.headers['mcp-session-id'] ?? null,
+                });
+              });
+            }
+          );
+          req.on('error', (error) => resolve({ error: error.message }));
+          req.write(JSON.stringify(body));
+          req.end();
+        });
+      }
+
+      const init = await sendRpc({
+        jsonrpc: '2.0',
+        id: 'init',
+        method: 'initialize',
+        params: {
+          protocolVersion: '2025-11-25',
+          capabilities: {},
+          clientInfo: { name: 'test-client', version: '1.0.0' },
+        },
+      });
+
+      const sid = init.sessionId;
+
+      // ping should pass through before notifications/initialized
+      const pingBeforeInit = await sendRpc(
+        { jsonrpc: '2.0', id: 'ping-1', method: 'ping' },
+        sid
+      );
+
+      // tools/list should still be blocked
+      const blockedRequest = await sendRpc(
+        { jsonrpc: '2.0', id: 'list-blocked', method: 'tools/list', params: {} },
+        sid
+      );
+
+      // now send initialized
+      await sendRpc(
+        { jsonrpc: '2.0', method: 'notifications/initialized', params: {} },
+        sid
+      );
+
+      // ping should also work after initialized
+      const pingAfterInit = await sendRpc(
+        { jsonrpc: '2.0', id: 'ping-2', method: 'ping' },
+        sid
+      );
+
+      await server.shutdown('TEST');
+      console.error('${RESULT_MARKER}' + JSON.stringify({
+        init,
+        pingBeforeInit,
+        blockedRequest,
+        pingAfterInit,
+      }));
+    `;
+
+    const result = runIsolatedNode(script, {
+      HOST: '127.0.0.1',
+      PORT: '0',
+      ACCESS_TOKENS: 'test-token',
+      ALLOW_REMOTE: 'false',
+    });
+
+    assert.equal(result.status, 0, result.stderr);
+    const payload = parseMarkedJson<{
+      init: { status: number; sessionId: string | null };
+      pingBeforeInit: { status: number; bodyPreview: string };
+      blockedRequest: { status: number; bodyPreview: string };
+      pingAfterInit: { status: number; bodyPreview: string };
+    }>(result.stderr);
+
+    assert.equal(payload.init.status, 200);
+    assert.equal(typeof payload.init.sessionId, 'string');
+
+    // R-6: ping is a transport-level keepalive, allowed before full init
+    assert.equal(payload.pingBeforeInit.status, 200);
+
+    // Other requests remain blocked
+    assert.equal(payload.blockedRequest.status, 400);
+    assert.match(payload.blockedRequest.bodyPreview, /Session not initialized/);
+
+    // ping works after init too
+    assert.equal(payload.pingAfterInit.status, 200);
+  });
 });

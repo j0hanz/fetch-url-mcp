@@ -59,6 +59,7 @@ function createServerCapabilities(): McpServerCapabilities {
     completions: {},
     logging: {},
     resources: { subscribe: true, listChanged: true },
+    // SDK auto-adds listChanged to tools capability at runtime.
     tools: {},
     prompts: {},
     tasks: {

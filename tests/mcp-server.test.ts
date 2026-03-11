@@ -81,6 +81,7 @@ describe('MCP Server', () => {
       const capabilities = getPrivateObject<{
         completions?: Record<string, never>;
         resources?: { subscribe?: boolean; listChanged?: boolean };
+        tools?: { listChanged?: boolean };
       }>(server.server, '_capabilities');
       assert.ok(
         capabilities?.completions,
@@ -88,6 +89,14 @@ describe('MCP Server', () => {
       );
       assert.equal(capabilities?.resources?.subscribe, true);
       assert.equal(capabilities?.resources?.listChanged, true);
+
+      // R-2: SDK auto-adds listChanged to tools capability even when declared
+      // as tools:{}. This is correct — the SDK handles tool list notifications.
+      assert.equal(
+        capabilities?.tools?.listChanged,
+        true,
+        'tools capability should include listChanged (SDK auto-adds)'
+      );
     });
   });
 
@@ -158,6 +167,29 @@ describe('MCP Server', () => {
 
       assert.ok(prompt, 'get-help prompt should be registered');
       assert.equal(typeof prompt.callback, 'function');
+    });
+  });
+
+  describe('Tools listing', () => {
+    it('returns all tools in a single page without pagination cursor', async () => {
+      const server = await createMcpServer();
+      const requestHandlers = getPrivateMap(server.server, '_requestHandlers');
+      const listTools = requestHandlers.get('tools/list') as (
+        request: unknown
+      ) => Promise<{
+        tools?: { name: string }[];
+        nextCursor?: string;
+      }>;
+      assert.ok(listTools, 'tools/list handler should be registered');
+
+      const result = await listTools({ method: 'tools/list' });
+      assert.ok(Array.isArray(result.tools), 'tools should be an array');
+      assert.ok(result.tools.length > 0, 'at least one tool should exist');
+      assert.equal(
+        result.nextCursor,
+        undefined,
+        'single-page result should not contain nextCursor'
+      );
     });
   });
 
