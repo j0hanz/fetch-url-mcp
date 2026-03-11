@@ -30,7 +30,7 @@ function readUnknown(obj: unknown, key: string): unknown {
   const record = asRecord(obj);
   return record ? record[key] : undefined;
 }
-export function readString(obj: unknown, key: string): string | undefined {
+function readString(obj: unknown, key: string): string | undefined {
   const value = readUnknown(obj, key);
   return typeof value === 'string' ? value : undefined;
 }

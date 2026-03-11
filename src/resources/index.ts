@@ -21,7 +21,7 @@ import {
 } from '../lib/core.js';
 import { logWarn } from '../lib/core.js';
 import { registerServerLifecycleCleanup } from '../lib/mcp-tools.js';
-import type { IconInfo } from '../lib/types.js';
+import { buildOptionalIcons, type IconInfo } from '../lib/types.js';
 import { isObject } from '../lib/utils.js';
 
 const RESOURCE_NOT_FOUND_ERROR_CODE = -32002;
@@ -51,20 +51,6 @@ function sortAndLimitValues(values: Iterable<string>): string[] {
   return [...values]
     .sort((left, right) => left.localeCompare(right))
     .slice(0, MAX_COMPLETION_VALUES);
-}
-
-function buildOptionalIcons(
-  iconInfo?: IconInfo
-): { icons: IconInfo[] } | Record<string, never> {
-  if (!iconInfo) return {};
-  return {
-    icons: [
-      {
-        src: iconInfo.src,
-        mimeType: iconInfo.mimeType,
-      },
-    ],
-  };
 }
 
 function isValidCacheResourceParts(parts: CacheResourceParts): boolean {

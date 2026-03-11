@@ -166,7 +166,6 @@ export {
 } from './task-handlers.js';
 
 export {
-  readString,
   readNestedRecord,
   withSignal,
   TRUNCATION_MARKER,

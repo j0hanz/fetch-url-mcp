@@ -173,11 +173,11 @@ function resolveOwnerScopedExtra(extra: unknown): {
 }
 type RequestHandlerFn = (request: unknown, extra?: unknown) => Promise<unknown>;
 
-export interface TaskHandlerRegistrationOptions {
+interface TaskHandlerRegistrationOptions {
   requireInterception?: boolean;
 }
 
-export interface TaskHandlerRegistrationResult {
+interface TaskHandlerRegistrationResult {
   interceptedToolsCall: boolean;
   taskCapableToolsRegistered: boolean;
 }

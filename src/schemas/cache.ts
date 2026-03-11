@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-export const extractedMetadataSchema = z.strictObject({
+const extractedMetadataSchema = z.strictObject({
   title: z.string().optional(),
   description: z.string().optional(),
   author: z.string().optional(),

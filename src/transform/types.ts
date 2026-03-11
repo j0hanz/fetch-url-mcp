@@ -112,11 +112,6 @@ export interface TransformWorkerTransformMessage {
   inputTruncated?: boolean | undefined;
 }
 
-export interface TransformWorkerCancelMessage {
-  type: 'cancel';
-  id: string;
-}
-
 export interface TransformWorkerCancelledMessage {
   type: 'cancelled';
   id: string;

@@ -1,22 +1,7 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { GetPromptResult } from '@modelcontextprotocol/sdk/types.js';
 
-import type { IconInfo } from '../lib/types.js';
-
-function buildOptionalPromptIcons(
-  iconInfo?: IconInfo
-): { icons: IconInfo[] } | Record<string, never> {
-  return iconInfo
-    ? {
-        icons: [
-          {
-            src: iconInfo.src,
-            mimeType: iconInfo.mimeType,
-          },
-        ],
-      }
-    : {};
-}
+import { buildOptionalIcons, type IconInfo } from '../lib/types.js';
 
 export function registerGetHelpPrompt(
   server: McpServer,
@@ -31,7 +16,7 @@ export function registerGetHelpPrompt(
     {
       title: 'Get Help',
       description,
-      ...buildOptionalPromptIcons(iconInfo),
+      ...buildOptionalIcons(iconInfo),
     },
     (): GetPromptResult => ({
       description,
