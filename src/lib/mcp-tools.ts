@@ -242,6 +242,7 @@ export {
   type InlineContentResult,
   appendTruncationMarker,
   type PipelineResult,
+  type SharedFetchStage,
   executeFetchPipeline,
   type MarkdownPipelineResult,
   parseCachedMarkdownResult,

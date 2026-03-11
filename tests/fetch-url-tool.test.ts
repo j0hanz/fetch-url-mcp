@@ -110,6 +110,72 @@ describe('fetchUrlToolHandler', () => {
     assertTextBlockMatchesStructured(response);
   });
 
+  it('emits the optimized 8-step progress sequence on a cache miss', async (t) => {
+    const html =
+      '<html><head><title>Progress Test</title></head><body><p>Hello</p></body></html>';
+    const progressEvents: Array<{ progress: number; message: string }> = [];
+
+    t.mock.method(globalThis, 'fetch', async () => {
+      return new Response(html, {
+        status: 200,
+        headers: { 'content-type': 'text/html' },
+      });
+    });
+
+    await fetchUrlToolHandler(
+      { url: 'https://example.com/progress-miss' },
+      {
+        onProgress: (progress, message) => {
+          progressEvents.push({ progress, message });
+        },
+      }
+    );
+
+    assert.deepEqual(progressEvents.slice(0, -1), [
+      { progress: 1, message: 'Preparing request' },
+      { progress: 2, message: 'Resolving URL' },
+      { progress: 3, message: 'Checking cache' },
+      { progress: 4, message: 'Fetching example.com/progress-miss' },
+      { progress: 5, message: 'Received response' },
+      { progress: 6, message: 'Parsing HTML → Markdown' },
+      { progress: 7, message: 'Finalizing output' },
+    ]);
+    assert.deepEqual(progressEvents.at(-1)?.progress, 8);
+    assert.match(String(progressEvents.at(-1)?.message), /^Done — .+/);
+  });
+
+  it('skips remote-only progress steps on a cache hit', async () => {
+    const url = 'https://example.com/progress-cache-hit';
+    const normalizedUrl = normalizeUrl(url).normalizedUrl;
+    const cacheKey = cache.createCacheKey('markdown', normalizedUrl);
+    const progressEvents: Array<{ progress: number; message: string }> = [];
+
+    assert.ok(cacheKey);
+    cache.set(cacheKey, JSON.stringify({ markdown: 'cached body' }), {
+      url: normalizedUrl,
+    });
+
+    const response = await fetchUrlToolHandler(
+      { url },
+      {
+        onProgress: (progress, message) => {
+          progressEvents.push({ progress, message });
+        },
+      }
+    );
+
+    assert.equal(response.isError, undefined);
+    assert.deepEqual(progressEvents.slice(0, -1), [
+      { progress: 1, message: 'Preparing request' },
+      { progress: 2, message: 'Resolving URL' },
+      { progress: 3, message: 'Checking cache' },
+      { progress: 4, message: 'Loaded from cache' },
+      { progress: 7, message: 'Finalizing output' },
+    ]);
+    assert.deepEqual(progressEvents.at(-1)?.progress, 8);
+    assert.match(String(progressEvents.at(-1)?.message), /^Done — .+/);
+  });
+
   it('returns extracted metadata fields when available', async (t) => {
     const html = `
       <html>

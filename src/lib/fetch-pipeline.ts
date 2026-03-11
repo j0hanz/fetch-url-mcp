@@ -213,6 +213,7 @@ interface FetchPipelineOptions<T> {
   signal?: AbortSignal;
   cacheVary?: Record<string, unknown> | string;
   forceRefresh?: boolean;
+  onStage?: (stage: SharedFetchStage) => void;
   transform: (
     input: { buffer: Uint8Array; encoding: string; truncated?: boolean },
     url: string
@@ -229,6 +230,14 @@ export interface PipelineResult<T> {
   fetchedAt: string;
   cacheKey?: string | null;
 }
+export type SharedFetchStage =
+  | 'resolve_url'
+  | 'check_cache'
+  | 'cache_hit'
+  | 'fetch_remote'
+  | 'response_ready'
+  | 'transform_start'
+  | 'finalize_output';
 interface UrlResolution {
   normalizedUrl: string;
   originalUrl: string;
@@ -426,6 +435,7 @@ function persistCacheTargets<T>(params: {
 export async function executeFetchPipeline<T>(
   options: FetchPipelineOptions<T>
 ): Promise<PipelineResult<T>> {
+  options.onStage?.('resolve_url');
   const resolvedUrl = resolveNormalizedUrl(options.url);
   logRawUrlTransformation(resolvedUrl);
 
@@ -436,6 +446,7 @@ export async function executeFetchPipeline<T>(
   );
 
   if (!options.forceRefresh) {
+    options.onStage?.('check_cache');
     const cachedResult = attemptCacheRetrieval({
       cacheKey,
       deserialize: options.deserialize,
@@ -443,10 +454,12 @@ export async function executeFetchPipeline<T>(
       normalizedUrl: resolvedUrl.normalizedUrl,
     });
     if (cachedResult) {
+      options.onStage?.('cache_hit');
       return { ...cachedResult, originalUrl: resolvedUrl.originalUrl };
     }
   }
 
+  options.onStage?.('fetch_remote');
   logDebug('Fetching URL', { url: resolvedUrl.normalizedUrl });
 
   const { buffer, encoding, truncated, finalUrl } =
@@ -454,8 +467,10 @@ export async function executeFetchPipeline<T>(
       resolvedUrl.normalizedUrl,
       withSignal(options.signal)
     );
+  options.onStage?.('response_ready');
   const resolvedFinalUrl = finalUrl || resolvedUrl.normalizedUrl;
   const transformUrl = resolvedFinalUrl;
+  options.onStage?.('transform_start');
   const data = await options.transform(
     { buffer, encoding, ...(truncated ? { truncated: true } : {}) },
     transformUrl
@@ -561,6 +576,7 @@ interface SharedFetchOptions {
   readonly cacheVary?: Record<string, unknown> | string;
   readonly forceRefresh?: boolean;
   readonly maxInlineChars?: number;
+  readonly onStage?: (stage: SharedFetchStage) => void;
   readonly transform: (
     input: { buffer: Uint8Array; encoding: string; truncated?: boolean },
     normalizedUrl: string
@@ -580,6 +596,7 @@ function buildSharedFetchPipelineOptions(
     ...withSignal(options.signal),
     ...(options.cacheVary ? { cacheVary: options.cacheVary } : {}),
     ...(options.forceRefresh ? { forceRefresh: true } : {}),
+    ...(options.onStage ? { onStage: options.onStage } : {}),
     transform: options.transform,
     ...(options.serialize ? { serialize: options.serialize } : {}),
     ...(options.deserialize ? { deserialize: options.deserialize } : {}),
@@ -596,6 +613,7 @@ export async function performSharedFetch(
   const pipeline = await executePipeline(
     buildSharedFetchPipelineOptions(options)
   );
+  options.onStage?.('finalize_output');
   const inlineResult = applyInlineContentLimit(
     pipeline.data.content,
     options.maxInlineChars

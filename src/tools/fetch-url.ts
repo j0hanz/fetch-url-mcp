@@ -30,6 +30,7 @@ import {
   type PipelineResult,
   readNestedRecord,
   serializeMarkdownResult,
+  type SharedFetchStage,
   TRUNCATION_MARKER,
   withSignal,
 } from '../lib/mcp-tools.js';
@@ -261,8 +262,31 @@ function getUrlContext(urlStr: string): string {
   }
 }
 
+function mapFetchStageToProgress(
+  stage: SharedFetchStage,
+  context: string
+): { step: number; message: string } {
+  switch (stage) {
+    case 'resolve_url':
+      return { step: 2, message: 'Resolving URL' };
+    case 'check_cache':
+      return { step: 3, message: 'Checking cache' };
+    case 'cache_hit':
+      return { step: 4, message: 'Loaded from cache' };
+    case 'fetch_remote':
+      return { step: 4, message: `Fetching ${context}` };
+    case 'response_ready':
+      return { step: 5, message: 'Received response' };
+    case 'transform_start':
+      return { step: 6, message: 'Parsing HTML → Markdown' };
+    case 'finalize_output':
+      return { step: 7, message: 'Finalizing output' };
+  }
+}
+
 function buildFetchOptions(
   url: string,
+  context: string,
   signal: AbortSignal | undefined,
   progress: ProgressReporter | undefined,
   skipNoiseRemoval?: boolean,
@@ -275,8 +299,11 @@ function buildFetchOptions(
     ...(skipNoiseRemoval ? { cacheVary: { skipNoiseRemoval: true } } : {}),
     ...(forceRefresh ? { forceRefresh: true } : {}),
     ...(maxInlineChars !== undefined ? { maxInlineChars } : {}),
+    onStage: (stage) => {
+      const update = mapFetchStageToProgress(stage, context);
+      reportProgress(progress, update.step, update.message);
+    },
     transform: async ({ buffer, encoding, truncated }, normalizedUrl) => {
-      reportProgress(progress, 2, 'Parsing HTML → Markdown');
       return markdownTransform(
         { buffer, encoding, ...(truncated ? { truncated } : {}) },
         normalizedUrl,
@@ -291,6 +318,7 @@ function buildFetchOptions(
 
 async function fetchPipeline(
   url: string,
+  context: string,
   signal?: AbortSignal,
   progress?: ProgressReporter,
   skipNoiseRemoval?: boolean,
@@ -303,6 +331,7 @@ async function fetchPipeline(
   return performSharedFetch(
     buildFetchOptions(
       url,
+      context,
       signal,
       progress,
       skipNoiseRemoval,
@@ -339,9 +368,10 @@ async function executeFetch(
   logDebug('Fetching URL', { url });
 
   try {
-    reportProgress(progress, 1, `Fetching ${context}`);
+    reportProgress(progress, 1, 'Preparing request');
     const { pipeline, inlineResult } = await fetchPipeline(
       url,
+      context,
       signal,
       progress,
       input.skipNoiseRemoval,
@@ -349,16 +379,12 @@ async function executeFetch(
       input.maxInlineChars
     );
 
-    if (pipeline.fromCache) {
-      reportProgress(progress, 3, 'Loaded from cache');
-    }
-
     const size = formatContentSize(inlineResult.contentSize);
-    reportProgress(progress, 4, `Done — ${size}`);
+    reportProgress(progress, 8, `Done — ${size}`);
     return buildResponse(pipeline, inlineResult, url);
   } catch (error) {
     const isAbort = isAbortError(error);
-    reportProgress(progress, 4, isAbort ? 'Cancelled' : 'Failed');
+    reportProgress(progress, 8, isAbort ? 'Cancelled' : 'Failed');
     throw error;
   }
 }

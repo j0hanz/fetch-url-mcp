@@ -33,7 +33,7 @@ export interface ToolHandlerExtra {
 export interface ProgressReporter {
   report: (progress: number, message: string) => void;
 }
-const FETCH_PROGRESS_TOTAL = 4;
+const FETCH_PROGRESS_TOTAL = 8;
 const PROGRESS_NOTIFICATION_TIMEOUT_MS = 5000;
 function resolveRelatedTaskMeta(
   meta?: RequestMeta
