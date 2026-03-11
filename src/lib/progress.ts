@@ -45,7 +45,6 @@ function resolveRelatedTaskMeta(
   return typeof taskId === 'string' ? { taskId } : undefined;
 }
 class ToolProgressReporter implements ProgressReporter {
-  private reportQueue: Promise<void> = Promise.resolve();
   private isTerminal = false;
   private lastProgress = -1;
 
@@ -115,7 +114,9 @@ class ToolProgressReporter implements ProgressReporter {
       message
     );
 
-    this.reportQueue = this.reportQueue.then(async () => {
+    // Fire without chaining to avoid queue buildup and delayed reports
+    // that could fire after the task reaches a terminal state.
+    void (async (): Promise<void> => {
       let timeoutId: NodeJS.Timeout | undefined;
       const timeoutPromise = new Promise<{ timeout: true }>((resolve) => {
         timeoutId = setTimeout(() => {
@@ -131,20 +132,23 @@ class ToolProgressReporter implements ProgressReporter {
         ]);
 
         if ('timeout' in outcome) {
-          logWarn('Progress notification timed out', { progress, message });
+          logWarn('Progress notification timed out', {
+            progress: effectiveProgress,
+            message,
+          });
         }
-      } catch (error) {
+      } catch (error: unknown) {
         logWarn('Failed to send progress notification', {
           error: getErrorMessage(error),
-          progress,
+          progress: effectiveProgress,
           message,
         });
       } finally {
-        if (timeoutId) clearTimeout(timeoutId);
+        if (timeoutId) {
+          clearTimeout(timeoutId);
+        }
       }
-    });
-    // Do not await reportQueue: notifications drain asynchronously so the caller
-    // is not blocked for up to N × PROGRESS_NOTIFICATION_TIMEOUT_MS.
+    })();
   }
 
   private createProgressNotification(
