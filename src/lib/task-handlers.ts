@@ -139,7 +139,7 @@ const ExtendedCallToolRequestSchema: z.ZodType<ExtendedCallToolRequest> =
         })
         .optional(),
       _meta: z
-        .strictObject({
+        .looseObject({
           progressToken: z.union([z.string(), z.number()]).optional(),
           'io.modelcontextprotocol/related-task': z
             .strictObject({
