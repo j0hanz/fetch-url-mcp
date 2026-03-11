@@ -11,18 +11,17 @@ const extractedMetadataSchema = z.strictObject({
 });
 
 export const cachedPayloadSchema = z
-  .object({
+  .looseObject({
     markdown: z.string().optional(),
     content: z.string().optional(),
     title: z.string().optional(),
     metadata: extractedMetadataSchema.optional(),
     truncated: z.boolean().optional(),
   })
-  .catchall(z.unknown())
   .refine(
     (value) =>
       typeof value.markdown === 'string' || typeof value.content === 'string',
-    { message: 'Missing markdown/content' }
+    { error: 'Missing markdown/content' }
   );
 
 export type CachedPayload = z.infer<typeof cachedPayloadSchema>;

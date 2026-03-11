@@ -39,7 +39,7 @@ const server = new McpServer(
 );
 
 const inputSchema = z.strictObject({
-  url: z.string(),
+  url: z.httpUrl(),
   skipNoiseRemoval: z.boolean().optional(),
   forceRefresh: z.boolean().optional(),
   maxInlineChars: z.number().optional(),

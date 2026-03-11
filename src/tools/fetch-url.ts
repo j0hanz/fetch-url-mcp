@@ -77,8 +77,6 @@ const TOOL_ICON = {
   src: 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSJjdXJyZW50Q29sb3IiIHN0cm9rZS13aWR0aD0iMiIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cGF0aCBkPSJNMjEgMTV2NGEyIDIgMCAwIDEtMiAySDVhMiAyIDAgMCAxLTItMnYtNCIvPjxwb2x5bGluZSBwb2ludHM9IjcgMTAgMTIgMTUgMTcgMTAiLz48bGluZSB4MT0iMTIiIHkxPSIxNSIgeDI9IjEyIiB5Mj0iMyIvPjwvc3ZnPg==',
   mimeType: 'image/svg+xml',
 };
-const JSON_SCHEMA_DRAFT_2020_12_URI =
-  'https://json-schema.org/draft/2020-12/schema';
 
 /* -------------------------------------------------------------------------------------------------
  * Tool response builders
@@ -396,25 +394,12 @@ export async function fetchUrlToolHandler(
 
 type FetchUrlToolHandler = ToolCallback<typeof fetchUrlInputSchema>;
 
-function withJsonSchema202012(
-  schema: Record<string, unknown>
-): Record<string, unknown> {
-  if (typeof schema['$schema'] === 'string') return schema;
-  return {
-    $schema: JSON_SCHEMA_DRAFT_2020_12_URI,
-    ...schema,
-  };
-}
-
 const TOOL_DEFINITION = {
   name: FETCH_URL_TOOL_NAME,
   title: 'Fetch URL',
   description: FETCH_URL_TOOL_DESCRIPTION,
   inputSchema: fetchUrlInputSchema,
-  // Explicitly mark JSON Schema dialect for MCP clients and static reviews.
-  outputSchema: withJsonSchema202012(
-    z.toJSONSchema(fetchUrlOutputSchema) as Record<string, unknown>
-  ),
+  outputSchema: z.toJSONSchema(fetchUrlOutputSchema) as Record<string, unknown>,
   handler: fetchUrlToolHandler,
   execution: {
     taskSupport: 'optional',
