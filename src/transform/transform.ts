@@ -5,13 +5,15 @@ import { performance } from 'node:perf_hooks';
 import { isProbablyReaderable, Readability } from '@mozilla/readability';
 import { parseHTML } from 'linkedom';
 
-import { removeNoiseFromHtml } from '../lib/content.js';
 import {
   addSourceToMarkdown,
   buildMetadataFooter,
   cleanupMarkdownArtifacts,
   extractTitleFromRawMarkdown,
   isRawTextContent,
+  prepareDocumentForMarkdown,
+  removeNoiseFromHtml,
+  serializeDocumentForMarkdown,
 } from '../lib/content.js';
 import { config } from '../lib/core.js';
 import {
@@ -1249,14 +1251,22 @@ function buildContentSource(params: {
   }
 
   if (document) {
-    const cleanedHtml = skipNoiseRemoval
-      ? html
-      : removeNoiseFromHtml(html, document, url, signal);
+    if (skipNoiseRemoval) {
+      return {
+        ...base,
+        sourceHtml: html,
+        title: extractedMeta.title,
+        skipNoiseRemoval: true,
+        document,
+      };
+    }
+
+    prepareDocumentForMarkdown(document, url, signal);
 
     const contentRoot = findContentRoot(document);
     return {
       ...base,
-      sourceHtml: contentRoot ?? cleanedHtml,
+      sourceHtml: contentRoot ?? serializeDocumentForMarkdown(document, html),
       title: extractedMeta.title,
       skipNoiseRemoval: true,
       document,
@@ -1289,9 +1299,10 @@ function resolveContentSource(params: {
     ...(params.inputTruncated ? { inputTruncated: true } : {}),
   });
 
-  const useArticleContent = article
-    ? shouldUseArticleContent(article, document)
-    : false;
+  const useArticleContent =
+    !params.skipNoiseRemoval && article
+      ? shouldUseArticleContent(article, document)
+      : false;
 
   return buildContentSource({
     html: params.html,

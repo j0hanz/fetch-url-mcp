@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
+import { config } from '../dist/lib/core.js';
 import { extractContent } from '../dist/transform/transform.js';
 
 type MetadataCase = {
@@ -181,6 +182,32 @@ describe('extractContent', () => {
       result.metadata.favicon,
       'https://example.com/page/assets/icon.png'
     );
+  });
+
+  it('preserves favicon from early head metadata when truncation cuts it off later', () => {
+    const html = `
+      <html>
+        <head>
+          <title>Truncated Head</title>
+          ${' '.repeat(64)}
+          <link rel="icon" sizes="32x32" href="/icon-32.png" />
+        </head>
+        <body><p>Content</p></body>
+      </html>
+    `;
+    const originalMaxHtmlSize = config.constants.maxHtmlSize;
+    config.constants.maxHtmlSize = html.indexOf('<link rel="icon"');
+
+    try {
+      const result = extractContent(html, 'https://example.com', {
+        extractArticle: false,
+      });
+
+      assert.equal(result.metadata.title, 'Truncated Head');
+      assert.equal(result.metadata.favicon, 'https://example.com/icon-32.png');
+    } finally {
+      config.constants.maxHtmlSize = originalMaxHtmlSize;
+    }
   });
 
   it('returns undefined favicon when no 32x32 icon is present', () => {

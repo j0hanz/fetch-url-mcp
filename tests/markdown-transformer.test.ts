@@ -227,6 +227,15 @@ describe('htmlToMarkdown code blocks', () => {
 });
 
 describe('htmlToMarkdown image alt text', () => {
+  it('does not emit placeholder URLs for data URI-only images', () => {
+    const html =
+      '<img alt="Inline Diagram" src="data:image/gif;base64,R0lGODlh" />';
+    const markdown = htmlToMarkdown(html);
+
+    assert.ok(!markdown.includes('[data URI removed]'));
+    assert.ok(markdown.includes('Inline Diagram'));
+  });
+
   it('derives alt text from filename when alt is missing', () => {
     const html = '<img src="https://example.com/images/my-diagram.png" />';
     const markdown = htmlToMarkdown(html);

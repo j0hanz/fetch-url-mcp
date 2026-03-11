@@ -528,7 +528,10 @@ function resolveUrls(document: Document, baseUrlStr: string): void {
     else if (tag === 'source') processUrlElement(el, 'srcset', base, true);
   }
 }
-function serialize(document: Document, fallback: string): string {
+export function serializeDocumentForMarkdown(
+  document: Document,
+  fallback: string
+): string {
   const bodyHtml = document.body.innerHTML;
   if (bodyHtml.trim().length > MIN_BODY_CONTENT_LENGTH) return bodyHtml;
 
@@ -547,6 +550,23 @@ function mayContainNoise(html: string): boolean {
       : `${html.substring(0, NOISE_SCAN_LIMIT)}\n${html.substring(html.length - NOISE_SCAN_LIMIT)}`;
   return NOISE_PATTERNS.some((re) => re.test(sample));
 }
+export function prepareDocumentForMarkdown(
+  document: Document,
+  baseUrl?: string,
+  signal?: AbortSignal
+): void {
+  const context = getContext();
+
+  if (config.noiseRemoval.debug) {
+    logDebug('Noise removal audit enabled', {
+      categories: [...(context.flags.navFooter ? ['nav-footer'] : [])],
+    });
+  }
+
+  stripNoise(document, context, signal);
+
+  if (baseUrl) resolveUrls(document, baseUrl);
+}
 export function removeNoiseFromHtml(
   html: string,
   document?: Document,
@@ -560,21 +580,9 @@ export function removeNoiseFromHtml(
   if (!shouldParse) return html;
 
   try {
-    const context = getContext();
-
-    if (config.noiseRemoval.debug) {
-      logDebug('Noise removal audit enabled', {
-        categories: [...(context.flags.navFooter ? ['nav-footer'] : [])],
-      });
-    }
-
     const doc = document ?? parseHTML(html).document;
-
-    stripNoise(doc, context, signal);
-
-    if (baseUrl) resolveUrls(doc, baseUrl);
-
-    return serialize(doc, html);
+    prepareDocumentForMarkdown(doc, baseUrl, signal);
+    return serializeDocumentForMarkdown(doc, html);
   } catch {
     return html;
   }

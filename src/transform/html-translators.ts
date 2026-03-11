@@ -197,8 +197,8 @@ function resolveImageSrc(
     if (url) return url;
   }
 
-  // If the only available src is a data URI, we choose to omit it rather than include the raw data in the alt text or URL, as data URIs can be very long and are not useful in Markdown output.
-  if (isDataUri(srcRaw)) return '[data URI removed]';
+  // If the only available src is a data URI, omit the image URL entirely.
+  if (isDataUri(srcRaw)) return '';
 
   return '';
 }
@@ -247,8 +247,11 @@ function buildImageTranslator(ctx: unknown): TranslatorConfig {
     : undefined;
 
   const src = resolveImageSrc(getAttribute);
-
   const existingAlt = getAttribute?.('alt') ?? '';
+  if (!src) {
+    return { content: existingAlt.trim() };
+  }
+
   const alt = existingAlt.trim() || deriveAltFromImageUrl(src);
 
   const markdown = `![${alt}](${src})`;

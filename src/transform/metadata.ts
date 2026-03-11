@@ -218,6 +218,7 @@ export function mergeMetadata(
     'description',
     'author',
     'image',
+    'favicon',
     'publishedAt',
     'modifiedAt',
   ] as const;

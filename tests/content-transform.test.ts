@@ -284,6 +284,32 @@ describe('transformHtmlToMarkdown raw content detection', () => {
 });
 
 describe('transformHtmlToMarkdown favicon rendering', () => {
+  it('preserves nav and footer when skipNoiseRemoval is enabled', async () => {
+    const html = `
+      <html>
+        <body>
+          <nav>Primary Navigation</nav>
+          <main>
+            <h1>Example Page</h1>
+            <p>${'Long body content '.repeat(20)}</p>
+          </main>
+          <footer>Footer Links</footer>
+        </body>
+      </html>
+    `;
+
+    const result = await withWorkerPoolDisabled(() =>
+      transformHtmlToMarkdown(html, 'https://example.com', {
+        includeMetadata: false,
+        skipNoiseRemoval: true,
+      })
+    );
+
+    assert.ok(result.markdown.includes('Primary Navigation'));
+    assert.ok(result.markdown.includes('Footer Links'));
+    assert.ok(result.markdown.includes('Example Page'));
+  });
+
   it('renders 32x32 favicon before title when declared', async () => {
     const html = `
       <html>
