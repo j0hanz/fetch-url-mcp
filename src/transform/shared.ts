@@ -31,7 +31,6 @@ function isTransformMessage(
     htmlBuffer,
     encoding,
     includeMetadata,
-    skipNoiseRemoval,
     inputTruncated,
   } = value;
 
@@ -42,7 +41,6 @@ function isTransformMessage(
     (html === undefined || typeof html === 'string') &&
     (htmlBuffer === undefined || htmlBuffer instanceof Uint8Array) &&
     (encoding === undefined || typeof encoding === 'string') &&
-    (skipNoiseRemoval === undefined || typeof skipNoiseRemoval === 'boolean') &&
     (inputTruncated === undefined || typeof inputTruncated === 'boolean')
   );
 }
@@ -145,7 +143,6 @@ export function createTransformMessageHandler(
       htmlBuffer,
       encoding,
       includeMetadata,
-      skipNoiseRemoval,
       inputTruncated,
     } = message;
 
@@ -183,7 +180,6 @@ export function createTransformMessageHandler(
       const result = runTransform(content, url, {
         includeMetadata,
         signal: controller.signal,
-        ...(skipNoiseRemoval ? { skipNoiseRemoval: true } : {}),
         ...(inputTruncated ? { inputTruncated: true } : {}),
       });
 

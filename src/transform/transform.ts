@@ -1204,7 +1204,6 @@ function buildContentSource(params: {
   useArticleContent: boolean;
   document?: Document;
   truncated: boolean;
-  skipNoiseRemoval?: boolean;
   signal?: AbortSignal;
 }): ContentSource {
   const {
@@ -1216,7 +1215,6 @@ function buildContentSource(params: {
     useArticleContent,
     document,
     truncated,
-    skipNoiseRemoval,
     signal,
   } = params;
 
@@ -1239,9 +1237,12 @@ function buildContentSource(params: {
   };
 
   if (useArticleContent && article) {
-    const cleanedArticleHtml = skipNoiseRemoval
-      ? article.content
-      : removeNoiseFromHtml(article.content, undefined, url, signal);
+    const cleanedArticleHtml = removeNoiseFromHtml(
+      article.content,
+      undefined,
+      url,
+      signal
+    );
     return {
       ...base,
       sourceHtml: cleanedArticleHtml,
@@ -1251,16 +1252,6 @@ function buildContentSource(params: {
   }
 
   if (document) {
-    if (skipNoiseRemoval) {
-      return {
-        ...base,
-        sourceHtml: html,
-        title: extractedMeta.title,
-        skipNoiseRemoval: true,
-        document,
-      };
-    }
-
     prepareDocumentForMarkdown(document, url, signal);
 
     const contentRoot = findContentRoot(document);
@@ -1285,7 +1276,6 @@ function resolveContentSource(params: {
   url: string;
   includeMetadata: boolean;
   signal?: AbortSignal;
-  skipNoiseRemoval?: boolean;
   inputTruncated?: boolean;
 }): ContentSource {
   const {
@@ -1299,10 +1289,9 @@ function resolveContentSource(params: {
     ...(params.inputTruncated ? { inputTruncated: true } : {}),
   });
 
-  const useArticleContent =
-    !params.skipNoiseRemoval && article
-      ? shouldUseArticleContent(article, document)
-      : false;
+  const useArticleContent = article
+    ? shouldUseArticleContent(article, document)
+    : false;
 
   return buildContentSource({
     html: params.html,
@@ -1313,7 +1302,6 @@ function resolveContentSource(params: {
     useArticleContent,
     document,
     truncated: truncated ?? false,
-    ...(params.skipNoiseRemoval ? { skipNoiseRemoval: true } : {}),
     ...(params.signal ? { signal: params.signal } : {}),
   });
 }
@@ -1415,7 +1403,6 @@ export function transformHtmlToMarkdownInProcess(
         url,
         includeMetadata: options.includeMetadata,
         ...(signal ? { signal } : {}),
-        ...(options.skipNoiseRemoval ? { skipNoiseRemoval: true } : {}),
         ...(options.inputTruncated ? { inputTruncated: true } : {}),
       })
     );
@@ -1471,13 +1458,11 @@ function endTotalTransformStage(
 function buildWorkerTransformOptions(options: TransformOptions): {
   includeMetadata: boolean;
   signal?: AbortSignal;
-  skipNoiseRemoval?: boolean;
   inputTruncated?: boolean;
 } {
   return {
     includeMetadata: options.includeMetadata,
     ...(options.signal ? { signal: options.signal } : {}),
-    ...(options.skipNoiseRemoval ? { skipNoiseRemoval: true } : {}),
     ...(options.inputTruncated ? { inputTruncated: true } : {}),
   };
 }

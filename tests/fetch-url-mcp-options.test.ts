@@ -4,6 +4,7 @@ import { after, describe, it } from 'node:test';
 import * as cache from '../dist/lib/core.js';
 import { config } from '../dist/lib/core.js';
 import { normalizeUrl } from '../dist/lib/http.js';
+import { fetchUrlInputSchema } from '../dist/schemas.js';
 import { createMcpServer } from '../dist/server.js';
 import { fetchUrlToolHandler } from '../dist/tools/fetch-url.js';
 import { shutdownTransformWorkerPool } from '../dist/transform/transform.js';
@@ -129,111 +130,6 @@ describe('fetch-url MCP validation and options', () => {
     }
   });
 
-  it('uses cache variance for skipNoiseRemoval and preserves nav/footer content', async (t) => {
-    const originalCacheEnabled = config.cache.enabled;
-    config.cache.enabled = true;
-
-    const url = 'https://example.com/skip-noise-removal';
-    let fetchCount = 0;
-    const html = `
-      <html>
-        <body>
-          <nav>Primary Navigation</nav>
-          <main>
-            <h1>Example Page</h1>
-            <p>${'Long body content '.repeat(20)}</p>
-          </main>
-          <footer>Footer Links</footer>
-        </body>
-      </html>
-    `;
-
-    try {
-      t.mock.method(globalThis, 'fetch', async () => {
-        fetchCount += 1;
-        return new Response(html, {
-          status: 200,
-          headers: { 'content-type': 'text/html' },
-        });
-      });
-
-      const defaultResponse = await fetchUrlToolHandler({ url });
-      const preservedResponse = await fetchUrlToolHandler({
-        url,
-        skipNoiseRemoval: true,
-      });
-      const preservedCached = await fetchUrlToolHandler({
-        url,
-        skipNoiseRemoval: true,
-      });
-
-      assert.equal(fetchCount, 2);
-      assert.equal(defaultResponse.structuredContent?.fromCache, false);
-      assert.equal(preservedResponse.structuredContent?.fromCache, false);
-      assert.equal(preservedCached.structuredContent?.fromCache, true);
-      assert.equal(
-        String(defaultResponse.structuredContent?.markdown).includes(
-          'Primary Navigation'
-        ),
-        false
-      );
-      assert.equal(
-        String(defaultResponse.structuredContent?.markdown).includes(
-          'Footer Links'
-        ),
-        false
-      );
-      assert.match(
-        String(preservedResponse.structuredContent?.markdown),
-        /Primary Navigation/
-      );
-      assert.match(
-        String(preservedResponse.structuredContent?.markdown),
-        /Footer Links/
-      );
-    } finally {
-      config.cache.enabled = originalCacheEnabled;
-    }
-  });
-
-  it('applies request maxInlineChars below the global limit and flags truncation', async (t) => {
-    const originalCacheEnabled = config.cache.enabled;
-    const originalInlineLimit = config.constants.maxInlineContentChars;
-    config.cache.enabled = false;
-    config.constants.maxInlineContentChars = 500;
-
-    const url = 'https://example.com/max-inline-chars';
-    const largeParagraph = 'a'.repeat(400);
-
-    try {
-      t.mock.method(globalThis, 'fetch', async () => {
-        return new Response(
-          `<html><body><p>${largeParagraph}</p></body></html>`,
-          {
-            status: 200,
-            headers: { 'content-type': 'text/html' },
-          }
-        );
-      });
-
-      const response = await fetchUrlToolHandler({
-        url,
-        maxInlineChars: 120,
-      });
-
-      const structured = response.structuredContent;
-      assert.ok(structured);
-      assert.equal(structured.truncated, true);
-      assert.equal(typeof structured.contentSize, 'number');
-      assert.ok((structured.contentSize as number) > 120);
-      assert.ok(String(structured.markdown).length <= 120);
-      assert.ok(String(structured.markdown).includes('[truncated]'));
-    } finally {
-      config.cache.enabled = originalCacheEnabled;
-      config.constants.maxInlineContentChars = originalInlineLimit;
-    }
-  });
-
   it('keeps the cache key stable for identical default requests', async (t) => {
     const originalCacheEnabled = config.cache.enabled;
     config.cache.enabled = true;
@@ -260,5 +156,23 @@ describe('fetch-url MCP validation and options', () => {
     } finally {
       config.cache.enabled = originalCacheEnabled;
     }
+  });
+});
+
+describe('fetchUrlInputSchema strictness', () => {
+  it('rejects removed skipNoiseRemoval parameter', () => {
+    const result = fetchUrlInputSchema.safeParse({
+      url: 'https://example.com',
+      skipNoiseRemoval: true,
+    });
+    assert.equal(result.success, false);
+  });
+
+  it('rejects removed maxInlineChars parameter', () => {
+    const result = fetchUrlInputSchema.safeParse({
+      url: 'https://example.com',
+      maxInlineChars: 100,
+    });
+    assert.equal(result.success, false);
   });
 });

@@ -68,7 +68,6 @@ export interface MarkdownTransformResult extends MarkdownPayload {
 export interface TransformOptions {
   includeMetadata: boolean;
   signal?: AbortSignal;
-  skipNoiseRemoval?: boolean;
   inputTruncated?: boolean;
 }
 
@@ -108,7 +107,6 @@ export interface TransformWorkerTransformMessage {
   encoding?: string | undefined;
   url: string;
   includeMetadata: boolean;
-  skipNoiseRemoval?: boolean | undefined;
   inputTruncated?: boolean | undefined;
 }
 

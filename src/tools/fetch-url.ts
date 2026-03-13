@@ -293,16 +293,12 @@ function buildFetchOptions(
   context: string,
   signal: AbortSignal | undefined,
   progress: ProgressReporter | undefined,
-  skipNoiseRemoval?: boolean,
-  forceRefresh?: boolean,
-  maxInlineChars?: number
+  forceRefresh?: boolean
 ): Parameters<typeof performSharedFetch>[0] {
   return {
     url,
     ...withSignal(signal),
-    ...(skipNoiseRemoval ? { cacheVary: { skipNoiseRemoval: true } } : {}),
     ...(forceRefresh ? { forceRefresh: true } : {}),
-    ...(maxInlineChars !== undefined ? { maxInlineChars } : {}),
     onStage: (stage) => {
       const update = mapFetchStageToProgress(stage, context);
       reportProgress(progress, update.step, update.message);
@@ -311,8 +307,7 @@ function buildFetchOptions(
       return markdownTransform(
         { buffer, encoding, ...(truncated ? { truncated } : {}) },
         normalizedUrl,
-        signal,
-        skipNoiseRemoval
+        signal
       );
     },
     serialize: serializeMarkdownResult,
@@ -325,23 +320,13 @@ async function fetchPipeline(
   context: string,
   signal?: AbortSignal,
   progress?: ProgressReporter,
-  skipNoiseRemoval?: boolean,
-  forceRefresh?: boolean,
-  maxInlineChars?: number
+  forceRefresh?: boolean
 ): Promise<{
   pipeline: PipelineResult<MarkdownPipelineResult>;
   inlineResult: InlineContentResult;
 }> {
   return performSharedFetch(
-    buildFetchOptions(
-      url,
-      context,
-      signal,
-      progress,
-      skipNoiseRemoval,
-      forceRefresh,
-      maxInlineChars
-    )
+    buildFetchOptions(url, context, signal, progress, forceRefresh)
   );
 }
 
@@ -378,9 +363,7 @@ async function executeFetch(
       context,
       signal,
       progress,
-      input.skipNoiseRemoval,
-      input.forceRefresh,
-      input.maxInlineChars
+      input.forceRefresh
     );
 
     const size = formatContentSize(inlineResult.contentSize);

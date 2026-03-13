@@ -157,9 +157,9 @@ export function appendTruncationMarker(
   return `${contentWithFence}${marker}`;
 }
 class InlineContentLimiter {
-  apply(content: string, inlineLimitOverride?: number): InlineContentResult {
+  apply(content: string): InlineContentResult {
     const contentSize = content.length;
-    const inlineLimit = this.resolveInlineLimit(inlineLimitOverride);
+    const inlineLimit = config.constants.maxInlineContentChars;
 
     if (isWithinInlineLimit(contentSize, inlineLimit)) {
       return { content, contentSize };
@@ -177,17 +177,6 @@ class InlineContentLimiter {
       truncated: true,
     };
   }
-
-  private resolveInlineLimit(inlineLimitOverride?: number): number {
-    const globalLimit = config.constants.maxInlineContentChars;
-
-    if (inlineLimitOverride === undefined) return globalLimit;
-    if (globalLimit > 0 && inlineLimitOverride > 0) {
-      return Math.min(inlineLimitOverride, globalLimit);
-    }
-
-    return inlineLimitOverride;
-  }
 }
 function isWithinInlineLimit(
   contentSize: number,
@@ -196,11 +185,8 @@ function isWithinInlineLimit(
   return inlineLimit <= 0 || contentSize <= inlineLimit;
 }
 const inlineLimiter = new InlineContentLimiter();
-function applyInlineContentLimit(
-  content: string,
-  inlineLimitOverride?: number
-): InlineContentResult {
-  return inlineLimiter.apply(content, inlineLimitOverride);
+function applyInlineContentLimit(content: string): InlineContentResult {
+  return inlineLimiter.apply(content);
 }
 
 /* -------------------------------------------------------------------------------------------------
@@ -539,14 +525,12 @@ export function parseCachedMarkdownResult(
 export const markdownTransform = async (
   input: { buffer: Uint8Array; encoding: string; truncated?: boolean },
   url: string,
-  signal?: AbortSignal,
-  skipNoiseRemoval?: boolean
+  signal?: AbortSignal
 ): Promise<MarkdownPipelineResult> => {
   const result = await transformBufferToMarkdown(input.buffer, url, {
     includeMetadata: true,
     encoding: input.encoding,
     ...withSignal(signal),
-    ...(skipNoiseRemoval ? { skipNoiseRemoval: true } : {}),
     ...(input.truncated ? { inputTruncated: true } : {}),
   });
   const truncated = Boolean(result.truncated || input.truncated);
@@ -578,7 +562,6 @@ interface SharedFetchOptions {
   readonly signal?: AbortSignal;
   readonly cacheVary?: Record<string, unknown> | string;
   readonly forceRefresh?: boolean;
-  readonly maxInlineChars?: number;
   readonly onStage?: (stage: SharedFetchStage) => void;
   readonly transform: (
     input: { buffer: Uint8Array; encoding: string; truncated?: boolean },
@@ -618,10 +601,7 @@ export async function performSharedFetch(
   );
   options.onStage?.('prepare_output');
   options.onStage?.('finalize_output');
-  const inlineResult = applyInlineContentLimit(
-    pipeline.data.content,
-    options.maxInlineChars
-  );
+  const inlineResult = applyInlineContentLimit(pipeline.data.content);
 
   return { pipeline, inlineResult };
 }

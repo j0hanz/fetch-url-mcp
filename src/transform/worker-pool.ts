@@ -108,7 +108,6 @@ interface PendingTask {
   encoding?: string;
   url: string;
   includeMetadata: boolean;
-  skipNoiseRemoval?: boolean;
   inputTruncated?: boolean;
   signal: AbortSignal | undefined;
   abortListener: (() => void) | undefined;
@@ -139,7 +138,6 @@ function buildWorkerDispatchPayload(task: PendingTask): WorkerDispatchPayload {
     id: task.id,
     url: task.url,
     includeMetadata: task.includeMetadata,
-    ...(task.skipNoiseRemoval ? { skipNoiseRemoval: true } : {}),
     ...(task.inputTruncated ? { inputTruncated: true } : {}),
   };
 
@@ -183,7 +181,6 @@ interface TransformWorkerPool {
     options: {
       includeMetadata: boolean;
       signal?: AbortSignal;
-      skipNoiseRemoval?: boolean;
       inputTruncated?: boolean;
     }
   ): Promise<MarkdownTransformResult>;
@@ -249,7 +246,6 @@ class WorkerPool implements TransformWorkerPool {
     options: {
       includeMetadata: boolean;
       signal?: AbortSignal;
-      skipNoiseRemoval?: boolean;
       inputTruncated?: boolean;
     }
   ): Promise<MarkdownTransformResult>;
@@ -259,7 +255,6 @@ class WorkerPool implements TransformWorkerPool {
     options: {
       includeMetadata: boolean;
       signal?: AbortSignal;
-      skipNoiseRemoval?: boolean;
       inputTruncated?: boolean;
       encoding?: string;
     }
@@ -270,7 +265,6 @@ class WorkerPool implements TransformWorkerPool {
     options: {
       includeMetadata: boolean;
       signal?: AbortSignal;
-      skipNoiseRemoval?: boolean;
       inputTruncated?: boolean;
       encoding?: string;
     }
@@ -366,7 +360,6 @@ class WorkerPool implements TransformWorkerPool {
     options: {
       includeMetadata: boolean;
       signal?: AbortSignal;
-      skipNoiseRemoval?: boolean;
       inputTruncated?: boolean;
       encoding?: string;
     },
@@ -391,7 +384,6 @@ class WorkerPool implements TransformWorkerPool {
       id,
       url,
       includeMetadata: options.includeMetadata,
-      ...(options.skipNoiseRemoval ? { skipNoiseRemoval: true } : {}),
       ...(options.inputTruncated ? { inputTruncated: true } : {}),
       signal: options.signal,
       abortListener,

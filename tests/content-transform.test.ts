@@ -284,32 +284,6 @@ describe('transformHtmlToMarkdown raw content detection', () => {
 });
 
 describe('transformHtmlToMarkdown favicon rendering', () => {
-  it('preserves nav and footer when skipNoiseRemoval is enabled', async () => {
-    const html = `
-      <html>
-        <body>
-          <nav>Primary Navigation</nav>
-          <main>
-            <h1>Example Page</h1>
-            <p>${'Long body content '.repeat(20)}</p>
-          </main>
-          <footer>Footer Links</footer>
-        </body>
-      </html>
-    `;
-
-    const result = await withWorkerPoolDisabled(() =>
-      transformHtmlToMarkdown(html, 'https://example.com', {
-        includeMetadata: false,
-        skipNoiseRemoval: true,
-      })
-    );
-
-    assert.ok(result.markdown.includes('Primary Navigation'));
-    assert.ok(result.markdown.includes('Footer Links'));
-    assert.ok(result.markdown.includes('Example Page'));
-  });
-
   it('renders 32x32 favicon before title when declared', async () => {
     const html = `
       <html>
@@ -360,5 +334,38 @@ describe('transformHtmlToMarkdown favicon rendering', () => {
     assert.ok(result.markdown.includes('# '));
     assert.ok(result.markdown.includes('No Favicon Page'));
     assert.ok(!result.markdown.includes('<img'));
+  });
+});
+
+describe('transformHtmlToMarkdown mandatory noise removal', () => {
+  it('always strips nav and footer elements from output', async () => {
+    const html = `
+      <html>
+        <body>
+          <nav><ul><li>Menu link 1</li><li>Menu link 2</li></ul></nav>
+          <main><p>Main article content</p></main>
+          <footer><p>Site footer info</p></footer>
+        </body>
+      </html>
+    `;
+
+    const result = await withWorkerPoolDisabled(() =>
+      transformHtmlToMarkdown(html, 'https://example.com/noise-test', {
+        includeMetadata: false,
+      })
+    );
+
+    assert.ok(
+      result.markdown.includes('Main article content'),
+      'Main content should be preserved'
+    );
+    assert.ok(
+      !result.markdown.includes('Menu link 1'),
+      'Nav content should be stripped'
+    );
+    assert.ok(
+      !result.markdown.includes('Site footer info'),
+      'Footer content should be stripped'
+    );
   });
 });

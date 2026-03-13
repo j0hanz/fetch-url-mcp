@@ -21,8 +21,7 @@ export function buildServerInstructions(): string {
 <workflows>
 1. Standard: Call \`${FETCH_URL_TOOL_NAME}\` -> Read \`markdown\`. If \`truncated: true\`, retry with \`forceRefresh: true\`.
 2. Fresh: Set \`forceRefresh: true\` to bypass cache.
-3. Full-Fidelity: Set \`skipNoiseRemoval: true\` to preserve nav/footers.
-4. Async: Add \`task: { ttl: <ms> }\` to \`tools/call\` -> Poll \`tasks/get\` -> Call \`tasks/result\`.
+3. Async: Add \`task: { ttl: <ms> }\` to \`tools/call\` -> Poll \`tasks/get\` -> Call \`tasks/result\`.
 </workflows>
 
 <constraints>

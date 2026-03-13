@@ -161,3 +161,39 @@ End of example.
     }
   });
 });
+
+describe('Global-only inline truncation', () => {
+  it('applies global maxInlineContentChars without per-request override', async (t) => {
+    const originalInlineLimit = config.constants.maxInlineContentChars;
+    config.constants.maxInlineContentChars = 100;
+
+    const longContent = 'x'.repeat(200);
+
+    t.mock.method(
+      globalThis,
+      'fetch',
+      async (_url: RequestInfo | URL, _init?: RequestInit) => {
+        return new Response(longContent, {
+          status: 200,
+          headers: { 'content-type': 'text/plain' },
+        });
+      }
+    );
+
+    try {
+      const result = await fetchUrlToolHandler(
+        { url: 'https://example.com/global-limit.txt' },
+        {}
+      );
+
+      assert.ok(result.structuredContent, 'Should have structured content');
+      assert.equal(
+        result.structuredContent?.truncated,
+        true,
+        'Content exceeding global limit should be truncated'
+      );
+    } finally {
+      config.constants.maxInlineContentChars = originalInlineLimit;
+    }
+  });
+});
