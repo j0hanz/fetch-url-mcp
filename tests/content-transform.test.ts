@@ -335,6 +335,36 @@ describe('transformHtmlToMarkdown favicon rendering', () => {
     assert.ok(result.markdown.includes('No Favicon Page'));
     assert.ok(!result.markdown.includes('<img'));
   });
+
+  it('normalizes synthetic GitHub repository titles at the top of repo pages', async () => {
+    const html = `
+      <html>
+        <head>
+          <title>GitHub - owner/repo: Project description</title>
+        </head>
+        <body>
+          <article class="markdown-body entry-content container-lg" itemprop="text">
+            <div class="markdown-heading" dir="auto">
+              <h1 tabindex="-1" class="heading-element" dir="auto">Fetch URL MCP Server</h1>
+            </div>
+            <p><a href="https://example.com/badge"><img src="https://example.com/badge.svg" alt="badge" /></a></p>
+            <p>This project fetches content and converts it to markdown with enough body text to keep article extraction active for this regression fixture.</p>
+          </article>
+        </body>
+      </html>
+    `;
+
+    const result = await withWorkerPoolDisabled(() =>
+      transformHtmlToMarkdown(html, 'https://github.com/owner/repo', {
+        includeMetadata: false,
+      })
+    );
+
+    assert.ok(result.markdown.startsWith('# Fetch URL MCP Server\n\n'));
+    assert.ok(!result.markdown.includes('\n## Fetch URL MCP Server\n'));
+    assert.ok(!result.markdown.startsWith('# GitHub - owner/repo:'));
+    assert.equal(result.title, 'Fetch URL MCP Server');
+  });
 });
 
 describe('transformHtmlToMarkdown mandatory noise removal', () => {

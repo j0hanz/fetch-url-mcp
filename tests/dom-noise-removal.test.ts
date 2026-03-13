@@ -579,8 +579,9 @@ describe('Aside noise removal', () => {
   });
 
   it('removes navigation-heavy aside inside main (SPA sidebar)', () => {
-    const links = Array.from({ length: 20 }, (_, i) =>
-      `<a href="/page-${i}">Page ${i}</a>`
+    const links = Array.from(
+      { length: 20 },
+      (_, i) => `<a href="/page-${i}">Page ${i}</a>`
     ).join('');
     const html = `
       <html>

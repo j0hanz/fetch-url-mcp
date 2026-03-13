@@ -35,6 +35,7 @@ import {
   extractMetadata,
   extractMetadataFromHead,
   mergeMetadata,
+  normalizeDocumentTitle,
 } from './metadata.js';
 import type {
   ExtractedArticle,
@@ -1117,7 +1118,9 @@ export function createContentMetadataBlock(
   };
 
   if (shouldExtractFromArticle && article) {
-    if (article.title !== undefined) metadata.title = article.title;
+    if (article.title !== undefined) {
+      metadata.title = normalizeDocumentTitle(article.title, url);
+    }
     if (article.byline !== undefined) metadata.author = article.byline;
   } else {
     if (extractedMeta.title !== undefined) metadata.title = extractedMeta.title;
@@ -1133,6 +1136,7 @@ export function createContentMetadataBlock(
 interface ContentSource {
   readonly sourceHtml: string;
   readonly title: string | undefined;
+  readonly primaryHeading: string | undefined;
   readonly favicon: string | undefined;
   readonly metadata: ReturnType<typeof createContentMetadataBlock>;
   readonly extractedMetadata: ExtractedMetadata;
@@ -1158,6 +1162,13 @@ const CONTENT_ROOT_SELECTORS = [
   '.article-body',
 ] as const;
 
+const PRIMARY_HEADING_ROOT_SELECTORS = [
+  ...CONTENT_ROOT_SELECTORS,
+  '.markdown-body',
+  '.entry-content',
+  '[itemprop="text"]',
+] as const;
+
 function findContentRoot(document: Document): string | undefined {
   for (const selector of CONTENT_ROOT_SELECTORS) {
     const element = document.querySelector(selector);
@@ -1171,6 +1182,36 @@ function findContentRoot(document: Document): string | undefined {
     if (innerHTML && innerHTML.trim().length > 100) return innerHTML;
   }
   return undefined;
+}
+
+function findPrimaryHeading(document: Document): string | undefined {
+  for (const selector of PRIMARY_HEADING_ROOT_SELECTORS) {
+    const root = document.querySelector(selector);
+    if (!root) continue;
+
+    const heading = root.querySelector('h1, h2');
+    if (!heading) continue;
+    const text = heading.textContent.trim();
+    if (text) return text;
+  }
+
+  return undefined;
+}
+
+function isGithubRepositoryRootUrl(url: string): boolean {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return false;
+  }
+
+  const hostname = parsed.hostname.toLowerCase();
+  if (hostname !== 'github.com' && hostname !== 'www.github.com') {
+    return false;
+  }
+
+  return parsed.pathname.split('/').filter(Boolean).length === 2;
 }
 
 function shouldUseArticleContent(
@@ -1239,12 +1280,17 @@ function buildContentSource(params: {
 
   const base: Pick<
     ContentSource,
-    'favicon' | 'metadata' | 'extractedMetadata' | 'truncated'
+    | 'favicon'
+    | 'metadata'
+    | 'extractedMetadata'
+    | 'truncated'
+    | 'primaryHeading'
   > = {
     favicon: extractedMeta.favicon,
     metadata,
     extractedMetadata: extractedMeta,
     truncated,
+    primaryHeading: document ? findPrimaryHeading(document) : undefined,
   };
 
   if (useArticleContent && article) {
@@ -1252,10 +1298,15 @@ function buildContentSource(params: {
       `<!DOCTYPE html><html><body>${article.content}</body></html>`
     );
     prepareDocumentForMarkdown(articleDoc, url, signal);
+    const preferPrimaryHeading = isGithubRepositoryRootUrl(url);
     return {
       ...base,
       sourceHtml: articleDoc.body.innerHTML,
-      title: article.title,
+      title:
+        (preferPrimaryHeading ? base.primaryHeading : undefined) ??
+        (article.title !== undefined
+          ? normalizeDocumentTitle(article.title, url)
+          : undefined),
       skipNoiseRemoval: true,
     };
   }
@@ -1328,7 +1379,11 @@ function buildMarkdownFromContext(
       ...(context.skipNoiseRemoval ? { skipNoiseRemoval: true } : {}),
     })
   );
-  if (context.title && !content.trim().startsWith('# ')) {
+  if (context.primaryHeading && isGithubRepositoryRootUrl(url)) {
+    content = stripLeadingHeading(content, context.primaryHeading);
+  }
+
+  if (context.title && !/^(#{1,6})\s/.test(content.trimStart())) {
     const icon = context.favicon;
     let prefix = ' ';
     if (icon) {
@@ -1349,6 +1404,38 @@ function buildMarkdownFromContext(
     truncated: context.truncated,
     metadata: context.extractedMetadata,
   };
+}
+
+function normalizeHeadingText(value: string): string {
+  return value.replace(/\s+/g, ' ').trim().toLowerCase();
+}
+
+function stripLeadingHeading(markdown: string, headingText: string): string {
+  if (!markdown) return markdown;
+
+  const lines = markdown.split('\n');
+  const target = normalizeHeadingText(headingText);
+  let nonEmptySeen = 0;
+
+  for (let i = 0; i < lines.length && nonEmptySeen < 12; i += 1) {
+    const trimmed = lines[i]?.trim() ?? '';
+    if (!trimmed) continue;
+
+    nonEmptySeen += 1;
+    const match = /^(#{1,6})\s+(.+?)\s*$/.exec(trimmed);
+    if (!match) continue;
+
+    const current = normalizeHeadingText(match[2] ?? '');
+    if (current !== target) return markdown;
+
+    lines.splice(i, 1);
+    if ((lines[i] ?? '').trim() === '') {
+      lines.splice(i, 1);
+    }
+    return lines.join('\n');
+  }
+
+  return markdown;
 }
 
 const REPLACEMENT_CHAR = '\ufffd';

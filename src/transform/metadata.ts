@@ -36,6 +36,33 @@ interface MetaContext {
   modifiedAt?: string;
 }
 
+export function normalizeDocumentTitle(
+  title: string,
+  baseUrl?: string
+): string {
+  if (!baseUrl || !title.startsWith('GitHub - ')) return title;
+
+  let parsed: URL;
+  try {
+    parsed = new URL(baseUrl);
+  } catch {
+    return title;
+  }
+
+  const hostname = parsed.hostname.toLowerCase();
+  if (hostname !== 'github.com' && hostname !== 'www.github.com') {
+    return title;
+  }
+
+  const segments = parsed.pathname.split('/').filter(Boolean);
+  if (segments.length !== 2) return title;
+
+  const [owner, repo] = segments;
+  if (!owner || !repo) return title;
+
+  return `${owner}/${repo}`;
+}
+
 const META_PROPERTY_HANDLERS = new Map<
   string,
   (ctx: MetaContext, content: string) => void
@@ -175,6 +202,9 @@ export function extractMetadata(
 ): ExtractedMetadata {
   const ctx = buildMetaContext(document);
   const metadata = resolveMetadataFromContext(ctx);
+  if (metadata.title) {
+    metadata.title = normalizeDocumentTitle(metadata.title, baseUrl);
+  }
   if (baseUrl) {
     const icon32 = document.querySelector<HTMLLinkElement>(
       'link[rel="icon"][sizes="32x32"]'
