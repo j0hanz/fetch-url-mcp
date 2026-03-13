@@ -1237,15 +1237,13 @@ function buildContentSource(params: {
   };
 
   if (useArticleContent && article) {
-    const cleanedArticleHtml = removeNoiseFromHtml(
-      article.content,
-      undefined,
-      url,
-      signal
+    const { document: articleDoc } = parseHTML(
+      `<!DOCTYPE html><html><body>${article.content}</body></html>`
     );
+    prepareDocumentForMarkdown(articleDoc, url, signal);
     return {
       ...base,
-      sourceHtml: cleanedArticleHtml,
+      sourceHtml: articleDoc.body.innerHTML,
       title: article.title,
       skipNoiseRemoval: true,
     };

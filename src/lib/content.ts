@@ -8,6 +8,7 @@ const NOISE_SCAN_LIMIT = 50_000;
 const MIN_BODY_CONTENT_LENGTH = 100;
 const DIALOG_MIN_CHARS_FOR_PRESERVATION = 500;
 const NAV_FOOTER_MIN_CHARS_FOR_PRESERVATION = 500;
+const ABORT_CHECK_INTERVAL = 500;
 const HTML_DOCUMENT_MARKERS = /<\s*(?:!doctype|html|head|body)\b/i;
 const HTML_FRAGMENT_MARKERS =
   /<\s*(?:article|main|section|div|nav|footer|header|aside|table|ul|ol)\b/i;
@@ -34,6 +35,7 @@ const BASE_STRUCTURAL_TAGS = new Set([
   'style',
   'noscript',
   'iframe',
+  'template',
   'form',
   'button',
   'input',
@@ -80,6 +82,10 @@ const PROMO_TOKENS_ALWAYS = [
   'pagination',
   'pager',
   'taglist',
+  'twitter-tweet',
+  'fb-post',
+  'instagram-media',
+  'social-embed',
 ];
 const PROMO_TOKENS_AGGRESSIVE = ['ad', 'related', 'comment'];
 const PROMO_TOKENS_BY_CATEGORY = {
@@ -92,7 +98,7 @@ const BASE_NOISE_SELECTORS = {
     'nav,footer,header[class*="site"],header[class*="nav"],header[class*="menu"],[role="banner"],[role="navigation"]',
   cookieBanners: '[role="dialog"]',
   hidden:
-    '[style*="display: none"],[style*="display:none"],[hidden],[aria-hidden="true"]',
+    '[style*="display: none"],[style*="display:none"],[style*="visibility: hidden"],[style*="visibility:hidden"],[hidden],[aria-hidden="true"]',
 };
 const NO_MATCH_REGEX = /a^/i;
 type NoiseRemovalConfig = typeof config.noiseRemoval;
@@ -278,29 +284,23 @@ function removeNodes(nodes: ArrayLike<Element>): void {
     }
   }
 }
-function scoreNavFooter(
-  tagName: string,
-  role: string | null,
-  className: string,
-  id: string,
-  weights: NoiseWeights
-): number {
+function scoreNavFooter(meta: ElementMetadata, weights: NoiseWeights): number {
   let score = 0;
-  if (ALWAYS_NOISE_TAGS.has(tagName)) score += weights.structural;
+  if (ALWAYS_NOISE_TAGS.has(meta.tagName)) score += weights.structural;
 
   // Header Boilerplate
-  if (tagName === 'header') {
+  if (meta.tagName === 'header') {
     if (
-      (role && NAVIGATION_ROLES.has(role)) ||
-      HEADER_NOISE_PATTERN.test(`${className} ${id}`)
+      (meta.role && NAVIGATION_ROLES.has(meta.role)) ||
+      HEADER_NOISE_PATTERN.test(`${meta.className} ${meta.id}`)
     ) {
       score += weights.structural;
     }
   }
 
   // Role Noise
-  if (role && NAVIGATION_ROLES.has(role)) {
-    if (tagName !== 'aside' || role !== 'complementary') {
+  if (meta.role && NAVIGATION_ROLES.has(meta.role)) {
+    if (meta.tagName !== 'aside' || meta.role !== 'complementary') {
       score += weights.structural;
     }
   }
@@ -351,13 +351,7 @@ function isNoiseElement(element: Element, context: NoiseContext): boolean {
 
   // Nav/Footer Scoring
   if (context.flags.navFooter) {
-    score += scoreNavFooter(
-      meta.tagName,
-      meta.role,
-      meta.className,
-      meta.id,
-      weights
-    );
+    score += scoreNavFooter(meta, weights);
   }
 
   // Hidden
@@ -459,7 +453,7 @@ function stripNoise(
   // Candidates
   const candidates = document.querySelectorAll(context.candidateSelector);
   for (let i = candidates.length - 1; i >= 0; i--) {
-    if (i % 500 === 0 && signal?.aborted) {
+    if (i % ABORT_CHECK_INTERVAL === 0 && signal?.aborted) {
       throw new Error('Noise removal aborted');
     }
     const node = candidates[i];

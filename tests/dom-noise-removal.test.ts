@@ -330,3 +330,154 @@ describe('Noise scan limits', () => {
     );
   });
 });
+
+describe('Visibility hidden removal', () => {
+  it('removes elements with inline visibility:hidden', () => {
+    const html = `
+      <html>
+        <body>
+          <div style="visibility: hidden">
+            <p>Hidden content</p>
+          </div>
+          <main><p>Main content</p></main>
+        </body>
+      </html>
+    `;
+
+    const result = removeNoiseFromHtml(html, undefined, 'https://example.com');
+
+    assert.ok(
+      !result.includes('Hidden content'),
+      'visibility:hidden content should be removed'
+    );
+    assert.ok(
+      result.includes('Main content'),
+      'Main content should be preserved'
+    );
+  });
+
+  it('removes elements with visibility:hidden (no space)', () => {
+    const html = `
+      <html>
+        <body>
+          <div style="visibility:hidden">
+            <p>Hidden no space</p>
+          </div>
+          <main><p>Main content</p></main>
+        </body>
+      </html>
+    `;
+
+    const result = removeNoiseFromHtml(html, undefined, 'https://example.com');
+
+    assert.ok(
+      !result.includes('Hidden no space'),
+      'visibility:hidden (no space) content should be removed'
+    );
+  });
+});
+
+describe('Template element removal', () => {
+  it('removes template elements as structural noise', () => {
+    const html = `
+      <html>
+        <body>
+          <template id="my-template">
+            <div>Template content</div>
+          </template>
+          <main><p>Main content</p></main>
+        </body>
+      </html>
+    `;
+
+    const result = removeNoiseFromHtml(html, undefined, 'https://example.com');
+
+    assert.ok(
+      !result.includes('Template content'),
+      'Template content should be removed'
+    );
+    assert.ok(
+      result.includes('Main content'),
+      'Main content should be preserved'
+    );
+  });
+});
+
+describe('Header noise scoring', () => {
+  it('preserves header without noise indicators', () => {
+    const html = `
+      <html>
+        <body>
+          <header class="article-header">
+            <h1>Article Title</h1>
+            <p>Published on 2026-01-01</p>
+          </header>
+          <main><p>Main content</p></main>
+        </body>
+      </html>
+    `;
+
+    const result = removeNoiseFromHtml(html, undefined, 'https://example.com');
+
+    assert.ok(
+      result.includes('Article Title'),
+      'Header without noise patterns should be preserved'
+    );
+  });
+
+  it('removes boilerplate header with noise patterns', () => {
+    const html = `
+      <html>
+        <body>
+          <header class="site-header" role="navigation">
+            <nav>
+              <a href="/">Home</a>
+              <a href="/about">About</a>
+            </nav>
+          </header>
+          <main><p>Main content</p></main>
+        </body>
+      </html>
+    `;
+
+    const result = removeNoiseFromHtml(html, undefined, 'https://example.com');
+
+    assert.ok(
+      !result.includes('site-header'),
+      'Boilerplate header should be removed'
+    );
+    assert.ok(
+      result.includes('Main content'),
+      'Main content should be preserved'
+    );
+  });
+});
+
+describe('Social embed promo detection', () => {
+  it('promo tokens alone do not exceed threshold', () => {
+    const html = `
+      <html>
+        <body>
+          <main>
+            <p>Main content</p>
+          </main>
+          <div class="twitter-tweet">
+            <p>Embedded tweet</p>
+          </div>
+        </body>
+      </html>
+    `;
+
+    const result = removeNoiseFromHtml(html, undefined, 'https://example.com');
+
+    // Promo score (35) alone does not reach threshold (50)
+    assert.ok(
+      result.includes('Embedded tweet'),
+      'Promo-only element should be preserved (below threshold)'
+    );
+    assert.ok(
+      result.includes('Main content'),
+      'Main content should be preserved'
+    );
+  });
+});
