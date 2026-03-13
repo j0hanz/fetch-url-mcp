@@ -1264,7 +1264,7 @@ function applyGlobalRegexes(text: string, options?: CleanupOptions): string {
     .replace(REGEX.DOUBLE_NEWLINE_REDUCER, '\n\n');
 
   // Trim leading whitespace inside inline code spans
-  result = result.replace(/`\s+([^`]+)`/g, '`$1`');
+  result = result.replace(/(?<=\s|^)`\s+([^`]+)`/gm, '`$1`');
 
   // Unescape backticks inside markdown link text
   result = result.replace(
