@@ -1240,6 +1240,12 @@ function isGithubRepositoryRootUrl(url: string): boolean {
   return parsed.pathname.split('/').filter(Boolean).length === 2;
 }
 
+export const TransformHeuristics = {
+  findContentRoot,
+  findPrimaryHeading,
+  isGithubRepositoryRootUrl,
+} as const;
+
 function shouldUseArticleContent(
   article: ExtractedArticle,
   document: Document
@@ -1315,7 +1321,9 @@ function buildContentSource(params: {
     metadata,
     extractedMetadata: extractedMeta,
     truncated,
-    primaryHeading: document ? findPrimaryHeading(document) : undefined,
+    primaryHeading: document
+      ? TransformHeuristics.findPrimaryHeading(document)
+      : undefined,
   };
 
   if (useArticleContent && article) {
@@ -1323,7 +1331,8 @@ function buildContentSource(params: {
       `<!DOCTYPE html><html><body>${article.content}</body></html>`
     );
     prepareDocumentForMarkdown(articleDoc, url, signal);
-    const preferPrimaryHeading = isGithubRepositoryRootUrl(url);
+    const preferPrimaryHeading =
+      TransformHeuristics.isGithubRepositoryRootUrl(url);
     return {
       ...base,
       sourceHtml: articleDoc.body.innerHTML,
@@ -1339,7 +1348,7 @@ function buildContentSource(params: {
   if (document) {
     prepareDocumentForMarkdown(document, url, signal);
 
-    const contentRoot = findContentRoot(document);
+    const contentRoot = TransformHeuristics.findContentRoot(document);
     return {
       ...base,
       sourceHtml: contentRoot ?? serializeDocumentForMarkdown(document, html),
@@ -1404,7 +1413,10 @@ function buildMarkdownFromContext(
       ...(context.skipNoiseRemoval ? { skipNoiseRemoval: true } : {}),
     })
   );
-  if (context.primaryHeading && isGithubRepositoryRootUrl(url)) {
+  if (
+    context.primaryHeading &&
+    TransformHeuristics.isGithubRepositoryRootUrl(url)
+  ) {
     content = stripLeadingHeading(content, context.primaryHeading);
   }
 
@@ -1498,48 +1510,67 @@ export function transformHtmlToMarkdownInProcess(
 ): MarkdownTransformResult {
   const signal = buildTransformSignal(options.signal);
   const totalStage = stageTracker.start(url, 'transform:total');
-  let completed: MarkdownTransformResult | null = null;
 
   try {
     abortPolicy.throwIfAborted(signal, url, 'transform:begin');
-    if (hasBinaryIndicators(html)) {
-      throw new FetchError(
-        'Content appears to be binary data (high replacement character ratio or null bytes)',
-        url,
-        415,
-        { reason: 'binary_content_detected', stage: 'transform:validate' }
-      );
-    }
 
-    const raw = stageTracker.run(url, 'transform:raw', () =>
-      tryTransformRawContent({
-        html,
-        url,
-        includeMetadata: options.includeMetadata,
-        ...(options.inputTruncated ? { inputTruncated: true } : {}),
-      })
-    );
-    if (raw) {
-      completed = raw;
-      return raw;
-    }
+    _validateBinaryContent(html, url);
 
-    const context = stageTracker.run(url, 'transform:extract', () =>
-      resolveContentSource({
-        html,
-        url,
-        includeMetadata: options.includeMetadata,
-        ...(signal ? { signal } : {}),
-        ...(options.inputTruncated ? { inputTruncated: true } : {}),
-      })
-    );
+    const result =
+      _tryRawContentPipeline(html, url, options) ??
+      _tryHtmlContentPipeline(html, url, options, signal);
 
-    const result = buildMarkdownFromContext(context, url, signal);
-    completed = result;
+    stageTracker.end(totalStage, { truncated: result.truncated });
     return result;
-  } finally {
-    endTotalTransformStage(totalStage, completed);
+  } catch (error) {
+    stageTracker.end(totalStage);
+    throw error;
   }
+}
+
+function _validateBinaryContent(html: string, url: string): void {
+  if (hasBinaryIndicators(html)) {
+    throw new FetchError(
+      'Content appears to be binary data (high replacement character ratio or null bytes)',
+      url,
+      415,
+      { reason: 'binary_content_detected', stage: 'transform:validate' }
+    );
+  }
+}
+
+function _tryRawContentPipeline(
+  html: string,
+  url: string,
+  options: TransformOptions
+): MarkdownTransformResult | null {
+  return stageTracker.run(url, 'transform:raw', () =>
+    tryTransformRawContent({
+      html,
+      url,
+      includeMetadata: options.includeMetadata,
+      ...(options.inputTruncated ? { inputTruncated: true } : {}),
+    })
+  );
+}
+
+function _tryHtmlContentPipeline(
+  html: string,
+  url: string,
+  options: TransformOptions,
+  signal?: AbortSignal
+): MarkdownTransformResult {
+  const context = stageTracker.run(url, 'transform:extract', () =>
+    resolveContentSource({
+      html,
+      url,
+      includeMetadata: options.includeMetadata,
+      ...(signal ? { signal } : {}),
+      ...(options.inputTruncated ? { inputTruncated: true } : {}),
+    })
+  );
+
+  return buildMarkdownFromContext(context, url, signal);
 }
 
 interface TransformPoolStats {
@@ -1568,18 +1599,6 @@ function transformInputInProcess(
     url,
     options
   );
-}
-
-function endTotalTransformStage(
-  context: TransformStageContext | null,
-  result: MarkdownTransformResult | null
-): void {
-  if (!result) {
-    stageTracker.end(context);
-    return;
-  }
-
-  stageTracker.end(context, { truncated: result.truncated });
 }
 
 function buildWorkerTransformOptions(options: TransformOptions): {
@@ -1670,7 +1689,6 @@ async function transformInputToMarkdown(
   options: TransformExecutionOptions
 ): Promise<MarkdownTransformResult> {
   const totalStage = stageTracker.start(url, 'transform:total');
-  let completed: MarkdownTransformResult | null = null;
 
   try {
     abortPolicy.throwIfAborted(options.signal, url, 'transform:begin');
@@ -1679,10 +1697,11 @@ async function transformInputToMarkdown(
       url,
       options
     );
-    completed = result;
+    stageTracker.end(totalStage, { truncated: result.truncated });
     return result;
-  } finally {
-    endTotalTransformStage(totalStage, completed);
+  } catch (error) {
+    stageTracker.end(totalStage);
+    throw error;
   }
 }
 
