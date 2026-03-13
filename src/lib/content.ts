@@ -558,8 +558,18 @@ export function prepareDocumentForMarkdown(
   }
 
   stripNoise(document, context, signal);
+  flattenTableCellBreaks(document);
 
   if (baseUrl) resolveUrls(document, baseUrl);
+}
+function flattenTableCellBreaks(document: Document): void {
+  const cells = document.querySelectorAll('td, th');
+  for (const cell of cells) {
+    const brs = cell.querySelectorAll('br');
+    for (const br of brs) {
+      br.replaceWith(' ');
+    }
+  }
 }
 export function removeNoiseFromHtml(
   html: string,
@@ -1214,6 +1224,9 @@ function applyGlobalRegexes(text: string, options?: CleanupOptions): string {
   let result = text;
   const checkAbort = createAbortChecker(options);
 
+  // Normalize non-breaking spaces to regular spaces
+  result = result.replace(/\u00A0/g, ' ');
+
   checkAbort('markdown:cleanup:headings');
 
   // fixAndSpaceHeadings
@@ -1249,6 +1262,16 @@ function applyGlobalRegexes(text: string, options?: CleanupOptions): string {
     .replace(REGEX.SPACING_LIST_NUM_COMBINED, '$1\n\n$2')
     .replace(REGEX.PUNCT_ONLY_LIST_ARTIFACT, '')
     .replace(REGEX.DOUBLE_NEWLINE_REDUCER, '\n\n');
+
+  // Trim leading whitespace inside inline code spans
+  result = result.replace(/`\s+([^`]+)`/g, '`$1`');
+
+  // Unescape backticks inside markdown link text
+  result = result.replace(
+    /\[([^\]]*\\`[^\]]*)\]\(([^)]+)\)/g,
+    (_match: string, linkText: string, url: string) =>
+      `[${linkText.replace(/\\`/g, '`')}](${url})`
+  );
 
   result = normalizeNestedListIndentation(result);
 

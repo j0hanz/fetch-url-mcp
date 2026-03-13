@@ -384,6 +384,15 @@ function resolveCollapsedTextLengthUpTo(text: string, max: number): number {
   return length;
 }
 
+function preserveAlertElements(doc: Document): void {
+  const alerts = doc.querySelectorAll('[role="alert"], .admonition, .callout');
+  for (const el of alerts) {
+    const bq = doc.createElement('blockquote');
+    bq.innerHTML = (el as HTMLElement).innerHTML;
+    el.replaceWith(bq);
+  }
+}
+
 function extractArticle(
   document: unknown,
   url: string,
@@ -429,6 +438,8 @@ function extractArticle(
       typeof doc.cloneNode === 'function'
         ? (doc.cloneNode(true) as Document)
         : doc;
+
+    preserveAlertElements(readabilityDoc);
 
     // F1: Check abort before heavy Readability parse
     abortPolicy.throwIfAborted(signal, url, 'extract:article:parse');
