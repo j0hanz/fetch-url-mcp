@@ -341,6 +341,57 @@ function removeNodes(nodes: ArrayLike<Element>): void {
 const HIDDEN_STYLE_REGEX =
   /\b(?:display\s*:\s*none|visibility\s*:\s*hidden)\b/i;
 
+function calculateNavFooterScore(
+  tagName: string,
+  className: string,
+  id: string,
+  role: string | null,
+  weights: NoiseWeights
+): number {
+  let score = 0;
+  if (ALWAYS_NOISE_TAGS.has(tagName)) score += weights.structural;
+
+  if (tagName === 'header') {
+    if (
+      (role && NAVIGATION_ROLES.has(role)) ||
+      HEADER_NOISE_PATTERN.test(`${className} ${id}`)
+    ) {
+      score += weights.structural;
+    }
+  }
+
+  if (tagName === 'aside') {
+    score += weights.structural;
+  }
+
+  if (role && NAVIGATION_ROLES.has(role)) {
+    if (tagName !== 'aside' || role !== 'complementary') {
+      score += weights.structural;
+    }
+  }
+  return score;
+}
+
+function calculatePromoScore(
+  element: Element,
+  className: string,
+  id: string,
+  context: NoiseContext
+): number {
+  if (!context.promoEnabled) return 0;
+
+  const aggTest =
+    context.promoMatchers.aggressive.test(className) ||
+    context.promoMatchers.aggressive.test(id);
+  const isAggressiveMatch = aggTest && !isWithinPrimaryContent(element);
+  const isBaseMatch =
+    !aggTest &&
+    (context.promoMatchers.base.test(className) ||
+      context.promoMatchers.base.test(id));
+
+  return isAggressiveMatch || isBaseMatch ? context.weights.promo : 0;
+}
+
 function isNoiseElement(element: Element, context: NoiseContext): boolean {
   const tagName = element.tagName.toLowerCase();
   const className = element.getAttribute('class') ?? '';
@@ -363,26 +414,7 @@ function isNoiseElement(element: Element, context: NoiseContext): boolean {
 
   // Nav/Footer Scoring
   if (context.flags.navFooter) {
-    if (ALWAYS_NOISE_TAGS.has(tagName)) score += weights.structural;
-
-    if (tagName === 'header') {
-      if (
-        (role && NAVIGATION_ROLES.has(role)) ||
-        HEADER_NOISE_PATTERN.test(`${className} ${id}`)
-      ) {
-        score += weights.structural;
-      }
-    }
-
-    if (tagName === 'aside') {
-      score += weights.structural;
-    }
-
-    if (role && NAVIGATION_ROLES.has(role)) {
-      if (tagName !== 'aside' || role !== 'complementary') {
-        score += weights.structural;
-      }
-    }
+    score += calculateNavFooterScore(tagName, className, id, role, weights);
   }
 
   // Hidden
@@ -396,20 +428,7 @@ function isNoiseElement(element: Element, context: NoiseContext): boolean {
   }
 
   // Promo
-  if (context.promoEnabled) {
-    const aggTest =
-      context.promoMatchers.aggressive.test(className) ||
-      context.promoMatchers.aggressive.test(id);
-    const isAggressiveMatch = aggTest && !isWithinPrimaryContent(element);
-    const isBaseMatch =
-      !aggTest &&
-      (context.promoMatchers.base.test(className) ||
-        context.promoMatchers.base.test(id));
-
-    if (isAggressiveMatch || isBaseMatch) {
-      score += weights.promo;
-    }
-  }
+  score += calculatePromoScore(element, className, id, context);
 
   return score >= weights.threshold;
 }
@@ -463,21 +482,16 @@ function stripNoise(
 ): void {
   cleanHeadings(document);
 
-  // Remove Base & Extra
+  // Remove Base & Extra in one pass
   const { baseSelector, extraSelectors } = context;
+  const removals =
+    extraSelectors.length > 0
+      ? `${baseSelector},${extraSelectors.join(',')}`
+      : baseSelector;
 
-  // Base
-  const baseNodes = document.querySelectorAll(baseSelector);
-  removeNodes(baseNodes);
+  removeNodes(document.querySelectorAll(removals));
 
-  // Extra
-  if (extraSelectors.length > 0) {
-    const combinedExtra = extraSelectors.join(',');
-    const extraNodes = document.querySelectorAll(combinedExtra);
-    removeNodes(extraNodes);
-  }
-
-  // Candidates
+  // Candidates (conditional removal)
   const candidates = document.querySelectorAll(context.candidateSelector);
   for (let i = candidates.length - 1; i >= 0; i--) {
     if (i % ABORT_CHECK_INTERVAL === 0 && signal?.aborted) {
@@ -870,6 +884,14 @@ function matchSql(ctx: DetectionContext): boolean {
     ctx.lower
   );
 }
+function hasJsSignals(lowerCode: string): boolean {
+  return (
+    JS_SIGNAL_REGEX.test(lowerCode) ||
+    lowerCode.includes('{') ||
+    lowerCode.includes("from '")
+  );
+}
+
 function matchPython(ctx: DetectionContext): boolean {
   const l = ctx.lower;
   if (l.includes('print(') || l.includes('__name__')) return true;
@@ -884,12 +906,7 @@ function matchPython(ctx: DetectionContext): boolean {
   }
   if (PYTHON_UNIQUE_REGEX.test(l)) return true;
   // Shared keywords (import, from, class) — only match if no JS signals present
-  if (
-    /\b(?:import|from|class)\b/.test(l) &&
-    !JS_SIGNAL_REGEX.test(l) &&
-    !l.includes('{') &&
-    !l.includes("from '")
-  ) {
+  if (/\b(?:import|from|class)\b/.test(l) && !hasJsSignals(l)) {
     return true;
   }
   return false;
@@ -1357,6 +1374,13 @@ export function cleanupMarkdownArtifacts(
   const segments: string[] = [];
   let buffer: string[] = [];
 
+  const flushBuffer = (): void => {
+    if (buffer.length > 0) {
+      segments.push(processTextBuffer(buffer, options));
+      buffer = [];
+    }
+  };
+
   for (const line of lines) {
     const trimmed = line.trimStart();
 
@@ -1374,19 +1398,14 @@ export function cleanupMarkdownArtifacts(
       if (!newMarker) {
         buffer.push(line);
       } else {
-        if (buffer.length > 0) {
-          segments.push(processTextBuffer(buffer, options));
-          buffer = [];
-        }
+        flushBuffer();
         segments.push(line);
         fenceMarker = newMarker;
       }
     }
   }
 
-  if (buffer.length > 0) {
-    segments.push(processTextBuffer(buffer, options));
-  }
+  flushBuffer();
 
   return segments.join('\n').trim();
 }
