@@ -154,7 +154,7 @@ interface NoiseContext {
   readonly candidateSelector: string;
 }
 let cachedContext: NoiseContext | undefined;
-let lastConfigRef: NoiseRemovalConfig | undefined;
+let lastContextKey: string | undefined;
 
 // endregion
 
@@ -206,7 +206,16 @@ function getPromoMatchers(
 }
 function getContext(): NoiseContext {
   const currentConfig = config.noiseRemoval;
-  if (cachedContext !== undefined && lastConfigRef === currentConfig)
+  const contextKey = JSON.stringify({
+    locale: config.i18n.locale,
+    enabledCategories: currentConfig.enabledCategories,
+    extraTokens: currentConfig.extraTokens,
+    extraSelectors: currentConfig.extraSelectors,
+    aggressiveMode: currentConfig.aggressiveMode,
+    preserveSvgCanvas: currentConfig.preserveSvgCanvas,
+    weights: currentConfig.weights,
+  });
+  if (cachedContext !== undefined && lastContextKey === contextKey)
     return cachedContext;
 
   const enabled = new Set(
@@ -265,7 +274,7 @@ function getContext(): NoiseContext {
     baseSelector,
     candidateSelector,
   };
-  lastConfigRef = currentConfig;
+  lastContextKey = contextKey;
   return cachedContext;
 }
 function isInteractive(element: Element, role: string | null): boolean {
@@ -482,14 +491,13 @@ function stripNoise(
 ): void {
   cleanHeadings(document);
 
-  // Remove Base & Extra in one pass
+  // Structural Removal
   const { baseSelector, extraSelectors } = context;
-  const removals =
-    extraSelectors.length > 0
-      ? `${baseSelector},${extraSelectors.join(',')}`
-      : baseSelector;
+  removeNodes(document.querySelectorAll(baseSelector));
 
-  removeNodes(document.querySelectorAll(removals));
+  if (extraSelectors.length > 0) {
+    removeNodes(document.querySelectorAll(extraSelectors.join(',')));
+  }
 
   // Candidates (conditional removal)
   const candidates = document.querySelectorAll(context.candidateSelector);

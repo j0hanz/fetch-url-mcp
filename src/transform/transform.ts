@@ -90,6 +90,24 @@ interface StageBudget {
 
 const abortPolicy = { throwIfAborted, createAbortError };
 
+// ── Extraction Thresholds ──
+const MIN_SPA_CONTENT_LENGTH = 100;
+const MIN_READERABLE_TEXT_LENGTH = 400;
+const MAX_READABILITY_ELEMENTS = 20_000;
+
+// ── URL Resolution ──
+const ABORT_CHECK_LINE_INTERVAL = 500;
+const CR_CHAR_CODE = 13;
+
+// ── Content Source ──
+const MIN_CONTENT_ROOT_LENGTH = 100;
+const HEADING_SCAN_LIMIT = 12;
+
+// ── Binary Detection ──
+const BINARY_SAMPLE_SIZE = 2000;
+
+// ── Stage Tracking ──
+
 function buildTransformSignal(signal?: AbortSignal): AbortSignal | undefined {
   const { timeoutMs } = config.transform;
   if (timeoutMs <= 0) return signal;
@@ -241,6 +259,8 @@ export function endTransformStage(
   return stageTracker.end(context, options);
 }
 
+// ── HTML Truncation ──
+
 function getUtf8ByteLength(html: string): number {
   return Buffer.byteLength(html, 'utf8');
 }
@@ -343,6 +363,8 @@ function willTruncate(html: string): boolean {
   );
 }
 
+// ── Content Extraction (Readability) ──
+
 function isReadabilityCompatible(doc: unknown): doc is Document {
   if (!isObject(doc)) return false;
   const record = doc as Record<string, unknown>;
@@ -404,19 +426,25 @@ function extractArticle(
     return null;
   }
 
+  const checkAbort = (stage: string): void => {
+    abortPolicy.throwIfAborted(signal, url, stage);
+  };
+
   try {
     const doc = document;
 
-    // F1: Check abort before DOM text content extraction
-    abortPolicy.throwIfAborted(signal, url, 'extract:article:textCheck');
+    checkAbort('extract:article:textCheck');
 
     const rawText =
       doc.querySelector('body')?.textContent ??
       (doc.documentElement.textContent as string | null | undefined) ??
       '';
-    const textLength = resolveCollapsedTextLengthUpTo(rawText, 401);
+    const textLength = resolveCollapsedTextLengthUpTo(
+      rawText,
+      MIN_READERABLE_TEXT_LENGTH + 1
+    );
 
-    if (textLength < 100) {
+    if (textLength < MIN_SPA_CONTENT_LENGTH) {
       logWarn(
         'Very minimal server-rendered content detected (< 100 chars). ' +
           'This might be a client-side rendered (SPA) application. ' +
@@ -425,15 +453,16 @@ function extractArticle(
       );
     }
 
-    // F1: Check abort before isProbablyReaderable (DOM traversal)
-    abortPolicy.throwIfAborted(signal, url, 'extract:article:readabilityCheck');
+    checkAbort('extract:article:readabilityCheck');
 
-    if (textLength >= 400 && !isProbablyReaderable(doc)) {
+    if (
+      textLength >= MIN_READERABLE_TEXT_LENGTH &&
+      !isProbablyReaderable(doc)
+    ) {
       return null;
     }
 
-    // F1: Check abort before cloning document
-    abortPolicy.throwIfAborted(signal, url, 'extract:article:clone');
+    checkAbort('extract:article:clone');
 
     const readabilityDoc =
       typeof doc.cloneNode === 'function'
@@ -442,11 +471,10 @@ function extractArticle(
 
     preserveAlertElements(readabilityDoc);
 
-    // F1: Check abort before heavy Readability parse
-    abortPolicy.throwIfAborted(signal, url, 'extract:article:parse');
+    checkAbort('extract:article:parse');
 
     const reader = new Readability(readabilityDoc, {
-      maxElemsToParse: 20_000,
+      maxElemsToParse: MAX_READABILITY_ELEMENTS,
       classesToPreserve: [
         'admonition',
         'callout',
@@ -583,6 +611,8 @@ export function extractContent(
   return { article: result.article, metadata: result.metadata };
 }
 
+// ── Markdown URL Resolution ──
+
 function isWhitespaceChar(code: number): boolean {
   return code === 9 || code === 10 || code === 12 || code === 13 || code === 32;
 }
@@ -718,42 +748,36 @@ function resolveRelativeUrls(
   let output = '';
   let buffer = '';
   let fenceMarker: string | null = null;
-
-  const flushBuffer = (): void => {
-    if (!buffer) return;
-    output += resolveRelativeUrlsInSegment(buffer, baseUrl, origin);
-    buffer = '';
-  };
-
   const len = markdown.length;
   let lastIndex = 0;
-
   let lineCount = 0;
+
   while (lastIndex < len) {
-    if (++lineCount % 500 === 0) {
+    if (++lineCount % ABORT_CHECK_LINE_INTERVAL === 0) {
       abortPolicy.throwIfAborted(signal, baseUrl, 'markdown:resolve-urls');
     }
+
+    // Extract next line (handling CR+LF)
     let nextIndex = markdown.indexOf('\n', lastIndex);
-    let line: string;
-    let lineWithNewline: string;
+    const isLastLine = nextIndex === -1;
+    if (isLastLine) nextIndex = len;
 
-    if (nextIndex === -1) {
-      line = markdown.slice(lastIndex);
-      lineWithNewline = line;
-      nextIndex = len;
-    } else {
-      if (nextIndex > lastIndex && markdown.charCodeAt(nextIndex - 1) === 13) {
-        line = markdown.slice(lastIndex, nextIndex - 1);
-      } else {
-        line = markdown.slice(lastIndex, nextIndex);
-      }
-      lineWithNewline = markdown.slice(lastIndex, nextIndex + 1);
-      nextIndex++; // Skip \n
-    }
+    const lineWithNewline = isLastLine
+      ? markdown.slice(lastIndex)
+      : markdown.slice(lastIndex, nextIndex + 1);
 
-    const trimmed = line.trimStart();
+    const lineEnd =
+      !isLastLine &&
+      nextIndex > lastIndex &&
+      markdown.charCodeAt(nextIndex - 1) === CR_CHAR_CODE
+        ? nextIndex - 1
+        : isLastLine
+          ? len
+          : nextIndex;
+    const trimmed = markdown.slice(lastIndex, lineEnd).trimStart();
 
     if (fenceMarker) {
+      // Inside a code fence — pass through without URL resolution
       output += lineWithNewline;
       if (
         trimmed.startsWith(fenceMarker) &&
@@ -762,9 +786,15 @@ function resolveRelativeUrls(
         fenceMarker = null;
       }
     } else {
-      const fenceMatch = FENCE_LINE_PATTERN.exec(line);
+      const fenceMatch = FENCE_LINE_PATTERN.exec(
+        markdown.slice(lastIndex, lineEnd)
+      );
       if (fenceMatch?.[1]) {
-        flushBuffer();
+        // Entering a code fence — flush buffered content first
+        if (buffer) {
+          output += resolveRelativeUrlsInSegment(buffer, baseUrl, origin);
+          buffer = '';
+        }
         output += lineWithNewline;
         fenceMarker = fenceMatch[1];
       } else {
@@ -772,12 +802,16 @@ function resolveRelativeUrls(
       }
     }
 
-    lastIndex = nextIndex;
+    lastIndex = isLastLine ? len : nextIndex + 1;
   }
 
-  flushBuffer();
+  if (buffer) {
+    output += resolveRelativeUrlsInSegment(buffer, baseUrl, origin);
+  }
   return output;
 }
+
+// ── HTML-to-Markdown Conversion ──
 
 function translateHtmlToMarkdown(params: {
   html: string;
@@ -913,6 +947,8 @@ function tryTransformRawContent(params: {
   };
 }
 
+// ── Content Quality Heuristics ──
+
 const MIN_CONTENT_RATIO = 0.15;
 const MIN_HTML_LENGTH_FOR_GATE = 100;
 const MIN_HEADING_RETENTION_RATIO = 0.3;
@@ -949,27 +985,12 @@ function resolveHtmlDocument(htmlOrDocument: string | Document): Document {
   }
 }
 
-function countDomSelector(
-  htmlOrDocument: string | Document,
-  selector: string
-): number {
-  return resolveHtmlDocument(htmlOrDocument).querySelectorAll(selector).length;
-}
-
 function countTagsInString(html: string, regex: RegExp): number {
   let count = 0;
   while (regex.exec(html) !== null) {
     count++;
   }
   return count;
-}
-
-function countHeadingsDom(htmlOrDocument: string | Document): number {
-  return countDomSelector(htmlOrDocument, 'h1,h2,h3,h4,h5,h6');
-}
-
-function countCodeBlocksDom(htmlOrDocument: string | Document): number {
-  return countDomSelector(htmlOrDocument, 'pre');
 }
 
 function stripNonVisibleNodes(root: ParentNode): void {
@@ -1037,6 +1058,8 @@ export function isExtractionSufficient(
   return articleLength / originalLength >= MIN_CONTENT_RATIO;
 }
 
+// ── Sentence Truncation Heuristics ──
+
 // Heuristic to detect if the content was truncated due to length limits by checking for incomplete sentences.
 const SENTENCE_ENDING_CODES = new Set([46, 33, 63, 58, 59]);
 
@@ -1095,6 +1118,8 @@ function hasTruncatedSentences(text: string): boolean {
   if (linesFound < 3) return false;
   return incompleteFound / linesFound > MAX_TRUNCATED_LINE_RATIO;
 }
+
+// ── Content Source Resolution ──
 
 export function determineContentExtractionSource(
   article: ExtractedArticle | null
@@ -1179,7 +1204,8 @@ function findContentRoot(document: Document): string | undefined {
         ? (element as HTMLElement).innerHTML
         : undefined;
 
-    if (innerHTML && innerHTML.trim().length > 100) return innerHTML;
+    if (innerHTML && innerHTML.trim().length > MIN_CONTENT_ROOT_LENGTH)
+      return innerHTML;
   }
   return undefined;
 }
@@ -1216,28 +1242,27 @@ function isGithubRepositoryRootUrl(url: string): boolean {
 
 function shouldUseArticleContent(
   article: ExtractedArticle,
-  originalHtmlOrDocument: string | Document
+  document: Document
 ): boolean {
   const articleLength = article.textContent.length;
-  const originalLength = getVisibleTextLength(originalHtmlOrDocument);
+  const originalLength = getVisibleTextLength(document);
 
   if (originalLength >= MIN_HTML_LENGTH_FOR_GATE) {
     const ratio = articleLength / originalLength;
     if (ratio < MIN_CONTENT_RATIO) return false;
   }
 
-  const originalHeadings = countHeadingsDom(originalHtmlOrDocument);
+  const originalHeadings =
+    document.querySelectorAll('h1,h2,h3,h4,h5,h6').length;
   if (originalHeadings > 0) {
-    // Optimization: Use regex on article content string instead of parsing it to DOM
     const articleHeadings = countTagsInString(article.content, /<h[1-6]\b/gi);
     const retentionRatio = articleHeadings / originalHeadings;
 
     if (retentionRatio < MIN_HEADING_RETENTION_RATIO) return false;
   }
 
-  const originalCodeBlocks = countCodeBlocksDom(originalHtmlOrDocument);
+  const originalCodeBlocks = document.querySelectorAll('pre').length;
   if (originalCodeBlocks > 0) {
-    // Optimization: Use regex on article content string
     const articleCodeBlocks = countTagsInString(article.content, /<pre\b/gi);
     const codeRetentionRatio = articleCodeBlocks / originalCodeBlocks;
 
@@ -1417,7 +1442,11 @@ function stripLeadingHeading(markdown: string, headingText: string): string {
   const target = normalizeHeadingText(headingText);
   let nonEmptySeen = 0;
 
-  for (let i = 0; i < lines.length && nonEmptySeen < 12; i += 1) {
+  for (
+    let i = 0;
+    i < lines.length && nonEmptySeen < HEADING_SCAN_LIMIT;
+    i += 1
+  ) {
     const trimmed = lines[i]?.trim() ?? '';
     if (!trimmed) continue;
 
@@ -1446,7 +1475,7 @@ function hasBinaryIndicators(content: string): boolean {
 
   if (content.includes('\x00')) return true;
 
-  const sampleSize = Math.min(content.length, 2000);
+  const sampleSize = Math.min(content.length, BINARY_SAMPLE_SIZE);
   let replacementCount = 0;
   let i = -1;
 
@@ -1459,6 +1488,8 @@ function hasBinaryIndicators(content: string): boolean {
 
   return replacementCount > sampleSize * BINARY_INDICATOR_THRESHOLD;
 }
+
+// ── Worker Orchestration ──
 
 export function transformHtmlToMarkdownInProcess(
   html: string,

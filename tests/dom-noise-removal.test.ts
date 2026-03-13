@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 import { removeNoiseFromHtml } from '../dist/lib/content.js';
+import { config } from '../dist/lib/core.js';
 
 describe('Dialog preservation', () => {
   it('preserves dialogs with >500 chars text content', () => {
@@ -137,6 +138,44 @@ describe('Dialog preservation', () => {
       result.includes(longText),
       'Alertdialog content should be preserved'
     );
+  });
+});
+
+describe('Extra noise selectors', () => {
+  it('evaluates extra selectors after base noise removal', () => {
+    const originalExtraSelectors = config.noiseRemoval.extraSelectors;
+    config.noiseRemoval.extraSelectors = ['div:empty'];
+
+    try {
+      const mainText = 'Main content '.repeat(20);
+      const html = `
+        <html>
+          <body>
+            <div id="cleanup-target"><nav><a href="/home">Home</a></nav></div>
+            <main>
+              <p>${mainText}</p>
+            </main>
+          </body>
+        </html>
+      `;
+
+      const result = removeNoiseFromHtml(
+        html,
+        undefined,
+        'https://example.com'
+      );
+
+      assert.ok(
+        !result.includes('cleanup-target'),
+        'extra selectors should match against the DOM after base removals'
+      );
+      assert.ok(
+        result.includes(mainText.trim()),
+        'main content should remain after noise cleanup'
+      );
+    } finally {
+      config.noiseRemoval.extraSelectors = originalExtraSelectors;
+    }
   });
 });
 
