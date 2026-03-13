@@ -559,9 +559,26 @@ export function prepareDocumentForMarkdown(
 
   stripNoise(document, context, signal);
   flattenTableCellBreaks(document);
+  normalizeTableStructure(document);
 
   if (baseUrl) resolveUrls(document, baseUrl);
 }
+
+// Some sites put tbody/thead/tfoot inside td/th, which breaks markdown tables.
+function normalizeTableStructure(document: Document): void {
+  for (const table of document.querySelectorAll('table')) {
+    for (const cell of table.querySelectorAll('th, td')) {
+      for (const tag of ['tbody', 'thead', 'tfoot'] as const) {
+        let nested = cell.querySelector(tag);
+        while (nested) {
+          table.appendChild(nested);
+          nested = cell.querySelector(tag);
+        }
+      }
+    }
+  }
+}
+
 function flattenTableCellBreaks(document: Document): void {
   const cells = document.querySelectorAll('td, th');
   for (const cell of cells) {

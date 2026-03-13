@@ -415,14 +415,8 @@ function buildSpanTranslator(ctx: unknown): Record<string, unknown> {
 }
 
 // ---------------------------------------------------------------------------
-// Table / DL helpers
+// DL helpers
 // ---------------------------------------------------------------------------
-
-function hasComplexTableLayout(node: unknown): boolean {
-  if (!isLikeNode(node)) return false;
-  const innerHTML = typeof node.innerHTML === 'string' ? node.innerHTML : '';
-  return /(?:colspan|rowspan)=["']?[2-9]/i.test(innerHTML);
-}
 
 function resolveDlNodeName(child: unknown): string {
   if (!isLikeNode(child)) return '';
@@ -451,20 +445,6 @@ function createCustomTranslators(): TranslatorConfigObject {
   return {
     code: (ctx: unknown) => buildCodeTranslator(ctx),
     img: (ctx: unknown) => buildImageTranslator(ctx),
-    table: (ctx: unknown) => {
-      if (!isObject(ctx)) return {};
-      const { node } = ctx as { node?: unknown };
-      if (hasComplexTableLayout(node)) {
-        return {
-          postprocess: ({ content }: { content: string }) => {
-            const trimmed = content.trim();
-            if (!trimmed) return '';
-            return `\n\n${trimmed}\n\n`;
-          },
-        };
-      }
-      return {};
-    },
     dl: (ctx: unknown) => {
       if (!isObject(ctx)) return { content: '' };
       const { node } = ctx as { node?: unknown };
