@@ -234,8 +234,10 @@ function getContext(): NoiseContext {
 }
 function isInteractive(element: Element, role: string | null): boolean {
   if (role && INTERACTIVE_CONTENT_ROLES.has(role)) return true;
+  const tag = element.tagName.toLowerCase();
   const ds = element.getAttribute('data-state');
-  if (ds === 'inactive' || ds === 'closed') return true;
+  if ((ds === 'inactive' || ds === 'closed') && !BASE_STRUCTURAL_TAGS.has(tag))
+    return true;
   const dataOrientation = element.getAttribute('data-orientation');
   if (dataOrientation === 'horizontal' || dataOrientation === 'vertical')
     return true;
@@ -253,6 +255,16 @@ function isWithinPrimaryContent(element: Element): boolean {
     current = current.parentElement;
   }
   return false;
+}
+const ASIDE_NAV_LINK_DENSITY_THRESHOLD = 0.5;
+const ASIDE_NAV_MIN_LINKS = 10;
+function isNavigationAside(element: Element): boolean {
+  if (element.querySelector('nav')) return true;
+  const links = element.querySelectorAll('a[href]');
+  if (links.length < ASIDE_NAV_MIN_LINKS) return false;
+  const textLen = (element.textContent || '').trim().length;
+  if (textLen === 0) return true;
+  return links.length / (textLen / 100) >= ASIDE_NAV_LINK_DENSITY_THRESHOLD;
 }
 function shouldPreserve(element: Element, tagName: string): boolean {
   // Check Dialog
@@ -272,6 +284,12 @@ function shouldPreserve(element: Element, tagName: string): boolean {
       (element.textContent || '').trim().length >=
       NAV_FOOTER_MIN_CHARS_FOR_PRESERVATION
     );
+  }
+
+  // Check Aside — preserve only if it looks like article content, not navigation
+  if (tagName === 'aside') {
+    if (!isWithinPrimaryContent(element)) return false;
+    return !isNavigationAside(element);
   }
 
   return false;
@@ -296,6 +314,11 @@ function scoreNavFooter(meta: ElementMetadata, weights: NoiseWeights): number {
     ) {
       score += weights.structural;
     }
+  }
+
+  // Aside (sidebar/complementary) — noise unless inside primary content
+  if (meta.tagName === 'aside') {
+    score += weights.structural;
   }
 
   // Role Noise
@@ -544,6 +567,34 @@ function mayContainNoise(html: string): boolean {
       : `${html.substring(0, NOISE_SCAN_LIMIT)}\n${html.substring(html.length - NOISE_SCAN_LIMIT)}`;
   return NOISE_PATTERNS.some((re) => re.test(sample));
 }
+function stripTabTriggers(document: Document): void {
+  const tabs = document.querySelectorAll('button[role="tab"]');
+  for (let i = tabs.length - 1; i >= 0; i--) {
+    tabs[i]?.remove();
+  }
+}
+
+function escapeTableCellPipes(document: Document): void {
+  const codes = document.querySelectorAll('td code, th code');
+  for (const code of codes) {
+    if (code.textContent.includes('|')) {
+      code.textContent = code.textContent.replace(/\|/g, '\\|');
+    }
+  }
+}
+
+function separateAdjacentInlineElements(document: Document): void {
+  const badges = document.querySelectorAll(
+    'span.chakra-badge, [data-scope="badge"], [class*="badge"]'
+  );
+  for (const badge of badges) {
+    const next = badge.nextSibling;
+    if (next?.nodeType === 1) {
+      badge.after(document.createTextNode(' '));
+    }
+  }
+}
+
 export function prepareDocumentForMarkdown(
   document: Document,
   baseUrl?: string,
@@ -558,7 +609,10 @@ export function prepareDocumentForMarkdown(
   }
 
   stripNoise(document, context, signal);
+  stripTabTriggers(document);
+  separateAdjacentInlineElements(document);
   flattenTableCellBreaks(document);
+  escapeTableCellPipes(document);
   normalizeTableStructure(document);
 
   if (baseUrl) resolveUrls(document, baseUrl);

@@ -481,3 +481,282 @@ describe('Social embed promo detection', () => {
     );
   });
 });
+
+describe('Aside noise removal', () => {
+  it('removes sidebar aside outside primary content', () => {
+    const html = `
+      <html>
+        <body>
+          <aside class="sidebar">
+            <ul>
+              <li><a href="/docs">Docs</a></li>
+              <li><a href="/about">About</a></li>
+            </ul>
+          </aside>
+          <main>
+            <p>Main content</p>
+          </main>
+        </body>
+      </html>
+    `;
+
+    const result = removeNoiseFromHtml(html, undefined, 'https://example.com');
+
+    assert.ok(!result.includes('<aside'), 'Sidebar aside should be removed');
+    assert.ok(!result.includes('Docs'), 'Sidebar links should be removed');
+    assert.ok(
+      result.includes('Main content'),
+      'Main content should be preserved'
+    );
+  });
+
+  it('preserves aside inside main content', () => {
+    const html = `
+      <html>
+        <body>
+          <main>
+            <p>Main content</p>
+            <aside class="note">
+              <p>Important sidebar note relevant to the article.</p>
+            </aside>
+          </main>
+        </body>
+      </html>
+    `;
+
+    const result = removeNoiseFromHtml(html, undefined, 'https://example.com');
+
+    assert.ok(
+      result.includes('Important sidebar note'),
+      'Aside inside main should be preserved'
+    );
+    assert.ok(
+      result.includes('Main content'),
+      'Main content should be preserved'
+    );
+  });
+
+  it('preserves aside inside article', () => {
+    const html = `
+      <html>
+        <body>
+          <article>
+            <p>Article content</p>
+            <aside>
+              <p>Related info inside article.</p>
+            </aside>
+          </article>
+        </body>
+      </html>
+    `;
+
+    const result = removeNoiseFromHtml(html, undefined, 'https://example.com');
+
+    assert.ok(
+      result.includes('Related info inside article'),
+      'Aside inside article should be preserved'
+    );
+  });
+
+  it('removes aside with role=complementary outside primary content', () => {
+    const html = `
+      <html>
+        <body>
+          <aside role="complementary" class="sidebar-nav">
+            <nav><a href="/">Home</a></nav>
+          </aside>
+          <main><p>Main content</p></main>
+        </body>
+      </html>
+    `;
+
+    const result = removeNoiseFromHtml(html, undefined, 'https://example.com');
+
+    assert.ok(
+      !result.includes('sidebar-nav'),
+      'Complementary aside outside main should be removed'
+    );
+  });
+
+  it('removes navigation-heavy aside inside main (SPA sidebar)', () => {
+    const links = Array.from({ length: 20 }, (_, i) =>
+      `<a href="/page-${i}">Page ${i}</a>`
+    ).join('');
+    const html = `
+      <html>
+        <body>
+          <main>
+            <aside class="sidebar">${links}</aside>
+            <div><p>Main content</p></div>
+          </main>
+        </body>
+      </html>
+    `;
+
+    const result = removeNoiseFromHtml(html, undefined, 'https://example.com');
+
+    assert.ok(
+      !result.includes('Page 0'),
+      'Navigation-heavy aside inside main should be removed'
+    );
+    assert.ok(
+      result.includes('Main content'),
+      'Main content should be preserved'
+    );
+  });
+
+  it('removes aside containing nav element inside main', () => {
+    const html = `
+      <html>
+        <body>
+          <main>
+            <aside>
+              <nav><a href="/">Home</a><a href="/about">About</a></nav>
+            </aside>
+            <div><p>Main content</p></div>
+          </main>
+        </body>
+      </html>
+    `;
+
+    const result = removeNoiseFromHtml(html, undefined, 'https://example.com');
+
+    assert.ok(
+      !result.includes('Home'),
+      'Aside with nav inside main should be removed'
+    );
+  });
+});
+
+describe('Button data-state noise removal', () => {
+  it('removes button with data-state="closed" as structural noise', () => {
+    const html = `
+      <html>
+        <body>
+          <main>
+            <p>Main content</p>
+          </main>
+          <button data-state="closed">Scroll to top</button>
+        </body>
+      </html>
+    `;
+
+    const result = removeNoiseFromHtml(html, undefined, 'https://example.com');
+
+    assert.ok(
+      !result.includes('Scroll to top'),
+      'Closed button should be removed as structural noise'
+    );
+    assert.ok(
+      result.includes('Main content'),
+      'Main content should be preserved'
+    );
+  });
+
+  it('preserves div with data-state="closed" (non-structural)', () => {
+    const html = `
+      <html>
+        <body>
+          <main>
+            <p>Main content</p>
+            <div data-state="closed" data-accordion-item>
+              <p>Accordion content</p>
+            </div>
+          </main>
+        </body>
+      </html>
+    `;
+
+    const result = removeNoiseFromHtml(html, undefined, 'https://example.com');
+
+    assert.ok(
+      result.includes('Accordion content'),
+      'Non-structural data-state="closed" elements should be preserved'
+    );
+  });
+});
+
+describe('Tab trigger removal', () => {
+  it('removes button[role="tab"] elements from output', () => {
+    const html = `
+      <html>
+        <body>
+          <main>
+            <div role="tablist">
+              <button role="tab">Preview</button>
+              <button role="tab">Code</button>
+            </div>
+            <div role="tabpanel">
+              <p>Panel content</p>
+            </div>
+          </main>
+        </body>
+      </html>
+    `;
+
+    const result = removeNoiseFromHtml(html, undefined, 'https://example.com');
+
+    assert.ok(
+      !result.includes('Preview'),
+      'Tab trigger text should be removed'
+    );
+    assert.ok(!result.includes('Code'), 'Tab trigger text should be removed');
+    assert.ok(
+      result.includes('Panel content'),
+      'Tab panel content should be preserved'
+    );
+  });
+});
+
+describe('Table cell pipe escaping', () => {
+  it('escapes pipe characters inside code within table cells', () => {
+    const html = `
+      <html>
+        <body>
+          <main>
+            <table>
+              <tr>
+                <td>Type</td>
+                <td><code>'horizontal' | 'vertical'</code></td>
+              </tr>
+            </table>
+          </main>
+        </body>
+      </html>
+    `;
+
+    const result = removeNoiseFromHtml(html, undefined, 'https://example.com');
+
+    assert.ok(
+      !result.includes("'horizontal' | 'vertical'"),
+      'Unescaped pipes in table code should be escaped'
+    );
+    assert.ok(
+      result.includes('\\|') || result.includes('horizontal'),
+      'Escaped pipe or content should be present'
+    );
+  });
+});
+
+describe('Badge element separation', () => {
+  it('separates adjacent badge spans with whitespace', () => {
+    const html = `
+      <html>
+        <body>
+          <main>
+            <div>
+              <span class="chakra-badge">AI Tip</span><span>Want to skip</span>
+            </div>
+          </main>
+        </body>
+      </html>
+    `;
+
+    const result = removeNoiseFromHtml(html, undefined, 'https://example.com');
+
+    assert.ok(
+      !result.includes('AI TipWant'),
+      'Badge text should not concatenate with next element'
+    );
+  });
+});

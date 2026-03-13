@@ -40,7 +40,7 @@ describe('htmlToMarkdown noise filtering', () => {
     assert.ok(markdown.includes('ZISO'));
   });
 
-  it('preserves <aside> content including role="complementary"', () => {
+  it('removes <aside> outside primary content as noise', () => {
     const html = `
       <html>
         <body>
@@ -54,8 +54,14 @@ describe('htmlToMarkdown noise filtering', () => {
     const markdown = htmlToMarkdown(html);
 
     assert.ok(markdown.includes('Main content'));
-    assert.match(markdown, /ASIDE\\?_DEFAULT/);
-    assert.match(markdown, /ASIDE\\?_COMPLEMENTARY/);
+    assert.ok(
+      !markdown.includes('ASIDE_DEFAULT'),
+      'Aside outside primary content should be removed'
+    );
+    assert.ok(
+      !markdown.includes('ASIDE_COMPLEMENTARY'),
+      'Complementary aside outside primary content should be removed'
+    );
   });
 
   it('preserves callout content (not treated as promo noise)', () => {
