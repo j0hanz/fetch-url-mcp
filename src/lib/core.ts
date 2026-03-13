@@ -151,20 +151,16 @@ function parseBoolean(
   return envValue.trim().toLowerCase() !== 'false';
 }
 
-function parseList(envValue: string | undefined): string[] {
-  if (!envValue) return [];
-  return envValue
+function parseList(
+  envValue: string | undefined,
+  defaultValue?: readonly string[]
+): string[] {
+  if (!envValue) return defaultValue ? [...defaultValue] : [];
+  const parsed = envValue
     .split(/[\s,]+/)
     .map((entry) => entry.trim())
     .filter(Boolean);
-}
-
-function parseListOrDefault(
-  envValue: string | undefined,
-  defaultValue: readonly string[]
-): string[] {
-  const parsed = parseList(envValue);
-  return parsed.length > 0 ? parsed : [...defaultValue];
+  return parsed.length > 0 || !defaultValue ? parsed : [...defaultValue];
 }
 
 function normalizeLocale(value: string | undefined): string | undefined {
@@ -176,14 +172,10 @@ function normalizeLocale(value: string | undefined): string | undefined {
   return trimmed;
 }
 
-function isLogLevel(value: string): value is LogLevel {
-  return ALLOWED_LOG_LEVELS.has(value);
-}
-
 function parseLogLevel(envValue: string | undefined): LogLevel {
   if (!envValue) return 'info';
   const level = envValue.toLowerCase();
-  return isLogLevel(level) ? level : 'info';
+  return ALLOWED_LOG_LEVELS.has(level) ? (level as LogLevel) : 'info';
 }
 
 function parseTransformWorkerMode(
@@ -195,21 +187,12 @@ function parseTransformWorkerMode(
   return 'threads';
 }
 
-function parsePort(envValue: string | undefined): number {
-  if (envValue?.trim() === '0') return 0;
-  return parseInteger(envValue, 3000, 1024, 65535);
-}
-
 function parseUrlEnv(value: string | undefined, name: string): URL | undefined {
   if (!value) return undefined;
   if (!URL.canParse(value)) {
     throw new ConfigError(`Invalid ${name} value: ${value}`);
   }
   return new URL(value);
-}
-
-function readUrlEnv(name: string): URL | undefined {
-  return parseUrlEnv(env[name], name);
 }
 
 function parseAllowedHosts(envValue: string | undefined): Set<string> {
@@ -277,32 +260,37 @@ interface WorkerResourceLimits {
 }
 
 function resolveWorkerResourceLimits(): WorkerResourceLimits | undefined {
-  const limits: WorkerResourceLimits = {};
-  let hasAny = false;
+  const maxOldGenerationSizeMb = parseOptionalInteger(
+    env['TRANSFORM_WORKER_MAX_OLD_GENERATION_MB'],
+    1
+  );
+  const maxYoungGenerationSizeMb = parseOptionalInteger(
+    env['TRANSFORM_WORKER_MAX_YOUNG_GENERATION_MB'],
+    1
+  );
+  const codeRangeSizeMb = parseOptionalInteger(
+    env['TRANSFORM_WORKER_CODE_RANGE_MB'],
+    1
+  );
+  const stackSizeMb = parseOptionalInteger(env['TRANSFORM_WORKER_STACK_MB'], 1);
 
-  const entries: [keyof WorkerResourceLimits, number | undefined][] = [
-    [
-      'maxOldGenerationSizeMb',
-      parseOptionalInteger(env['TRANSFORM_WORKER_MAX_OLD_GENERATION_MB'], 1),
-    ],
-    [
-      'maxYoungGenerationSizeMb',
-      parseOptionalInteger(env['TRANSFORM_WORKER_MAX_YOUNG_GENERATION_MB'], 1),
-    ],
-    [
-      'codeRangeSizeMb',
-      parseOptionalInteger(env['TRANSFORM_WORKER_CODE_RANGE_MB'], 1),
-    ],
-    ['stackSizeMb', parseOptionalInteger(env['TRANSFORM_WORKER_STACK_MB'], 1)],
-  ];
-
-  for (const [key, value] of entries) {
-    if (value === undefined) continue;
-    limits[key] = value;
-    hasAny = true;
+  if (
+    maxOldGenerationSizeMb === undefined &&
+    maxYoungGenerationSizeMb === undefined &&
+    codeRangeSizeMb === undefined &&
+    stackSizeMb === undefined
+  ) {
+    return undefined;
   }
 
-  return hasAny ? limits : undefined;
+  const limits: WorkerResourceLimits = {};
+  if (maxOldGenerationSizeMb !== undefined)
+    limits.maxOldGenerationSizeMb = maxOldGenerationSizeMb;
+  if (maxYoungGenerationSizeMb !== undefined)
+    limits.maxYoungGenerationSizeMb = maxYoungGenerationSizeMb;
+  if (codeRangeSizeMb !== undefined) limits.codeRangeSizeMb = codeRangeSizeMb;
+  if (stackSizeMb !== undefined) limits.stackSizeMb = stackSizeMb;
+  return limits;
 }
 
 interface AuthConfig {
@@ -328,30 +316,38 @@ interface HttpsConfig {
   caFile: string | undefined;
 }
 
-interface OAuthUrls {
-  issuerUrl: URL | undefined;
-  authorizationUrl: URL | undefined;
-  tokenUrl: URL | undefined;
-  revocationUrl: URL | undefined;
-  registrationUrl: URL | undefined;
-  introspectionUrl: URL | undefined;
-  resourceUrl: URL;
-}
-
-type OAuthModeInputs = Pick<
-  OAuthUrls,
-  'issuerUrl' | 'authorizationUrl' | 'tokenUrl' | 'introspectionUrl'
->;
-function readOAuthUrls(baseUrl: URL): OAuthUrls {
-  const issuerUrl = readUrlEnv('OAUTH_ISSUER_URL');
-  const authorizationUrl = readUrlEnv('OAUTH_AUTHORIZATION_URL');
-  const tokenUrl = readUrlEnv('OAUTH_TOKEN_URL');
-  const revocationUrl = readUrlEnv('OAUTH_REVOCATION_URL');
-  const registrationUrl = readUrlEnv('OAUTH_REGISTRATION_URL');
-  const introspectionUrl = readUrlEnv('OAUTH_INTROSPECTION_URL');
+function buildAuthConfig(baseUrl: URL): AuthConfig {
+  const issuerUrl = parseUrlEnv(env['OAUTH_ISSUER_URL'], 'OAUTH_ISSUER_URL');
+  const authorizationUrl = parseUrlEnv(
+    env['OAUTH_AUTHORIZATION_URL'],
+    'OAUTH_AUTHORIZATION_URL'
+  );
+  const tokenUrl = parseUrlEnv(env['OAUTH_TOKEN_URL'], 'OAUTH_TOKEN_URL');
+  const revocationUrl = parseUrlEnv(
+    env['OAUTH_REVOCATION_URL'],
+    'OAUTH_REVOCATION_URL'
+  );
+  const registrationUrl = parseUrlEnv(
+    env['OAUTH_REGISTRATION_URL'],
+    'OAUTH_REGISTRATION_URL'
+  );
+  const introspectionUrl = parseUrlEnv(
+    env['OAUTH_INTROSPECTION_URL'],
+    'OAUTH_INTROSPECTION_URL'
+  );
   const resourceUrl = new URL('/mcp', baseUrl);
 
+  const oauthConfigured =
+    issuerUrl !== undefined ||
+    authorizationUrl !== undefined ||
+    tokenUrl !== undefined ||
+    introspectionUrl !== undefined;
+
+  const tokens = parseList(env['ACCESS_TOKENS']);
+  if (env['API_KEY']) tokens.push(env['API_KEY']);
+
   return {
+    mode: oauthConfigured ? 'oauth' : 'static',
     issuerUrl,
     authorizationUrl,
     tokenUrl,
@@ -359,38 +355,11 @@ function readOAuthUrls(baseUrl: URL): OAuthUrls {
     registrationUrl,
     introspectionUrl,
     resourceUrl,
-  };
-}
-
-function resolveAuthMode(urls: OAuthModeInputs): AuthMode {
-  const oauthConfigured = [
-    urls.issuerUrl,
-    urls.authorizationUrl,
-    urls.tokenUrl,
-    urls.introspectionUrl,
-  ].some((value) => value !== undefined);
-
-  return oauthConfigured ? 'oauth' : 'static';
-}
-
-function collectStaticTokens(): string[] {
-  const tokens = parseList(env['ACCESS_TOKENS']);
-  if (env['API_KEY']) tokens.push(env['API_KEY']);
-  return [...new Set(tokens)];
-}
-
-function buildAuthConfig(baseUrl: URL): AuthConfig {
-  const urls = readOAuthUrls(baseUrl);
-  const mode = resolveAuthMode(urls);
-
-  return {
-    mode,
-    ...urls,
     requiredScopes: parseList(env['OAUTH_REQUIRED_SCOPES']),
     clientId: env['OAUTH_CLIENT_ID'],
     clientSecret: env['OAUTH_CLIENT_SECRET'],
     introspectionTimeoutMs: 5000,
-    staticTokens: collectStaticTokens(),
+    staticTokens: [...new Set(tokens)],
   };
 }
 
@@ -433,38 +402,12 @@ const BLOCKED_HOSTS = new Set<string>([
   'instance-data',
 ]);
 const host = (env['HOST'] ?? LOOPBACK_V4).trim();
-const port = parsePort(env['PORT']);
+const port =
+  env['PORT']?.trim() === '0'
+    ? 0
+    : parseInteger(env['PORT'], 3000, 1024, 65535);
 const httpsConfig = buildHttpsConfig();
-const maxConnections = parseInteger(env['SERVER_MAX_CONNECTIONS'], 0, 0);
-const headersTimeoutMs = parseOptionalInteger(
-  env['SERVER_HEADERS_TIMEOUT_MS'],
-  1
-);
-const requestTimeoutMs = parseOptionalInteger(
-  env['SERVER_REQUEST_TIMEOUT_MS'],
-  0
-);
-const keepAliveTimeoutMs = parseOptionalInteger(
-  env['SERVER_KEEP_ALIVE_TIMEOUT_MS'],
-  1
-);
-const keepAliveTimeoutBufferMs = parseOptionalInteger(
-  env['SERVER_KEEP_ALIVE_TIMEOUT_BUFFER_MS'],
-  0
-);
-const maxHeadersCount = parseOptionalInteger(
-  env['SERVER_MAX_HEADERS_COUNT'],
-  1
-);
-const blockPrivateConnections = parseBoolean(
-  env['SERVER_BLOCK_PRIVATE_CONNECTIONS'],
-  false
-);
 const allowRemote = parseBoolean(env['ALLOW_REMOTE'], false);
-const requireProtocolVersionHeaderOnSessionInit = parseBoolean(
-  env['MCP_STRICT_PROTOCOL_VERSION_HEADER'],
-  true
-);
 const baseUrl = new URL(
   `${httpsConfig.enabled ? 'https' : 'http'}://${formatHostForUrl(host)}:${port}`
 );
@@ -486,14 +429,32 @@ export const config = {
     sessionInitTimeoutMs: DEFAULT_SESSION_INIT_TIMEOUT_MS,
     maxSessions: DEFAULT_MAX_SESSIONS,
     http: {
-      headersTimeoutMs,
-      requestTimeoutMs,
-      keepAliveTimeoutMs,
-      keepAliveTimeoutBufferMs,
-      maxHeadersCount,
-      maxConnections,
-      blockPrivateConnections,
-      requireProtocolVersionHeaderOnSessionInit,
+      headersTimeoutMs: parseOptionalInteger(
+        env['SERVER_HEADERS_TIMEOUT_MS'],
+        1
+      ),
+      requestTimeoutMs: parseOptionalInteger(
+        env['SERVER_REQUEST_TIMEOUT_MS'],
+        0
+      ),
+      keepAliveTimeoutMs: parseOptionalInteger(
+        env['SERVER_KEEP_ALIVE_TIMEOUT_MS'],
+        1
+      ),
+      keepAliveTimeoutBufferMs: parseOptionalInteger(
+        env['SERVER_KEEP_ALIVE_TIMEOUT_BUFFER_MS'],
+        0
+      ),
+      maxHeadersCount: parseOptionalInteger(env['SERVER_MAX_HEADERS_COUNT'], 1),
+      maxConnections: parseInteger(env['SERVER_MAX_CONNECTIONS'], 0, 0),
+      blockPrivateConnections: parseBoolean(
+        env['SERVER_BLOCK_PRIVATE_CONNECTIONS'],
+        false
+      ),
+      requireProtocolVersionHeaderOnSessionInit: parseBoolean(
+        env['MCP_STRICT_PROTOCOL_VERSION_HEADER'],
+        true
+      ),
       shutdownCloseIdleConnections: true,
       shutdownCloseAllConnections: false,
     },
@@ -566,7 +527,7 @@ export const config = {
     removeSkipLinks: true,
     removeTocBlocks: true,
     removeTypeDocComments: true,
-    headingKeywords: parseListOrDefault(
+    headingKeywords: parseList(
       env['MARKDOWN_HEADING_KEYWORDS'],
       DEFAULT_HEADING_KEYWORDS
     ),
@@ -634,33 +595,6 @@ interface CacheUpdateEvent {
   listChanged: boolean;
 }
 type CacheUpdateListener = (event: CacheUpdateEvent) => unknown;
-const CACHE_CONSTANTS = {
-  URL_HASH_LENGTH: 32,
-  VARY_HASH_LENGTH: 16,
-} as const;
-function createHashFragment(input: string, length: number): string {
-  return sha256Hex(input).substring(0, length);
-}
-function buildCacheKey(
-  namespace: string,
-  urlHash: string,
-  varyHash?: string
-): string {
-  return varyHash
-    ? `${namespace}:${urlHash}.${varyHash}`
-    : `${namespace}:${urlHash}`;
-}
-function resolveVaryString(
-  vary: Record<string, unknown> | string
-): string | null {
-  if (typeof vary === 'string') return vary;
-
-  try {
-    return stableJsonStringify(vary);
-  } catch {
-    return null;
-  }
-}
 export function createCacheKey(
   namespace: string,
   url: string,
@@ -668,20 +602,28 @@ export function createCacheKey(
 ): string | null {
   if (!namespace || !url) return null;
 
-  const urlHash = createHashFragment(url, CACHE_CONSTANTS.URL_HASH_LENGTH);
+  const urlHash = sha256Hex(url).substring(0, 32);
 
-  if (!vary) return buildCacheKey(namespace, urlHash);
+  if (!vary) return `${namespace}:${urlHash}`;
 
-  const varyString = resolveVaryString(vary);
+  const varyString =
+    typeof vary === 'string'
+      ? vary
+      : (() => {
+          try {
+            return stableJsonStringify(vary);
+          } catch {
+            return null;
+          }
+        })();
   if (varyString === null) return null;
 
-  return buildCacheKey(
-    namespace,
-    urlHash,
-    varyString
-      ? createHashFragment(varyString, CACHE_CONSTANTS.VARY_HASH_LENGTH)
-      : undefined
-  );
+  const varyHash = varyString
+    ? sha256Hex(varyString).substring(0, 16)
+    : undefined;
+  return varyHash
+    ? `${namespace}:${urlHash}.${varyHash}`
+    : `${namespace}:${urlHash}`;
 }
 export function parseCacheKey(cacheKey: string): CacheKeyParts | null {
   if (!cacheKey) return null;
@@ -1002,31 +944,24 @@ export function getOperationId(): string | undefined {
 function isDebugEnabled(): boolean {
   return config.logging.level === 'debug';
 }
-function buildContextMetadata(): LogMetadata | undefined {
+function mergeMetadata(meta?: LogMetadata): LogMetadata | undefined {
   const ctx = requestContext.getStore();
-  if (!ctx) return undefined;
+  const hasMeta = meta && Object.keys(meta).length > 0;
+
+  if (!ctx) return hasMeta ? meta : undefined;
 
   const { requestId, operationId, sessionId } = ctx;
   const includeSession = sessionId && isDebugEnabled();
 
-  if (!requestId && !operationId && !includeSession) return undefined;
+  if (!requestId && !operationId && !includeSession)
+    return hasMeta ? meta : undefined;
 
-  const meta: LogMetadata = {};
-  if (requestId) meta['requestId'] = requestId;
-  if (operationId) meta['operationId'] = operationId;
-  if (includeSession) meta['sessionId'] = sessionId;
+  const contextMeta: LogMetadata = {};
+  if (requestId) contextMeta['requestId'] = requestId;
+  if (operationId) contextMeta['operationId'] = operationId;
+  if (includeSession) contextMeta['sessionId'] = sessionId;
 
-  return meta;
-}
-function mergeMetadata(meta?: LogMetadata): LogMetadata | undefined {
-  const contextMeta = buildContextMetadata();
-  const hasMeta = meta && Object.keys(meta).length > 0;
-
-  if (!contextMeta && !hasMeta) return undefined;
-  if (!contextMeta) return meta;
-  if (!hasMeta) return contextMeta;
-
-  return { ...contextMeta, ...meta };
+  return hasMeta ? { ...contextMeta, ...meta } : contextMeta;
 }
 function formatMetadata(meta?: LogMetadata): string {
   const merged = mergeMetadata(meta);
@@ -1065,39 +1000,25 @@ const LEVEL_PRIORITY: Readonly<Record<LogLevel, number>> = {
 function shouldLog(level: LogLevel): boolean {
   return LEVEL_PRIORITY[level] >= LEVEL_PRIORITY[config.logging.level];
 }
+const LOG_LEVEL_ALIASES: Readonly<Record<string, LogLevel>> = {
+  debug: 'debug',
+  info: 'info',
+  notice: 'info',
+  warning: 'warn',
+  warn: 'warn',
+  error: 'error',
+  critical: 'error',
+  alert: 'error',
+  emergency: 'error',
+};
 function normalizeLogLevel(level: string): LogLevel | undefined {
-  switch (level.toLowerCase()) {
-    case 'debug':
-      return 'debug';
-    case 'info':
-    case 'notice':
-      return 'info';
-    case 'warning':
-    case 'warn':
-      return 'warn';
-    case 'error':
-    case 'critical':
-    case 'alert':
-    case 'emergency':
-      return 'error';
-    default:
-      return undefined;
-  }
-}
-function resolveMcpLogLevel(sessionId?: string): LogLevel {
-  if (sessionId) {
-    return sessionMcpLogLevels.get(sessionId) ?? config.logging.level;
-  }
-
-  return stdioMcpLogLevel ?? config.logging.level;
+  return LOG_LEVEL_ALIASES[level.toLowerCase()];
 }
 function shouldForwardMcpLog(level: LogLevel, sessionId?: string): boolean {
-  return LEVEL_PRIORITY[level] >= LEVEL_PRIORITY[resolveMcpLogLevel(sessionId)];
-}
-function mapToMcpLevel(
-  level: LogLevel
-): 'debug' | 'info' | 'warning' | 'error' {
-  return level === 'warn' ? 'warning' : level;
+  const mcpLevel = sessionId
+    ? (sessionMcpLogLevels.get(sessionId) ?? config.logging.level)
+    : (stdioMcpLogLevel ?? config.logging.level);
+  return LEVEL_PRIORITY[level] >= LEVEL_PRIORITY[mcpLevel];
 }
 function resolveErrorText(err: unknown): string {
   if (err instanceof Error) {
@@ -1143,7 +1064,7 @@ function writeLog(level: LogLevel, message: string, meta?: LogMetadata): void {
     server.server
       .sendLoggingMessage(
         {
-          level: mapToMcpLevel(level),
+          level: level === 'warn' ? 'warning' : level,
           logger: 'fetch-url-mcp',
           // Preserve existing behavior: MCP payload includes only message + provided meta (not ALS context meta).
           data: meta ? { message, ...meta } : message,
@@ -1197,7 +1118,10 @@ export function logError(message: string, error?: Error | LogMetadata): void {
   writeLog('error', message, errorMeta);
 }
 export function getMcpLogLevel(sessionId?: string): LogLevel {
-  return resolveMcpLogLevel(sessionId);
+  if (sessionId) {
+    return sessionMcpLogLevels.get(sessionId) ?? config.logging.level;
+  }
+  return stdioMcpLogLevel ?? config.logging.level;
 }
 export function setLogLevel(level: string, sessionId?: string): void {
   const normalized = normalizeLogLevel(level);
@@ -1287,15 +1211,6 @@ function logRejectedSettledResults(
       logWarn(message, { error: getErrorMessage(result.reason) });
     }
   }
-}
-
-function isSessionExpired(
-  session: SessionEntry,
-  now: number,
-  sessionTtlMs: number
-): boolean {
-  if (sessionTtlMs <= 0) return false;
-  return now - session.lastSeen > sessionTtlMs;
 }
 
 class SessionCleanupLoop {
@@ -1407,25 +1322,6 @@ export function startSessionCleanupLoop(
     options?.cleanupIntervalMs
   ).start();
 }
-function moveSessionToEnd(
-  sessions: Map<string, SessionEntry>,
-  sessionId: string,
-  session: SessionEntry
-): void {
-  sessions.delete(sessionId);
-  sessions.set(sessionId, session);
-}
-function removeSessionById(
-  sessions: Map<string, SessionEntry>,
-  sessionId: string
-): SessionEntry | undefined {
-  const session = sessions.get(sessionId);
-  sessions.delete(sessionId);
-  return session;
-}
-function isBlankSessionId(sessionId: string): boolean {
-  return sessionId.length === 0;
-}
 class InMemorySessionStore implements SessionStore {
   private readonly sessions = new Map<string, SessionEntry>();
   private inflight = 0;
@@ -1433,28 +1329,32 @@ class InMemorySessionStore implements SessionStore {
   constructor(private readonly sessionTtlMs: number) {}
 
   get(sessionId: string): SessionEntry | undefined {
-    if (isBlankSessionId(sessionId)) return undefined;
+    if (sessionId.length === 0) return undefined;
     return this.sessions.get(sessionId);
   }
 
   touch(sessionId: string): void {
-    if (isBlankSessionId(sessionId)) return;
+    if (sessionId.length === 0) return;
 
     const session = this.sessions.get(sessionId);
     if (!session) return;
 
     session.lastSeen = Date.now();
-    moveSessionToEnd(this.sessions, sessionId, session);
+    this.sessions.delete(sessionId);
+    this.sessions.set(sessionId, session);
   }
 
   set(sessionId: string, entry: SessionEntry): void {
-    if (isBlankSessionId(sessionId)) return;
-    moveSessionToEnd(this.sessions, sessionId, entry);
+    if (sessionId.length === 0) return;
+    this.sessions.delete(sessionId);
+    this.sessions.set(sessionId, entry);
   }
 
   remove(sessionId: string): SessionEntry | undefined {
-    if (isBlankSessionId(sessionId)) return undefined;
-    return removeSessionById(this.sessions, sessionId);
+    if (sessionId.length === 0) return undefined;
+    const session = this.sessions.get(sessionId);
+    this.sessions.delete(sessionId);
+    return session;
   }
 
   size(): number {
@@ -1485,7 +1385,8 @@ class InMemorySessionStore implements SessionStore {
     const evicted: SessionEntry[] = [];
 
     for (const [id, session] of this.sessions.entries()) {
-      if (!isSessionExpired(session, now, this.sessionTtlMs)) continue;
+      if (this.sessionTtlMs <= 0 || now - session.lastSeen <= this.sessionTtlMs)
+        continue;
       this.sessions.delete(id);
       evicted.push(session);
     }
@@ -1497,50 +1398,41 @@ class InMemorySessionStore implements SessionStore {
     const oldest = this.sessions.keys().next();
     if (oldest.done) return undefined;
 
-    return removeSessionById(this.sessions, oldest.value);
+    const session = this.sessions.get(oldest.value);
+    this.sessions.delete(oldest.value);
+    return session;
   }
 }
 export function createSessionStore(sessionTtlMs: number): SessionStore {
   return new InMemorySessionStore(sessionTtlMs);
 }
-class SessionSlotTracker implements SlotTracker {
-  private slotReleased = false;
-  private initialized = false;
-
-  constructor(private readonly store: SessionStore) {}
-
-  releaseSlot(): void {
-    if (this.slotReleased) return;
-    this.slotReleased = true;
-    this.store.decrementInFlight();
-  }
-
-  markInitialized(): void {
-    this.initialized = true;
-  }
-
-  isInitialized(): boolean {
-    return this.initialized;
-  }
-}
 export function createSlotTracker(store: SessionStore): SlotTracker {
-  return new SessionSlotTracker(store);
-}
-function currentLoad(store: SessionStore): number {
-  return store.size() + store.inFlight();
+  let slotReleased = false;
+  let initialized = false;
+
+  return {
+    releaseSlot(): void {
+      if (slotReleased) return;
+      slotReleased = true;
+      store.decrementInFlight();
+    },
+    markInitialized(): void {
+      initialized = true;
+    },
+    isInitialized(): boolean {
+      return initialized;
+    },
+  };
 }
 export function reserveSessionSlot(
   store: SessionStore,
   maxSessions: number
 ): boolean {
   if (maxSessions <= 0) return false;
-  if (currentLoad(store) >= maxSessions) return false;
+  if (store.size() + store.inFlight() >= maxSessions) return false;
 
   store.incrementInFlight();
   return true;
-}
-function isAtCapacity(store: SessionStore, maxSessions: number): boolean {
-  return currentLoad(store) >= maxSessions;
 }
 export function ensureSessionCapacity({
   store,
@@ -1564,5 +1456,5 @@ export function ensureSessionCapacity({
   if (!canFreeSlot) return false;
   if (!evictOldest(store)) return false;
 
-  return !isAtCapacity(store, maxSessions);
+  return store.size() + store.inFlight() < maxSessions;
 }
