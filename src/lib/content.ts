@@ -4,11 +4,42 @@ import { type MetadataBlock } from '../transform/types.js';
 import { config, logDebug } from './core.js';
 import { throwIfAborted } from './utils.js';
 
+// region Constants & Types
+
+// ASCII char codes used in hot-path charCodeAt comparisons
+const ASCII_SPACE = 32;
+const ASCII_TAB = 9;
+const ASCII_EXCLAMATION = 33;
+const ASCII_HASH = 35;
+const ASCII_ASTERISK = 42;
+const ASCII_PLUS = 43;
+const ASCII_DASH = 45;
+const ASCII_PERIOD = 46;
+const ASCII_DIGIT_0 = 48;
+const ASCII_DIGIT_9 = 57;
+const ASCII_LT = 60;
+const ASCII_QUESTION = 63;
+const ASCII_UPPER_A = 65;
+const ASCII_UPPER_Z = 90;
+const ASCII_BRACKET_OPEN = 91;
+const ASCII_LOWER_A = 97;
+const ASCII_LOWER_Z = 122;
+const ASCII_UNDERSCORE = 95;
+
+// Thresholds
 const NOISE_SCAN_LIMIT = 50_000;
 const MIN_BODY_CONTENT_LENGTH = 100;
 const DIALOG_MIN_CHARS_FOR_PRESERVATION = 500;
 const NAV_FOOTER_MIN_CHARS_FOR_PRESERVATION = 500;
 const ABORT_CHECK_INTERVAL = 500;
+const NODE_FILTER_SHOW_TEXT = 4;
+const HTML_TAG_DENSITY_LIMIT = 5;
+const TITLE_MIN_WORDS = 2;
+const TITLE_MAX_WORDS = 6;
+const TITLE_MIN_CAPITALIZED = 2;
+const PROPERTY_FIX_MAX_PASSES = 3;
+const BODY_SCAN_LIMIT = 5000;
+const HAS_FOLLOWING_LOOKAHEAD = 50;
 const HTML_DOCUMENT_MARKERS = /<\s*(?:!doctype|html|head|body)\b/i;
 const HTML_FRAGMENT_MARKERS =
   /<\s*(?:article|main|section|div|nav|footer|header|aside|table|ul|ol)\b/i;
@@ -124,6 +155,11 @@ interface NoiseContext {
 }
 let cachedContext: NoiseContext | undefined;
 let lastConfigRef: NoiseRemovalConfig | undefined;
+
+// endregion
+
+// region DOM Noise Removal
+
 function escapeRegexLiteral(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
@@ -302,101 +338,73 @@ function removeNodes(nodes: ArrayLike<Element>): void {
     }
   }
 }
-function scoreNavFooter(meta: ElementMetadata, weights: NoiseWeights): number {
-  let score = 0;
-  if (ALWAYS_NOISE_TAGS.has(meta.tagName)) score += weights.structural;
+const HIDDEN_STYLE_REGEX =
+  /\b(?:display\s*:\s*none|visibility\s*:\s*hidden)\b/i;
 
-  // Header Boilerplate
-  if (meta.tagName === 'header') {
-    if (
-      (meta.role && NAVIGATION_ROLES.has(meta.role)) ||
-      HEADER_NOISE_PATTERN.test(`${meta.className} ${meta.id}`)
-    ) {
-      score += weights.structural;
-    }
-  }
-
-  // Aside (sidebar/complementary) — noise unless inside primary content
-  if (meta.tagName === 'aside') {
-    score += weights.structural;
-  }
-
-  // Role Noise
-  if (meta.role && NAVIGATION_ROLES.has(meta.role)) {
-    if (meta.tagName !== 'aside' || meta.role !== 'complementary') {
-      score += weights.structural;
-    }
-  }
-  return score;
-}
-interface ElementMetadata {
-  readonly tagName: string;
-  readonly className: string;
-  readonly id: string;
-  readonly role: string | null;
-  readonly style: string | null;
-  readonly isInteractive: boolean;
-  readonly isHidden: boolean;
-}
-function extractElementMetadata(element: Element): ElementMetadata {
+function isNoiseElement(element: Element, context: NoiseContext): boolean {
   const tagName = element.tagName.toLowerCase();
   const className = element.getAttribute('class') ?? '';
   const id = element.getAttribute('id') ?? '';
   const role = element.getAttribute('role');
   const style = element.getAttribute('style');
-  const _isInteractive = isInteractive(element, role);
-  const isHidden =
+  const elIsInteractive = isInteractive(element, role);
+  const elIsHidden =
     element.hasAttribute('hidden') ||
     element.getAttribute('aria-hidden') === 'true' ||
-    (style !== null &&
-      /\b(?:display\s*:\s*none|visibility\s*:\s*hidden)\b/i.test(style));
-
-  return {
-    tagName,
-    className,
-    id,
-    role,
-    style,
-    isInteractive: _isInteractive,
-    isHidden,
-  };
-}
-function isNoiseElement(element: Element, context: NoiseContext): boolean {
-  const meta = extractElementMetadata(element);
+    (style !== null && HIDDEN_STYLE_REGEX.test(style));
 
   let score = 0;
   const { weights } = context;
 
   // Structural
-  if (context.structuralTags.has(meta.tagName) && !meta.isInteractive) {
+  if (context.structuralTags.has(tagName) && !elIsInteractive) {
     score += weights.structural;
   }
 
   // Nav/Footer Scoring
   if (context.flags.navFooter) {
-    score += scoreNavFooter(meta, weights);
+    if (ALWAYS_NOISE_TAGS.has(tagName)) score += weights.structural;
+
+    if (tagName === 'header') {
+      if (
+        (role && NAVIGATION_ROLES.has(role)) ||
+        HEADER_NOISE_PATTERN.test(`${className} ${id}`)
+      ) {
+        score += weights.structural;
+      }
+    }
+
+    if (tagName === 'aside') {
+      score += weights.structural;
+    }
+
+    if (role && NAVIGATION_ROLES.has(role)) {
+      if (tagName !== 'aside' || role !== 'complementary') {
+        score += weights.structural;
+      }
+    }
   }
 
   // Hidden
-  if (meta.isHidden && !meta.isInteractive) {
+  if (elIsHidden && !elIsInteractive) {
     score += weights.hidden;
   }
 
   // Sticky/Fixed
-  if (FIXED_OR_HIGH_Z_PATTERN.test(meta.className)) {
+  if (FIXED_OR_HIGH_Z_PATTERN.test(className)) {
     score += weights.stickyFixed;
   }
 
   // Promo
   if (context.promoEnabled) {
     const aggTest =
-      context.promoMatchers.aggressive.test(meta.className) ||
-      context.promoMatchers.aggressive.test(meta.id);
+      context.promoMatchers.aggressive.test(className) ||
+      context.promoMatchers.aggressive.test(id);
     const isAggressiveMatch = aggTest && !isWithinPrimaryContent(element);
     const isBaseMatch =
       !aggTest &&
-      (context.promoMatchers.base.test(meta.className) ||
-        context.promoMatchers.base.test(meta.id));
+      (context.promoMatchers.base.test(className) ||
+        context.promoMatchers.base.test(id));
 
     if (isAggressiveMatch || isBaseMatch) {
       score += weights.promo;
@@ -405,51 +413,47 @@ function isNoiseElement(element: Element, context: NoiseContext): boolean {
 
   return score >= weights.threshold;
 }
-function cleanHeadingWrapperDivs(h: Element): void {
-  const divs = h.querySelectorAll('div');
-  for (let j = divs.length - 1; j >= 0; j--) {
-    const d = divs[j];
-    if (!d?.parentNode) continue;
-    const cls = d.getAttribute('class') ?? '';
-    const stl = d.getAttribute('style') ?? '';
-    if (
-      cls.includes('absolute') ||
-      stl.includes('position') ||
-      d.getAttribute('tabindex') === '-1'
-    ) {
-      d.remove();
-    }
-  }
-}
-function cleanHeadingAnchors(h: Element): void {
-  const anchors = h.querySelectorAll('a');
-  for (let j = anchors.length - 1; j >= 0; j--) {
-    const a = anchors[j];
-    if (!a?.parentNode) continue;
-    const href = a.getAttribute('href') ?? '';
-    const txt = (a.textContent || '').replace(/[\u200B\s]/g, '');
-    if (href.startsWith('#') && txt.length === 0) {
-      a.remove();
-    }
-  }
-}
-function cleanHeadingZeroWidth(h: Element, document: Document): void {
-  const walker = document.createTreeWalker(h, 4); // SHOW_TEXT
-  let node: Node | null;
-  while ((node = walker.nextNode())) {
-    if (node.textContent?.includes('\u200B')) {
-      node.textContent = node.textContent.replace(/\u200B/g, '');
-    }
-  }
-}
 function cleanHeadings(document: Document): void {
-  // Clean Heading Anchors
   const headings = document.querySelectorAll('h1,h2,h3,h4,h5,h6');
   for (const h of headings) {
     if (!h.parentNode) continue;
-    cleanHeadingWrapperDivs(h);
-    cleanHeadingAnchors(h);
-    cleanHeadingZeroWidth(h, document);
+
+    // Remove absolute/positioned wrapper divs
+    const divs = h.querySelectorAll('div');
+    for (let j = divs.length - 1; j >= 0; j--) {
+      const d = divs[j];
+      if (!d?.parentNode) continue;
+      const cls = d.getAttribute('class') ?? '';
+      const stl = d.getAttribute('style') ?? '';
+      if (
+        cls.includes('absolute') ||
+        stl.includes('position') ||
+        d.getAttribute('tabindex') === '-1'
+      ) {
+        d.remove();
+      }
+    }
+
+    // Remove empty hash-link anchors
+    const anchors = h.querySelectorAll('a');
+    for (let j = anchors.length - 1; j >= 0; j--) {
+      const a = anchors[j];
+      if (!a?.parentNode) continue;
+      const href = a.getAttribute('href') ?? '';
+      const txt = (a.textContent || '').replace(/[\u200B\s]/g, '');
+      if (href.startsWith('#') && txt.length === 0) {
+        a.remove();
+      }
+    }
+
+    // Strip zero-width spaces from text nodes
+    const walker = document.createTreeWalker(h, NODE_FILTER_SHOW_TEXT);
+    let node: Node | null;
+    while ((node = walker.nextNode())) {
+      if (node.textContent?.includes('\u200B')) {
+        node.textContent = node.textContent.replace(/\u200B/g, '');
+      }
+    }
   }
 }
 function stripNoise(
@@ -662,6 +666,11 @@ export function removeNoiseFromHtml(
     return html;
   }
 }
+
+// endregion
+
+// region Language Detection
+
 class DetectionContext {
   private _lower: string | undefined;
   private _lines: readonly string[] | undefined;
@@ -745,9 +754,9 @@ const CSS_PROPERTY_REGEX = /^\s*[a-z][\w-]*\s*:/;
 function containsJsxTag(code: string): boolean {
   const len = code.length;
   for (let i = 0; i < len - 1; i++) {
-    if (code.charCodeAt(i) === 60 /* < */) {
+    if (code.charCodeAt(i) === ASCII_LT) {
       const next = code.charCodeAt(i + 1);
-      if (next >= 65 && next <= 90) return true; // A-Z
+      if (next >= ASCII_UPPER_A && next <= ASCII_UPPER_Z) return true;
     }
   }
   return false;
@@ -817,8 +826,7 @@ function detectYamlStructure(lines: readonly string[]): boolean {
     if (colonIdx <= 0) continue;
 
     const after = trimmed.charCodeAt(colonIdx + 1);
-    // space (32) or tab (9)
-    if (after === 32 || after === 9) return true;
+    if (after === ASCII_SPACE || after === ASCII_TAB) return true;
   }
   return false;
 }
@@ -828,130 +836,94 @@ interface LanguageDef {
   weight: number;
   match: Matcher;
 }
+function matchRust(ctx: DetectionContext): boolean {
+  if (ctx.lower.includes('let mut')) return true;
+  if (RUST_REGEX.test(ctx.lower)) return true;
+  return ctx.lower.includes('use ') && ctx.lower.includes('::');
+}
+function matchGo(ctx: DetectionContext): boolean {
+  if (ctx.lower.includes('import "')) return true;
+  return /\b(?:package|func)\b/.test(ctx.lower);
+}
+function matchJsx(ctx: DetectionContext): boolean {
+  const l = ctx.lower;
+  if (
+    l.includes('classname=') ||
+    l.includes('jsx:') ||
+    l.includes("from 'react'") ||
+    l.includes('from "react"')
+  ) {
+    return true;
+  }
+  return containsJsxTag(ctx.code);
+}
+function matchTypeScript(ctx: DetectionContext): boolean {
+  if (/\b(?:interface|type)\b/.test(ctx.lower)) return true;
+  const l = ctx.lower;
+  for (const hint of TYPESCRIPT_HINTS) {
+    if (l.includes(hint)) return true;
+  }
+  return false;
+}
+function matchSql(ctx: DetectionContext): boolean {
+  return /\b(?:select|insert|update|delete|create|alter|drop)\b/.test(
+    ctx.lower
+  );
+}
+function matchPython(ctx: DetectionContext): boolean {
+  const l = ctx.lower;
+  if (l.includes('print(') || l.includes('__name__')) return true;
+  if (l.includes('self.') || l.includes('elif ')) return true;
+  // Check for Python's None/True/False using original case (they are capitalized in Python)
+  if (
+    ctx.code.includes('None') ||
+    ctx.code.includes('True') ||
+    ctx.code.includes('False')
+  ) {
+    return true;
+  }
+  if (PYTHON_UNIQUE_REGEX.test(l)) return true;
+  // Shared keywords (import, from, class) — only match if no JS signals present
+  if (
+    /\b(?:import|from|class)\b/.test(l) &&
+    !JS_SIGNAL_REGEX.test(l) &&
+    !l.includes('{') &&
+    !l.includes("from '")
+  ) {
+    return true;
+  }
+  return false;
+}
+function matchHtml(ctx: DetectionContext): boolean {
+  const l = ctx.lower;
+  for (const tag of HTML_TAGS) {
+    if (l.includes(tag)) return true;
+  }
+  return false;
+}
+
+// Pre-sorted by weight descending — first match wins in detectLanguageFromCode
 const LANGUAGES: LanguageDef[] = [
-  {
-    lang: 'rust',
-    weight: 25,
-    match: (ctx) => {
-      if (ctx.lower.includes('let mut')) return true;
-      if (RUST_REGEX.test(ctx.lower)) return true;
-      return ctx.lower.includes('use ') && ctx.lower.includes('::');
-    },
-  },
-  {
-    lang: 'go',
-    weight: 22,
-    match: (ctx) => {
-      if (ctx.lower.includes('import "')) return true;
-      return /\b(?:package|func)\b/.test(ctx.lower);
-    },
-  },
-  {
-    lang: 'jsx',
-    weight: 22,
-    match: (ctx) => {
-      const l = ctx.lower;
-      if (
-        l.includes('classname=') ||
-        l.includes('jsx:') ||
-        l.includes("from 'react'") ||
-        l.includes('from "react"')
-      ) {
-        return true;
-      }
-      return containsJsxTag(ctx.code);
-    },
-  },
-  {
-    lang: 'typescript',
-    weight: 20,
-    match: (ctx) => {
-      if (/\b(?:interface|type)\b/.test(ctx.lower)) return true;
-      const l = ctx.lower;
-      for (const hint of TYPESCRIPT_HINTS) {
-        if (l.includes(hint)) return true;
-      }
-      return false;
-    },
-  },
-  {
-    lang: 'sql',
-    weight: 20,
-    match: (ctx) => {
-      const l = ctx.lower;
-      return /\b(?:select|insert|update|delete|create|alter|drop)\b/.test(l);
-    },
-  },
-  {
-    lang: 'python',
-    weight: 18,
-    match: (ctx) => {
-      const l = ctx.lower;
-      if (l.includes('print(') || l.includes('__name__')) return true;
-      if (l.includes('self.') || l.includes('elif ')) return true;
-      // Check for Python's None/True/False using original case (they are capitalized in Python)
-      if (
-        ctx.code.includes('None') ||
-        ctx.code.includes('True') ||
-        ctx.code.includes('False')
-      ) {
-        return true;
-      }
-      // Python-unique keywords that JS doesn't have
-      if (PYTHON_UNIQUE_REGEX.test(l)) return true;
-      // Shared keywords (import, from, class) — only match if no JS signals present
-      if (
-        /\b(?:import|from|class)\b/.test(l) &&
-        !JS_SIGNAL_REGEX.test(l) &&
-        !l.includes('{') &&
-        !l.includes("from '")
-      ) {
-        return true;
-      }
-      return false;
-    },
-  },
+  { lang: 'rust', weight: 25, match: matchRust },
+  { lang: 'go', weight: 22, match: matchGo },
+  { lang: 'jsx', weight: 22, match: matchJsx },
+  { lang: 'typescript', weight: 20, match: matchTypeScript },
+  { lang: 'sql', weight: 20, match: matchSql },
+  { lang: 'python', weight: 18, match: matchPython },
   {
     lang: 'css',
     weight: 18,
-    match: (ctx) => {
-      if (CSS_REGEX.test(ctx.lower)) return true;
-      return detectCssStructure(ctx.lines);
-    },
+    match: (ctx) => CSS_REGEX.test(ctx.lower) || detectCssStructure(ctx.lines),
   },
-  {
-    lang: 'bash',
-    weight: 15,
-    match: (ctx) => detectBashIndicators(ctx.lines),
-  },
-  {
-    lang: 'yaml',
-    weight: 15,
-    match: (ctx) => detectYamlStructure(ctx.lines),
-  },
-  {
-    lang: 'javascript',
-    weight: 15,
-    match: (ctx) => JS_REGEX.test(ctx.lower),
-  },
-  {
-    lang: 'html',
-    weight: 12,
-    match: (ctx) => {
-      const l = ctx.lower;
-      for (const tag of HTML_TAGS) {
-        if (l.includes(tag)) return true;
-      }
-      return false;
-    },
-  },
+  { lang: 'bash', weight: 15, match: (ctx) => detectBashIndicators(ctx.lines) },
+  { lang: 'yaml', weight: 15, match: (ctx) => detectYamlStructure(ctx.lines) },
+  { lang: 'javascript', weight: 15, match: (ctx) => JS_REGEX.test(ctx.lower) },
+  { lang: 'html', weight: 12, match: matchHtml },
   {
     lang: 'json',
     weight: 10,
-    match: (ctx) => {
-      const s = ctx.trimmedStart;
-      return s.startsWith('{') || s.startsWith('[');
-    },
+    match: (ctx) =>
+      ctx.trimmedStart.startsWith('{') || ctx.trimmedStart.startsWith('['),
   },
 ];
 function extractLanguageFromClassName(className: string): string | undefined {
@@ -987,11 +959,10 @@ function resolveLanguageFromDataAttribute(
   // Check if \w+
   for (let i = 0; i < trimmed.length; i++) {
     const c = trimmed.charCodeAt(i);
-    // valid: A-Z, a-z, 0-9, _
-    const isUpper = c >= 65 && c <= 90;
-    const isLower = c >= 97 && c <= 122;
-    const isDigit = c >= 48 && c <= 57;
-    const isUnder = c === 95;
+    const isUpper = c >= ASCII_UPPER_A && c <= ASCII_UPPER_Z;
+    const isLower = c >= ASCII_LOWER_A && c <= ASCII_LOWER_Z;
+    const isDigit = c >= ASCII_DIGIT_0 && c <= ASCII_DIGIT_9;
+    const isUnder = c === ASCII_UNDERSCORE;
 
     if (!isUpper && !isLower && !isDigit && !isUnder) {
       return undefined;
@@ -1014,7 +985,7 @@ export function detectLanguageFromCode(code: string): string | undefined {
   // Fast path for empty/whitespace only
   let empty = true;
   for (let i = 0; i < code.length; i++) {
-    if (code.charCodeAt(i) > 32) {
+    if (code.charCodeAt(i) > ASCII_SPACE) {
       empty = false;
       break;
     }
@@ -1023,21 +994,18 @@ export function detectLanguageFromCode(code: string): string | undefined {
 
   const ctx = new DetectionContext(code);
 
-  let bestLang: string | undefined;
-  let bestScore = -1;
-
+  // LANGUAGES is pre-sorted by weight descending — first match is highest confidence
   for (const def of LANGUAGES) {
-    if (def.match(ctx)) {
-      if (def.weight > bestScore) {
-        bestScore = def.weight;
-        bestLang = def.lang;
-        if (bestScore >= 25) break;
-      }
-    }
+    if (def.match(ctx)) return def.lang;
   }
 
-  return bestLang;
+  return undefined;
 }
+
+// endregion
+
+// region Markdown Cleanup
+
 const MAX_LINE_LENGTH = 80;
 const REGEX = {
   HEADING_MARKER: /^#{1,6}\s/m,
@@ -1105,7 +1073,7 @@ function hasFollowingContent(lines: string[], startIndex: number): boolean {
   // Optimization: Bound lookahead to avoid checking too many lines in huge files
   for (
     let i = startIndex + 1;
-    i < Math.min(lines.length, startIndex + 50);
+    i < Math.min(lines.length, startIndex + HAS_FOLLOWING_LOOKAHEAD);
     i++
   ) {
     if (!isBlank(lines[i])) return true;
@@ -1125,7 +1093,7 @@ function isTitleCaseOrKeyword(trimmed: string): boolean {
   // Split limited number of words
   const words = trimmed.split(/\s+/);
   const len = words.length;
-  if (len < 2 || len > 6) return false;
+  if (len < TITLE_MIN_WORDS || len > TITLE_MAX_WORDS) return false;
 
   let capitalizedCount = 0;
   for (let i = 0; i < len; i++) {
@@ -1136,21 +1104,20 @@ function isTitleCaseOrKeyword(trimmed: string): boolean {
     else if (!/^(?:and|or|the|of|in|for|to|a)$/i.test(w)) return false;
   }
 
-  return capitalizedCount >= 2;
+  return capitalizedCount >= TITLE_MIN_CAPITALIZED;
 }
 function getHeadingPrefix(trimmed: string): string | null {
   if (trimmed.length > MAX_LINE_LENGTH) return null;
 
   // Fast path: Check common markdown markers first
   const firstChar = trimmed.charCodeAt(0);
-  // # (35), - (45), * (42), + (43), digit (48-57), [ (91)
   if (
-    firstChar === 35 ||
-    firstChar === 45 ||
-    firstChar === 42 ||
-    firstChar === 43 ||
-    firstChar === 91 ||
-    (firstChar >= 48 && firstChar <= 57)
+    firstChar === ASCII_HASH ||
+    firstChar === ASCII_DASH ||
+    firstChar === ASCII_ASTERISK ||
+    firstChar === ASCII_PLUS ||
+    firstChar === ASCII_BRACKET_OPEN ||
+    (firstChar >= ASCII_DIGIT_0 && firstChar <= ASCII_DIGIT_9)
   ) {
     if (
       REGEX.HEADING_MARKER.test(trimmed) ||
@@ -1167,8 +1134,12 @@ function getHeadingPrefix(trimmed: string): string | null {
   }
 
   const lastChar = trimmed.charCodeAt(trimmed.length - 1);
-  // . (46), ! (33), ? (63)
-  if (lastChar === 46 || lastChar === 33 || lastChar === 63) return null;
+  if (
+    lastChar === ASCII_PERIOD ||
+    lastChar === ASCII_EXCLAMATION ||
+    lastChar === ASCII_QUESTION
+  )
+    return null;
 
   return isTitleCaseOrKeyword(trimmed) ? '## ' : null;
 }
@@ -1291,41 +1262,22 @@ function processTextBuffer(lines: string[], options?: CleanupOptions): string {
   const text = preprocessLines(lines, options);
   return applyGlobalRegexes(text, options);
 }
-function applyGlobalRegexes(text: string, options?: CleanupOptions): string {
-  let result = text;
-  const checkAbort = createAbortChecker(options);
-
-  // Normalize non-breaking spaces to regular spaces
-  result = result.replace(/\u00A0/g, ' ');
-
-  checkAbort('markdown:cleanup:headings');
-
-  // fixAndSpaceHeadings
-  result = result
-    .replace(REGEX.HEADING_SPACING, '$1\n\n$2')
-    .replace(REGEX.HEADING_CODE_BLOCK, '$1\n\n```');
-
-  if (config.markdownCleanup.removeTypeDocComments) {
-    checkAbort('markdown:cleanup:typedoc');
-    result = result
-      .split('\n')
-      .filter((line) => !isTypeDocArtifactLine(line))
-      .join('\n');
-    result = result.replace(REGEX.TYPEDOC_COMMENT, (match) =>
-      match.startsWith('`') ? match : ''
-    );
-  }
-  if (config.markdownCleanup.removeSkipLinks) {
-    checkAbort('markdown:cleanup:skip-links');
-    result = result
-      .replace(REGEX.ZERO_WIDTH_ANCHOR, '')
-      .replace(REGEX.COMBINED_LINE_REMOVALS, '');
-  }
-
-  checkAbort('markdown:cleanup:spacing');
-
-  // normalizeSpacing
-  result = result
+function removeTypeDocArtifacts(text: string): string {
+  const filtered = text
+    .split('\n')
+    .filter((line) => !isTypeDocArtifactLine(line))
+    .join('\n');
+  return filtered.replace(REGEX.TYPEDOC_COMMENT, (match) =>
+    match.startsWith('`') ? match : ''
+  );
+}
+function removeSkipLinks(text: string): string {
+  return text
+    .replace(REGEX.ZERO_WIDTH_ANCHOR, '')
+    .replace(REGEX.COMBINED_LINE_REMOVALS, '');
+}
+function normalizeMarkdownSpacing(text: string): string {
+  let result = text
     .replace(REGEX.SPACING_LINK_FIX, ']($1)\n\n[')
     .replace(REGEX.SPACING_ADJ_COMBINED, '$& ')
     .replace(REGEX.SPACING_CODE_DASH, '$1 - ')
@@ -1344,18 +1296,41 @@ function applyGlobalRegexes(text: string, options?: CleanupOptions): string {
       `[${linkText.replace(/\\`/g, '`')}](${url})`
   );
 
-  result = normalizeNestedListIndentation(result);
-
-  checkAbort('markdown:cleanup:properties');
-
-  // fixProperties
-  for (let k = 0; k < 3; k++) {
+  return normalizeNestedListIndentation(result);
+}
+function fixConcatenatedProperties(text: string): string {
+  let result = text;
+  for (let k = 0; k < PROPERTY_FIX_MAX_PASSES; k++) {
     const next = result.replace(REGEX.CONCATENATED_PROPS, '$1$2\n\n$3');
     if (next === result) break;
     result = next;
   }
-
   return result;
+}
+function applyGlobalRegexes(text: string, options?: CleanupOptions): string {
+  const checkAbort = createAbortChecker(options);
+
+  let result = text.replace(/\u00A0/g, ' ');
+
+  checkAbort('markdown:cleanup:headings');
+  result = result
+    .replace(REGEX.HEADING_SPACING, '$1\n\n$2')
+    .replace(REGEX.HEADING_CODE_BLOCK, '$1\n\n```');
+
+  if (config.markdownCleanup.removeTypeDocComments) {
+    checkAbort('markdown:cleanup:typedoc');
+    result = removeTypeDocArtifacts(result);
+  }
+  if (config.markdownCleanup.removeSkipLinks) {
+    checkAbort('markdown:cleanup:skip-links');
+    result = removeSkipLinks(result);
+  }
+
+  checkAbort('markdown:cleanup:spacing');
+  result = normalizeMarkdownSpacing(result);
+
+  checkAbort('markdown:cleanup:properties');
+  return fixConcatenatedProperties(result);
 }
 function normalizeNestedListIndentation(text: string): string {
   return text.replace(
@@ -1377,28 +1352,12 @@ export function cleanupMarkdownArtifacts(
   const checkAbort = createAbortChecker(options);
   checkAbort('markdown:cleanup:begin');
 
-  const len = content.length;
-  let lastIndex = 0;
+  const lines = content.split(/\r?\n/);
   let fenceMarker: string | null = null;
   const segments: string[] = [];
   let buffer: string[] = [];
 
-  while (lastIndex < len) {
-    let nextIndex = content.indexOf('\n', lastIndex);
-    let line: string;
-
-    if (nextIndex === -1) {
-      line = content.slice(lastIndex);
-      nextIndex = len;
-    } else {
-      if (nextIndex > lastIndex && content.charCodeAt(nextIndex - 1) === 13) {
-        line = content.slice(lastIndex, nextIndex - 1);
-      } else {
-        line = content.slice(lastIndex, nextIndex);
-      }
-      nextIndex++; // Skip \n
-    }
-
+  for (const line of lines) {
     const trimmed = line.trimStart();
 
     if (fenceMarker) {
@@ -1423,8 +1382,6 @@ export function cleanupMarkdownArtifacts(
         fenceMarker = newMarker;
       }
     }
-
-    lastIndex = nextIndex;
   }
 
   if (buffer.length > 0) {
@@ -1433,6 +1390,11 @@ export function cleanupMarkdownArtifacts(
 
   return segments.join('\n').trim();
 }
+
+// endregion
+
+// region Frontmatter & Metadata
+
 interface FrontmatterRange {
   start: number;
   end: number;
@@ -1440,7 +1402,11 @@ interface FrontmatterRange {
   linesEnd: number;
   lineEnding: '\n' | '\r\n';
 }
-function detectFrontmatter(content: string): FrontmatterRange | null {
+interface FrontmatterResult {
+  range: FrontmatterRange;
+  entries: Map<string, string>;
+}
+function parseFrontmatter(content: string): FrontmatterResult | null {
   const len = content.length;
   if (len < 4) return null;
 
@@ -1459,66 +1425,46 @@ function detectFrontmatter(content: string): FrontmatterRange | null {
 
   const fence = `---${lineEnding}`;
   const closeIndex = content.indexOf(fence, fenceLen);
-
   if (closeIndex === -1) return null;
 
-  return {
+  const range: FrontmatterRange = {
     start: 0,
     end: closeIndex + fenceLen,
     linesStart: fenceLen,
     linesEnd: closeIndex,
     lineEnding,
   };
-}
-function parseFrontmatterEntry(
-  line: string
-): { key: string; value: string } | null {
-  const trimmed = line.trim();
-  const idx = trimmed.indexOf(':');
-  if (!trimmed || idx <= 0) return null;
 
-  return {
-    key: trimmed.slice(0, idx).trim().toLowerCase(),
-    value: trimmed.slice(idx + 1).trim(),
-  };
-}
-function stripFrontmatterQuotes(val: string): string {
-  const first = val.charAt(0);
-  const last = val.charAt(val.length - 1);
-
-  if ((first === '"' && last === '"') || (first === "'" && last === "'")) {
-    return val.slice(1, -1).trim();
-  }
-  return val;
-}
-function scanFrontmatterForTitle(
-  content: string,
-  fm: FrontmatterRange
-): string | undefined {
-  const fmBody = content.slice(fm.linesStart, fm.linesEnd);
+  // Parse key-value entries in one pass
+  const entries = new Map<string, string>();
+  const fmBody = content.slice(range.linesStart, range.linesEnd);
   let lastIdx = 0;
   while (lastIdx < fmBody.length) {
-    let nextIdx = fmBody.indexOf(fm.lineEnding, lastIdx);
+    let nextIdx = fmBody.indexOf(lineEnding, lastIdx);
     if (nextIdx === -1) nextIdx = fmBody.length;
 
-    const line = fmBody.slice(lastIdx, nextIdx);
-    const entry = parseFrontmatterEntry(line);
-
-    if (entry) {
-      if (entry.key === 'title' || entry.key === 'name') {
-        const cleaned = stripFrontmatterQuotes(entry.value);
-        if (cleaned) return cleaned;
+    const line = fmBody.slice(lastIdx, nextIdx).trim();
+    const colonIdx = line.indexOf(':');
+    if (line && colonIdx > 0) {
+      const key = line.slice(0, colonIdx).trim().toLowerCase();
+      let value = line.slice(colonIdx + 1).trim();
+      // Strip surrounding quotes
+      const first = value.charAt(0);
+      const last = value.charAt(value.length - 1);
+      if ((first === '"' && last === '"') || (first === "'" && last === "'")) {
+        value = value.slice(1, -1).trim();
       }
+      if (value) entries.set(key, value);
     }
-    lastIdx = nextIdx + fm.lineEnding.length;
+    lastIdx = nextIdx + lineEnding.length;
   }
-  return undefined;
+
+  return { range, entries };
 }
 function scanBodyForTitle(content: string): string | undefined {
   const len = content.length;
   let scanIndex = 0;
-  const LIMIT = 5000;
-  const maxScan = Math.min(len, LIMIT);
+  const maxScan = Math.min(len, BODY_SCAN_LIMIT);
 
   while (scanIndex < maxScan) {
     let nextIndex = content.indexOf('\n', scanIndex);
@@ -1542,15 +1488,15 @@ function scanBodyForTitle(content: string): string | undefined {
 export function extractTitleFromRawMarkdown(
   content: string
 ): string | undefined {
-  const fm = detectFrontmatter(content);
+  const fm = parseFrontmatter(content);
   if (fm) {
-    const title = scanFrontmatterForTitle(content, fm);
+    const title = fm.entries.get('title') ?? fm.entries.get('name');
     if (title) return title;
   }
   return scanBodyForTitle(content);
 }
 export function addSourceToMarkdown(content: string, url: string): string {
-  const fm = detectFrontmatter(content);
+  const fm = parseFrontmatter(content);
   const useMarkdownFormat = config.transform.metadataFormat === 'markdown';
 
   if (useMarkdownFormat && !fm) {
@@ -1577,13 +1523,17 @@ export function addSourceToMarkdown(content: string, url: string): string {
     return `---${lineEnding}source: "${escapedUrl}"${lineEnding}---${lineEnding}${lineEnding}${content}`;
   }
 
-  const fmBody = content.slice(fm.linesStart, fm.linesEnd);
+  const fmBody = content.slice(fm.range.linesStart, fm.range.linesEnd);
   if (REGEX.SOURCE_KEY.test(fmBody)) return content;
 
   const escapedUrl = url.replace(/"/g, '\\"');
-  const injection = `source: "${escapedUrl}"${fm.lineEnding}`;
+  const injection = `source: "${escapedUrl}"${fm.range.lineEnding}`;
 
-  return content.slice(0, fm.linesEnd) + injection + content.slice(fm.linesEnd);
+  return (
+    content.slice(0, fm.range.linesEnd) +
+    injection +
+    content.slice(fm.range.linesEnd)
+  );
 }
 function countCommonTags(content: string, limit: number): number {
   if (limit <= 0) return 0;
@@ -1602,10 +1552,10 @@ export function isRawTextContent(content: string): boolean {
   const trimmed = content.trim();
   if (REGEX.HTML_DOC_START.test(trimmed)) return false;
 
-  if (detectFrontmatter(trimmed) !== null) return true;
+  if (parseFrontmatter(trimmed) !== null) return true;
 
-  const tagCount = countCommonTags(content, 5);
-  if (tagCount > 5) return false;
+  const tagCount = countCommonTags(content, HTML_TAG_DENSITY_LIMIT);
+  if (tagCount > HTML_TAG_DENSITY_LIMIT) return false;
 
   return (
     REGEX.HEADING_MARKER.test(content) ||
@@ -1648,3 +1598,5 @@ export function buildMetadataFooter(
 
   return lines.join('\n');
 }
+
+// endregion
