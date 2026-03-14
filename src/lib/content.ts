@@ -948,7 +948,7 @@ const LANGUAGES: LanguageDef[] = [
       ctx.trimmedStart.startsWith('{') || ctx.trimmedStart.startsWith('['),
   },
 ];
-function extractLanguageFromClassName(className: string): string | undefined {
+export function extractLanguageFromClassName(className: string): string | undefined {
   if (!className) return undefined;
 
   // Split by whitespace and check for language indicators

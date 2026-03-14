@@ -9,6 +9,7 @@ import {
   addSourceToMarkdown,
   buildMetadataFooter,
   cleanupMarkdownArtifacts,
+  extractLanguageFromClassName,
   extractTitleFromRawMarkdown,
   isRawTextContent,
   prepareDocumentForMarkdown,
@@ -401,11 +402,21 @@ function resolveCollapsedTextLengthUpTo(text: string, max: number): number {
 }
 
 function preserveAlertElements(doc: Document): void {
-  const alerts = doc.querySelectorAll('[role="alert"], .admonition, .callout');
+  const alerts = doc.querySelectorAll(
+    '[role="alert"], .admonition, [class*="callout"]'
+  );
   for (const el of alerts) {
     const bq = doc.createElement('blockquote');
     bq.innerHTML = (el as HTMLElement).innerHTML;
     el.replaceWith(bq);
+  }
+}
+
+function preserveCodeLanguageAttributes(doc: Document): void {
+  for (const el of doc.querySelectorAll('pre, code')) {
+    if (el.getAttribute('data-language')) continue;
+    const lang = extractLanguageFromClassName(el.getAttribute('class') ?? '');
+    if (lang) el.setAttribute('data-language', lang);
   }
 }
 
@@ -463,6 +474,7 @@ function extractArticle(
         : doc;
 
     preserveAlertElements(readabilityDoc);
+    preserveCodeLanguageAttributes(readabilityDoc);
 
     for (const el of readabilityDoc.querySelectorAll(
       '[class*="breadcrumb"],[class*="pagination"]'
