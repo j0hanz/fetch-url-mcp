@@ -364,3 +364,32 @@ interface LikeNode {
 export function isLikeNode(value: unknown): value is LikeNode {
   return isObject(value);
 }
+
+type JsonRecord = Record<string, unknown>;
+function asRecord(value: unknown): JsonRecord | undefined {
+  return isObject(value) ? (value as JsonRecord) : undefined;
+}
+function readUnknown(obj: unknown, key: string): unknown {
+  const record = asRecord(obj);
+  return record ? record[key] : undefined;
+}
+export function readString(obj: unknown, key: string): string | undefined {
+  const value = readUnknown(obj, key);
+  return typeof value === 'string' ? value : undefined;
+}
+export function readNestedRecord(
+  obj: unknown,
+  keys: readonly string[]
+): JsonRecord | undefined {
+  let current: unknown = obj;
+  for (const key of keys) {
+    current = readUnknown(current, key);
+    if (current === undefined) return undefined;
+  }
+  return asRecord(current);
+}
+export function withSignal(
+  signal?: AbortSignal
+): { signal: AbortSignal } | Record<string, never> {
+  return signal === undefined ? {} : { signal };
+}

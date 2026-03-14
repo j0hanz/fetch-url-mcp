@@ -19,44 +19,14 @@ import {
   normalizeUrl,
   transformToRawUrl,
 } from './http.js';
-import { getErrorMessage, isObject } from './utils.js';
+import {
+  getErrorMessage,
+  readNestedRecord,
+  readString,
+  withSignal,
+} from './utils.js';
 
-/* -------------------------------------------------------------------------------------------------
- * JSON record utilities
- * ------------------------------------------------------------------------------------------------- */
-
-type JsonRecord = Record<string, unknown>;
-function asRecord(value: unknown): JsonRecord | undefined {
-  return isObject(value) ? (value as JsonRecord) : undefined;
-}
-function readUnknown(obj: unknown, key: string): unknown {
-  const record = asRecord(obj);
-  return record ? record[key] : undefined;
-}
-function readString(obj: unknown, key: string): string | undefined {
-  const value = readUnknown(obj, key);
-  return typeof value === 'string' ? value : undefined;
-}
-export function readNestedRecord(
-  obj: unknown,
-  keys: readonly string[]
-): JsonRecord | undefined {
-  let current: unknown = obj;
-  for (const key of keys) {
-    current = readUnknown(current, key);
-    if (current === undefined) return undefined;
-  }
-  return asRecord(current);
-}
-export function withSignal(
-  signal?: AbortSignal
-): { signal: AbortSignal } | Record<string, never> {
-  return signal === undefined ? {} : { signal };
-}
-
-/* -------------------------------------------------------------------------------------------------
- * Inline content truncation
- * ------------------------------------------------------------------------------------------------- */
+export { readNestedRecord, withSignal };
 
 export const TRUNCATION_MARKER = '...[truncated]';
 export interface InlineContentResult {
@@ -156,42 +126,20 @@ export function appendTruncationMarker(
 
   return `${contentWithFence}${marker}`;
 }
-class InlineContentLimiter {
-  apply(content: string): InlineContentResult {
-    const contentSize = content.length;
-    const inlineLimit = config.constants.maxInlineContentChars;
-
-    if (isWithinInlineLimit(contentSize, inlineLimit)) {
-      return { content, contentSize };
-    }
-
-    const truncatedContent = truncateWithMarker(
-      content,
-      inlineLimit,
-      TRUNCATION_MARKER
-    );
-
-    return {
-      content: truncatedContent,
-      contentSize,
-      truncated: true,
-    };
-  }
-}
-function isWithinInlineLimit(
-  contentSize: number,
-  inlineLimit: number
-): boolean {
-  return inlineLimit <= 0 || contentSize <= inlineLimit;
-}
-const inlineLimiter = new InlineContentLimiter();
 function applyInlineContentLimit(content: string): InlineContentResult {
-  return inlineLimiter.apply(content);
-}
+  const contentSize = content.length;
+  const inlineLimit = config.constants.maxInlineContentChars;
 
-/* -------------------------------------------------------------------------------------------------
- * Fetch pipeline
- * ------------------------------------------------------------------------------------------------- */
+  if (inlineLimit <= 0 || contentSize <= inlineLimit) {
+    return { content, contentSize };
+  }
+
+  return {
+    content: truncateWithMarker(content, inlineLimit, TRUNCATION_MARKER),
+    contentSize,
+    truncated: true,
+  };
+}
 
 interface FetchPipelineOptions<T> {
   url: string;
@@ -249,16 +197,6 @@ function resolveNormalizedUrl(url: string): UrlResolution {
     transformed: true,
   };
 }
-function logRawUrlTransformation(resolvedUrl: UrlResolution): void {
-  if (!resolvedUrl.transformed) return;
-
-  logDebug('Using transformed raw content URL', {
-    original: resolvedUrl.originalUrl,
-  });
-}
-function extractTitle(value: unknown): string | undefined {
-  return readString(value, 'title');
-}
 function logCacheMiss(
   reason: string,
   cacheNamespace: string,
@@ -272,32 +210,12 @@ function logCacheMiss(
     ...(error ? { error: getErrorMessage(error) } : {}),
   });
 }
-function createCacheHitResult<T>(params: {
-  data: T;
-  normalizedUrl: string;
-  cachedUrl: string;
-  fetchedAt: string;
-  cacheKey: string;
-}): PipelineResult<T> {
-  const finalUrl =
-    params.cachedUrl !== params.normalizedUrl ? params.cachedUrl : undefined;
-
-  return {
-    data: params.data,
-    fromCache: true,
-    url: params.normalizedUrl,
-    ...(finalUrl ? { finalUrl } : {}),
-    fetchedAt: params.fetchedAt,
-    cacheKey: params.cacheKey,
-  };
-}
-function attemptCacheRetrieval<T>(params: {
-  cacheKey: string | null;
-  deserialize: ((cached: string) => T | undefined) | undefined;
-  cacheNamespace: string;
-  normalizedUrl: string;
-}): PipelineResult<T> | null {
-  const { cacheKey, deserialize, cacheNamespace, normalizedUrl } = params;
+function attemptCacheRetrieval<T>(
+  cacheKey: string | null,
+  deserialize: ((cached: string) => T | undefined) | undefined,
+  cacheNamespace: string,
+  normalizedUrl: string
+): PipelineResult<T> | null {
   if (!cacheKey) return null;
 
   const cached = get(cacheKey);
@@ -323,40 +241,33 @@ function attemptCacheRetrieval<T>(params: {
 
   logDebug('Cache hit', { namespace: cacheNamespace, url: normalizedUrl });
 
-  return createCacheHitResult({
+  const finalUrl = cached.url !== normalizedUrl ? cached.url : undefined;
+
+  return {
     data,
-    normalizedUrl,
-    cachedUrl: cached.url,
+    fromCache: true,
+    url: normalizedUrl,
+    ...(finalUrl ? { finalUrl } : {}),
     fetchedAt: cached.fetchedAt,
     cacheKey,
-  });
+  };
 }
-function persistCache<T>(params: {
-  cacheKey: string | null;
-  data: T;
-  serialize: ((result: T) => string) | undefined;
-  normalizedUrl: string;
-  cacheNamespace: string;
-  force?: boolean;
-}): void {
-  const { cacheKey, data, serialize, normalizedUrl, cacheNamespace, force } =
-    params;
-  if (!cacheKey) return;
-
+function persistCacheEntry<T>(
+  cacheKey: string,
+  data: T,
+  serialize: ((result: T) => string) | undefined,
+  normalizedUrl: string,
+  cacheNamespace: string
+): void {
   const serializer = serialize ?? JSON.stringify;
-  const title = extractTitle(data);
+  const title = readString(data, 'title');
   const metadata = {
     url: normalizedUrl,
     ...(title === undefined ? {} : { title }),
   };
 
   try {
-    set(
-      cacheKey,
-      serializer(data),
-      metadata,
-      force ? { force: true } : undefined
-    );
+    set(cacheKey, serializer(data), metadata);
   } catch (error: unknown) {
     logWarn('Failed to persist cache entry', {
       namespace: cacheNamespace,
@@ -365,67 +276,42 @@ function persistCache<T>(params: {
     });
   }
 }
-interface CacheWriteTarget {
-  cacheKey: string;
-  normalizedUrl: string;
-}
-function buildCacheWriteTargets(params: {
-  primaryCacheKey: string | null;
-  cacheNamespace: string;
-  cacheVary: Record<string, unknown> | string | undefined;
-  requestedUrl: string;
-  finalUrl: string | undefined;
-}): CacheWriteTarget[] {
-  const { primaryCacheKey, cacheNamespace, cacheVary, requestedUrl, finalUrl } =
-    params;
-  const targets: CacheWriteTarget[] = [];
-
+function persistAllCacheTargets<T>(
+  primaryCacheKey: string | null,
+  data: T,
+  serialize: ((result: T) => string) | undefined,
+  cacheNamespace: string,
+  cacheVary: Record<string, unknown> | string | undefined,
+  requestedUrl: string,
+  finalUrl: string | undefined
+): void {
   if (primaryCacheKey) {
-    targets.push({
-      cacheKey: primaryCacheKey,
-      normalizedUrl: finalUrl ?? requestedUrl,
-    });
-  }
-
-  if (!finalUrl || finalUrl === requestedUrl) {
-    return targets;
-  }
-
-  const finalCacheKey = createCacheKey(cacheNamespace, finalUrl, cacheVary);
-  if (!finalCacheKey || finalCacheKey === primaryCacheKey) {
-    return targets;
-  }
-
-  targets.push({
-    cacheKey: finalCacheKey,
-    normalizedUrl: finalUrl,
-  });
-
-  return targets;
-}
-function persistCacheTargets<T>(params: {
-  targets: readonly CacheWriteTarget[];
-  data: T;
-  serialize: ((result: T) => string) | undefined;
-  cacheNamespace: string;
-}): void {
-  const { targets, data, serialize, cacheNamespace } = params;
-  for (const target of targets) {
-    persistCache({
-      cacheKey: target.cacheKey,
+    persistCacheEntry(
+      primaryCacheKey,
       data,
       serialize,
-      normalizedUrl: target.normalizedUrl,
-      cacheNamespace,
-    });
+      finalUrl ?? requestedUrl,
+      cacheNamespace
+    );
   }
+
+  if (!finalUrl || finalUrl === requestedUrl) return;
+
+  const finalCacheKey = createCacheKey(cacheNamespace, finalUrl, cacheVary);
+  if (!finalCacheKey || finalCacheKey === primaryCacheKey) return;
+
+  persistCacheEntry(finalCacheKey, data, serialize, finalUrl, cacheNamespace);
 }
 export async function executeFetchPipeline<T>(
   options: FetchPipelineOptions<T>
 ): Promise<PipelineResult<T>> {
   options.onStage?.('resolve_url');
   const resolvedUrl = resolveNormalizedUrl(options.url);
-  logRawUrlTransformation(resolvedUrl);
+  if (resolvedUrl.transformed) {
+    logDebug('Using transformed raw content URL', {
+      original: resolvedUrl.originalUrl,
+    });
+  }
 
   const cacheKey = createCacheKey(
     options.cacheNamespace,
@@ -435,12 +321,12 @@ export async function executeFetchPipeline<T>(
 
   if (!options.forceRefresh) {
     options.onStage?.('check_cache');
-    const cachedResult = attemptCacheRetrieval({
+    const cachedResult = attemptCacheRetrieval(
       cacheKey,
-      deserialize: options.deserialize,
-      cacheNamespace: options.cacheNamespace,
-      normalizedUrl: resolvedUrl.normalizedUrl,
-    });
+      options.deserialize,
+      options.cacheNamespace,
+      resolvedUrl.normalizedUrl
+    );
     if (cachedResult) {
       options.onStage?.('cache_hit');
       options.onStage?.('cache_restore');
@@ -466,18 +352,15 @@ export async function executeFetchPipeline<T>(
   );
 
   if (isEnabled()) {
-    persistCacheTargets({
-      targets: buildCacheWriteTargets({
-        primaryCacheKey: cacheKey,
-        cacheNamespace: options.cacheNamespace,
-        cacheVary: options.cacheVary,
-        requestedUrl: resolvedUrl.normalizedUrl,
-        finalUrl,
-      }),
+    persistAllCacheTargets(
+      cacheKey,
       data,
-      serialize: options.serialize,
-      cacheNamespace: options.cacheNamespace,
-    });
+      options.serialize,
+      options.cacheNamespace,
+      options.cacheVary,
+      resolvedUrl.normalizedUrl,
+      finalUrl
+    );
   }
 
   return {
@@ -490,10 +373,6 @@ export async function executeFetchPipeline<T>(
     cacheKey,
   };
 }
-
-/* -------------------------------------------------------------------------------------------------
- * Markdown pipeline
- * ------------------------------------------------------------------------------------------------- */
 
 export type MarkdownPipelineResult = MarkdownTransformResult & {
   readonly content: string;
@@ -553,10 +432,6 @@ export function serializeMarkdownResult(
   return JSON.stringify(payload);
 }
 
-/* -------------------------------------------------------------------------------------------------
- * Shared fetch
- * ------------------------------------------------------------------------------------------------- */
-
 interface SharedFetchOptions {
   readonly url: string;
   readonly signal?: AbortSignal;
@@ -576,17 +451,18 @@ interface SharedFetchDeps {
 function buildSharedFetchPipelineOptions(
   options: SharedFetchOptions
 ): FetchPipelineOptions<MarkdownPipelineResult> {
-  return {
+  const opts: FetchPipelineOptions<MarkdownPipelineResult> = {
     url: options.url,
     cacheNamespace: 'markdown',
-    ...withSignal(options.signal),
-    ...(options.cacheVary ? { cacheVary: options.cacheVary } : {}),
-    ...(options.forceRefresh ? { forceRefresh: true } : {}),
-    ...(options.onStage ? { onStage: options.onStage } : {}),
     transform: options.transform,
-    ...(options.serialize ? { serialize: options.serialize } : {}),
-    ...(options.deserialize ? { deserialize: options.deserialize } : {}),
   };
+  if (options.signal !== undefined) opts.signal = options.signal;
+  if (options.cacheVary !== undefined) opts.cacheVary = options.cacheVary;
+  if (options.forceRefresh) opts.forceRefresh = true;
+  if (options.onStage) opts.onStage = options.onStage;
+  if (options.serialize) opts.serialize = options.serialize;
+  if (options.deserialize) opts.deserialize = options.deserialize;
+  return opts;
 }
 export async function performSharedFetch(
   options: SharedFetchOptions,
