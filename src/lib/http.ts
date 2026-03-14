@@ -48,6 +48,10 @@ import {
 } from './utils.js';
 import { formatZodError } from './zod.js';
 
+// ═══════════════════════════════════════════════════════════════════
+// FILENAME GENERATION & DOWNLOAD
+// ═══════════════════════════════════════════════════════════════════
+
 const FILENAME_RULES = {
   MAX_LEN: 200,
   UNSAFE_CHARS: /[<>:"/\\|?*\p{C}]/gu,
@@ -178,6 +182,11 @@ export function handleDownload(
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.end(content);
 }
+
+// ═══════════════════════════════════════════════════════════════════
+// ENCODING DETECTION
+// ═══════════════════════════════════════════════════════════════════
+
 const UTF8_ENCODING = 'utf-8';
 function getCharsetFromContentType(
   contentType: string | null
@@ -219,17 +228,24 @@ function isUnicodeWideEncoding(encoding: string | undefined): boolean {
     normalized === 'unicodefeff'
   );
 }
-const BOM_SIGNATURES: readonly {
-  bytes: readonly number[];
-  encoding: string;
-}[] = [
-  // 4-byte BOMs must come first to avoid false matches with 2-byte prefixes
+const BOM_ENTRIES: readonly { bytes: readonly number[]; encoding: string }[] = [
+  // 4-byte BOMs must come before shorter prefixes to avoid false matches
   { bytes: [0xff, 0xfe, 0x00, 0x00], encoding: 'utf-32le' },
   { bytes: [0x00, 0x00, 0xfe, 0xff], encoding: 'utf-32be' },
   { bytes: [0xef, 0xbb, 0xbf], encoding: 'utf-8' },
   { bytes: [0xff, 0xfe], encoding: 'utf-16le' },
   { bytes: [0xfe, 0xff], encoding: 'utf-16be' },
 ];
+const BOM_BY_FIRST_BYTE = new Map<
+  number,
+  readonly { bytes: readonly number[]; encoding: string }[]
+>();
+for (const entry of BOM_ENTRIES) {
+  const key = entry.bytes[0];
+  if (key === undefined) continue;
+  const existing = BOM_BY_FIRST_BYTE.get(key);
+  BOM_BY_FIRST_BYTE.set(key, existing ? [...existing, entry] : [entry]);
+}
 function startsWithBytes(
   buffer: Uint8Array,
   signature: readonly number[]
@@ -243,7 +259,12 @@ function startsWithBytes(
   return true;
 }
 function detectBomEncoding(buffer: Uint8Array): string | undefined {
-  for (const { bytes, encoding } of BOM_SIGNATURES) {
+  if (buffer.length === 0) return undefined;
+  const first = buffer[0];
+  if (first === undefined) return undefined;
+  const candidates = BOM_BY_FIRST_BYTE.get(first);
+  if (!candidates) return undefined;
+  for (const { bytes, encoding } of candidates) {
     if (startsWithBytes(buffer, bytes)) return encoding;
   }
   return undefined;
@@ -318,6 +339,11 @@ function resolveEncoding(
 
   return detectHtmlDeclaredEncoding(sample);
 }
+
+// ═══════════════════════════════════════════════════════════════════
+// BINARY DETECTION
+// ═══════════════════════════════════════════════════════════════════
+
 const BINARY_SIGNATURES = [
   [0x25, 0x50, 0x44, 0x46],
   [0x89, 0x50, 0x4e, 0x47],
@@ -362,6 +388,11 @@ function isBinaryContent(buffer: Uint8Array, encoding?: string): boolean {
 
   return !isUnicodeWideEncoding(encoding) && hasNullByte(buffer, 1000);
 }
+
+// ═══════════════════════════════════════════════════════════════════
+// FETCH ERRORS
+// ═══════════════════════════════════════════════════════════════════
+
 function parseRetryAfter(header: string | null): number {
   if (!header) return 60;
 
@@ -493,6 +524,11 @@ function mapFetchError(
 
   return createFetchError({ kind: 'network', message: error.message }, url);
 }
+
+// ═══════════════════════════════════════════════════════════════════
+// REDIRECT FOLLOWING
+// ═══════════════════════════════════════════════════════════════════
+
 const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
 function isRedirectStatus(status: number): boolean {
   return REDIRECT_STATUSES.has(status);
@@ -692,6 +728,11 @@ class RedirectFollower {
     }
   }
 }
+
+// ═══════════════════════════════════════════════════════════════════
+// CONTENT VALIDATION & DECOMPRESSION
+// ═══════════════════════════════════════════════════════════════════
+
 function resolveResponseError(
   response: Response,
   finalUrl: string
@@ -855,6 +896,69 @@ function createPumpedStream(
     },
   });
 }
+interface DecodePipeline {
+  decodedReader: ReadableStreamDefaultReader<Uint8Array>;
+  passthroughBranch: ReadableStream<Uint8Array>;
+  decodedNodeStream: PassThrough;
+  headers: Headers;
+  cleanup: () => void;
+}
+function buildDecodePipeline(
+  body: ReadableStream<Uint8Array>,
+  encodings: ContentEncoding[],
+  url: string,
+  response: Response,
+  signal?: AbortSignal
+): DecodePipeline {
+  const [decodeBranch, passthroughBranch] = body.tee();
+
+  const decodeOrder = encodings.slice().reverse();
+  const decompressors = decodeOrder.map((enc) => createDecompressor(enc));
+  const decodeSource = Readable.fromWeb(
+    toNodeReadableStream(decodeBranch, url, 'response:decode-content-encoding')
+  );
+  const decodedNodeStream = new PassThrough();
+  const decodedPipeline = pipeline([
+    decodeSource,
+    ...decompressors,
+    decodedNodeStream,
+  ]);
+
+  const headers = new Headers(response.headers);
+  headers.delete('content-encoding');
+  headers.delete('content-length');
+
+  const cleanup = (): void => {
+    decodeSource.destroy();
+    for (const decompressor of decompressors) {
+      decompressor.destroy();
+    }
+    decodedNodeStream.destroy();
+  };
+
+  if (signal) {
+    signal.addEventListener('abort', cleanup, { once: true });
+  }
+
+  void decodedPipeline.catch((error: unknown) => {
+    decodedNodeStream.destroy(toError(error));
+  });
+
+  const decodedBodyStream = toWebReadableStream(
+    decodedNodeStream,
+    url,
+    'response:decode-content-encoding'
+  );
+  const decodedReader = decodedBodyStream.getReader();
+
+  return {
+    decodedReader,
+    passthroughBranch,
+    decodedNodeStream,
+    headers,
+    cleanup,
+  };
+}
 async function decodeResponseIfNeeded(
   response: Response,
   url: string,
@@ -877,75 +981,37 @@ async function decodeResponseIfNeeded(
   }
 
   if (!response.body) return response;
-  const [decodeBranch, passthroughBranch] = response.body.tee();
 
-  const decodeOrder = encodings
-    .slice()
-    .reverse()
-    .filter(isSupportedContentEncoding);
-
-  const decompressors = decodeOrder.map((encoding) =>
-    createDecompressor(encoding)
-  );
-  const decodeSource = Readable.fromWeb(
-    toNodeReadableStream(decodeBranch, url, 'response:decode-content-encoding')
-  );
-  const decodedNodeStream = new PassThrough();
-  const decodedPipeline = pipeline([
-    decodeSource,
-    ...decompressors,
-    decodedNodeStream,
-  ]);
-
-  const headers = new Headers(response.headers);
-  headers.delete('content-encoding');
-  headers.delete('content-length');
-
-  const abortDecodePipeline = (): void => {
-    decodeSource.destroy();
-    for (const decompressor of decompressors) {
-      decompressor.destroy();
-    }
-    decodedNodeStream.destroy();
-  };
-
-  if (signal) {
-    signal.addEventListener('abort', abortDecodePipeline, { once: true });
-  }
-
-  void decodedPipeline.catch((error: unknown) => {
-    decodedNodeStream.destroy(toError(error));
-  });
-
-  const decodedBodyStream = toWebReadableStream(
-    decodedNodeStream,
+  const pipe = buildDecodePipeline(
+    response.body,
+    encodings.filter(isSupportedContentEncoding),
     url,
-    'response:decode-content-encoding'
+    response,
+    signal
   );
-  const decodedReader = decodedBodyStream.getReader();
 
   const clearAbortListener = (): void => {
     if (!signal) return;
-    signal.removeEventListener('abort', abortDecodePipeline);
+    signal.removeEventListener('abort', pipe.cleanup);
   };
 
   try {
-    const first = await decodedReader.read();
+    const first = await pipe.decodedReader.read();
     if (first.done) {
       clearAbortListener();
-      void passthroughBranch.cancel().catch(() => undefined);
+      void pipe.passthroughBranch.cancel().catch(() => undefined);
       return new Response(null, {
         status: response.status,
         statusText: response.statusText,
-        headers,
+        headers: pipe.headers,
       });
     }
 
-    void passthroughBranch.cancel().catch(() => undefined);
-    const body = createPumpedStream(first.value, decodedReader);
+    void pipe.passthroughBranch.cancel().catch(() => undefined);
+    const body = createPumpedStream(first.value, pipe.decodedReader);
 
     if (signal) {
-      void finished(decodedNodeStream, { cleanup: true })
+      void finished(pipe.decodedNodeStream, { cleanup: true })
         .catch(() => {})
         .finally(() => {
           clearAbortListener();
@@ -955,19 +1021,95 @@ async function decodeResponseIfNeeded(
     return new Response(body, {
       status: response.status,
       statusText: response.statusText,
-      headers,
+      headers: pipe.headers,
     });
   } catch (error: unknown) {
     clearAbortListener();
-    abortDecodePipeline();
-    void decodedReader.cancel(error).catch(() => undefined);
+    pipe.cleanup();
+    void pipe.decodedReader.cancel(error).catch(() => undefined);
 
-    void passthroughBranch.cancel().catch(() => undefined);
+    void pipe.passthroughBranch.cancel().catch(() => undefined);
 
     throw new FetchError(
       `Content-Encoding decode failed for ${redactUrl(url)}: ${isError(error) ? error.message : String(error)}`,
       url
     );
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// RESPONSE READING
+// ═══════════════════════════════════════════════════════════════════
+
+class BoundedBufferTransform extends Transform {
+  total = 0;
+  readonly chunks: Buffer[] = [];
+  effectiveEncoding: string;
+  private encodingResolved = false;
+
+  constructor(
+    private readonly byteLimit: number,
+    private readonly captureChunks: boolean,
+    private readonly url: string,
+    private readonly declaredEncoding: string | undefined
+  ) {
+    super();
+    this.effectiveEncoding = declaredEncoding ?? 'utf-8';
+  }
+
+  override _transform(
+    chunk: unknown,
+    _encoding: string,
+    callback: (error?: Error | null, data?: Buffer) => void
+  ): void {
+    try {
+      const buf = Buffer.isBuffer(chunk)
+        ? chunk
+        : Buffer.from(
+            (chunk as Uint8Array).buffer,
+            (chunk as Uint8Array).byteOffset,
+            (chunk as Uint8Array).byteLength
+          );
+
+      if (!this.encodingResolved) {
+        this.encodingResolved = true;
+        this.effectiveEncoding =
+          resolveEncoding(this.declaredEncoding, buf) ??
+          this.declaredEncoding ??
+          'utf-8';
+      }
+
+      if (isBinaryContent(buf, this.effectiveEncoding)) {
+        callback(
+          new FetchError(
+            'Detailed content type check failed: binary content detected',
+            this.url,
+            500,
+            { reason: 'binary_content_detected' }
+          )
+        );
+        return;
+      }
+
+      const newTotal = this.total + buf.length;
+      if (newTotal > this.byteLimit) {
+        const remaining = this.byteLimit - this.total;
+        if (remaining > 0) {
+          const slice = buf.subarray(0, remaining);
+          this.total += remaining;
+          if (this.captureChunks) this.chunks.push(slice);
+          this.push(slice);
+        }
+        callback(new MaxBytesError());
+        return;
+      }
+
+      this.total = newTotal;
+      if (this.captureChunks) this.chunks.push(buf);
+      callback(null, buf);
+    } catch (error: unknown) {
+      callback(toError(error));
+    }
   }
 }
 class ResponseTextReader {
@@ -1040,26 +1182,10 @@ class ResponseTextReader {
 
     const limit = maxBytes <= 0 ? Number.POSITIVE_INFINITY : maxBytes;
 
-    let buffer: Uint8Array;
-    let truncated = false;
-
-    try {
-      // Try safe blob slicing if available (Node 18+) to avoid OOM
-      const blob = await response.blob();
-      if (Number.isFinite(limit) && blob.size > limit) {
-        const sliced = blob.slice(0, limit);
-        buffer = new Uint8Array(await sliced.arrayBuffer());
-        truncated = true;
-      } else {
-        buffer = new Uint8Array(await blob.arrayBuffer());
-      }
-    } catch {
-      // Fallback if blob() fails
-      const arrayBuffer = await response.arrayBuffer();
-      const length = Math.min(arrayBuffer.byteLength, limit);
-      buffer = new Uint8Array(arrayBuffer, 0, length);
-      truncated = Number.isFinite(limit) && arrayBuffer.byteLength > limit;
-    }
+    const arrayBuffer = await response.arrayBuffer();
+    const truncated = Number.isFinite(limit) && arrayBuffer.byteLength > limit;
+    const length = truncated ? limit : arrayBuffer.byteLength;
+    const buffer = new Uint8Array(arrayBuffer, 0, length);
 
     const effectiveEncoding =
       resolveEncoding(encoding, buffer) ?? encoding ?? 'utf-8';
@@ -1095,65 +1221,17 @@ class ResponseTextReader {
   }> {
     const byteLimit = maxBytes <= 0 ? Number.POSITIVE_INFINITY : maxBytes;
     const captureChunks = byteLimit !== Number.POSITIVE_INFINITY;
-    let effectiveEncoding = encoding ?? 'utf-8';
-    let encodingResolved = false;
-    let total = 0;
-    const chunks: Buffer[] = [];
 
     const source = Readable.fromWeb(
       toNodeReadableStream(stream, url, 'response:read-stream-buffer')
     );
 
-    const guard = new Transform({
-      transform(this: Transform, chunk, _encoding, callback): void {
-        try {
-          const buf = Buffer.isBuffer(chunk)
-            ? chunk
-            : Buffer.from(
-                (chunk as Uint8Array).buffer,
-                (chunk as Uint8Array).byteOffset,
-                (chunk as Uint8Array).byteLength
-              );
-
-          if (!encodingResolved) {
-            encodingResolved = true;
-            effectiveEncoding =
-              resolveEncoding(encoding, buf) ?? encoding ?? 'utf-8';
-          }
-
-          if (isBinaryContent(buf, effectiveEncoding)) {
-            callback(
-              new FetchError(
-                'Detailed content type check failed: binary content detected',
-                url,
-                500,
-                { reason: 'binary_content_detected' }
-              )
-            );
-            return;
-          }
-
-          const newTotal = total + buf.length;
-          if (newTotal > byteLimit) {
-            const remaining = byteLimit - total;
-            if (remaining > 0) {
-              const slice = buf.subarray(0, remaining);
-              total += remaining;
-              if (captureChunks) chunks.push(slice);
-              this.push(slice);
-            }
-            callback(new MaxBytesError());
-            return;
-          }
-
-          total = newTotal;
-          if (captureChunks) chunks.push(buf);
-          callback(null, buf);
-        } catch (error: unknown) {
-          callback(toError(error));
-        }
-      },
-    });
+    const guard = new BoundedBufferTransform(
+      byteLimit,
+      captureChunks,
+      url,
+      encoding
+    );
 
     const guarded = source.pipe(guard);
     const abortHandler = (): void => {
@@ -1169,8 +1247,8 @@ class ResponseTextReader {
       const buffer = await consumeBuffer(guarded);
       return {
         buffer,
-        encoding: effectiveEncoding,
-        size: total,
+        encoding: guard.effectiveEncoding,
+        size: guard.total,
         truncated: false,
       };
     } catch (error: unknown) {
@@ -1180,9 +1258,9 @@ class ResponseTextReader {
         source.destroy();
         guard.destroy();
         return {
-          buffer: Buffer.concat(chunks, total),
-          encoding: effectiveEncoding,
-          size: total,
+          buffer: Buffer.concat(guard.chunks, guard.total),
+          encoding: guard.effectiveEncoding,
+          size: guard.total,
           truncated: true,
         };
       }
@@ -1293,6 +1371,11 @@ function toWebReadableStream(
   assertReadableStreamLike(converted, url, stage);
   return converted;
 }
+
+// ═══════════════════════════════════════════════════════════════════
+// TELEMETRY
+// ═══════════════════════════════════════════════════════════════════
+
 interface RequestContextAccessor {
   getRequestId(): string | undefined;
   getOperationId(): string | undefined;
@@ -1352,17 +1435,6 @@ class FetchTelemetry {
     return this.redactor.redact(url);
   }
 
-  private contextFields(
-    ctx: FetchTelemetryContext
-  ): Record<string, string | undefined> {
-    return {
-      ...(ctx.contextRequestId
-        ? { contextRequestId: ctx.contextRequestId }
-        : {}),
-      ...(ctx.operationId ? { operationId: ctx.operationId } : {}),
-    };
-  }
-
   start(url: string, method: string): FetchTelemetryContext {
     const safeUrl = this.redactor.redact(url);
     const contextRequestId = this.context.getRequestId();
@@ -1377,7 +1449,12 @@ class FetchTelemetry {
     if (contextRequestId) ctx.contextRequestId = contextRequestId;
     if (operationId) ctx.operationId = operationId;
 
-    const ctxFields = this.contextFields(ctx);
+    const ctxFields = {
+      ...(ctx.contextRequestId
+        ? { contextRequestId: ctx.contextRequestId }
+        : {}),
+      ...(ctx.operationId ? { operationId: ctx.operationId } : {}),
+    };
     this.publish({
       v: 1,
       type: 'start',
@@ -1404,7 +1481,12 @@ class FetchTelemetry {
   ): void {
     const duration = performance.now() - context.startTime;
     const durationLabel = `${Math.round(duration)}ms`;
-    const ctxFields = this.contextFields(context);
+    const ctxFields = {
+      ...(context.contextRequestId
+        ? { contextRequestId: context.contextRequestId }
+        : {}),
+      ...(context.operationId ? { operationId: context.operationId } : {}),
+    };
 
     this.publish({
       v: 1,
@@ -1449,7 +1531,12 @@ class FetchTelemetry {
     const duration = performance.now() - context.startTime;
     const err = toError(error);
     const code = isSystemError(err) ? err.code : undefined;
-    const ctxFields = this.contextFields(context);
+    const ctxFields = {
+      ...(context.contextRequestId
+        ? { contextRequestId: context.contextRequestId }
+        : {}),
+      ...(context.operationId ? { operationId: context.operationId } : {}),
+    };
 
     this.publish({
       v: 1,
@@ -1490,6 +1577,11 @@ class FetchTelemetry {
     }
   }
 }
+
+// ═══════════════════════════════════════════════════════════════════
+// ORCHESTRATION & EXPORTS
+// ═══════════════════════════════════════════════════════════════════
+
 interface FetchOptions {
   signal?: AbortSignal;
 }
@@ -1556,7 +1648,7 @@ class HttpFetcher {
     options?: FetchOptions
   ): Promise<FetchReadResult> {
     const timeoutMs = this.fetcherConfig.timeout;
-    const headers = buildHeaders();
+    const headers = DEFAULT_HEADERS;
     const signal = buildRequestSignal(timeoutMs, options?.signal);
     const init = buildRequestInit(headers, signal);
 
@@ -1635,9 +1727,6 @@ const DEFAULT_HEADERS: Record<string, string> = {
   // The undici-based globalThis.fetch manages content negotiation and
   // decompression transparently per the Fetch spec.
 };
-function buildHeaders(): Record<string, string> {
-  return DEFAULT_HEADERS;
-}
 function buildRequestSignal(
   timeoutMs: number,
   external?: AbortSignal
@@ -1657,39 +1746,68 @@ function buildRequestInit(
     ...(signal ? { signal } : {}),
   };
 }
-const ipBlocker = new IpBlocker(config.security);
-const urlNormalizer = new UrlNormalizer(
-  config.constants,
-  config.security,
+interface HttpModuleSingletons {
+  readonly ipBlocker: IpBlocker;
+  readonly urlNormalizer: UrlNormalizer;
+  readonly rawUrlTransformer: RawUrlTransformer;
+  readonly telemetry: FetchTelemetry;
+  readonly secureRedirectFollower: RedirectFollower;
+  readonly responseReader: ResponseTextReader;
+  readonly httpFetcher: HttpFetcher;
+}
+function createHttpModule(): HttpModuleSingletons {
+  const ipBlocker = new IpBlocker(config.security);
+  const urlNormalizer = new UrlNormalizer(
+    config.constants,
+    config.security,
+    ipBlocker,
+    BLOCKED_HOST_SUFFIXES
+  );
+  const rawUrlTransformer = new RawUrlTransformer(defaultLogger);
+  const dnsResolver = new SafeDnsResolver(
+    ipBlocker,
+    config.security,
+    BLOCKED_HOST_SUFFIXES
+  );
+  const tel = new FetchTelemetry(
+    defaultLogger,
+    defaultContext,
+    defaultRedactor
+  );
+  const normalizeRedirectUrl = (url: string): string =>
+    urlNormalizer.validateAndNormalize(url);
+  const dnsPreflight = createDnsPreflight(dnsResolver);
+  const secureRedirectFollower = new RedirectFollower(
+    defaultFetch,
+    normalizeRedirectUrl,
+    dnsPreflight
+  );
+  const responseReader = new ResponseTextReader();
+  const httpFetcher = new HttpFetcher(
+    config.fetcher,
+    secureRedirectFollower,
+    responseReader,
+    tel
+  );
+  return {
+    ipBlocker,
+    urlNormalizer,
+    rawUrlTransformer,
+    telemetry: tel,
+    secureRedirectFollower,
+    responseReader,
+    httpFetcher,
+  } as const;
+}
+const {
   ipBlocker,
-  BLOCKED_HOST_SUFFIXES
-);
-const rawUrlTransformer = new RawUrlTransformer(defaultLogger);
-const dnsResolver = new SafeDnsResolver(
-  ipBlocker,
-  config.security,
-  BLOCKED_HOST_SUFFIXES
-);
-const telemetry = new FetchTelemetry(
-  defaultLogger,
-  defaultContext,
-  defaultRedactor
-);
-const normalizeRedirectUrl = (url: string): string =>
-  urlNormalizer.validateAndNormalize(url);
-const dnsPreflight = createDnsPreflight(dnsResolver);
-const secureRedirectFollower = new RedirectFollower(
-  defaultFetch,
-  normalizeRedirectUrl,
-  dnsPreflight
-);
-const responseReader = new ResponseTextReader();
-const httpFetcher = new HttpFetcher(
-  config.fetcher,
+  urlNormalizer,
+  rawUrlTransformer,
+  telemetry,
   secureRedirectFollower,
   responseReader,
-  telemetry
-);
+  httpFetcher,
+} = createHttpModule();
 export function isBlockedIp(ip: string): boolean {
   return ipBlocker.isBlockedIp(ip);
 }
