@@ -1,9 +1,6 @@
 import { randomUUID } from 'node:crypto';
 
-import type {
-  McpServer,
-  ToolCallback,
-} from '@modelcontextprotocol/sdk/server/mcp.js';
+import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type {
   ContentBlock,
   ToolAnnotations,
@@ -11,33 +8,31 @@ import type {
 import { ErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js';
 import { z } from 'zod';
 
-import { config } from '../lib/core.js';
 import {
+  config,
   getRequestId,
   logDebug,
   logError,
   logWarn,
   runWithRequestContext,
 } from '../lib/core.js';
-import { handleToolError } from '../lib/mcp-tools.js';
 import {
   appendTruncationMarker,
+  createProgressReporter,
+  handleToolError,
   type InlineContentResult,
   type MarkdownPipelineResult,
   markdownTransform,
   parseCachedMarkdownResult,
   performSharedFetch,
   type PipelineResult,
+  type ProgressReporter,
   readNestedRecord,
   serializeMarkdownResult,
   type SharedFetchStage,
+  type ToolHandlerExtra,
   TRUNCATION_MARKER,
   withSignal,
-} from '../lib/mcp-tools.js';
-import {
-  createProgressReporter,
-  type ProgressReporter,
-  type ToolHandlerExtra,
 } from '../lib/mcp-tools.js';
 import { isAbortError, isObject, toError } from '../lib/utils.js';
 import { formatZodError } from '../lib/zod.js';
@@ -55,16 +50,15 @@ import {
 
 type FetchUrlInput = z.infer<typeof fetchUrlInputSchema>;
 
-type ToolContentBlockUnion = ContentBlock;
-
 interface ToolResponseBase {
   [key: string]: unknown;
-  content: ToolContentBlockUnion[];
+  content: ContentBlock[];
   structuredContent?: Record<string, unknown> | undefined;
   isError?: boolean;
 }
 
 export const FETCH_URL_TOOL_NAME = 'fetch-url';
+
 const FETCH_URL_TOOL_DESCRIPTION = `
 <role>Web Content Extractor</role>
 <task>Fetch public webpages and convert HTML to clean Markdown.</task>
@@ -82,181 +76,35 @@ const TOOL_ICON = {
   mimeType: 'image/svg+xml',
 };
 
-/* -------------------------------------------------------------------------------------------------
- * Tool response builders
- * ------------------------------------------------------------------------------------------------- */
-
-function buildTextBlock(structuredContent: Record<string, unknown>): {
-  type: 'text';
-  text: string;
-} {
-  return {
-    type: 'text',
-    text: JSON.stringify(structuredContent),
-  };
-}
-
-/* -------------------------------------------------------------------------------------------------
- * Tool abort signal
- * ------------------------------------------------------------------------------------------------- */
-
 const HARD_TOOL_TIMEOUT_MS = 300_000;
-
-function buildToolAbortSignal(
-  extraSignal: AbortSignal | undefined
-): AbortSignal | undefined {
-  const { timeoutMs } = config.tools;
-  const effectiveTimeout = timeoutMs > 0 ? timeoutMs : HARD_TOOL_TIMEOUT_MS;
-
-  const timeoutSignal = AbortSignal.timeout(effectiveTimeout);
-  if (!extraSignal) return timeoutSignal;
-
-  return AbortSignal.any([extraSignal, timeoutSignal]);
-}
+const CODE_HOSTS = new Set(['github.com', 'gitlab.com', 'bitbucket.org']);
 
 /* -------------------------------------------------------------------------------------------------
- * Structured response assembly
+ * URL context & progress
  * ------------------------------------------------------------------------------------------------- */
-
-function truncateStr(
-  value: string | undefined,
-  max: number
-): string | undefined {
-  if (value === undefined || value.length <= max) return value;
-  return value.slice(0, max);
-}
-
-function buildStructuredContent(
-  pipeline: PipelineResult<MarkdownPipelineResult>,
-  inlineResult: InlineContentResult,
-  inputUrl: string
-): Record<string, unknown> {
-  const truncated = inlineResult.truncated ?? pipeline.data.truncated;
-  const rawMarkdown = applyTruncationMarker(
-    inlineResult.content,
-    pipeline.data.truncated
-  );
-  const maxChars = config.constants.maxInlineContentChars;
-  const markdown =
-    maxChars > 0 ? truncateStr(rawMarkdown, maxChars) : rawMarkdown;
-  const metadata = normalizeExtractedMetadata(pipeline.data.metadata);
-  const title = normalizePageTitle(pipeline.data.title);
-
-  return {
-    url: pipeline.originalUrl ?? pipeline.url,
-    resolvedUrl: pipeline.url,
-    ...(pipeline.finalUrl ? { finalUrl: pipeline.finalUrl } : {}),
-    inputUrl,
-    ...(title ? { title } : {}),
-    ...(metadata ? { metadata } : {}),
-    markdown,
-    fromCache: pipeline.fromCache,
-    fetchedAt: pipeline.fetchedAt,
-    contentSize: inlineResult.contentSize,
-    ...(truncated ? { truncated: true } : {}),
-  };
-}
-
-function applyTruncationMarker(
-  content: string | undefined,
-  truncated: boolean
-): string | undefined {
-  if (!truncated || typeof content !== 'string') return content;
-  return appendTruncationMarker(content, TRUNCATION_MARKER);
-}
-
-function buildFetchUrlContentBlocks(
-  structuredContent: Record<string, unknown>
-): ToolContentBlockUnion[] {
-  return [buildTextBlock(structuredContent)];
-}
-
-function buildResponse(
-  pipeline: PipelineResult<MarkdownPipelineResult>,
-  inlineResult: InlineContentResult,
-  inputUrl: string
-): ToolResponseBase {
-  const structuredContent = buildStructuredContent(
-    pipeline,
-    inlineResult,
-    inputUrl
-  );
-  const content = buildFetchUrlContentBlocks(structuredContent);
-
-  const validation = fetchUrlOutputSchema.safeParse(structuredContent);
-  if (!validation.success) {
-    logWarn('Tool output schema validation failed', {
-      url: inputUrl,
-      issues: formatZodError(validation.error),
-    });
-    // Omit structuredContent so the SDK does not receive data that fails its
-    // output schema validation. The client still gets the payload via content[0].text.
-    return { content };
-  }
-
-  return {
-    content,
-    structuredContent,
-  };
-}
-
-/* -------------------------------------------------------------------------------------------------
- * fetch-url tool implementation
- * ------------------------------------------------------------------------------------------------- */
-
-function isCodeHost(host: string): boolean {
-  return (
-    host === 'github.com' || host === 'gitlab.com' || host === 'bitbucket.org'
-  );
-}
-
-function summarizeCodeHostPath(host: string, parts: string[]): string | null {
-  if (!isCodeHost(host) || parts.length < 2) return null;
-
-  const p0 = parts[0] ?? '';
-  const p1 = parts[1] ?? '';
-  return `${host}/${p0}/${p1}`;
-}
-
-function summarizeWikipediaPath(parts: string[]): string | null {
-  if (parts[0] !== 'wiki' || parts.length < 2) return null;
-
-  const p1 = parts[1] ?? '';
-  return `wikipedia.org/${p1}`;
-}
-
-function truncatePathSegment(segment: string, max = 20): string {
-  if (segment.length <= max) return segment;
-  return `${segment.substring(0, max - 3)}...`;
-}
-
-function summarizeUrlPath(host: string, parts: string[]): string {
-  const codeHostSummary = summarizeCodeHostPath(host, parts);
-  if (codeHostSummary) return codeHostSummary;
-
-  if (host.endsWith('wikipedia.org')) {
-    const wikipediaSummary = summarizeWikipediaPath(parts);
-    if (wikipediaSummary) return wikipediaSummary;
-  }
-
-  const basename = truncatePathSegment(parts.at(-1) ?? '');
-  if (parts.length === 1) {
-    return `${host}/${basename}`;
-  }
-
-  return basename ? `${host}/…/${basename}` : host;
-}
 
 function getUrlContext(urlStr: string): string {
   try {
     const u = new URL(urlStr);
     const host = u.hostname.replace(/^www\./, '');
-    const path = u.pathname;
-    if (path === '/' || path === '') return host;
-
-    const parts = path.split('/').filter(Boolean);
+    const parts = u.pathname.split('/').filter(Boolean);
     if (parts.length === 0) return host;
-    return summarizeUrlPath(host, parts);
+
+    if (CODE_HOSTS.has(host) && parts.length >= 2) {
+      return `${host}/${parts[0] ?? ''}/${parts[1] ?? ''}`;
+    }
+    if (
+      host.endsWith('wikipedia.org') &&
+      parts[0] === 'wiki' &&
+      parts.length >= 2
+    ) {
+      return `wikipedia.org/${parts[1] ?? ''}`;
+    }
+
+    const raw = parts.at(-1) ?? '';
+    const basename = raw.length > 20 ? `${raw.substring(0, 17)}...` : raw;
+    if (parts.length === 1) return `${host}/${basename}`;
+    return basename ? `${host}/…/${basename}` : host;
   } catch {
     return 'unknown';
   }
@@ -288,6 +136,83 @@ function mapFetchStageToProgress(
   }
 }
 
+/* -------------------------------------------------------------------------------------------------
+ * Response assembly
+ * ------------------------------------------------------------------------------------------------- */
+
+function buildStructuredContent(
+  pipeline: PipelineResult<MarkdownPipelineResult>,
+  inlineResult: InlineContentResult,
+  inputUrl: string
+): Record<string, unknown> {
+  const truncated = inlineResult.truncated ?? pipeline.data.truncated;
+
+  let markdown = inlineResult.content;
+  if (pipeline.data.truncated && typeof markdown === 'string') {
+    markdown = appendTruncationMarker(markdown, TRUNCATION_MARKER);
+  }
+  const maxChars = config.constants.maxInlineContentChars;
+  if (maxChars > 0 && markdown !== undefined && markdown.length > maxChars) {
+    markdown = markdown.slice(0, maxChars);
+  }
+
+  const metadata = normalizeExtractedMetadata(pipeline.data.metadata);
+  const title = normalizePageTitle(pipeline.data.title);
+
+  return {
+    url: pipeline.originalUrl ?? pipeline.url,
+    resolvedUrl: pipeline.url,
+    ...(pipeline.finalUrl ? { finalUrl: pipeline.finalUrl } : {}),
+    inputUrl,
+    ...(title ? { title } : {}),
+    ...(metadata ? { metadata } : {}),
+    markdown,
+    fromCache: pipeline.fromCache,
+    fetchedAt: pipeline.fetchedAt,
+    contentSize: inlineResult.contentSize,
+    ...(truncated ? { truncated: true } : {}),
+  };
+}
+
+function buildResponse(
+  pipeline: PipelineResult<MarkdownPipelineResult>,
+  inlineResult: InlineContentResult,
+  inputUrl: string
+): ToolResponseBase {
+  const structuredContent = buildStructuredContent(
+    pipeline,
+    inlineResult,
+    inputUrl
+  );
+  const content: ContentBlock[] = [
+    { type: 'text', text: JSON.stringify(structuredContent) },
+  ];
+
+  const validation = fetchUrlOutputSchema.safeParse(structuredContent);
+  if (!validation.success) {
+    logWarn('Tool output schema validation failed', {
+      url: inputUrl,
+      issues: formatZodError(validation.error),
+    });
+    return { content };
+  }
+
+  return { content, structuredContent };
+}
+
+/* -------------------------------------------------------------------------------------------------
+ * Fetch pipeline
+ * ------------------------------------------------------------------------------------------------- */
+
+function buildToolAbortSignal(extraSignal?: AbortSignal): AbortSignal {
+  const timeout =
+    config.tools.timeoutMs > 0 ? config.tools.timeoutMs : HARD_TOOL_TIMEOUT_MS;
+  const timeoutSignal = AbortSignal.timeout(timeout);
+  return extraSignal
+    ? AbortSignal.any([extraSignal, timeoutSignal])
+    : timeoutSignal;
+}
+
 function buildFetchOptions(
   url: string,
   context: string,
@@ -300,8 +225,8 @@ function buildFetchOptions(
     ...withSignal(signal),
     ...(forceRefresh ? { forceRefresh: true } : {}),
     onStage: (stage) => {
-      const update = mapFetchStageToProgress(stage, context);
-      reportProgress(progress, update.step, update.message);
+      const { step, message } = mapFetchStageToProgress(stage, context);
+      progress?.report(step, message);
     },
     transform: async ({ buffer, encoding, truncated }, normalizedUrl) => {
       return markdownTransform(
@@ -315,36 +240,6 @@ function buildFetchOptions(
   };
 }
 
-async function fetchPipeline(
-  url: string,
-  context: string,
-  signal?: AbortSignal,
-  progress?: ProgressReporter,
-  forceRefresh?: boolean
-): Promise<{
-  pipeline: PipelineResult<MarkdownPipelineResult>;
-  inlineResult: InlineContentResult;
-}> {
-  return performSharedFetch(
-    buildFetchOptions(url, context, signal, progress, forceRefresh)
-  );
-}
-
-function formatContentSize(chars: number): string {
-  if (chars < 1000) return `${chars} chars`;
-  if (chars < 1_000_000) return `${(chars / 1024).toFixed(1)} KB`;
-  return `${(chars / (1024 * 1024)).toFixed(1)} MB`;
-}
-
-function reportProgress(
-  progress: ProgressReporter | undefined,
-  step: number,
-  message: string
-): void {
-  if (!progress) return;
-  progress.report(step, message);
-}
-
 async function executeFetch(
   input: FetchUrlInput,
   extra?: ToolHandlerExtra
@@ -352,26 +247,27 @@ async function executeFetch(
   const { url } = input;
   const signal = buildToolAbortSignal(extra?.signal);
   const progress = createProgressReporter(extra);
-
   const context = getUrlContext(url);
+
   logDebug('Fetching URL', { url });
 
   try {
-    reportProgress(progress, 1, 'Preparing request');
-    const { pipeline, inlineResult } = await fetchPipeline(
-      url,
-      context,
-      signal,
-      progress,
-      input.forceRefresh
+    progress.report(1, 'Preparing request');
+    const { pipeline, inlineResult } = await performSharedFetch(
+      buildFetchOptions(url, context, signal, progress, input.forceRefresh)
     );
 
-    const size = formatContentSize(inlineResult.contentSize);
-    reportProgress(progress, 8, `Done — ${size}`);
+    const chars = inlineResult.contentSize;
+    const size =
+      chars < 1000
+        ? `${chars} chars`
+        : chars < 1_000_000
+          ? `${(chars / 1024).toFixed(1)} KB`
+          : `${(chars / (1024 * 1024)).toFixed(1)} MB`;
+    progress.report(8, `Done — ${size}`);
     return buildResponse(pipeline, inlineResult, url);
   } catch (error) {
-    const isAbort = isAbortError(error);
-    reportProgress(progress, 8, isAbort ? 'Cancelled' : 'Failed');
+    progress.report(8, isAbortError(error) ? 'Cancelled' : 'Failed');
     throw error;
   }
 }
@@ -390,8 +286,6 @@ export async function fetchUrlToolHandler(
  * MCP tool definition + registration
  * ------------------------------------------------------------------------------------------------- */
 
-type FetchUrlToolHandler = ToolCallback<typeof fetchUrlInputSchema>;
-
 const TOOL_DEFINITION = {
   name: FETCH_URL_TOOL_NAME,
   title: 'Fetch URL',
@@ -399,38 +293,14 @@ const TOOL_DEFINITION = {
   inputSchema: fetchUrlInputSchema,
   outputSchema: z.toJSONSchema(fetchUrlOutputSchema) as Record<string, unknown>,
   handler: fetchUrlToolHandler,
-  execution: {
-    taskSupport: 'optional',
-  },
+  execution: { taskSupport: 'optional' } as const,
   annotations: {
     readOnlyHint: true,
     destructiveHint: false,
     idempotentHint: true,
     openWorldHint: true,
   } satisfies ToolAnnotations,
-} satisfies {
-  name: string;
-  title: string;
-  description: string;
-  inputSchema: typeof fetchUrlInputSchema;
-  outputSchema: Record<string, unknown>;
-  execution: { taskSupport: 'optional' | 'required' | 'forbidden' };
-  annotations: ToolAnnotations;
-  handler: FetchUrlToolHandler;
 };
-
-function applyRegisteredToolExecutionMetadata(
-  registeredTool: {
-    execution?:
-      | { taskSupport?: 'optional' | 'required' | 'forbidden' | undefined }
-      | undefined;
-  },
-  execution: { taskSupport: 'optional' | 'required' | 'forbidden' }
-): void {
-  // SDK workaround: RegisteredTool does not expose `execution` in its public type.
-  // Keep the mutation localized to one helper so future SDK upgrades touch one place.
-  registeredTool.execution = execution;
-}
 
 /**
  * Stdio-path guard: ensures a request context (requestId, sessionId) is set
@@ -518,10 +388,7 @@ export function registerTools(server: McpServer): void {
     } as { inputSchema: typeof fetchUrlInputSchema } & Record<string, unknown>,
     withRequestContextIfMissing(TOOL_DEFINITION.handler)
   );
-  // SDK typing gap workaround: preserve runtime `execution` metadata until the
-  // registered tool type includes this field.
-  applyRegisteredToolExecutionMetadata(
-    registeredTool,
-    TOOL_DEFINITION.execution
-  );
+  // SDK workaround: RegisteredTool type omits `execution`
+  (registeredTool as Record<string, unknown>).execution =
+    TOOL_DEFINITION.execution;
 }
