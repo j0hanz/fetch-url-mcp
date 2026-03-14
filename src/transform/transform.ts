@@ -90,23 +90,16 @@ interface StageBudget {
 
 const abortPolicy = { throwIfAborted, createAbortError };
 
-// ── Extraction Thresholds ──
-const MIN_SPA_CONTENT_LENGTH = 100;
-const MIN_READERABLE_TEXT_LENGTH = 400;
-const MAX_READABILITY_ELEMENTS = 20_000;
+function isWhitespaceChar(code: number): boolean {
+  return code === 9 || code === 10 || code === 12 || code === 13 || code === 32;
+}
 
-// ── URL Resolution ──
-const ABORT_CHECK_LINE_INTERVAL = 500;
-const CR_CHAR_CODE = 13;
-
-// ── Content Source ──
-const MIN_CONTENT_ROOT_LENGTH = 100;
-const HEADING_SCAN_LIMIT = 12;
-
-// ── Binary Detection ──
-const BINARY_SAMPLE_SIZE = 2000;
-
-// ── Stage Tracking ──
+function containsWhitespace(value: string): boolean {
+  for (let i = 0; i < value.length; i += 1) {
+    if (isWhitespaceChar(value.charCodeAt(i))) return true;
+  }
+  return false;
+}
 
 function buildTransformSignal(signal?: AbortSignal): AbortSignal | undefined {
   const { timeoutMs } = config.transform;
@@ -259,8 +252,6 @@ export function endTransformStage(
   return stageTracker.end(context, options);
 }
 
-// ── HTML Truncation ──
-
 function getUtf8ByteLength(html: string): number {
   return Buffer.byteLength(html, 'utf8');
 }
@@ -363,7 +354,9 @@ function willTruncate(html: string): boolean {
   );
 }
 
-// ── Content Extraction (Readability) ──
+const MIN_SPA_CONTENT_LENGTH = 100;
+const MIN_READERABLE_TEXT_LENGTH = 400;
+const MAX_READABILITY_ELEMENTS = 20_000;
 
 function isReadabilityCompatible(doc: unknown): doc is Document {
   if (!isObject(doc)) return false;
@@ -611,18 +604,8 @@ export function extractContent(
   return { article: result.article, metadata: result.metadata };
 }
 
-// ── Markdown URL Resolution ──
-
-function isWhitespaceChar(code: number): boolean {
-  return code === 9 || code === 10 || code === 12 || code === 13 || code === 32;
-}
-
-function containsWhitespace(value: string): boolean {
-  for (let i = 0; i < value.length; i += 1) {
-    if (isWhitespaceChar(value.charCodeAt(i))) return true;
-  }
-  return false;
-}
+const ABORT_CHECK_LINE_INTERVAL = 500;
+const CR_CHAR_CODE = 13;
 
 function resolveRelativeHref(
   href: string,
@@ -811,8 +794,6 @@ function resolveRelativeUrls(
   return output;
 }
 
-// ── HTML-to-Markdown Conversion ──
-
 function translateHtmlToMarkdown(params: {
   html: string;
   url: string;
@@ -947,8 +928,6 @@ function tryTransformRawContent(params: {
   };
 }
 
-// ── Content Quality Heuristics ──
-
 const MIN_CONTENT_RATIO = 0.15;
 const MIN_HTML_LENGTH_FOR_GATE = 100;
 const MIN_HEADING_RETENTION_RATIO = 0.3;
@@ -1058,8 +1037,6 @@ export function isExtractionSufficient(
   return articleLength / originalLength >= MIN_CONTENT_RATIO;
 }
 
-// ── Sentence Truncation Heuristics ──
-
 // Heuristic to detect if the content was truncated due to length limits by checking for incomplete sentences.
 const SENTENCE_ENDING_CODES = new Set([46, 33, 63, 58, 59]);
 
@@ -1119,7 +1096,9 @@ function hasTruncatedSentences(text: string): boolean {
   return incompleteFound / linesFound > MAX_TRUNCATED_LINE_RATIO;
 }
 
-// ── Content Source Resolution ──
+const MIN_CONTENT_ROOT_LENGTH = 100;
+const HEADING_SCAN_LIMIT = 12;
+const BINARY_SAMPLE_SIZE = 2000;
 
 export function determineContentExtractionSource(
   article: ExtractedArticle | null
@@ -1501,8 +1480,6 @@ function hasBinaryIndicators(content: string): boolean {
   return replacementCount > sampleSize * BINARY_INDICATOR_THRESHOLD;
 }
 
-// ── Worker Orchestration ──
-
 export function transformHtmlToMarkdownInProcess(
   html: string,
   url: string,
@@ -1514,11 +1491,11 @@ export function transformHtmlToMarkdownInProcess(
   try {
     abortPolicy.throwIfAborted(signal, url, 'transform:begin');
 
-    _validateBinaryContent(html, url);
+    validateBinaryContent(html, url);
 
     const result =
-      _tryRawContentPipeline(html, url, options) ??
-      _tryHtmlContentPipeline(html, url, options, signal);
+      tryRawContentPipeline(html, url, options) ??
+      tryHtmlContentPipeline(html, url, options, signal);
 
     stageTracker.end(totalStage, { truncated: result.truncated });
     return result;
@@ -1528,7 +1505,7 @@ export function transformHtmlToMarkdownInProcess(
   }
 }
 
-function _validateBinaryContent(html: string, url: string): void {
+function validateBinaryContent(html: string, url: string): void {
   if (hasBinaryIndicators(html)) {
     throw new FetchError(
       'Content appears to be binary data (high replacement character ratio or null bytes)',
@@ -1539,7 +1516,7 @@ function _validateBinaryContent(html: string, url: string): void {
   }
 }
 
-function _tryRawContentPipeline(
+function tryRawContentPipeline(
   html: string,
   url: string,
   options: TransformOptions
@@ -1554,7 +1531,7 @@ function _tryRawContentPipeline(
   );
 }
 
-function _tryHtmlContentPipeline(
+function tryHtmlContentPipeline(
   html: string,
   url: string,
   options: TransformOptions,

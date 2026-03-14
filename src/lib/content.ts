@@ -4,8 +4,6 @@ import { type MetadataBlock } from '../transform/types.js';
 import { config, logDebug } from './core.js';
 import { throwIfAborted } from './utils.js';
 
-// region Constants & Types
-
 // ASCII char codes used in hot-path charCodeAt comparisons
 const ASCII_SPACE = 32;
 const ASCII_TAB = 9;
@@ -25,14 +23,6 @@ const ASCII_BRACKET_OPEN = 91;
 const ASCII_LOWER_A = 97;
 const ASCII_LOWER_Z = 122;
 const ASCII_UNDERSCORE = 95;
-
-// Thresholds
-const NOISE_SCAN_LIMIT = 50_000;
-const MIN_BODY_CONTENT_LENGTH = 100;
-const DIALOG_MIN_CHARS_FOR_PRESERVATION = 500;
-const NAV_FOOTER_MIN_CHARS_FOR_PRESERVATION = 500;
-const ABORT_CHECK_INTERVAL = 500;
-const NODE_FILTER_SHOW_TEXT = 4;
 const HTML_TAG_DENSITY_LIMIT = 5;
 const TITLE_MIN_WORDS = 2;
 const TITLE_MAX_WORDS = 6;
@@ -40,6 +30,12 @@ const TITLE_MIN_CAPITALIZED = 2;
 const PROPERTY_FIX_MAX_PASSES = 3;
 const BODY_SCAN_LIMIT = 5000;
 const HAS_FOLLOWING_LOOKAHEAD = 50;
+const NOISE_SCAN_LIMIT = 50_000;
+const MIN_BODY_CONTENT_LENGTH = 100;
+const DIALOG_MIN_CHARS_FOR_PRESERVATION = 500;
+const NAV_FOOTER_MIN_CHARS_FOR_PRESERVATION = 500;
+const ABORT_CHECK_INTERVAL = 500;
+const NODE_FILTER_SHOW_TEXT = 4;
 const HTML_DOCUMENT_MARKERS = /<\s*(?:!doctype|html|head|body)\b/i;
 const HTML_FRAGMENT_MARKERS =
   /<\s*(?:article|main|section|div|nav|footer|header|aside|table|ul|ol)\b/i;
@@ -124,6 +120,8 @@ const PROMO_TOKENS_BY_CATEGORY = {
   newsletters: ['newsletter', 'subscribe'],
   'social-share': ['share', 'social'],
 };
+
+// Noise selector configurations
 const BASE_NOISE_SELECTORS = {
   navFooter:
     'nav,footer,header[class*="site"],header[class*="nav"],header[class*="menu"],[role="banner"],[role="navigation"]',
@@ -132,6 +130,8 @@ const BASE_NOISE_SELECTORS = {
     '[style*="display: none"],[style*="display:none"],[style*="visibility: hidden"],[style*="visibility:hidden"],[hidden],[aria-hidden="true"]',
 };
 const NO_MATCH_REGEX = /a^/i;
+
+// Noise removal types
 type NoiseRemovalConfig = typeof config.noiseRemoval;
 type NoiseWeights = NoiseRemovalConfig['weights'];
 interface PromoTokenMatchers {
@@ -155,10 +155,6 @@ interface NoiseContext {
 }
 let cachedContext: NoiseContext | undefined;
 let lastContextKey: string | undefined;
-
-// endregion
-
-// region DOM Noise Removal
 
 function escapeRegexLiteral(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -1420,7 +1416,7 @@ export function cleanupMarkdownArtifacts(
 
 // endregion
 
-// region Frontmatter & Metadata
+// region Frontmatter & Source Injection
 
 interface FrontmatterRange {
   start: number;
@@ -1562,6 +1558,11 @@ export function addSourceToMarkdown(content: string, url: string): string {
     content.slice(fm.range.linesEnd)
   );
 }
+
+// endregion
+
+// region Content Detection & Metadata Footer
+
 function countCommonTags(content: string, limit: number): number {
   if (limit <= 0) return 0;
 
