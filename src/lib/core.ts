@@ -409,8 +409,33 @@ interface RuntimeState {
 const runtimeState: RuntimeState = {
   httpMode: false,
 };
-export const config = {
-  server: {
+export interface AppServerHttpConfig {
+  headersTimeoutMs: number | undefined;
+  requestTimeoutMs: number | undefined;
+  keepAliveTimeoutMs: number | undefined;
+  keepAliveTimeoutBufferMs: number | undefined;
+  maxHeadersCount: number | undefined;
+  maxConnections: number;
+  blockPrivateConnections: boolean;
+  requireProtocolVersionHeaderOnSessionInit: boolean;
+  shutdownCloseIdleConnections: boolean;
+  shutdownCloseAllConnections: boolean;
+}
+
+export interface AppServerConfig {
+  name: string;
+  version: string;
+  port: number;
+  host: string;
+  https: HttpsConfig;
+  sessionTtlMs: number;
+  sessionInitTimeoutMs: number;
+  maxSessions: number;
+  http: AppServerHttpConfig;
+}
+
+function buildServerConfig(): AppServerConfig {
+  return {
     name: 'fetch-url-mcp',
     version: serverVersion,
     port,
@@ -452,14 +477,37 @@ export const config = {
       shutdownCloseIdleConnections: true,
       shutdownCloseAllConnections: false,
     },
-  },
-  fetcher: {
+  };
+}
+
+export interface AppFetcherConfig {
+  timeout: number;
+  maxRedirects: number;
+  userAgent: string;
+  maxContentLength: number;
+}
+
+function buildFetcherConfig(): AppFetcherConfig {
+  return {
     timeout: DEFAULT_FETCH_TIMEOUT_MS,
     maxRedirects: 5,
     userAgent: env['USER_AGENT'] ?? DEFAULT_USER_AGENT,
     maxContentLength: MAX_HTML_BYTES,
-  },
-  transform: {
+  };
+}
+
+export interface AppTransformConfig {
+  timeoutMs: number;
+  stageWarnRatio: number;
+  metadataFormat: string;
+  maxWorkerScale: number;
+  cancelAckTimeoutMs: number;
+  workerMode: TransformWorkerMode;
+  workerResourceLimits: WorkerResourceLimits | undefined;
+}
+
+function buildTransformConfig(): AppTransformConfig {
+  return {
     timeoutMs: DEFAULT_TRANSFORM_TIMEOUT_MS,
     stageWarnRatio: 0.5,
     metadataFormat: 'markdown',
@@ -472,12 +520,18 @@ export const config = {
     ),
     workerMode: EnvParser.transformWorkerMode(env['TRANSFORM_WORKER_MODE']),
     workerResourceLimits: resolveWorkerResourceLimits(),
-  },
-  tools: {
-    enabled: ['fetch-url'],
-    timeoutMs: DEFAULT_TOOL_TIMEOUT_MS,
-  },
-  tasks: {
+  };
+}
+
+export interface AppTasksConfig {
+  maxTotal: number;
+  maxPerOwner: number;
+  emitStatusNotifications: boolean;
+  requireInterception: boolean;
+}
+
+function buildTasksConfig(): AppTasksConfig {
+  return {
     maxTotal: DEFAULT_TASKS_MAX_TOTAL,
     maxPerOwner: RESOLVED_TASKS_MAX_PER_OWNER,
     emitStatusNotifications: EnvParser.boolean(
@@ -488,18 +542,43 @@ export const config = {
       env['TASKS_REQUIRE_INTERCEPTION'],
       true
     ),
-  },
-  cache: {
+  };
+}
+
+export interface AppCacheConfig {
+  enabled: boolean;
+  ttl: number;
+  maxKeys: number;
+  maxSizeBytes: number;
+}
+
+function buildCacheConfig(): AppCacheConfig {
+  return {
     enabled: EnvParser.boolean(env['CACHE_ENABLED'], true),
     ttl: 86400,
     maxKeys: 100,
-    maxSizeBytes: 50 * 1024 * 1024, // 50MB
-  },
-  extraction: {
-    maxBlockLength: 5000,
-    minParagraphLength: 10,
-  },
-  noiseRemoval: {
+    maxSizeBytes: 50 * 1024 * 1024,
+  };
+}
+
+export interface AppNoiseRemovalConfig {
+  extraTokens: string[];
+  extraSelectors: string[];
+  enabledCategories: string[];
+  debug: boolean;
+  aggressiveMode: boolean;
+  preserveSvgCanvas: boolean;
+  weights: {
+    hidden: number;
+    structural: number;
+    promo: number;
+    stickyFixed: number;
+    threshold: number;
+  };
+}
+
+function buildNoiseRemovalConfig(): AppNoiseRemovalConfig {
+  return {
     extraTokens: EnvParser.list(env['FETCH_URL_MCP_EXTRA_NOISE_TOKENS']),
     extraSelectors: EnvParser.list(env['FETCH_URL_MCP_EXTRA_NOISE_SELECTORS']),
     enabledCategories: [
@@ -518,8 +597,19 @@ export const config = {
       stickyFixed: 30,
       threshold: 50,
     },
-  },
-  markdownCleanup: {
+  };
+}
+
+export interface AppMarkdownCleanupConfig {
+  promoteOrphanHeadings: boolean;
+  removeSkipLinks: boolean;
+  removeTocBlocks: boolean;
+  removeTypeDocComments: boolean;
+  headingKeywords: string[];
+}
+
+function buildMarkdownCleanupConfig(): AppMarkdownCleanupConfig {
+  return {
     promoteOrphanHeadings: true,
     removeSkipLinks: true,
     removeTocBlocks: true,
@@ -528,7 +618,25 @@ export const config = {
       env['MARKDOWN_HEADING_KEYWORDS'],
       DEFAULT_HEADING_KEYWORDS
     ),
+  };
+}
+
+export const config = {
+  server: buildServerConfig(),
+  fetcher: buildFetcherConfig(),
+  transform: buildTransformConfig(),
+  tools: {
+    enabled: ['fetch-url'],
+    timeoutMs: DEFAULT_TOOL_TIMEOUT_MS,
   },
+  tasks: buildTasksConfig(),
+  cache: buildCacheConfig(),
+  extraction: {
+    maxBlockLength: 5000,
+    minParagraphLength: 10,
+  },
+  noiseRemoval: buildNoiseRemovalConfig(),
+  markdownCleanup: buildMarkdownCleanupConfig(),
   i18n: {
     locale: EnvParser.locale(env['FETCH_URL_MCP_LOCALE']),
   },
