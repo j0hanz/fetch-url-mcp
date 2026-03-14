@@ -664,6 +664,15 @@ export function prepareDocumentForMarkdown(
 // Some sites put tbody/thead/tfoot inside td/th, which breaks markdown tables.
 function normalizeTableStructure(document: Document): void {
   for (const table of document.querySelectorAll('table')) {
+    const theadCells = table.querySelectorAll('thead td');
+    for (const td of theadCells) {
+      const th = document.createElement('th');
+      th.innerHTML = td.innerHTML;
+      for (const attr of Array.from(td.attributes)) {
+        th.setAttribute(attr.name, attr.value);
+      }
+      td.replaceWith(th);
+    }
     for (const cell of table.querySelectorAll('th, td')) {
       for (const tag of ['tbody', 'thead', 'tfoot'] as const) {
         let nested = cell.querySelector(tag);
@@ -683,6 +692,32 @@ function flattenTableCellBreaks(document: Document): void {
     for (const br of brs) {
       br.replaceWith(' ');
     }
+    
+    const blocks = Array.from(cell.querySelectorAll('div, p, ul, li, h1, h2, h3, h4, h5, h6'));
+    for (const block of blocks) {
+      if (!block.parentNode) continue;
+      const span = document.createElement('span');
+      span.appendChild(document.createTextNode(' '));
+      while (block.firstChild) {
+        span.appendChild(block.firstChild);
+      }
+      span.appendChild(document.createTextNode(' '));
+      for (const attr of Array.from(block.attributes)) {
+        span.setAttribute(attr.name, attr.value);
+      }
+      block.replaceWith(span);
+    }
+    
+    const filterNewlines = (node: Node): void => {
+      if (node.nodeType === 3 && node.nodeValue) {
+        node.nodeValue = node.nodeValue.replace(/\r?\n/g, ' ');
+      } else {
+        for (const child of Array.from(node.childNodes)) {
+          filterNewlines(child);
+        }
+      }
+    };
+    filterNewlines(cell);
   }
 }
 export function removeNoiseFromHtml(
@@ -905,7 +940,7 @@ function matchTypeScript(ctx: DetectionContext): boolean {
   return false;
 }
 function matchSql(ctx: DetectionContext): boolean {
-  return /\b(?:select|insert|update|delete|create|alter|drop)\b/.test(
+  return /\b(?:select\s+.+?\s+from|insert\s+into|update\s+.+?\s+set|delete\s+from|create\s+(?:table|database|index|view|function|procedure|trigger|user|role)|alter\s+(?:table|database|index|view))\b/.test(
     ctx.lower
   );
 }
@@ -1332,9 +1367,13 @@ function removeSkipLinks(text: string): string {
 function normalizeInlineCodeTokens(text: string): string {
   return text.replace(/`([^`\n]+)`/g, (match: string, inner: string) => {
     const trimmed = inner.trim();
-    if (trimmed === inner || /\s/.test(trimmed)) return match;
-    if (!/^[*A-Za-z0-9_./:-]+$/.test(trimmed)) return match;
-    return `\`${trimmed}\``;
+    if (trimmed === inner) return match;
+    if (!/[A-Za-z0-9]/.test(trimmed)) return match;
+    
+    const parts = /^(\s*)(.*?)(\s*)$/.exec(inner);
+    if (!parts) return match;
+    
+    return `${parts[1] ?? ''}\`${parts[2] ?? ''}\`${parts[3] ?? ''}`;
   });
 }
 
