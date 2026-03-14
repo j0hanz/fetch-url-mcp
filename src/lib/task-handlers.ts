@@ -102,23 +102,23 @@ export {
 
 const TaskGetSchema = z.looseObject({
   method: z.literal('tasks/get'),
-  params: z.strictObject({ taskId: z.string() }),
+  params: z.looseObject({ taskId: z.string() }),
 });
 const TaskListSchema = z.looseObject({
   method: z.literal('tasks/list'),
   params: z
-    .strictObject({
+    .looseObject({
       cursor: z.string().optional(),
     })
     .optional(),
 });
 const TaskCancelSchema = z.looseObject({
   method: z.literal('tasks/cancel'),
-  params: z.strictObject({ taskId: z.string() }),
+  params: z.looseObject({ taskId: z.string() }),
 });
 const TaskResultSchema = z.looseObject({
   method: z.literal('tasks/result'),
-  params: z.strictObject({ taskId: z.string() }),
+  params: z.looseObject({ taskId: z.string() }),
 });
 const MIN_TASK_TTL_MS = 1_000;
 const MAX_TASK_TTL_MS = 86_400_000;

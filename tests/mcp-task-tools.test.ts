@@ -211,12 +211,14 @@ describe('MCP task-augmented tools', () => {
     }
   });
 
-  it('rejects unknown params on task requests', async () => {
+  it('tolerates unknown params on task requests (passthrough)', async () => {
     const server = await createMcpServer();
 
     try {
       const getTask = getRequestHandler(server, 'tasks/get');
 
+      // Extra keys (e.g. task, _meta) should be ignored — not rejected.
+      // The handler proceeds normally and returns "Task not found" for the bad id.
       await assert.rejects(
         async () =>
           getTask({
@@ -225,7 +227,8 @@ describe('MCP task-augmented tools', () => {
             method: 'tasks/get',
             params: { taskId: 'missing-task-id', task: { ttl: 10_000 } },
           }),
-        (error: unknown) => /Unrecognized key/.test(String(error))
+        (error: unknown) =>
+          error instanceof Error && /Task not found/.test(error.message)
       );
     } finally {
       await server.close();
