@@ -44,7 +44,7 @@ const NOISE_PATTERNS: readonly RegExp[] = [
   /[\s"']role\s*=\s*['"]?(?:navigation|banner|complementary|contentinfo|tree|menubar|menu)['"]?/i,
   /[\s"'](?:aria-hidden\s*=\s*['"]?true['"]?|hidden)/i,
   /[\s"'](?:banner|promo|announcement|cta|advert|newsletter|subscribe|cookie|consent|popup|modal|overlay|toast)\b/i,
-  /[\s"'](?:fixed|sticky|z-50|z-4|isolate|breadcrumb|pagination)\b/i,
+  /[\s"'](?:fixed|sticky|z-50|z-4|isolate|breadcrumbs?|pagination)\b/i,
 ];
 const HEADER_NOISE_PATTERN =
   /\b(site-header|masthead|topbar|navbar|nav(?:bar)?|menu|header-nav)\b/i;
@@ -106,6 +106,7 @@ const PROMO_TOKENS_ALWAYS = [
   'sponsor',
   'recommend',
   'breadcrumb',
+  'breadcrumbs',
   'pagination',
   'pager',
   'taglist',
@@ -124,7 +125,7 @@ const PROMO_TOKENS_BY_CATEGORY = {
 // Noise selector configurations
 const BASE_NOISE_SELECTORS = {
   navFooter:
-    'nav,footer,header[class*="site"],header[class*="nav"],header[class*="menu"],[role="banner"],[role="navigation"]',
+    'nav,footer,header[class*="site"],header[class*="nav"],header[class*="menu"],[role="banner"],[role="navigation"],[class*="breadcrumb"]',
   cookieBanners: '[role="dialog"]',
   hidden:
     '[style*="display: none"],[style*="display:none"],[style*="visibility: hidden"],[style*="visibility:hidden"],[hidden],[aria-hidden="true"]',

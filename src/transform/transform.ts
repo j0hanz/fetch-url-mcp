@@ -464,6 +464,12 @@ function extractArticle(
 
     preserveAlertElements(readabilityDoc);
 
+    for (const el of readabilityDoc.querySelectorAll(
+      '[class*="breadcrumb"],[class*="pagination"]'
+    )) {
+      el.remove();
+    }
+
     checkAbort('extract:article:parse');
 
     const reader = new Readability(readabilityDoc, {

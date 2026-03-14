@@ -312,10 +312,14 @@ const GFM_ALERT_MAP: ReadonlyMap<string, string> = new Map([
   ['important', 'IMPORTANT'],
 ]);
 
+const ADMONITION_TOKEN_RE =
+  /^(?:note|tip|hint|info|warning|warn|danger|caution|important)$/i;
+
 function resolveGfmAlertType(className: string): string | undefined {
-  const lower = className.toLowerCase();
-  for (const [key, type] of GFM_ALERT_MAP) {
-    if (lower.includes(key)) return type;
+  const tokens = className.toLowerCase().split(/\s+/);
+  for (const token of tokens) {
+    const mapped = GFM_ALERT_MAP.get(token);
+    if (mapped) return mapped;
   }
   return undefined;
 }
@@ -335,12 +339,13 @@ function buildDivTranslator(ctx: unknown): Record<string, unknown> {
         `\n\n\`\`\`mermaid\n${content.trim()}\n\`\`\`\n\n`,
     };
   }
+  const classTokens = className.split(/\s+/);
   const isAdmonition =
     className.includes('admonition') ||
     className.includes('callout') ||
     className.includes('custom-block') ||
     getAttribute('role') === 'alert' ||
-    /\b(note|tip|info|warning|danger|caution|important)\b/i.test(className);
+    classTokens.some((t) => ADMONITION_TOKEN_RE.test(t));
   if (isAdmonition) {
     return {
       postprocess: ({ content }: { content: string }) => {
