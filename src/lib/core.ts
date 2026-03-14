@@ -1490,10 +1490,12 @@ class InMemorySessionStore implements SessionStore {
     const evicted: SessionEntry[] = [];
 
     for (const [id, session] of this.sessions.entries()) {
-      if (this.sessionTtlMs <= 0 || now - session.lastSeen <= this.sessionTtlMs)
-        continue;
-      this.sessions.delete(id);
-      evicted.push(session);
+      if (this.sessionTtlMs > 0 && now - session.lastSeen > this.sessionTtlMs) {
+        this.sessions.delete(id);
+        evicted.push(session);
+      } else {
+        break;
+      }
     }
 
     return evicted;
