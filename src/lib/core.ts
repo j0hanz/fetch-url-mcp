@@ -75,139 +75,123 @@ function loadEnvFileIfAvailable(): void {
 
 loadEnvFileIfAvailable();
 const { env } = process;
+const EnvParser = {
+  integerValue(
+    envValue: string | undefined,
+    min?: number,
+    max?: number
+  ): number | null {
+    if (!envValue) return null;
+    const parsed = Number.parseInt(envValue, 10);
+    if (Number.isNaN(parsed)) return null;
+    if (min !== undefined && parsed < min) return null;
+    if (max !== undefined && parsed > max) return null;
+    return parsed;
+  },
+  optionalInteger(
+    envValue: string | undefined,
+    min?: number,
+    max?: number
+  ): number | undefined {
+    return EnvParser.integerValue(envValue, min, max) ?? undefined;
+  },
+  integer(
+    envValue: string | undefined,
+    defaultValue: number,
+    min?: number,
+    max?: number
+  ): number {
+    return EnvParser.integerValue(envValue, min, max) ?? defaultValue;
+  },
+  boolean(envValue: string | undefined, defaultValue: boolean): boolean {
+    if (!envValue) return defaultValue;
+    return envValue.trim().toLowerCase() !== 'false';
+  },
+  list(
+    envValue: string | undefined,
+    defaultValue?: readonly string[]
+  ): string[] {
+    if (!envValue) return defaultValue ? [...defaultValue] : [];
+    const parsed = envValue
+      .split(/[\s,]+/)
+      .map((entry) => entry.trim())
+      .filter(Boolean);
+    return parsed.length > 0 || !defaultValue ? parsed : [...defaultValue];
+  },
+  locale(value: string | undefined): string | undefined {
+    if (!value) return undefined;
+    const trimmed = value.trim();
+    if (!trimmed) return undefined;
+    const lowered = trimmed.toLowerCase();
+    if (lowered === 'system' || lowered === 'default') return undefined;
+    return trimmed;
+  },
+  logLevel(envValue: string | undefined): LogLevel {
+    if (!envValue) return 'info';
+    const level = envValue.toLowerCase();
+    return ALLOWED_LOG_LEVELS.has(level) ? (level as LogLevel) : 'info';
+  },
+  transformWorkerMode(envValue: string | undefined): TransformWorkerMode {
+    if (!envValue) return 'threads';
+    const normalized = envValue.trim().toLowerCase();
+    if (normalized === 'process' || normalized === 'fork') return 'process';
+    return 'threads';
+  },
+  url(value: string | undefined, name: string): URL | undefined {
+    if (!value) return undefined;
+    if (!URL.canParse(value)) {
+      throw new ConfigError(`Invalid ${name} value: ${value}`);
+    }
+    return new URL(value);
+  },
+  allowedHosts(envValue: string | undefined): Set<string> {
+    return new Set(
+      EnvParser.list(envValue)
+        .map((h) => EnvParser.normalizeHostValue(h))
+        .filter((h): h is string => h !== null)
+    );
+  },
+  optionalFilePath(value: string | undefined): string | undefined {
+    if (!value) return undefined;
+    const trimmed = value.trim();
+    return trimmed.length > 0 ? trimmed : undefined;
+  },
+  normalizeHostValue(value: string): string | null {
+    const raw = value.trim();
+    if (!raw) return null;
 
-function formatHostForUrl(hostname: string): string {
-  if (hostname.includes(':') && !hostname.startsWith('['))
-    return `[${hostname}]`;
-  return hostname;
-}
+    if (raw.includes('://') && URL.canParse(raw)) {
+      return normalizeHostname(new URL(raw).hostname);
+    }
 
-function normalizeHostValue(value: string): string | null {
-  const raw = value.trim();
-  if (!raw) return null;
+    const candidateUrl = `http://${raw}`;
+    if (URL.canParse(candidateUrl)) {
+      return normalizeHostname(new URL(candidateUrl).hostname);
+    }
 
-  if (raw.includes('://') && URL.canParse(raw)) {
-    return normalizeHostname(new URL(raw).hostname);
-  }
+    const lowered = raw.toLowerCase();
 
-  const candidateUrl = `http://${raw}`;
-  if (URL.canParse(candidateUrl)) {
-    return normalizeHostname(new URL(candidateUrl).hostname);
-  }
+    if (lowered.startsWith('[')) {
+      const end = lowered.indexOf(']');
+      if (end === -1) return null;
+      return normalizeHostname(lowered.slice(1, end));
+    }
 
-  const lowered = raw.toLowerCase();
+    if (isIP(lowered) === 6) return stripTrailingDots(lowered);
 
-  if (lowered.startsWith('[')) {
-    const end = lowered.indexOf(']');
-    if (end === -1) return null;
-    return normalizeHostname(lowered.slice(1, end));
-  }
+    const firstColon = lowered.indexOf(':');
+    if (firstColon === -1) return normalizeHostname(lowered);
+    if (lowered.includes(':', firstColon + 1)) return null;
 
-  if (isIP(lowered) === 6) return stripTrailingDots(lowered);
-
-  const firstColon = lowered.indexOf(':');
-  if (firstColon === -1) return normalizeHostname(lowered);
-  if (lowered.includes(':', firstColon + 1)) return null;
-
-  const host = lowered.slice(0, firstColon);
-  return host ? normalizeHostname(host) : null;
-}
-
-function parseIntegerValue(
-  envValue: string | undefined,
-  min?: number,
-  max?: number
-): number | null {
-  if (!envValue) return null;
-  const parsed = Number.parseInt(envValue, 10);
-  if (Number.isNaN(parsed)) return null;
-  if (min !== undefined && parsed < min) return null;
-  if (max !== undefined && parsed > max) return null;
-  return parsed;
-}
-
-function parseOptionalInteger(
-  envValue: string | undefined,
-  min?: number,
-  max?: number
-): number | undefined {
-  return parseIntegerValue(envValue, min, max) ?? undefined;
-}
-
-function parseInteger(
-  envValue: string | undefined,
-  defaultValue: number,
-  min?: number,
-  max?: number
-): number {
-  return parseIntegerValue(envValue, min, max) ?? defaultValue;
-}
-
-function parseBoolean(
-  envValue: string | undefined,
-  defaultValue: boolean
-): boolean {
-  if (!envValue) return defaultValue;
-  return envValue.trim().toLowerCase() !== 'false';
-}
-
-function parseList(
-  envValue: string | undefined,
-  defaultValue?: readonly string[]
-): string[] {
-  if (!envValue) return defaultValue ? [...defaultValue] : [];
-  const parsed = envValue
-    .split(/[\s,]+/)
-    .map((entry) => entry.trim())
-    .filter(Boolean);
-  return parsed.length > 0 || !defaultValue ? parsed : [...defaultValue];
-}
-
-function normalizeLocale(value: string | undefined): string | undefined {
-  if (!value) return undefined;
-  const trimmed = value.trim();
-  if (!trimmed) return undefined;
-  const lowered = trimmed.toLowerCase();
-  if (lowered === 'system' || lowered === 'default') return undefined;
-  return trimmed;
-}
-
-function parseLogLevel(envValue: string | undefined): LogLevel {
-  if (!envValue) return 'info';
-  const level = envValue.toLowerCase();
-  return ALLOWED_LOG_LEVELS.has(level) ? (level as LogLevel) : 'info';
-}
-
-function parseTransformWorkerMode(
-  envValue: string | undefined
-): TransformWorkerMode {
-  if (!envValue) return 'threads';
-  const normalized = envValue.trim().toLowerCase();
-  if (normalized === 'process' || normalized === 'fork') return 'process';
-  return 'threads';
-}
-
-function parseUrlEnv(value: string | undefined, name: string): URL | undefined {
-  if (!value) return undefined;
-  if (!URL.canParse(value)) {
-    throw new ConfigError(`Invalid ${name} value: ${value}`);
-  }
-  return new URL(value);
-}
-
-function parseAllowedHosts(envValue: string | undefined): Set<string> {
-  return new Set(
-    parseList(envValue)
-      .map(normalizeHostValue)
-      .filter((h): h is string => h !== null)
-  );
-}
-
-function readOptionalFilePath(value: string | undefined): string | undefined {
-  if (!value) return undefined;
-  const trimmed = value.trim();
-  return trimmed.length > 0 ? trimmed : undefined;
-}
+    const host = lowered.slice(0, firstColon);
+    return host ? normalizeHostname(host) : null;
+  },
+  formatHostForUrl(hostname: string): string {
+    if (hostname.includes(':') && !hostname.startsWith('['))
+      return `[${hostname}]`;
+    return hostname;
+  },
+};
 
 function assertFileReadable(filePath: string, envVar: string): void {
   try {
@@ -220,7 +204,7 @@ function assertFileReadable(filePath: string, envVar: string): void {
 }
 
 const MAX_HTML_BYTES = 10 * 1024 * 1024;
-const MAX_INLINE_CONTENT_CHARS = parseInteger(
+const MAX_INLINE_CONTENT_CHARS = EnvParser.integer(
   env['MAX_INLINE_CONTENT_CHARS'],
   0,
   0,
@@ -232,7 +216,7 @@ const DEFAULT_MAX_SESSIONS = 200;
 const DEFAULT_USER_AGENT = `fetch-url-mcp/${serverVersion}`;
 const DEFAULT_TOOL_TIMEOUT_PADDING_MS = 5000;
 const DEFAULT_TRANSFORM_TIMEOUT_MS = 30000;
-const DEFAULT_FETCH_TIMEOUT_MS = parseInteger(
+const DEFAULT_FETCH_TIMEOUT_MS = EnvParser.integer(
   env['FETCH_TIMEOUT_MS'],
   15000,
   1000,
@@ -242,8 +226,12 @@ const DEFAULT_TOOL_TIMEOUT_MS =
   DEFAULT_FETCH_TIMEOUT_MS +
   DEFAULT_TRANSFORM_TIMEOUT_MS +
   DEFAULT_TOOL_TIMEOUT_PADDING_MS;
-const DEFAULT_TASKS_MAX_TOTAL = parseInteger(env['TASKS_MAX_TOTAL'], 5000, 1);
-const DEFAULT_TASKS_MAX_PER_OWNER = parseInteger(
+const DEFAULT_TASKS_MAX_TOTAL = EnvParser.integer(
+  env['TASKS_MAX_TOTAL'],
+  5000,
+  1
+);
+const DEFAULT_TASKS_MAX_PER_OWNER = EnvParser.integer(
   env['TASKS_MAX_PER_OWNER'],
   1000,
   1
@@ -260,19 +248,22 @@ interface WorkerResourceLimits {
 }
 
 function resolveWorkerResourceLimits(): WorkerResourceLimits | undefined {
-  const maxOldGenerationSizeMb = parseOptionalInteger(
+  const maxOldGenerationSizeMb = EnvParser.optionalInteger(
     env['TRANSFORM_WORKER_MAX_OLD_GENERATION_MB'],
     1
   );
-  const maxYoungGenerationSizeMb = parseOptionalInteger(
+  const maxYoungGenerationSizeMb = EnvParser.optionalInteger(
     env['TRANSFORM_WORKER_MAX_YOUNG_GENERATION_MB'],
     1
   );
-  const codeRangeSizeMb = parseOptionalInteger(
+  const codeRangeSizeMb = EnvParser.optionalInteger(
     env['TRANSFORM_WORKER_CODE_RANGE_MB'],
     1
   );
-  const stackSizeMb = parseOptionalInteger(env['TRANSFORM_WORKER_STACK_MB'], 1);
+  const stackSizeMb = EnvParser.optionalInteger(
+    env['TRANSFORM_WORKER_STACK_MB'],
+    1
+  );
 
   if (
     maxOldGenerationSizeMb === undefined &&
@@ -317,21 +308,21 @@ interface HttpsConfig {
 }
 
 function buildAuthConfig(baseUrl: URL): AuthConfig {
-  const issuerUrl = parseUrlEnv(env['OAUTH_ISSUER_URL'], 'OAUTH_ISSUER_URL');
-  const authorizationUrl = parseUrlEnv(
+  const issuerUrl = EnvParser.url(env['OAUTH_ISSUER_URL'], 'OAUTH_ISSUER_URL');
+  const authorizationUrl = EnvParser.url(
     env['OAUTH_AUTHORIZATION_URL'],
     'OAUTH_AUTHORIZATION_URL'
   );
-  const tokenUrl = parseUrlEnv(env['OAUTH_TOKEN_URL'], 'OAUTH_TOKEN_URL');
-  const revocationUrl = parseUrlEnv(
+  const tokenUrl = EnvParser.url(env['OAUTH_TOKEN_URL'], 'OAUTH_TOKEN_URL');
+  const revocationUrl = EnvParser.url(
     env['OAUTH_REVOCATION_URL'],
     'OAUTH_REVOCATION_URL'
   );
-  const registrationUrl = parseUrlEnv(
+  const registrationUrl = EnvParser.url(
     env['OAUTH_REGISTRATION_URL'],
     'OAUTH_REGISTRATION_URL'
   );
-  const introspectionUrl = parseUrlEnv(
+  const introspectionUrl = EnvParser.url(
     env['OAUTH_INTROSPECTION_URL'],
     'OAUTH_INTROSPECTION_URL'
   );
@@ -343,7 +334,7 @@ function buildAuthConfig(baseUrl: URL): AuthConfig {
     tokenUrl !== undefined ||
     introspectionUrl !== undefined;
 
-  const tokens = parseList(env['ACCESS_TOKENS']);
+  const tokens = EnvParser.list(env['ACCESS_TOKENS']);
   if (env['API_KEY']) tokens.push(env['API_KEY']);
 
   return {
@@ -355,7 +346,7 @@ function buildAuthConfig(baseUrl: URL): AuthConfig {
     registrationUrl,
     introspectionUrl,
     resourceUrl,
-    requiredScopes: parseList(env['OAUTH_REQUIRED_SCOPES']),
+    requiredScopes: EnvParser.list(env['OAUTH_REQUIRED_SCOPES']),
     clientId: env['OAUTH_CLIENT_ID'],
     clientSecret: env['OAUTH_CLIENT_SECRET'],
     introspectionTimeoutMs: 5000,
@@ -364,9 +355,9 @@ function buildAuthConfig(baseUrl: URL): AuthConfig {
 }
 
 function buildHttpsConfig(): HttpsConfig {
-  const keyFile = readOptionalFilePath(env['SERVER_TLS_KEY_FILE']);
-  const certFile = readOptionalFilePath(env['SERVER_TLS_CERT_FILE']);
-  const caFile = readOptionalFilePath(env['SERVER_TLS_CA_FILE']);
+  const keyFile = EnvParser.optionalFilePath(env['SERVER_TLS_KEY_FILE']);
+  const certFile = EnvParser.optionalFilePath(env['SERVER_TLS_CERT_FILE']);
+  const caFile = EnvParser.optionalFilePath(env['SERVER_TLS_CA_FILE']);
 
   if (keyFile) assertFileReadable(keyFile, 'SERVER_TLS_KEY_FILE');
   if (certFile) assertFileReadable(certFile, 'SERVER_TLS_CERT_FILE');
@@ -405,11 +396,11 @@ const host = (env['HOST'] ?? LOOPBACK_V4).trim();
 const port =
   env['PORT']?.trim() === '0'
     ? 0
-    : parseInteger(env['PORT'], 3000, 1024, 65535);
+    : EnvParser.integer(env['PORT'], 3000, 1024, 65535);
 const httpsConfig = buildHttpsConfig();
-const allowRemote = parseBoolean(env['ALLOW_REMOTE'], false);
+const allowRemote = EnvParser.boolean(env['ALLOW_REMOTE'], false);
 const baseUrl = new URL(
-  `${httpsConfig.enabled ? 'https' : 'http'}://${formatHostForUrl(host)}:${port}`
+  `${httpsConfig.enabled ? 'https' : 'http'}://${EnvParser.formatHostForUrl(host)}:${port}`
 );
 interface RuntimeState {
   httpMode: boolean;
@@ -429,29 +420,32 @@ export const config = {
     sessionInitTimeoutMs: DEFAULT_SESSION_INIT_TIMEOUT_MS,
     maxSessions: DEFAULT_MAX_SESSIONS,
     http: {
-      headersTimeoutMs: parseOptionalInteger(
+      headersTimeoutMs: EnvParser.optionalInteger(
         env['SERVER_HEADERS_TIMEOUT_MS'],
         1
       ),
-      requestTimeoutMs: parseOptionalInteger(
+      requestTimeoutMs: EnvParser.optionalInteger(
         env['SERVER_REQUEST_TIMEOUT_MS'],
         0
       ),
-      keepAliveTimeoutMs: parseOptionalInteger(
+      keepAliveTimeoutMs: EnvParser.optionalInteger(
         env['SERVER_KEEP_ALIVE_TIMEOUT_MS'],
         1
       ),
-      keepAliveTimeoutBufferMs: parseOptionalInteger(
+      keepAliveTimeoutBufferMs: EnvParser.optionalInteger(
         env['SERVER_KEEP_ALIVE_TIMEOUT_BUFFER_MS'],
         0
       ),
-      maxHeadersCount: parseOptionalInteger(env['SERVER_MAX_HEADERS_COUNT'], 1),
-      maxConnections: parseInteger(env['SERVER_MAX_CONNECTIONS'], 0, 0),
-      blockPrivateConnections: parseBoolean(
+      maxHeadersCount: EnvParser.optionalInteger(
+        env['SERVER_MAX_HEADERS_COUNT'],
+        1
+      ),
+      maxConnections: EnvParser.integer(env['SERVER_MAX_CONNECTIONS'], 0, 0),
+      blockPrivateConnections: EnvParser.boolean(
         env['SERVER_BLOCK_PRIVATE_CONNECTIONS'],
         false
       ),
-      requireProtocolVersionHeaderOnSessionInit: parseBoolean(
+      requireProtocolVersionHeaderOnSessionInit: EnvParser.boolean(
         env['MCP_STRICT_PROTOCOL_VERSION_HEADER'],
         true
       ),
@@ -470,13 +464,13 @@ export const config = {
     stageWarnRatio: 0.5,
     metadataFormat: 'markdown',
     maxWorkerScale: 4,
-    cancelAckTimeoutMs: parseInteger(
+    cancelAckTimeoutMs: EnvParser.integer(
       env['TRANSFORM_CANCEL_ACK_TIMEOUT_MS'],
       200,
       50,
       5000
     ),
-    workerMode: parseTransformWorkerMode(env['TRANSFORM_WORKER_MODE']),
+    workerMode: EnvParser.transformWorkerMode(env['TRANSFORM_WORKER_MODE']),
     workerResourceLimits: resolveWorkerResourceLimits(),
   },
   tools: {
@@ -486,14 +480,17 @@ export const config = {
   tasks: {
     maxTotal: DEFAULT_TASKS_MAX_TOTAL,
     maxPerOwner: RESOLVED_TASKS_MAX_PER_OWNER,
-    emitStatusNotifications: parseBoolean(
+    emitStatusNotifications: EnvParser.boolean(
       env['TASKS_STATUS_NOTIFICATIONS'],
       false
     ),
-    requireInterception: parseBoolean(env['TASKS_REQUIRE_INTERCEPTION'], true),
+    requireInterception: EnvParser.boolean(
+      env['TASKS_REQUIRE_INTERCEPTION'],
+      true
+    ),
   },
   cache: {
-    enabled: parseBoolean(env['CACHE_ENABLED'], true),
+    enabled: EnvParser.boolean(env['CACHE_ENABLED'], true),
     ttl: 86400,
     maxKeys: 100,
     maxSizeBytes: 50 * 1024 * 1024, // 50MB
@@ -503,8 +500,8 @@ export const config = {
     minParagraphLength: 10,
   },
   noiseRemoval: {
-    extraTokens: parseList(env['FETCH_URL_MCP_EXTRA_NOISE_TOKENS']),
-    extraSelectors: parseList(env['FETCH_URL_MCP_EXTRA_NOISE_SELECTORS']),
+    extraTokens: EnvParser.list(env['FETCH_URL_MCP_EXTRA_NOISE_TOKENS']),
+    extraSelectors: EnvParser.list(env['FETCH_URL_MCP_EXTRA_NOISE_SELECTORS']),
     enabledCategories: [
       'cookie-banners',
       'newsletters',
@@ -527,16 +524,16 @@ export const config = {
     removeSkipLinks: true,
     removeTocBlocks: true,
     removeTypeDocComments: true,
-    headingKeywords: parseList(
+    headingKeywords: EnvParser.list(
       env['MARKDOWN_HEADING_KEYWORDS'],
       DEFAULT_HEADING_KEYWORDS
     ),
   },
   i18n: {
-    locale: normalizeLocale(env['FETCH_URL_MCP_LOCALE']),
+    locale: EnvParser.locale(env['FETCH_URL_MCP_LOCALE']),
   },
   logging: {
-    level: parseLogLevel(env['LOG_LEVEL']),
+    level: EnvParser.logLevel(env['LOG_LEVEL']),
     format: env['LOG_FORMAT']?.toLowerCase() === 'json' ? 'json' : 'text',
   },
   constants: {
@@ -546,10 +543,10 @@ export const config = {
   },
   security: {
     blockedHosts: BLOCKED_HOSTS,
-    allowedHosts: parseAllowedHosts(env['ALLOWED_HOSTS']),
+    allowedHosts: EnvParser.allowedHosts(env['ALLOWED_HOSTS']),
     apiKey: env['API_KEY'],
     allowRemote,
-    allowLocalFetch: parseBoolean(env['ALLOW_LOCAL_FETCH'], false),
+    allowLocalFetch: EnvParser.boolean(env['ALLOW_LOCAL_FETCH'], false),
   },
   auth: buildAuthConfig(baseUrl),
   rateLimit: {
