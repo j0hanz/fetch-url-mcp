@@ -590,7 +590,24 @@ function mayContainNoise(html: string): boolean {
       : `${html.substring(0, NOISE_SCAN_LIMIT)}\n${html.substring(html.length - NOISE_SCAN_LIMIT)}`;
   return NOISE_PATTERNS.some((re) => re.test(sample));
 }
+function surfaceHiddenTabPanels(document: Document): void {
+  const panels = document.querySelectorAll(
+    '[data-slot="tabContent"], [role="tabpanel"]'
+  );
+  for (const panel of panels) {
+    const style = panel.getAttribute('style') ?? '';
+    if (/display\s*:\s*none/i.test(style)) {
+      panel.setAttribute(
+        'style',
+        style.replace(/display\s*:\s*none\s*;?/gi, '').trim()
+      );
+    }
+    panel.removeAttribute('hidden');
+  }
+}
+
 function stripTabTriggers(document: Document): void {
+  surfaceHiddenTabPanels(document);
   const tabs = document.querySelectorAll('button[role="tab"]');
   for (let i = tabs.length - 1; i >= 0; i--) {
     tabs[i]?.remove();
@@ -598,10 +615,13 @@ function stripTabTriggers(document: Document): void {
 }
 
 function escapeTableCellPipes(document: Document): void {
-  const codes = document.querySelectorAll('td code, th code');
-  for (const code of codes) {
-    if (code.textContent.includes('|')) {
-      code.textContent = code.textContent.replace(/\|/g, '\\|');
+  const cells = document.querySelectorAll('td, th');
+  for (const cell of cells) {
+    for (const node of cell.childNodes) {
+      const text = node.textContent;
+      if (node.nodeType === 3 && text?.includes('|')) {
+        node.textContent = text.replace(/\|/g, '\\|');
+      }
     }
   }
 }
@@ -1035,13 +1055,15 @@ const REGEX = {
   HEADING_MARKER: /^#{1,6}\s/m,
   HEADING_STRICT: /^#{1,6}\s+/m,
   EMPTY_HEADING_LINE: /^#{1,6}[ \t\u00A0]*$/,
+  ANCHOR_ONLY_HEADING: /^#{1,6}\s+\[[^\]]+\]\(#[^)]+\)\s*$/,
   FENCE_START: /^\s*(`{3,}|~{3,})/,
   LIST_MARKER: /^(?:[-*+])\s/m,
   TOC_LINK: /^- \[[^\]]+\]\(#[^)]+\)\s*$/,
-  TOC_HEADING: /^(?:#{1,6}\s+)?(?:table of contents|contents)\s*$/i,
+  TOC_HEADING:
+    /^(?:#{1,6}\s+)?(?:table of contents|contents|on this page)\s*$/i,
   HTML_DOC_START: /^(<!doctype|<html)/i,
   COMBINED_LINE_REMOVALS:
-    /^(?:\[Skip to (?:main )?(?:content|navigation)\]\(#[^)]*\)|\[Skip link\]\(#[^)]*\)|Was this page helpful\??)\s*$/gim,
+    /^(?:\[Skip to (?:main )?(?:content|navigation)\]\(#[^)]*\)|\[Skip link\]\(#[^)]*\)|Was this page helpful\??|\[Back to top\]\(#[^)]*\)|\[\s*\]\(https?:\/\/[^)]*\))\s*$/gim,
   ZERO_WIDTH_ANCHOR: /\[(?:\s|\u200B)*\]\(#[^)]*\)[ \t]*/g,
   CONCATENATED_PROPS:
     /([a-z_][a-z0-9_]{0,30}\??:\s+)([\u0022\u201C][^\u0022\u201C\u201D]*[\u0022\u201D])([a-z_][a-z0-9_]{0,30}\??:)/g,
@@ -1264,6 +1286,11 @@ function preprocessLines(lines: string[], options?: CleanupOptions): string {
 
     const trimmed = line.trim();
     if (REGEX.EMPTY_HEADING_LINE.test(trimmed)) continue;
+    if (
+      REGEX.ANCHOR_ONLY_HEADING.test(trimmed) &&
+      !hasFollowingContent(lines, i)
+    )
+      continue;
 
     const tocSkip = shouldSkipAsToc(lines, i, trimmed, removeToc, options);
     if (tocSkip !== null) {

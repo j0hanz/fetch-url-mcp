@@ -55,6 +55,52 @@ describe('markdown cleanup', () => {
     assert.equal(cleaned.includes('[Intro](#intro)'), false);
   });
 
+  it('removes "On this page" TOC with pure anchor links', () => {
+    const input = [
+      '## On this page',
+      '- [Card](#card)',
+      '- [Import](#import)',
+      '- [Usage](#usage)',
+      '',
+      '## Card',
+      'A card component.',
+    ].join('\n');
+
+    const cleaned = cleanupMarkdownArtifacts(input);
+
+    assert.equal(cleaned.includes('On this page'), false);
+    assert.equal(cleaned.includes('[Card](#card)'), false);
+    assert.ok(cleaned.includes('## Card'));
+    assert.ok(cleaned.includes('A card component.'));
+  });
+
+  it('removes anchor-only heading with no following content', () => {
+    const input = [
+      '## Real',
+      'Some body text.',
+      '',
+      '### [With Image](#with-image)',
+      '',
+    ].join('\n');
+
+    const cleaned = cleanupMarkdownArtifacts(input);
+
+    assert.equal(cleaned.includes('With Image'), false);
+    assert.ok(cleaned.includes('## Real'));
+    assert.ok(cleaned.includes('Some body text.'));
+  });
+
+  it('preserves anchor-only heading when followed by content', () => {
+    const input = ['### [Usage](#usage)', 'Use the component like this.'].join(
+      '\n'
+    );
+
+    const cleaned = cleanupMarkdownArtifacts(input);
+
+    assert.ok(cleaned.includes('### [Usage](#usage)'));
+    assert.ok(cleaned.includes('Use the component like this.'));
+  });
+
   it('escapes angle brackets in markdown link text', () => {
     const input = '- [<Button />](https://mui.com/api/button/)';
     const cleaned = cleanupMarkdownArtifacts(input);

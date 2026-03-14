@@ -749,7 +749,7 @@ describe('Tab trigger removal', () => {
 });
 
 describe('Table cell pipe escaping', () => {
-  it('escapes pipe characters inside code within table cells', () => {
+  it('preserves pipe characters inside code (backticks neutralise them)', () => {
     const html = `
       <html>
         <body>
@@ -768,12 +768,31 @@ describe('Table cell pipe escaping', () => {
     const result = removeNoiseFromHtml(html, undefined, 'https://example.com');
 
     assert.ok(
-      !result.includes("'horizontal' | 'vertical'"),
-      'Unescaped pipes in table code should be escaped'
+      result.includes('horizontal') && result.includes('vertical'),
+      'Code content should be present'
     );
+  });
+
+  it('escapes bare-text pipes in table cells', () => {
+    const html = `
+      <html>
+        <body>
+          <main>
+            <table>
+              <tr>
+                <td>A | B</td>
+              </tr>
+            </table>
+          </main>
+        </body>
+      </html>
+    `;
+
+    const result = removeNoiseFromHtml(html, undefined, 'https://example.com');
+
     assert.ok(
-      result.includes('\\|') || result.includes('horizontal'),
-      'Escaped pipe or content should be present'
+      result.includes('\\|'),
+      'Bare-text pipes in table cells must be escaped'
     );
   });
 });
