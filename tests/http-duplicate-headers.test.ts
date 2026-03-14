@@ -124,7 +124,7 @@ describe('http duplicate-header protection', () => {
                 'Content-Type: application/json',
                 'Accept: application/json, text/event-stream',
                 'MCP-Protocol-Version: 2025-11-25',
-                'MCP-Protocol-Version: 2025-03-26',
+                'MCP-Protocol-Version: 2025-11-25',
                 'Content-Length: ' + Buffer.byteLength(body, 'utf8'),
                 'Connection: close',
                 '',

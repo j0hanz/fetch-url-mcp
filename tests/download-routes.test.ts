@@ -106,27 +106,6 @@ function registerMarkdownNamespaceTest(): void {
   });
 }
 
-function registerMarkdownContentFallbackTest(): void {
-  it('falls back to content field for markdown payloads', async () => {
-    const cacheKey = 'markdown:abc123ff';
-    cache.set(cacheKey, JSON.stringify({ content: '# Title\n\nBody' }), {
-      url: 'https://example.com/article',
-    });
-
-    const { res, getBody } = createResponseCapture();
-
-    (
-      handleDownload as (
-        response: unknown,
-        namespace: string,
-        hash: string
-      ) => void
-    )(res, 'markdown', 'abc123ff');
-
-    assert.equal(getBody(), '# Title\n\nBody');
-  });
-}
-
 function registerInvalidPayloadTest(): void {
   it('responds with not found for invalid cached payloads', async () => {
     const cacheKey = 'markdown:deadbeef';
@@ -149,6 +128,5 @@ function registerInvalidPayloadTest(): void {
 
 describe('download routes', () => {
   registerMarkdownNamespaceTest();
-  registerMarkdownContentFallbackTest();
   registerInvalidPayloadTest();
 });

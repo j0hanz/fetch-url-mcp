@@ -43,7 +43,7 @@ describe('withRequestContextIfMissing', () => {
 
 describe('Progress notification timeout', () => {
   it('times out progress notifications after 5 seconds', async () => {
-    const { createProgressReporter } = await import('../dist/lib/mcp-tools.js');
+    const { createProgressReporter } = await import('../dist/lib/progress.js');
     const startTime = Date.now();
 
     // Mock sendNotification that takes 10 seconds (longer than 5-second timeout)

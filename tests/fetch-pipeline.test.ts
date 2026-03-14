@@ -4,8 +4,8 @@ import { describe, it } from 'node:test';
 import * as cache from '../dist/lib/core.js';
 import { createCacheKey } from '../dist/lib/core.js';
 import { config } from '../dist/lib/core.js';
+import { executeFetchPipeline } from '../dist/lib/fetch-pipeline.js';
 import { normalizeUrl } from '../dist/lib/http.js';
-import { executeFetchPipeline } from '../dist/lib/mcp-tools.js';
 
 type CachedPayload = { value: string };
 

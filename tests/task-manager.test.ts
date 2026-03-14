@@ -3,7 +3,7 @@ import { describe, it } from 'node:test';
 
 import { config } from '../dist/lib/core.js';
 import { getRequestId, runWithRequestContext } from '../dist/lib/core.js';
-import { cancelTasksForOwner } from '../dist/lib/mcp-tools.js';
+import { cancelTasksForOwner } from '../dist/lib/task-handlers.js';
 import { taskManager } from '../dist/tasks/manager.js';
 
 describe('TaskManager.waitForTerminalTask', () => {

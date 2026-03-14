@@ -8,7 +8,7 @@ import {
 } from '@modelcontextprotocol/sdk/server/auth/errors.js';
 import type { AuthInfo } from '@modelcontextprotocol/sdk/server/auth/types.js';
 
-import { config, logWarn } from '../lib/core.js';
+import { config } from '../lib/core.js';
 import { normalizeHost } from '../lib/url.js';
 import { hmacSha256Hex, timingSafeEqualUtf8 } from '../lib/utils.js';
 import { isObject } from '../lib/utils.js';
@@ -253,14 +253,11 @@ export function assertHttpModeConfiguration(): void {
 // ---------------------------------------------------------------------------
 
 const DEFAULT_MCP_PROTOCOL_VERSION = '2025-11-25';
-const LEGACY_MCP_PROTOCOL_VERSION = '2025-03-26';
 export const SUPPORTED_MCP_PROTOCOL_VERSIONS = new Set<string>([
   DEFAULT_MCP_PROTOCOL_VERSION,
-  LEGACY_MCP_PROTOCOL_VERSION,
 ]);
 
 interface McpProtocolVersionCheckOptions {
-  requireHeader?: boolean;
   expectedVersion?: string;
 }
 
@@ -278,22 +275,8 @@ export function ensureMcpProtocolVersion(
   options?: McpProtocolVersionCheckOptions
 ): boolean {
   const version = resolveMcpProtocolVersion(req);
-  const requireHeader = options?.requireHeader ?? config.security.allowRemote;
 
   if (!version) {
-    if (!requireHeader) {
-      // Permissive backward-compat fallback: clients predating MCP 2025-03-26 do not
-      // send MCP-Protocol-Version. Accepting requests without the header keeps older
-      // integrations working. Pass requireHeader: true to enforce strict version checking.
-      logWarn(
-        'MCP-Protocol-Version header missing; defaulting to permissive fallback',
-        {
-          remoteAddress: req.socket.remoteAddress,
-        }
-      );
-      return true;
-    }
-
     sendError(res, -32600, 'Missing MCP-Protocol-Version header');
     return false;
   }

@@ -10,7 +10,7 @@ import { logWarn, runWithRequestContext } from '../lib/core.js';
 import type {
   ProgressNotification,
   ToolHandlerExtra,
-} from '../lib/mcp-tools.js';
+} from '../lib/progress.js';
 import { getErrorMessage } from '../lib/utils.js';
 import { isObject } from '../lib/utils.js';
 

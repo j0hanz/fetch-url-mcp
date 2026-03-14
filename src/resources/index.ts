@@ -18,7 +18,7 @@ import {
   parseCacheKey,
 } from '../lib/core.js';
 import { logWarn } from '../lib/core.js';
-import { registerServerLifecycleCleanup } from '../lib/mcp-tools.js';
+import { registerServerLifecycleCleanup } from '../lib/task-handlers.js';
 import { buildOptionalIcons, type IconInfo } from '../lib/types.js';
 import { isObject } from '../lib/utils.js';
 

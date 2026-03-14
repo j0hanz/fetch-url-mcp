@@ -176,16 +176,6 @@ function registerCachedPayloadParsingTest(): void {
     assert.strictEqual(parsed.title, 'Test Title');
   });
 
-  it('parses valid cached payload with legacy content field', () => {
-    const raw = JSON.stringify({
-      content: 'Plain text content',
-    });
-
-    const parsed = parseCachedPayload(raw);
-    assert.ok(parsed, 'Should parse legacy payload');
-    assert.strictEqual(parsed.content, 'Plain text content');
-  });
-
   it('returns null for invalid JSON', () => {
     const parsed = parseCachedPayload('not json{]');
     assert.strictEqual(parsed, null, 'Should return null for invalid JSON');
@@ -204,22 +194,7 @@ function registerCacheContentResolutionTest(): void {
     assert.strictEqual(content, '# Markdown Content');
   });
 
-  it('resolves content from legacy content field', () => {
-    const payload = { content: 'Plain content' };
-    const content = resolveCachedPayloadContent(payload);
-    assert.strictEqual(content, 'Plain content');
-  });
-
-  it('prefers markdown over content when both exist', () => {
-    const payload = {
-      markdown: '# Markdown',
-      content: 'Plain',
-    };
-    const content = resolveCachedPayloadContent(payload);
-    assert.strictEqual(content, '# Markdown', 'Should prefer markdown field');
-  });
-
-  it('returns null when no content field exists', () => {
+  it('returns null when no markdown field exists', () => {
     const payload = { title: 'Only Title' };
     const content = resolveCachedPayloadContent(payload);
     assert.strictEqual(content, null);

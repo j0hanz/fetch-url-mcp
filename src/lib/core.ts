@@ -417,7 +417,6 @@ export interface AppServerHttpConfig {
   maxHeadersCount: number | undefined;
   maxConnections: number;
   blockPrivateConnections: boolean;
-  requireProtocolVersionHeaderOnSessionInit: boolean;
   shutdownCloseIdleConnections: boolean;
   shutdownCloseAllConnections: boolean;
 }
@@ -469,10 +468,6 @@ function buildServerConfig(): AppServerConfig {
       blockPrivateConnections: EnvParser.boolean(
         env['SERVER_BLOCK_PRIVATE_CONNECTIONS'],
         false
-      ),
-      requireProtocolVersionHeaderOnSessionInit: EnvParser.boolean(
-        env['MCP_STRICT_PROTOCOL_VERSION_HEADER'],
-        true
       ),
       shutdownCloseIdleConnections: true,
       shutdownCloseAllConnections: false,

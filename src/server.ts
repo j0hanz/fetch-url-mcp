@@ -16,7 +16,7 @@ import {
 import {
   abortAllTaskExecutions,
   registerTaskHandlers,
-} from './lib/mcp-tools.js';
+} from './lib/task-handlers.js';
 import type { IconInfo } from './lib/types.js';
 import { toError } from './lib/utils.js';
 

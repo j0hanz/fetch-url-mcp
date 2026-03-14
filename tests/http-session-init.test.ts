@@ -93,12 +93,12 @@ describe('http session initialization', () => {
 
       const first = await initialize('2025-11-25');
       const second = await initialize('2025-11-25');
-      const legacy = await initialize('2025-03-26');
       const unsupported = await initialize('1900-01-01');
+      const legacy = await initialize('2025-03-26');
       const missingHeader = await initialize(undefined);
 
       await server.shutdown('TEST');
-      console.error('${RESULT_MARKER}' + JSON.stringify({ first, second, legacy, unsupported, missingHeader }));
+      console.error('${RESULT_MARKER}' + JSON.stringify({ first, second, unsupported, legacy, missingHeader }));
     `;
 
     const result = runIsolatedNode(script, {
@@ -120,12 +120,12 @@ describe('http session initialization', () => {
         sessionId: string | null;
         hasInitializeResult: boolean;
       };
-      legacy: {
-        status: number;
-        sessionId: string | null;
-        hasInitializeResult: boolean;
-      };
       unsupported: {
+        status: number;
+        sessionId?: string | null;
+        hasInitializeResult?: boolean;
+      };
+      legacy: {
         status: number;
         sessionId?: string | null;
         hasInitializeResult?: boolean;
@@ -146,16 +146,13 @@ describe('http session initialization', () => {
     assert.equal(payload.second.hasInitializeResult, true);
     assert.notEqual(payload.first.sessionId, payload.second.sessionId);
 
-    assert.equal(payload.legacy.status, 200);
-    assert.equal(typeof payload.legacy.sessionId, 'string');
-    assert.equal(payload.legacy.hasInitializeResult, true);
-
     assert.equal(payload.unsupported.status, 400);
+    assert.equal(payload.legacy.status, 400);
 
     assert.equal(payload.missingHeader.status, 400);
   });
 
-  it('can allow initialize without protocol header when strict header mode is disabled', () => {
+  it('rejects initialize without protocol header regardless of env config', () => {
     const script = `
       import { startHttpServer } from './dist/http/native.js';
       import { request } from 'node:http';
@@ -214,7 +211,6 @@ describe('http session initialization', () => {
       PORT: '0',
       ACCESS_TOKENS: 'test-token',
       ALLOW_REMOTE: 'false',
-      MCP_STRICT_PROTOCOL_VERSION_HEADER: 'false',
     });
 
     assert.equal(result.status, 0, result.stderr);
@@ -226,9 +222,8 @@ describe('http session initialization', () => {
       };
     }>(result.stderr);
 
-    assert.equal(payload.result.status, 200);
-    assert.equal(typeof payload.result.sessionId, 'string');
-    assert.equal(payload.result.hasInitializeResult, true);
+    assert.equal(payload.result.status, 400);
+    assert.equal(payload.result.sessionId, null);
   });
 
   it('rejects initialize when header and body protocol versions disagree', () => {
@@ -301,7 +296,7 @@ describe('http session initialization', () => {
     }>(result.stderr);
 
     assert.equal(payload.status, 400);
-    assert.match(payload.body, /initialize protocolVersion mismatch/);
+    assert.match(payload.body, /Unsupported protocolVersion/);
     assert.equal(payload.sessionId, null);
   });
 

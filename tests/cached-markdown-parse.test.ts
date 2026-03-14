@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { parseCachedMarkdownResult } from '../dist/lib/mcp-tools.js';
+import { parseCachedMarkdownResult } from '../dist/lib/fetch-pipeline.js';
 
 describe('parseCachedMarkdownResult', () => {
   it('accepts cached payload with markdown field', () => {
@@ -15,23 +15,12 @@ describe('parseCachedMarkdownResult', () => {
     assert.equal(parsed.truncated, false);
   });
 
-  it('accepts legacy cached payload with content field', () => {
-    const cached = JSON.stringify({ content: 'Hi', truncated: true });
-    const parsed = parseCachedMarkdownResult(cached);
-
-    assert.ok(parsed);
-    assert.equal(parsed.content, 'Hi...[truncated]');
-    assert.equal(parsed.markdown, 'Hi...[truncated]');
-    assert.equal(parsed.title, undefined);
-    assert.equal(parsed.truncated, true);
-  });
-
   it('rejects invalid JSON', () => {
     const parsed = parseCachedMarkdownResult('{');
     assert.equal(parsed, undefined);
   });
 
-  it('rejects payloads without string markdown/content', () => {
+  it('rejects payloads without string markdown', () => {
     const parsed = parseCachedMarkdownResult(JSON.stringify({ markdown: 123 }));
     assert.equal(parsed, undefined);
   });

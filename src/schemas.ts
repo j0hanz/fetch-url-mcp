@@ -101,10 +101,6 @@ export const cachedPayloadSchema = z
       .unknown()
       .transform((value) => normalizeString(value))
       .optional(),
-    content: z
-      .unknown()
-      .transform((value) => normalizeString(value))
-      .optional(),
     title: z
       .unknown()
       .transform((value) => normalizePageTitle(value))
@@ -118,11 +114,9 @@ export const cachedPayloadSchema = z
       .transform((value) => normalizeBoolean(value))
       .optional(),
   })
-  .refine(
-    (value) =>
-      typeof value.markdown === 'string' || typeof value.content === 'string',
-    { error: 'Missing markdown/content' }
-  );
+  .refine((value) => typeof value.markdown === 'string', {
+    error: 'Missing markdown',
+  });
 
 export type CachedPayload = z.infer<typeof cachedPayloadSchema>;
 
@@ -200,5 +194,5 @@ export function parseCachedPayload(raw: string): CachedPayload | null {
 export function resolveCachedPayloadContent(
   payload: CachedPayload
 ): string | null {
-  return payload.markdown ?? payload.content ?? null;
+  return payload.markdown ?? null;
 }

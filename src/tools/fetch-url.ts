@@ -18,22 +18,24 @@ import {
 } from '../lib/core.js';
 import {
   appendTruncationMarker,
-  createProgressReporter,
-  handleToolError,
   type InlineContentResult,
   type MarkdownPipelineResult,
   markdownTransform,
   parseCachedMarkdownResult,
   performSharedFetch,
   type PipelineResult,
-  type ProgressReporter,
   readNestedRecord,
   serializeMarkdownResult,
   type SharedFetchStage,
-  type ToolHandlerExtra,
   TRUNCATION_MARKER,
   withSignal,
-} from '../lib/mcp-tools.js';
+} from '../lib/fetch-pipeline.js';
+import { handleToolError } from '../lib/mcp-tools.js';
+import {
+  createProgressReporter,
+  type ProgressReporter,
+  type ToolHandlerExtra,
+} from '../lib/progress.js';
 import { isAbortError, isObject, toError } from '../lib/utils.js';
 import { formatZodError } from '../lib/zod.js';
 

@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 import type { ServerResult } from '@modelcontextprotocol/sdk/types.js';
 import { z } from 'zod';
 
-import type { ProgressNotification } from '../lib/mcp-tools.js';
+import type { ProgressNotification } from '../lib/progress.js';
 import { isObject } from '../lib/utils.js';
 
 /* -------------------------------------------------------------------------------------------------

@@ -45,7 +45,7 @@ import {
   isMcpRequestBody,
   type JsonRpcId,
 } from '../lib/mcp-tools.js';
-import { cancelTasksForOwner } from '../lib/mcp-tools.js';
+import { cancelTasksForOwner } from '../lib/task-handlers.js';
 import { toError } from '../lib/utils.js';
 import {
   applyHttpServerTuning,
@@ -213,12 +213,7 @@ class McpSessionGateway {
         }
       }
     } else {
-      if (
-        !ensureMcpProtocolVersion(ctx.req, ctx.res, {
-          requireHeader:
-            config.server.http.requireProtocolVersionHeaderOnSessionInit,
-        })
-      ) {
+      if (!ensureMcpProtocolVersion(ctx.req, ctx.res)) {
         return;
       }
     }
@@ -395,7 +390,6 @@ class McpSessionGateway {
     session: SessionRecord
   ): boolean {
     return ensureMcpProtocolVersion(ctx.req, ctx.res, {
-      requireHeader: true,
       expectedVersion: session.negotiatedProtocolVersion,
     });
   }

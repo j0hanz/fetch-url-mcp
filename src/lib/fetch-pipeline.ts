@@ -383,7 +383,7 @@ export function parseCachedMarkdownResult(
   const payload = parseCachedPayload(cached);
   if (!payload) return undefined;
 
-  const markdown = payload.markdown ?? payload.content;
+  const { markdown } = payload;
   if (typeof markdown !== 'string') return undefined;
 
   const metadata = normalizeExtractedMetadata(payload.metadata);
