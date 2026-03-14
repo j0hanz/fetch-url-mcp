@@ -1316,6 +1316,11 @@ function normalizeMarkdownSpacing(text: string): string {
     (_match: string, linkText: string, url: string) =>
       `[${linkText.replace(/\\`/g, '`')}](${url})`
   );
+  result = result.replace(
+    /\[([^\]]*<[^\]]*)\]\(([^)]+)\)/g,
+    (_match: string, linkText: string, url: string) =>
+      `[${linkText.replace(/</g, '\\<').replace(/>/g, '\\>')}](${url})`
+  );
 
   return normalizeNestedListIndentation(result);
 }

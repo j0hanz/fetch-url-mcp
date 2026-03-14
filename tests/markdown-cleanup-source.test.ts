@@ -30,4 +30,14 @@ describe('markdown cleanup source regression', () => {
     assert.match(cleaned, /- First item/);
     assert.match(cleaned, /- Second item/);
   });
+
+  it('escapes angle brackets in markdown link text', () => {
+    const input = '- [<Button />](https://mui.com/api/button/)';
+    const cleaned = cleanupMarkdownArtifacts(input);
+
+    assert.ok(
+      cleaned.includes('[\\<Button /\\>](https://mui.com/api/button/)'),
+      `expected escaped angle brackets, got: ${cleaned}`
+    );
+  });
 });

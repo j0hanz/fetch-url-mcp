@@ -54,4 +54,26 @@ describe('markdown cleanup', () => {
     assert.equal(cleaned.includes('## Contents'), false);
     assert.equal(cleaned.includes('[Intro](#intro)'), false);
   });
+
+  it('escapes angle brackets in markdown link text', () => {
+    const input = '- [<Button />](https://mui.com/api/button/)';
+    const cleaned = cleanupMarkdownArtifacts(input);
+
+    assert.ok(
+      cleaned.includes('[\\<Button /\\>](https://mui.com/api/button/)'),
+      `expected escaped angle brackets, got: ${cleaned}`
+    );
+    assert.equal(cleaned.includes('[<Button'), false);
+  });
+
+  it('escapes angle brackets in multiple API links', () => {
+    const input = [
+      '- [<FormControl />](https://mui.com/api/form-control/)',
+      '- [<InputLabel />](https://mui.com/api/input-label/)',
+    ].join('\n');
+    const cleaned = cleanupMarkdownArtifacts(input);
+
+    assert.ok(cleaned.includes('\\<FormControl /\\>'));
+    assert.ok(cleaned.includes('\\<InputLabel /\\>'));
+  });
 });
