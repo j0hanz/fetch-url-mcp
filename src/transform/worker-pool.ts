@@ -12,11 +12,14 @@ import {
 
 import { z } from 'zod';
 
-import { config } from '../lib/core.js';
-import { logWarn } from '../lib/core.js';
-import { createAbortError } from '../lib/utils.js';
-import { FetchError, getErrorMessage } from '../lib/utils.js';
-import { type CancellableTimeout, createUnrefTimeout } from '../lib/utils.js';
+import { config, logWarn } from '../lib/core.js';
+import {
+  type CancellableTimeout,
+  createAbortError,
+  createUnrefTimeout,
+  FetchError,
+  getErrorMessage,
+} from '../lib/utils.js';
 
 import { normalizeExtractedMetadata } from '../schemas.js';
 import { createTransformMessageHandler } from './shared.js';
@@ -204,6 +207,117 @@ const WORKER_NAME_PREFIX = 'fetch-url-mcp-transform';
 const DEFAULT_TIMEOUT_MS = config.transform.timeoutMs;
 const TRANSFORM_WORKER_PATH = new URL(import.meta.url);
 
+// TaskQueue — array-deque with auto-compaction
+
+class TaskQueue<T extends { id: string }> {
+  private items: (T | undefined)[] = [];
+  private head = 0;
+
+  get depth(): number {
+    const d = this.items.length - this.head;
+    return d > 0 ? d : 0;
+  }
+
+  enqueue(item: T): void {
+    this.items.push(item);
+  }
+
+  dequeue(): T | null {
+    while (this.head < this.items.length) {
+      const item = this.items[this.head];
+      this.head += 1;
+
+      if (item) {
+        this.compact();
+        return item;
+      }
+    }
+
+    this.compact();
+    return null;
+  }
+
+  removeById(id: string): T | undefined {
+    for (let i = this.head; i < this.items.length; i += 1) {
+      const item = this.items[i];
+      if (item?.id === id) {
+        this.items.splice(i, 1);
+        this.compact();
+        return item;
+      }
+    }
+    return undefined;
+  }
+
+  drain(callback: (item: T) => void): void {
+    for (let i = this.head; i < this.items.length; i += 1) {
+      const item = this.items[i];
+      if (item) callback(item);
+    }
+    this.items.length = 0;
+    this.head = 0;
+  }
+
+  private compact(): void {
+    if (this.head === 0) return;
+
+    if (
+      this.head >= this.items.length ||
+      (this.head > 1024 && this.head > this.items.length / 2)
+    ) {
+      this.items.splice(0, this.head);
+      this.head = 0;
+    }
+  }
+}
+
+// CancelAckTracker — isolates the cancel-acknowledgement protocol
+
+class CancelAckTracker {
+  private readonly pending = new Map<
+    string,
+    {
+      promise: Promise<void>;
+      resolve: () => void;
+      timeout: CancellableTimeout<void>;
+    }
+  >();
+
+  resolve(id: string): void {
+    const entry = this.pending.get(id);
+    if (!entry) return;
+    entry.timeout.cancel();
+    entry.resolve();
+  }
+
+  wait(id: string, timeoutMs: number): Promise<void> {
+    const existing = this.pending.get(id);
+    if (existing) return existing.promise;
+
+    let resolve: () => void = () => {};
+    const timeout = createUnrefTimeout(timeoutMs, undefined);
+    const racePromise = new Promise<void>((finish) => {
+      resolve = finish;
+    });
+
+    const promise = Promise.race([racePromise, timeout.promise]).finally(() => {
+      this.pending.delete(id);
+      timeout.cancel();
+    });
+
+    this.pending.set(id, { promise, resolve, timeout });
+    return promise;
+  }
+
+  dispose(): void {
+    for (const entry of this.pending.values()) {
+      entry.timeout.cancel();
+      entry.resolve();
+    }
+    this.pending.clear();
+  }
+}
+
 // WorkerPool
 
 class WorkerPool implements TransformWorkerPool {
@@ -214,22 +328,15 @@ class WorkerPool implements TransformWorkerPool {
   private readonly minCapacity = POOL_MIN_WORKERS;
   private readonly maxCapacity = POOL_MAX_WORKERS;
 
-  private readonly queue: PendingTask[] = [];
-  private queueHead = 0;
+  private readonly queue = new TaskQueue<PendingTask>();
   private readonly inflight = new Map<string, InflightTask>();
-  private readonly cancelAcks = new Map<
-    string,
-    {
-      promise: Promise<void>;
-      resolve: () => void;
-      timeout: CancellableTimeout<void>;
-    }
-  >();
+  private readonly cancelAcks = new CancelAckTracker();
 
   private readonly timeoutMs: number;
   private readonly queueMax: number;
   private closed = false;
   private taskIdSeq = 0;
+  private busyCount = 0;
 
   constructor(size: number, timeoutMs: number) {
     this.capacity =
@@ -273,7 +380,7 @@ class WorkerPool implements TransformWorkerPool {
     if (options.signal?.aborted)
       throw createAbortError(url, 'transform:enqueue');
 
-    if (this.getQueueDepth() >= this.queueMax) {
+    if (this.queue.depth >= this.queueMax) {
       throw new FetchError('Transform worker queue is full', url, 503, {
         reason: 'queue_full',
         stage: 'transform:enqueue',
@@ -288,18 +395,17 @@ class WorkerPool implements TransformWorkerPool {
         resolve,
         reject
       );
-      this.queue.push(task);
+      this.queue.enqueue(task);
       this.drainQueue();
     });
   }
 
   getQueueDepth(): number {
-    const depth = this.queue.length - this.queueHead;
-    return depth > 0 ? depth : 0;
+    return this.queue.depth;
   }
 
   getActiveWorkers(): number {
-    return this.workers.filter((s) => s?.busy).length;
+    return this.busyCount;
   }
 
   getCapacity(): number {
@@ -327,6 +433,8 @@ class WorkerPool implements TransformWorkerPool {
 
     this.workers.fill(undefined);
     this.workers.length = 0;
+    this.busyCount = 0;
+    this.cancelAcks.dispose();
 
     for (const id of Array.from(this.inflight.keys())) {
       const inflight = this.takeInflight(id);
@@ -336,16 +444,12 @@ class WorkerPool implements TransformWorkerPool {
       });
     }
 
-    for (let i = this.queueHead; i < this.queue.length; i += 1) {
-      const task = this.queue[i];
-      if (!task) continue;
+    this.queue.drain((task) => {
       this.clearAbortListener(task.signal, task.abortListener);
       this.finalizeTask(task.context, () => {
         task.reject(new Error(WorkerPool.CLOSED_MESSAGE));
       });
-    }
-    this.queue.length = 0;
-    this.queueHead = 0;
+    });
 
     await Promise.allSettled(terminations);
   }
@@ -423,55 +527,13 @@ class WorkerPool implements TransformWorkerPool {
       return;
     }
 
-    const queuedIndex = this.findQueuedIndex(id);
-    if (queuedIndex !== null) {
-      const task = this.queue[queuedIndex];
-      if (task) this.clearAbortListener(task.signal, task.abortListener);
-
-      this.queue.splice(queuedIndex, 1);
-      if (task) {
-        this.finalizeTask(task.context, () => {
-          task.reject(createAbortError(url, 'transform:queued-abort'));
-        });
-      } else {
-        this.finalizeTask(context, () => {
-          reject(createAbortError(url, 'transform:queued-abort'));
-        });
-      }
-      this.maybeCompactQueue();
+    const queuedTask = this.queue.removeById(id);
+    if (queuedTask) {
+      this.clearAbortListener(queuedTask.signal, queuedTask.abortListener);
+      this.finalizeTask(queuedTask.context, () => {
+        queuedTask.reject(createAbortError(url, 'transform:queued-abort'));
+      });
     }
-  }
-
-  private resolveCancelAck(id: string): void {
-    const pending = this.cancelAcks.get(id);
-    if (!pending) return;
-    pending.timeout.cancel();
-    pending.resolve();
-  }
-
-  private waitForCancelAck(id: string): Promise<void> {
-    const existing = this.cancelAcks.get(id);
-    if (existing) {
-      return existing.promise;
-    }
-
-    let resolve: () => void = () => {};
-    const timeout = createUnrefTimeout(
-      config.transform.cancelAckTimeoutMs,
-      undefined
-    );
-    const racePromise = new Promise<void>((finish) => {
-      resolve = finish;
-    });
-
-    const promise = Promise.race([racePromise, timeout.promise]).finally(() => {
-      this.cancelAcks.delete(id);
-      timeout.cancel();
-    });
-
-    this.cancelAcks.set(id, { promise, resolve, timeout });
-
-    return promise;
   }
 
   private async abortInflight(
@@ -492,7 +554,7 @@ class WorkerPool implements TransformWorkerPool {
       }
     }
 
-    await this.waitForCancelAck(id);
+    await this.cancelAcks.wait(id, config.transform.cancelAckTimeoutMs);
 
     const taken = this.failTask(
       id,
@@ -588,13 +650,13 @@ class WorkerPool implements TransformWorkerPool {
     if (!message) return;
 
     if (message.type === 'cancelled') {
-      this.resolveCancelAck(message.id);
+      this.cancelAcks.resolve(message.id);
       return;
     }
 
     const inflightPeek = this.inflight.get(message.id);
     if (inflightPeek?.cancelPending) {
-      this.resolveCancelAck(message.id);
+      this.cancelAcks.resolve(message.id);
       return;
     }
 
@@ -651,7 +713,10 @@ class WorkerPool implements TransformWorkerPool {
   private markIdle(workerIndex: number): void {
     const slot = this.workers[workerIndex];
     if (!slot) return;
-    slot.busy = false;
+    if (slot.busy) {
+      slot.busy = false;
+      this.busyCount -= 1;
+    }
     slot.currentTaskId = null;
   }
 
@@ -676,7 +741,7 @@ class WorkerPool implements TransformWorkerPool {
   }
 
   private drainQueue(): void {
-    if (this.closed || this.getQueueDepth() === 0) return;
+    if (this.closed || this.queue.depth === 0) return;
 
     this.maybeScaleUp();
 
@@ -684,17 +749,17 @@ class WorkerPool implements TransformWorkerPool {
       const slot = this.workers[i];
       if (slot && !slot.busy) {
         this.dispatchFromQueue(i, slot);
-        if (this.getQueueDepth() === 0) return;
+        if (this.queue.depth === 0) return;
       }
     }
 
-    if (this.workers.length < this.capacity && this.getQueueDepth() > 0) {
+    if (this.workers.length < this.capacity && this.queue.depth > 0) {
       const workerIndex = this.workers.length;
       const slot = this.spawnWorker(workerIndex);
       this.workers.push(slot);
       this.dispatchFromQueue(workerIndex, slot);
 
-      if (this.workers.length < this.capacity && this.getQueueDepth() > 0) {
+      if (this.workers.length < this.capacity && this.queue.depth > 0) {
         setImmediate(() => {
           this.drainQueue();
         });
@@ -702,23 +767,8 @@ class WorkerPool implements TransformWorkerPool {
     }
   }
 
-  private takeNextQueuedTask(): PendingTask | null {
-    while (this.queueHead < this.queue.length) {
-      const task = this.queue[this.queueHead];
-      this.queueHead += 1;
-
-      if (task) {
-        this.maybeCompactQueue();
-        return task;
-      }
-    }
-
-    this.maybeCompactQueue();
-    return null;
-  }
-
   private dispatchFromQueue(workerIndex: number, slot: WorkerSlot): void {
-    const task = this.takeNextQueuedTask();
+    const task = this.queue.dequeue();
     if (!task) return;
 
     if (this.closed) {
@@ -739,7 +789,17 @@ class WorkerPool implements TransformWorkerPool {
 
     slot.busy = true;
     slot.currentTaskId = task.id;
+    this.busyCount += 1;
 
+    const timeout = this.registerInflight(task, workerIndex, slot);
+    this.sendToWorker(task, slot, workerIndex, timeout);
+  }
+
+  private registerInflight(
+    task: PendingTask,
+    workerIndex: number,
+    slot: WorkerSlot
+  ): CancellableTimeout<null> {
     const timeout = createUnrefTimeout(this.timeoutMs, null);
     void timeout.promise
       .then(() => {
@@ -778,6 +838,15 @@ class WorkerPool implements TransformWorkerPool {
       cancelPending: false,
     });
 
+    return timeout;
+  }
+
+  private sendToWorker(
+    task: PendingTask,
+    slot: WorkerSlot,
+    workerIndex: number,
+    timeout: CancellableTimeout<null>
+  ): void {
     try {
       const { message, transferList } = buildWorkerDispatchPayload(task);
       slot.worker.postMessage(message, transferList);
@@ -803,26 +872,6 @@ class WorkerPool implements TransformWorkerPool {
       context.run(fn);
     } finally {
       context.dispose();
-    }
-  }
-
-  private findQueuedIndex(id: string): number | null {
-    for (let i = this.queueHead; i < this.queue.length; i += 1) {
-      const task = this.queue[i];
-      if (task?.id === id) return i;
-    }
-    return null;
-  }
-
-  private maybeCompactQueue(): void {
-    if (this.queueHead === 0) return;
-
-    if (
-      this.queueHead >= this.queue.length ||
-      (this.queueHead > 1024 && this.queueHead > this.queue.length / 2)
-    ) {
-      this.queue.splice(0, this.queueHead);
-      this.queueHead = 0;
     }
   }
 }
@@ -857,22 +906,27 @@ export async function shutdownWorkerPool(): Promise<void> {
 }
 
 // Worker thread message handling
-if (!isMainThread && parentPort) {
-  const port = parentPort;
-  const onMessage = createTransformMessageHandler({
-    sendMessage: (message) => {
-      port.postMessage(message);
-    },
-    runTransform: transformHtmlToMarkdownInProcess,
-  });
-  port.on('message', onMessage);
-} else if (process.send) {
-  const send = process.send.bind(process);
-  const onMessage = createTransformMessageHandler({
-    sendMessage: (message) => {
-      send(message);
-    },
-    runTransform: transformHtmlToMarkdownInProcess,
-  });
-  process.on('message', onMessage);
+
+function bootstrapWorkerThread(): void {
+  if (!isMainThread && parentPort) {
+    const port = parentPort;
+    const onMessage = createTransformMessageHandler({
+      sendMessage: (message) => {
+        port.postMessage(message);
+      },
+      runTransform: transformHtmlToMarkdownInProcess,
+    });
+    port.on('message', onMessage);
+  } else if (process.send) {
+    const send = process.send.bind(process);
+    const onMessage = createTransformMessageHandler({
+      sendMessage: (message) => {
+        send(message);
+      },
+      runTransform: transformHtmlToMarkdownInProcess,
+    });
+    process.on('message', onMessage);
+  }
 }
+
+bootstrapWorkerThread();
