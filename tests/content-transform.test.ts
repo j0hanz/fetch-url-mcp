@@ -366,6 +366,51 @@ describe('transformHtmlToMarkdown favicon rendering', () => {
     assert.ok(!result.markdown.startsWith('# GitHub - owner/repo:'));
     assert.equal(result.title, 'Fetch URL MCP Server');
   });
+
+  it('preserves docs-style body h1 headings when a synthetic title heading is prepended', () => {
+    const html = `
+      <html>
+        <head>
+          <title>Architecture overview - Model Context Protocol</title>
+          <link rel="icon" sizes="32x32" href="/favicon-32x32.png" />
+        </head>
+        <body>
+          <main>
+            <article>
+              <p>This overview introduces the architecture page and intentionally starts with prose so title synthesis stays active for this characterization test.</p>
+              <h2>Scope</h2>
+              <p>The scope section describes the protocol surface and keeps enough text for extraction heuristics.</p>
+              <h1>Pseudo Code</h1>
+              <p>Example request and response flows follow.</p>
+              <h1>Pseudo-code using MCP Python SDK patterns</h1>
+              <p>More examples follow here as well.</p>
+            </article>
+          </main>
+        </body>
+      </html>
+    `;
+
+    const result = transformHtmlToMarkdownInProcess(
+      html,
+      'https://modelcontextprotocol.io/docs/learn/architecture',
+      { includeMetadata: false }
+    );
+
+    assert.ok(
+      result.markdown.includes(
+        '![modelcontextprotocol.io](https://modelcontextprotocol.io/favicon-32x32.png)'
+      )
+    );
+    assert.ok(
+      result.markdown.includes('Architecture overview - Model Context Protocol')
+    );
+    assert.ok(result.markdown.includes('\n## Pseudo Code\n\n'));
+    assert.ok(
+      result.markdown.includes(
+        '\n## Pseudo-code using MCP Python SDK patterns\n\n'
+      )
+    );
+  });
 });
 
 describe('transformHtmlToMarkdown next flight supplements', () => {

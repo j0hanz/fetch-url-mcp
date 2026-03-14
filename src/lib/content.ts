@@ -1311,41 +1311,77 @@ function shouldSkipAsToc(
   throwIfAborted(options?.signal, options?.url ?? '', 'markdown:cleanup:toc');
   return skipTocLines(lines, i + 1);
 }
+function normalizePreprocessLine(
+  lines: string[],
+  i: number,
+  trimmed: string,
+  line: string
+): string | null {
+  if (REGEX.EMPTY_HEADING_LINE.test(trimmed)) return null;
+  if (!REGEX.ANCHOR_ONLY_HEADING.test(trimmed)) return line;
+  if (!hasFollowingContent(lines, i)) return null;
+  return stripAnchorOnlyHeading(trimmed);
+}
+function maybeSkipTocBlock(
+  lines: string[],
+  i: number,
+  trimmed: string,
+  options?: CleanupOptions
+): number | null {
+  return shouldSkipAsToc(
+    lines,
+    i,
+    trimmed,
+    config.markdownCleanup.removeTocBlocks,
+    options
+  );
+}
+function maybePromoteOrphanHeading(
+  lines: string[],
+  i: number,
+  trimmed: string,
+  checkAbort: (stage: string) => void
+): string | null {
+  if (!config.markdownCleanup.promoteOrphanHeadings || trimmed.length === 0) {
+    return null;
+  }
+
+  checkAbort('markdown:cleanup:promote');
+  return tryPromoteOrphan(lines, i, trimmed);
+}
 function preprocessLines(lines: string[], options?: CleanupOptions): string {
   const processedLines: string[] = [];
-  const len = lines.length;
-  const promote = config.markdownCleanup.promoteOrphanHeadings;
-  const removeToc = config.markdownCleanup.removeTocBlocks;
   const checkAbort = createAbortChecker(options);
-
   let skipUntil = -1;
 
-  for (let i = 0; i < len; i++) {
+  for (let i = 0; i < lines.length; i++) {
     if (i < skipUntil) continue;
 
-    let line = lines[i];
-    if (line === undefined) continue;
+    const currentLine = lines[i];
+    if (currentLine === undefined) continue;
 
-    const trimmed = line.trim();
-    if (REGEX.EMPTY_HEADING_LINE.test(trimmed)) continue;
-    if (REGEX.ANCHOR_ONLY_HEADING.test(trimmed)) {
-      if (!hasFollowingContent(lines, i)) continue;
-      line = stripAnchorOnlyHeading(trimmed);
-    }
+    const trimmed = currentLine.trim();
+    const normalizedLine = normalizePreprocessLine(
+      lines,
+      i,
+      trimmed,
+      currentLine
+    );
+    if (normalizedLine === null) continue;
 
-    const tocSkip = shouldSkipAsToc(lines, i, trimmed, removeToc, options);
+    const tocSkip = maybeSkipTocBlock(lines, i, trimmed, options);
     if (tocSkip !== null) {
       skipUntil = tocSkip;
       continue;
     }
 
-    if (promote && trimmed.length > 0) {
-      checkAbort('markdown:cleanup:promote');
-      const promoted = tryPromoteOrphan(lines, i, trimmed);
-      if (promoted) line = promoted;
-    }
-
-    processedLines.push(line);
+    const promotedLine = maybePromoteOrphanHeading(
+      lines,
+      i,
+      trimmed,
+      checkAbort
+    );
+    processedLines.push(promotedLine ?? normalizedLine);
   }
   return processedLines.join('\n');
 }

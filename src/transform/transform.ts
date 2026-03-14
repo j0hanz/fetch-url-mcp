@@ -541,6 +541,59 @@ function applyBaseUri(document: Document, url: string): void {
   }
 }
 
+function createEmptyExtractionContext(): ExtractionContext {
+  const { document } = parseHTML('<html></html>');
+  return { article: null, metadata: {}, document };
+}
+
+function extractEarlyMetadataIfNeeded(
+  html: string,
+  url: string
+): ExtractedMetadata | null {
+  if (!willTruncate(html)) return null;
+  return stageTracker.run(url, 'extract:early-metadata', () =>
+    extractMetadataFromHead(html, url)
+  );
+}
+
+function parseExtractionDocument(
+  html: string,
+  url: string,
+  inputTruncated?: boolean
+): { document: Document; truncated: boolean } {
+  const { html: limitedHtml, truncated } = truncateHtml(html, inputTruncated);
+  const { document } = stageTracker.run(url, 'extract:parse', () =>
+    parseHTML(limitedHtml)
+  );
+  return { document, truncated };
+}
+
+function extractMergedMetadata(
+  html: string,
+  url: string,
+  document: Document
+): ExtractedMetadata {
+  const earlyMetadata = extractEarlyMetadataIfNeeded(html, url);
+  const lateMetadata = stageTracker.run(url, 'extract:metadata', () =>
+    extractMetadata(document, url)
+  );
+  return mergeMetadata(earlyMetadata, lateMetadata);
+}
+
+function extractArticleIfRequested(
+  document: Document,
+  url: string,
+  options: {
+    extractArticle?: boolean;
+    signal?: AbortSignal;
+  }
+): ExtractedArticle | null {
+  if (!options.extractArticle) return null;
+  return stageTracker.run(url, 'extract:article', () =>
+    extractArticle(document, url, options.signal)
+  );
+}
+
 function extractContentContext(
   html: string,
   url: string,
@@ -551,45 +604,25 @@ function extractContentContext(
   }
 ): ExtractionContext {
   if (!isValidInput(html, url)) {
-    const { document } = parseHTML('<html></html>');
-    return { article: null, metadata: {}, document };
+    return createEmptyExtractionContext();
   }
 
   try {
     throwIfAborted(options.signal, url, 'extract:begin');
 
-    // F2: Extract metadata from <head> BEFORE truncation to preserve it
-    const earlyMetadata = willTruncate(html)
-      ? stageTracker.run(url, 'extract:early-metadata', () =>
-          extractMetadataFromHead(html, url)
-        )
-      : null;
-
-    const { html: limitedHtml, truncated } = truncateHtml(
+    const { document, truncated } = parseExtractionDocument(
       html,
+      url,
       options.inputTruncated
-    );
-
-    const { document } = stageTracker.run(url, 'extract:parse', () =>
-      parseHTML(limitedHtml)
     );
     throwIfAborted(options.signal, url, 'extract:parsed');
 
     applyBaseUri(document, url);
 
-    const lateMetadata = stageTracker.run(url, 'extract:metadata', () =>
-      extractMetadata(document, url)
-    );
+    const metadata = extractMergedMetadata(html, url, document);
     throwIfAborted(options.signal, url, 'extract:metadata');
 
-    // Merge early (pre-truncation) with late (post-truncation) metadata
-    const metadata = mergeMetadata(earlyMetadata, lateMetadata);
-
-    const article = options.extractArticle
-      ? stageTracker.run(url, 'extract:article', () =>
-          extractArticle(document, url, options.signal)
-        )
-      : null;
+    const article = extractArticleIfRequested(document, url, options);
 
     throwIfAborted(options.signal, url, 'extract:article');
 
@@ -606,8 +639,7 @@ function extractContentContext(
 
     logError('Failed to extract content', asError(error));
 
-    const { document } = parseHTML('<html></html>');
-    return { article: null, metadata: {}, document };
+    return createEmptyExtractionContext();
   }
 }
 
@@ -1221,75 +1253,118 @@ export const TransformHeuristics = {
   isGithubRepositoryRootUrl,
 } as const;
 
-function shouldUseArticleContent(
+const ARTICLE_INTERACTIVE_SELECTOR =
+  'button,[role="tab"],[role="tabpanel"],[aria-controls]';
+
+function buildArticleDocument(article: ExtractedArticle): Document {
+  return parseHTML(
+    `<!DOCTYPE html><html><body>${article.content}</body></html>`
+  ).document;
+}
+
+function hasSufficientArticleContentRatio(
   article: ExtractedArticle,
   document: Document
 ): boolean {
-  const articleLength = article.textContent.length;
   const originalLength = getVisibleTextLength(document);
+  if (originalLength < MIN_HTML_LENGTH_FOR_GATE) return true;
 
-  if (originalLength >= MIN_HTML_LENGTH_FOR_GATE) {
-    const ratio = articleLength / originalLength;
-    if (ratio < MIN_CONTENT_RATIO) return false;
-  }
+  return article.textContent.length / originalLength >= MIN_CONTENT_RATIO;
+}
 
-  const { document: articleDoc } = parseHTML(
-    `<!DOCTYPE html><html><body>${article.content}</body></html>`
-  );
-
+function retainsEnoughHeadings(
+  articleDoc: Document,
+  document: Document
+): boolean {
   const originalHeadings = countMatchingElements(document, 'h1,h2,h3,h4,h5,h6');
+  if (originalHeadings === 0) return true;
+
   const articleHeadings = countMatchingElements(
     articleDoc,
     'h1,h2,h3,h4,h5,h6'
   );
-  if (originalHeadings > 0) {
-    const retentionRatio = articleHeadings / originalHeadings;
-    if (retentionRatio < MIN_HEADING_RETENTION_RATIO) return false;
-  }
+  return articleHeadings / originalHeadings >= MIN_HEADING_RETENTION_RATIO;
+}
 
+function retainsEnoughCodeBlocks(
+  articleDoc: Document,
+  document: Document
+): boolean {
   const originalCodeBlocks = countMatchingElements(document, 'pre');
-  if (originalCodeBlocks > 0) {
-    const articleCodeBlocks = countMatchingElements(articleDoc, 'pre');
-    const codeRetentionRatio = articleCodeBlocks / originalCodeBlocks;
-    if (codeRetentionRatio < MIN_CODE_BLOCK_RETENTION_RATIO) return false;
-  }
+  if (originalCodeBlocks === 0) return true;
 
+  const articleCodeBlocks = countMatchingElements(articleDoc, 'pre');
+  return (
+    articleCodeBlocks / originalCodeBlocks >= MIN_CODE_BLOCK_RETENTION_RATIO
+  );
+}
+
+function retainsEnoughTables(
+  articleDoc: Document,
+  document: Document
+): boolean {
   const originalTables = countMatchingElements(document, 'table');
-  if (originalTables > 0) {
-    const articleTables = countMatchingElements(articleDoc, 'table');
-    const tableRetentionRatio = articleTables / originalTables;
-    if (tableRetentionRatio < MIN_TABLE_RETENTION_RATIO) return false;
-  }
+  if (originalTables === 0) return true;
 
+  const articleTables = countMatchingElements(articleDoc, 'table');
+  return articleTables / originalTables >= MIN_TABLE_RETENTION_RATIO;
+}
+
+function retainsEnoughImages(
+  articleDoc: Document,
+  document: Document
+): boolean {
   const originalImages = countMatchingElements(document, 'img');
-  if (originalImages >= MIN_IMAGE_ELEMENTS_FOR_GATE) {
-    const articleImages = countMatchingElements(articleDoc, 'img');
-    const imageRetentionRatio = articleImages / originalImages;
-    if (imageRetentionRatio < MIN_IMAGE_RETENTION_RATIO) return false;
-  }
+  if (originalImages < MIN_IMAGE_ELEMENTS_FOR_GATE) return true;
 
-  const interactiveSelector =
-    'button,[role="tab"],[role="tabpanel"],[aria-controls]';
+  const articleImages = countMatchingElements(articleDoc, 'img');
+  return articleImages / originalImages >= MIN_IMAGE_RETENTION_RATIO;
+}
+
+function retainsEnoughInteractiveElements(
+  articleDoc: Document,
+  document: Document
+): boolean {
   const originalInteractive = countMatchingElements(
     document,
-    interactiveSelector
+    ARTICLE_INTERACTIVE_SELECTOR
   );
-  if (originalInteractive >= MIN_INTERACTIVE_ELEMENTS_FOR_GATE) {
-    const articleInteractive = countMatchingElements(
-      articleDoc,
-      interactiveSelector
-    );
-    const interactiveRetentionRatio = articleInteractive / originalInteractive;
-    if (interactiveRetentionRatio < MIN_INTERACTIVE_RETENTION_RATIO) {
-      return false;
-    }
-  }
+  if (originalInteractive < MIN_INTERACTIVE_ELEMENTS_FOR_GATE) return true;
 
-  if (articleHeadings >= MIN_HEADINGS_FOR_EMPTY_SECTION_GATE) {
-    const emptySectionRatio =
-      countEmptyHeadingSections(articleDoc) / articleHeadings;
-    if (emptySectionRatio > MAX_EMPTY_SECTION_RATIO) return false;
-  }
+  const articleInteractive = countMatchingElements(
+    articleDoc,
+    ARTICLE_INTERACTIVE_SELECTOR
+  );
+  return (
+    articleInteractive / originalInteractive >= MIN_INTERACTIVE_RETENTION_RATIO
+  );
+}
+
+function hasAcceptableEmptySectionRatio(articleDoc: Document): boolean {
+  const articleHeadings = countMatchingElements(
+    articleDoc,
+    'h1,h2,h3,h4,h5,h6'
+  );
+  if (articleHeadings < MIN_HEADINGS_FOR_EMPTY_SECTION_GATE) return true;
+
+  const emptySectionRatio =
+    countEmptyHeadingSections(articleDoc) / articleHeadings;
+  return emptySectionRatio <= MAX_EMPTY_SECTION_RATIO;
+}
+
+function shouldUseArticleContent(
+  article: ExtractedArticle,
+  document: Document
+): boolean {
+  if (!hasSufficientArticleContentRatio(article, document)) return false;
+
+  const articleDoc = buildArticleDocument(article);
+  if (!retainsEnoughHeadings(articleDoc, document)) return false;
+  if (!retainsEnoughCodeBlocks(articleDoc, document)) return false;
+  if (!retainsEnoughTables(articleDoc, document)) return false;
+  if (!retainsEnoughImages(articleDoc, document)) return false;
+  if (!retainsEnoughInteractiveElements(articleDoc, document)) return false;
+  if (!hasAcceptableEmptySectionRatio(articleDoc)) return false;
 
   return !hasTruncatedSentences(article.textContent);
 }
@@ -1807,6 +1882,50 @@ function resolveContentSource(params: {
   });
 }
 
+function shouldStripGithubPrimaryHeading(
+  context: ContentSource,
+  url: string
+): boolean {
+  return (
+    context.primaryHeading !== undefined &&
+    TransformHeuristics.isGithubRepositoryRootUrl(url)
+  );
+}
+
+function maybeStripGithubPrimaryHeading(
+  markdown: string,
+  context: ContentSource,
+  url: string
+): string {
+  if (!shouldStripGithubPrimaryHeading(context, url)) return markdown;
+  return stripLeadingHeading(markdown, context.primaryHeading ?? '');
+}
+
+function buildSyntheticTitlePrefix(url: string, favicon?: string): string {
+  if (!favicon) return ' ';
+
+  let alt = '';
+  try {
+    alt = new URL(url).hostname;
+  } catch {
+    /* skip */
+  }
+
+  return ` ![${alt}](${favicon}) `;
+}
+
+function maybePrependSyntheticTitle(
+  markdown: string,
+  context: ContentSource,
+  url: string
+): string {
+  if (!context.title || /^(#{1,6})\s/.test(markdown.trimStart())) {
+    return markdown;
+  }
+
+  return `#${buildSyntheticTitlePrefix(url, context.favicon)}${context.title}\n\n${markdown}`;
+}
+
 function buildMarkdownFromContext(
   context: ContentSource,
   url: string,
@@ -1820,27 +1939,8 @@ function buildMarkdownFromContext(
       ...(context.skipNoiseRemoval ? { skipNoiseRemoval: true } : {}),
     })
   );
-  if (
-    context.primaryHeading &&
-    TransformHeuristics.isGithubRepositoryRootUrl(url)
-  ) {
-    content = stripLeadingHeading(content, context.primaryHeading);
-  }
-
-  if (context.title && !/^(#{1,6})\s/.test(content.trimStart())) {
-    const icon = context.favicon;
-    let prefix = ' ';
-    if (icon) {
-      let alt = '';
-      try {
-        alt = new URL(url).hostname;
-      } catch {
-        /* skip */
-      }
-      prefix = ` ![${alt}](${icon}) `;
-    }
-    content = `#${prefix}${context.title}\n\n${content}`;
-  }
+  content = maybeStripGithubPrimaryHeading(content, context, url);
+  content = maybePrependSyntheticTitle(content, context, url);
 
   content = supplementMarkdownFromNextFlight(content, context.originalHtml);
   content = cleanupMarkdownArtifacts(
