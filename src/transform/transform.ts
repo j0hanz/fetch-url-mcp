@@ -1461,6 +1461,7 @@ interface NextFlightSupplement {
   readonly importCommands?: string[];
   readonly apiTables: Map<string, string>;
   readonly demoCodeBlocks: Map<string, string>;
+  readonly mermaidDiagrams: Map<string, string>;
 }
 
 const NEXT_FLIGHT_PAYLOAD_RE =
@@ -1476,6 +1477,8 @@ const FLIGHT_API_RE =
   /children:"([^"]+)"\}\),`\\n`,\(0,e\.jsx\)\(o,\{data:\[([\s\S]*?)\]\}\)/g;
 const FLIGHT_API_ROW_RE =
   /attribute:"([^"]+)",type:"([^"]+)",description:"([^"]*)",default:"([^"]*)"/g;
+const FLIGHT_MERMAID_SECTION_RE =
+  /_jsx\(Heading,\{\s*level:"[1-6]",\s*id:"[^"]+",\s*children:"((?:\\.|[^"\\])*)"\s*\}\)(?:(?!_jsx\(Heading,\{)[\s\S]){0,12000}?_jsx\(Mermaid,\{\s*chart:"((?:\\.|[^"\\])*)"\s*\}\)/g;
 
 function decodeHtmlEntities(value: string): string {
   return value
@@ -1484,6 +1487,14 @@ function decodeHtmlEntities(value: string): string {
     .replace(/&amp;/g, '&')
     .replace(/&lt;/g, '<')
     .replace(/&gt;/g, '>');
+}
+
+function decodeFlightStringValue(value: string): string {
+  try {
+    return JSON.parse(`"${value}"`) as string;
+  } catch {
+    return decodeHtmlEntities(value);
+  }
 }
 
 function decodeNextFlightPayloads(html: string): string[] {
@@ -1599,6 +1610,13 @@ function buildCodeBlock(code: string): string {
 
   const language = detectLanguageFromCode(trimmed) ?? 'tsx';
   return `\`\`\`${language}\n${trimmed}\n\`\`\``;
+}
+
+function buildMermaidBlock(chart: string): string {
+  const normalized = decodeFlightStringValue(chart).trim();
+  if (!normalized) return '';
+
+  return `\`\`\`mermaid\n${normalized}\n\`\`\``;
 }
 
 function normalizeSupplementHeadingText(value: string): string {
@@ -1730,6 +1748,13 @@ function extractNextFlightSupplement(
     if (table) apiTables.set(title, table);
   }
 
+  const mermaidDiagrams = new Map<string, string>();
+  for (const match of text.matchAll(FLIGHT_MERMAID_SECTION_RE)) {
+    const title = match[1] ? decodeFlightStringValue(match[1]).trim() : '';
+    const chart = match[2] ? buildMermaidBlock(match[2]) : '';
+    if (title && chart) mermaidDiagrams.set(title, chart);
+  }
+
   const demoCodeBlocks = new Map<string, string>();
   for (const match of text.matchAll(FLIGHT_DEMO_RE)) {
     const title = match[1];
@@ -1748,6 +1773,7 @@ function extractNextFlightSupplement(
     ...(importMatch ? { importCommands: importMatch.slice(1) } : {}),
     apiTables,
     demoCodeBlocks,
+    mermaidDiagrams,
   };
 }
 
@@ -1790,6 +1816,19 @@ function supplementMarkdownFromNextFlight(
 
   for (const [title, table] of supplement.apiTables) {
     replaceMarkdownSection(lines, title, table);
+  }
+
+  for (const [title, mermaidBlock] of supplement.mermaidDiagrams) {
+    const section = findMarkdownSection(lines, title);
+    if (!section) continue;
+
+    const sectionBody = getSectionBody(lines, section);
+    if (sectionBody.includes('```mermaid')) continue;
+
+    const nextBody = sectionBody
+      ? `${sectionBody}\n\n${mermaidBlock}`
+      : mermaidBlock;
+    replaceMarkdownSection(lines, title, nextBody);
   }
 
   for (const [title, codeBlock] of supplement.demoCodeBlocks) {

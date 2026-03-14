@@ -123,4 +123,16 @@ describe('markdown cleanup', () => {
     assert.ok(cleaned.includes('\\<FormControl /\\>'));
     assert.ok(cleaned.includes('\\<InputLabel /\\>'));
   });
+
+  it('trims padding around token-like inline code spans', () => {
+    const input = [
+      'Use ` tools/call` and ` name` to invoke `two words` safely.',
+      'Keep `already-clean` unchanged.',
+    ].join('\n');
+    const cleaned = cleanupMarkdownArtifacts(input);
+
+    assert.ok(cleaned.includes('`tools/call`'));
+    assert.ok(cleaned.includes('`name`'));
+    assert.ok(cleaned.includes('`already-clean`'));
+  });
 });

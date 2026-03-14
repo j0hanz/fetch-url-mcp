@@ -430,6 +430,42 @@ describe('transformHtmlToMarkdown next flight supplements', () => {
     );
     assert.ok(!result.markdown.includes('## [Installation](#installation)'));
   });
+
+  it('supplements mermaid diagrams from next flight payloads', () => {
+    const payload = [
+      '_jsx(Heading,{level:"3",id:"participants",children:"Participants"})',
+      ',"\\n",_jsx(_components.p,{children:"Participant overview."})',
+      ',"\\n",_jsx(Mermaid,{chart:"graph TB\\n  Client[\\"MCP Client\\"] --> Server[\\"MCP Server\\"]"})',
+    ].join('');
+
+    const html = `
+      <!doctype html>
+      <html>
+        <body>
+          <main>
+            <article>
+              <h1>Architecture</h1>
+              <h3><a href="#participants">Participants</a></h3>
+              <p>Participant overview.</p>
+            </article>
+          </main>
+          <script>self.__next_f.push([1,${JSON.stringify(payload)}])</script>
+        </body>
+      </html>
+    `;
+
+    const result = transformHtmlToMarkdownInProcess(
+      html,
+      'https://example.com/docs/architecture',
+      { includeMetadata: false }
+    );
+
+    assert.ok(result.markdown.includes('### Participants'));
+    assert.ok(result.markdown.includes('```mermaid'));
+    assert.ok(result.markdown.includes('graph TB'));
+    assert.ok(result.markdown.includes('MCP Client'));
+    assert.ok(result.markdown.includes('MCP Server'));
+  });
 });
 
 describe('transformHtmlToMarkdown mandatory noise removal', () => {

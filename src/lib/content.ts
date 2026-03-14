@@ -1329,6 +1329,15 @@ function removeSkipLinks(text: string): string {
     .replace(REGEX.ZERO_WIDTH_ANCHOR, '')
     .replace(REGEX.COMBINED_LINE_REMOVALS, '');
 }
+function normalizeInlineCodeTokens(text: string): string {
+  return text.replace(/`([^`\n]+)`/g, (match: string, inner: string) => {
+    const trimmed = inner.trim();
+    if (trimmed === inner || /\s/.test(trimmed)) return match;
+    if (!/^[*A-Za-z0-9_./:-]+$/.test(trimmed)) return match;
+    return `\`${trimmed}\``;
+  });
+}
+
 function normalizeMarkdownSpacing(text: string): string {
   let result = text
     .replace(REGEX.SPACING_LINK_FIX, ']($1)\n\n[')
@@ -1339,8 +1348,8 @@ function normalizeMarkdownSpacing(text: string): string {
     .replace(REGEX.PUNCT_ONLY_LIST_ARTIFACT, '')
     .replace(REGEX.DOUBLE_NEWLINE_REDUCER, '\n\n');
 
-  // Trim leading whitespace inside inline code spans
-  result = result.replace(/(?<=\s|^)`\s+([^`]+)`/gm, '`$1`');
+  // Trim whitespace around token-like inline code spans.
+  result = normalizeInlineCodeTokens(result);
 
   // Unescape backticks inside markdown link text
   result = result.replace(
