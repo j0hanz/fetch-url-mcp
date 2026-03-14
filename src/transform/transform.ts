@@ -9,6 +9,7 @@ import {
   addSourceToMarkdown,
   buildMetadataFooter,
   cleanupMarkdownArtifacts,
+  detectLanguageFromCode,
   extractLanguageFromClassName,
   extractTitleFromRawMarkdown,
   isRawTextContent,
@@ -950,6 +951,13 @@ const MIN_CONTENT_RATIO = 0.15;
 const MIN_HTML_LENGTH_FOR_GATE = 100;
 const MIN_HEADING_RETENTION_RATIO = 0.3;
 const MIN_CODE_BLOCK_RETENTION_RATIO = 0.15;
+const MIN_TABLE_RETENTION_RATIO = 0.5;
+const MIN_IMAGE_RETENTION_RATIO = 0.2;
+const MIN_INTERACTIVE_RETENTION_RATIO = 0.1;
+const MIN_INTERACTIVE_ELEMENTS_FOR_GATE = 6;
+const MIN_IMAGE_ELEMENTS_FOR_GATE = 4;
+const MIN_HEADINGS_FOR_EMPTY_SECTION_GATE = 5;
+const MAX_EMPTY_SECTION_RATIO = 0.05;
 
 const MIN_LINE_LENGTH_FOR_TRUNCATION_CHECK = 20;
 const MAX_TRUNCATED_LINE_RATIO = 0.95;
@@ -980,14 +988,6 @@ function resolveHtmlDocument(htmlOrDocument: string | Document): Document {
     // Don't crash on parse failures.
     return parseHTML('<!DOCTYPE html><html><body></body></html>').document;
   }
-}
-
-function countTagsInString(html: string, regex: RegExp): number {
-  let count = 0;
-  while (regex.exec(html) !== null) {
-    count++;
-  }
-  return count;
 }
 
 function stripNonVisibleNodes(root: ParentNode): void {
@@ -1157,6 +1157,7 @@ export function createContentMetadataBlock(
 
 interface ContentSource {
   readonly sourceHtml: string;
+  readonly originalHtml: string;
   readonly title: string | undefined;
   readonly primaryHeading: string | undefined;
   readonly favicon: string | undefined;
@@ -1221,6 +1222,49 @@ function findPrimaryHeading(document: Document): string | undefined {
   return undefined;
 }
 
+function countMatchingElements(root: ParentNode, selector: string): number {
+  return root.querySelectorAll(selector).length;
+}
+
+function getHeadingLevel(heading: Element): number | null {
+  const match = /^H([1-6])$/.exec(heading.tagName);
+  if (!match) return null;
+
+  return Number.parseInt(match[1] ?? '', 10);
+}
+
+function hasSectionContent(heading: Element): boolean {
+  const level = getHeadingLevel(heading);
+  if (level === null) return false;
+
+  let current = heading.nextElementSibling;
+  while (current) {
+    const currentLevel = getHeadingLevel(current);
+    if (currentLevel !== null && currentLevel <= level) return false;
+
+    const text = current.textContent.trim();
+    if (text.length > 0) return true;
+    if (current.querySelector('img,table,pre,code,ul,ol,figure,blockquote')) {
+      return true;
+    }
+
+    current = current.nextElementSibling;
+  }
+
+  return false;
+}
+
+function countEmptyHeadingSections(root: ParentNode): number {
+  let emptyCount = 0;
+  const headings = root.querySelectorAll('h1,h2,h3,h4,h5,h6');
+
+  for (const heading of headings) {
+    if (!hasSectionContent(heading)) emptyCount += 1;
+  }
+
+  return emptyCount;
+}
+
 function isGithubRepositoryRootUrl(url: string): boolean {
   let parsed: URL;
   try {
@@ -1255,21 +1299,62 @@ function shouldUseArticleContent(
     if (ratio < MIN_CONTENT_RATIO) return false;
   }
 
-  const originalHeadings =
-    document.querySelectorAll('h1,h2,h3,h4,h5,h6').length;
-  if (originalHeadings > 0) {
-    const articleHeadings = countTagsInString(article.content, /<h[1-6]\b/gi);
-    const retentionRatio = articleHeadings / originalHeadings;
+  const { document: articleDoc } = parseHTML(
+    `<!DOCTYPE html><html><body>${article.content}</body></html>`
+  );
 
+  const originalHeadings = countMatchingElements(document, 'h1,h2,h3,h4,h5,h6');
+  const articleHeadings = countMatchingElements(
+    articleDoc,
+    'h1,h2,h3,h4,h5,h6'
+  );
+  if (originalHeadings > 0) {
+    const retentionRatio = articleHeadings / originalHeadings;
     if (retentionRatio < MIN_HEADING_RETENTION_RATIO) return false;
   }
 
-  const originalCodeBlocks = document.querySelectorAll('pre').length;
+  const originalCodeBlocks = countMatchingElements(document, 'pre');
   if (originalCodeBlocks > 0) {
-    const articleCodeBlocks = countTagsInString(article.content, /<pre\b/gi);
+    const articleCodeBlocks = countMatchingElements(articleDoc, 'pre');
     const codeRetentionRatio = articleCodeBlocks / originalCodeBlocks;
-
     if (codeRetentionRatio < MIN_CODE_BLOCK_RETENTION_RATIO) return false;
+  }
+
+  const originalTables = countMatchingElements(document, 'table');
+  if (originalTables > 0) {
+    const articleTables = countMatchingElements(articleDoc, 'table');
+    const tableRetentionRatio = articleTables / originalTables;
+    if (tableRetentionRatio < MIN_TABLE_RETENTION_RATIO) return false;
+  }
+
+  const originalImages = countMatchingElements(document, 'img');
+  if (originalImages >= MIN_IMAGE_ELEMENTS_FOR_GATE) {
+    const articleImages = countMatchingElements(articleDoc, 'img');
+    const imageRetentionRatio = articleImages / originalImages;
+    if (imageRetentionRatio < MIN_IMAGE_RETENTION_RATIO) return false;
+  }
+
+  const interactiveSelector =
+    'button,[role="tab"],[role="tabpanel"],[aria-controls]';
+  const originalInteractive = countMatchingElements(
+    document,
+    interactiveSelector
+  );
+  if (originalInteractive >= MIN_INTERACTIVE_ELEMENTS_FOR_GATE) {
+    const articleInteractive = countMatchingElements(
+      articleDoc,
+      interactiveSelector
+    );
+    const interactiveRetentionRatio = articleInteractive / originalInteractive;
+    if (interactiveRetentionRatio < MIN_INTERACTIVE_RETENTION_RATIO) {
+      return false;
+    }
+  }
+
+  if (articleHeadings >= MIN_HEADINGS_FOR_EMPTY_SECTION_GATE) {
+    const emptySectionRatio =
+      countEmptyHeadingSections(articleDoc) / articleHeadings;
+    if (emptySectionRatio > MAX_EMPTY_SECTION_RATIO) return false;
   }
 
   return !hasTruncatedSentences(article.textContent);
@@ -1313,6 +1398,7 @@ function buildContentSource(params: {
     | 'extractedMetadata'
     | 'truncated'
     | 'primaryHeading'
+    | 'originalHtml'
   > = {
     favicon: extractedMeta.favicon,
     metadata,
@@ -1321,6 +1407,7 @@ function buildContentSource(params: {
     primaryHeading: document
       ? TransformHeuristics.findPrimaryHeading(document)
       : undefined,
+    originalHtml: html,
   };
 
   if (useArticleContent && article) {
@@ -1360,6 +1447,356 @@ function buildContentSource(params: {
     sourceHtml: html,
     title: extractedMeta.title,
   };
+}
+
+interface FlightApiRow {
+  readonly attribute: string;
+  readonly type: string;
+  readonly description: string;
+  readonly defaultValue: string;
+}
+
+interface NextFlightSupplement {
+  readonly installationCommands?: string[];
+  readonly importCommands?: string[];
+  readonly apiTables: Map<string, string>;
+  readonly demoCodeBlocks: Map<string, string>;
+}
+
+const NEXT_FLIGHT_PAYLOAD_RE =
+  /self\.__next_f\.push\(\[1,"((?:\\.|[^"\\])*)"\]\)<\/script>/gs;
+const TEMPLATE_ASSIGNMENT_RE = /([A-Za-z_$][\w$]*)=`([\s\S]*?)`;/g;
+const OBJECT_ASSIGNMENT_RE = /([A-Za-z_$][\w$]*)=\{([^{}]+)\}/g;
+const FLIGHT_INSTALL_RE =
+  /commands:\{cli:"([^"]+)",npm:"([^"]+)",yarn:"([^"]+)",pnpm:"([^"]+)",bun:"([^"]+)"\}/;
+const FLIGHT_IMPORT_RE = /commands:\{main:'([^']+)',individual:'([^']+)'\}/;
+const FLIGHT_DEMO_RE =
+  /title:"([^"]+)",files:([A-Za-z_$][\w$]*)\.([A-Za-z_$][\w$]*)/g;
+const FLIGHT_API_RE =
+  /children:"([^"]+)"\}\),`\\n`,\(0,e\.jsx\)\(o,\{data:\[([\s\S]*?)\]\}\)/g;
+const FLIGHT_API_ROW_RE =
+  /attribute:"([^"]+)",type:"([^"]+)",description:"([^"]*)",default:"([^"]*)"/g;
+
+function decodeHtmlEntities(value: string): string {
+  return value
+    .replace(/&#39;|&#x27;/g, "'")
+    .replace(/&quot;/g, '"')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>');
+}
+
+function decodeNextFlightPayloads(html: string): string[] {
+  const payloads: string[] = [];
+
+  for (const match of html.matchAll(NEXT_FLIGHT_PAYLOAD_RE)) {
+    const rawPayload = match[1];
+    if (!rawPayload) continue;
+
+    try {
+      payloads.push(JSON.parse(`"${rawPayload}"`) as string);
+    } catch {
+      // Ignore malformed payload fragments and continue with the rest.
+    }
+  }
+
+  return payloads;
+}
+
+function parseFlightObjectRefs(text: string): {
+  templateMap: Map<string, string>;
+  aliasMap: Map<string, string>;
+  objectMaps: Map<string, Map<string, string>>;
+} {
+  const templateMap = new Map<string, string>();
+  const aliasMap = new Map<string, string>();
+  const objectMaps = new Map<string, Map<string, string>>();
+
+  for (const match of text.matchAll(TEMPLATE_ASSIGNMENT_RE)) {
+    const name = match[1];
+    const code = match[2];
+    if (name && code) templateMap.set(name, decodeHtmlEntities(code));
+  }
+
+  for (const match of text.matchAll(OBJECT_ASSIGNMENT_RE)) {
+    const objectName = match[1];
+    const body = match[2]?.trim() ?? '';
+    if (!objectName || !body) continue;
+
+    const spreadMatch = /^\.\.\.([A-Za-z_$][\w$]*)$/.exec(body);
+    if (spreadMatch?.[1]) {
+      aliasMap.set(objectName, spreadMatch[1]);
+      continue;
+    }
+
+    const entries = new Map<string, string>();
+    for (const part of body.split(',')) {
+      const entryMatch =
+        /(?:"([^"]+)"|([A-Za-z_$][\w$]*)):([A-Za-z_$][\w$]*)$/.exec(
+          part.trim()
+        );
+      const key = entryMatch?.[1] ?? entryMatch?.[2];
+      const value = entryMatch?.[3];
+      if (key && value) entries.set(key, value);
+    }
+
+    if (entries.size > 0) objectMaps.set(objectName, entries);
+  }
+
+  return { templateMap, aliasMap, objectMaps };
+}
+
+function resolveFlightCodeRef(
+  name: string | undefined,
+  refs: ReturnType<typeof parseFlightObjectRefs>,
+  seen = new Set<string>()
+): string | undefined {
+  if (!name || seen.has(name)) return undefined;
+  seen.add(name);
+
+  const direct = refs.templateMap.get(name);
+  if (direct) return direct;
+
+  const alias = refs.aliasMap.get(name);
+  if (alias) return resolveFlightCodeRef(alias, refs, seen);
+
+  const objectMap = refs.objectMaps.get(name);
+  if (!objectMap) return undefined;
+
+  for (const ref of objectMap.values()) {
+    const resolved = resolveFlightCodeRef(ref, refs, seen);
+    if (resolved) return resolved;
+  }
+
+  return undefined;
+}
+
+function escapeMarkdownTableCell(value: string): string {
+  const normalized = decodeHtmlEntities(value).replace(/\s+/g, ' ').trim();
+  return (normalized || '-').replace(/\|/g, '\\|');
+}
+
+function buildMarkdownTable(rows: readonly FlightApiRow[]): string {
+  if (rows.length === 0) return '';
+
+  const lines = [
+    '| Prop | Type | Description | Default |',
+    '| ---- | ---- | ----------- | ------- |',
+  ];
+
+  for (const row of rows) {
+    lines.push(
+      `| ${escapeMarkdownTableCell(row.attribute)} | ${escapeMarkdownTableCell(row.type)} | ${escapeMarkdownTableCell(row.description)} | ${escapeMarkdownTableCell(row.defaultValue)} |`
+    );
+  }
+
+  return lines.join('\n');
+}
+
+function buildCodeBlock(code: string): string {
+  const trimmed = code.trim();
+  if (!trimmed) return '';
+
+  const language = detectLanguageFromCode(trimmed) ?? 'tsx';
+  return `\`\`\`${language}\n${trimmed}\n\`\`\``;
+}
+
+function normalizeSupplementHeadingText(value: string): string {
+  return value
+    .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase();
+}
+
+function getMarkdownHeadingInfo(
+  line: string
+): { level: number; title: string } | null {
+  const match = /^(#{1,6})\s+(.+?)\s*$/.exec(line.trim());
+  if (!match) return null;
+
+  return {
+    level: match[1]?.length ?? 0,
+    title: normalizeSupplementHeadingText(match[2] ?? ''),
+  };
+}
+
+function findMarkdownSection(
+  lines: string[],
+  title: string
+): { start: number; end: number } | null {
+  const target = normalizeSupplementHeadingText(title);
+
+  for (let i = 0; i < lines.length; i += 1) {
+    const heading = getMarkdownHeadingInfo(lines[i] ?? '');
+    if (heading?.title !== target) continue;
+
+    let end = lines.length;
+    for (let j = i + 1; j < lines.length; j += 1) {
+      const nextLine = lines[j];
+      const nextHeading =
+        nextLine !== undefined ? getMarkdownHeadingInfo(nextLine) : null;
+      if (nextHeading && nextHeading.level <= heading.level) {
+        end = j;
+        break;
+      }
+    }
+
+    return { start: i, end };
+  }
+
+  return null;
+}
+
+function getSectionBody(
+  lines: string[],
+  section: { start: number; end: number }
+): string {
+  return lines
+    .slice(section.start + 1, section.end)
+    .join('\n')
+    .trim();
+}
+
+function replaceMarkdownSection(
+  lines: string[],
+  title: string,
+  body: string
+): boolean {
+  const section = findMarkdownSection(lines, title);
+  if (!section) return false;
+
+  const replacement =
+    body.trim().length > 0 ? ['', ...body.trim().split('\n'), ''] : [''];
+  lines.splice(
+    section.start + 1,
+    section.end - section.start - 1,
+    ...replacement
+  );
+  return true;
+}
+
+function appendMarkdownSection(
+  lines: string[],
+  title: string,
+  body: string
+): boolean {
+  const section = findMarkdownSection(lines, title);
+  if (!section) return false;
+
+  const bodyText = getSectionBody(lines, section);
+  if (bodyText.includes('```')) return false;
+
+  const nextBody = bodyText ? `${bodyText}\n\n${body.trim()}` : body.trim();
+  return replaceMarkdownSection(lines, title, nextBody);
+}
+
+function extractNextFlightSupplement(
+  originalHtml: string
+): NextFlightSupplement | null {
+  const payloads = decodeNextFlightPayloads(originalHtml);
+  if (payloads.length === 0) return null;
+
+  const text = payloads.join('\n');
+  const refs = parseFlightObjectRefs(text);
+
+  const installMatch = FLIGHT_INSTALL_RE.exec(text);
+  const importMatch = FLIGHT_IMPORT_RE.exec(text);
+
+  const apiTables = new Map<string, string>();
+  for (const match of text.matchAll(FLIGHT_API_RE)) {
+    const title = match[1];
+    const rawRows = match[2] ?? '';
+    if (!title) continue;
+
+    const rows: FlightApiRow[] = [];
+    for (const rowMatch of rawRows.matchAll(FLIGHT_API_ROW_RE)) {
+      const attribute = rowMatch[1];
+      const type = rowMatch[2];
+      const description = rowMatch[3];
+      const defaultValue = rowMatch[4];
+      if (
+        !attribute ||
+        !type ||
+        description === undefined ||
+        defaultValue === undefined
+      ) {
+        continue;
+      }
+      rows.push({ attribute, type, description, defaultValue });
+    }
+
+    const table = buildMarkdownTable(rows);
+    if (table) apiTables.set(title, table);
+  }
+
+  const demoCodeBlocks = new Map<string, string>();
+  for (const match of text.matchAll(FLIGHT_DEMO_RE)) {
+    const title = match[1];
+    const objectName = match[2];
+    const key = match[3];
+    const ref = objectName
+      ? refs.objectMaps.get(objectName)?.get(key ?? '')
+      : undefined;
+    const code = resolveFlightCodeRef(ref, refs);
+    const codeBlock = code ? buildCodeBlock(code) : '';
+    if (title && codeBlock) demoCodeBlocks.set(title, codeBlock);
+  }
+
+  return {
+    ...(installMatch ? { installationCommands: installMatch.slice(1) } : {}),
+    ...(importMatch ? { importCommands: importMatch.slice(1) } : {}),
+    apiTables,
+    demoCodeBlocks,
+  };
+}
+
+function supplementMarkdownFromNextFlight(
+  markdown: string,
+  originalHtml: string
+): string {
+  const supplement = extractNextFlightSupplement(originalHtml);
+  if (!supplement) return markdown;
+
+  const lines = markdown.split('\n');
+
+  if (supplement.installationCommands?.length) {
+    const installationSection = findMarkdownSection(lines, 'Installation');
+    if (installationSection) {
+      const installBody = getSectionBody(lines, installationSection);
+      if (!/(npm|pnpm|yarn|bun|npx)\s+(install|add)/.test(installBody)) {
+        appendMarkdownSection(
+          lines,
+          'Installation',
+          buildCodeBlock(supplement.installationCommands.join('\n'))
+        );
+      }
+    }
+  }
+
+  if (supplement.importCommands?.length) {
+    const importSection = findMarkdownSection(lines, 'Import');
+    if (importSection) {
+      const importBody = getSectionBody(lines, importSection);
+      if (!/import\s+\{/.test(importBody)) {
+        appendMarkdownSection(
+          lines,
+          'Import',
+          buildCodeBlock(supplement.importCommands.join('\n\n'))
+        );
+      }
+    }
+  }
+
+  for (const [title, table] of supplement.apiTables) {
+    replaceMarkdownSection(lines, title, table);
+  }
+
+  for (const [title, codeBlock] of supplement.demoCodeBlocks) {
+    appendMarkdownSection(lines, title, codeBlock);
+  }
+
+  return lines.join('\n');
 }
 
 function resolveContentSource(params: {
@@ -1431,6 +1868,12 @@ function buildMarkdownFromContext(
     }
     content = `#${prefix}${context.title}\n\n${content}`;
   }
+
+  content = supplementMarkdownFromNextFlight(content, context.originalHtml);
+  content = cleanupMarkdownArtifacts(
+    content,
+    signal ? { signal, url } : { url }
+  );
 
   return {
     markdown: content,

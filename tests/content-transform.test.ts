@@ -6,6 +6,7 @@ import { FetchError } from '../dist/lib/utils.js';
 import {
   shutdownTransformWorkerPool,
   transformHtmlToMarkdown,
+  transformHtmlToMarkdownInProcess,
 } from '../dist/transform/transform.js';
 
 after(async () => {
@@ -364,6 +365,70 @@ describe('transformHtmlToMarkdown favicon rendering', () => {
     assert.ok(!result.markdown.includes('\n## Fetch URL MCP Server\n'));
     assert.ok(!result.markdown.startsWith('# GitHub - owner/repo:'));
     assert.equal(result.title, 'Fetch URL MCP Server');
+  });
+});
+
+describe('transformHtmlToMarkdown next flight supplements', () => {
+  it('supplements missing commands, demo code, and API tables from flight payloads', () => {
+    const demoCode = [
+      'import {Card, Image} from "@example/react";',
+      '',
+      'export default function App() {',
+      '  return <Card><Image alt="Hero" src="/hero.png" /></Card>;',
+      '}',
+    ].join('\n');
+
+    const payload = [
+      `var W=\`${demoCode}\`;`,
+      'var s={image:W};',
+      'commands:{cli:"npx example add card",npm:"npm install @example/card",yarn:"yarn add @example/card",pnpm:"pnpm add @example/card",bun:"bun add @example/card"}',
+      'commands:{main:\'import {Card} from "@example/react";\',individual:\'import {Card} from "@example/card";\'}',
+      'children:"Card Props"}),`\\n`,(0,e.jsx)(o,{data:[{attribute:"classNames",type:"Partial<Record<\'base\' | \'body\' | \'footer\', string>>",description:"Slot classes",default:"-"}]})',
+      'title:"With Image",files:s.image',
+    ].join('');
+
+    const html = `
+      <!doctype html>
+      <html>
+        <body>
+          <main>
+            <article>
+              <h1><a href="#card">Card</a></h1>
+              <p>Card docs.</p>
+              <h2><a href="#installation">Installation</a></h2>
+              <p>Install note.</p>
+              <h2><a href="#import">Import</a></h2>
+              <p>Import note.</p>
+              <h2><a href="#usage">Usage</a></h2>
+              <h3><a href="#with-image">With Image</a></h3>
+              <h2><a href="#api">API</a></h2>
+              <h3><a href="#card-props">Card Props</a></h3>
+              <p>Legacy props output.</p>
+            </article>
+          </main>
+          <script>self.__next_f.push([1,${JSON.stringify(payload)}])</script>
+        </body>
+      </html>
+    `;
+
+    const result = transformHtmlToMarkdownInProcess(
+      html,
+      'https://example.com/docs/card',
+      { includeMetadata: false }
+    );
+
+    assert.ok(result.markdown.includes('## Installation'));
+    assert.ok(result.markdown.includes('npm install @example/card'));
+    assert.ok(result.markdown.includes('## Import'));
+    assert.ok(result.markdown.includes('import {Card} from "@example/react";'));
+    assert.ok(result.markdown.includes('### With Image'));
+    assert.ok(result.markdown.includes('src="/hero.png"'));
+    assert.ok(
+      result.markdown.includes(
+        "| classNames | Partial<Record<'base' \\| 'body' \\| 'footer', string>> | Slot classes | - |"
+      )
+    );
+    assert.ok(!result.markdown.includes('## [Installation](#installation)'));
   });
 });
 

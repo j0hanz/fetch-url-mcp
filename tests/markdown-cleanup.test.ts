@@ -90,14 +90,15 @@ describe('markdown cleanup', () => {
     assert.ok(cleaned.includes('Some body text.'));
   });
 
-  it('preserves anchor-only heading when followed by content', () => {
+  it('normalizes anchor-only heading when followed by content', () => {
     const input = ['### [Usage](#usage)', 'Use the component like this.'].join(
       '\n'
     );
 
     const cleaned = cleanupMarkdownArtifacts(input);
 
-    assert.ok(cleaned.includes('### [Usage](#usage)'));
+    assert.ok(cleaned.includes('### Usage'));
+    assert.ok(!cleaned.includes('### [Usage](#usage)'));
     assert.ok(cleaned.includes('Use the component like this.'));
   });
 

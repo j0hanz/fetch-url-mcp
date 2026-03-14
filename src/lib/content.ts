@@ -1126,6 +1126,9 @@ function hasFollowingContent(lines: string[], startIndex: number): boolean {
   }
   return false;
 }
+function stripAnchorOnlyHeading(line: string): string {
+  return line.replace(/^(#{1,6})\s+\[([^\]]+)\]\(#[^)]+\)\s*$/, '$1 $2');
+}
 function isTitleCaseOrKeyword(trimmed: string): boolean {
   // Quick check for length to avoid regex on long strings
   if (trimmed.length > MAX_LINE_LENGTH) return false;
@@ -1286,11 +1289,10 @@ function preprocessLines(lines: string[], options?: CleanupOptions): string {
 
     const trimmed = line.trim();
     if (REGEX.EMPTY_HEADING_LINE.test(trimmed)) continue;
-    if (
-      REGEX.ANCHOR_ONLY_HEADING.test(trimmed) &&
-      !hasFollowingContent(lines, i)
-    )
-      continue;
+    if (REGEX.ANCHOR_ONLY_HEADING.test(trimmed)) {
+      if (!hasFollowingContent(lines, i)) continue;
+      line = stripAnchorOnlyHeading(trimmed);
+    }
 
     const tocSkip = shouldSkipAsToc(lines, i, trimmed, removeToc, options);
     if (tocSkip !== null) {
