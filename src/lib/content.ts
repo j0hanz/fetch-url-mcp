@@ -617,10 +617,11 @@ function stripTabTriggers(document: Document): void {
 function escapeTableCellPipes(document: Document): void {
   const cells = document.querySelectorAll('td, th');
   for (const cell of cells) {
-    for (const node of cell.childNodes) {
-      const text = node.textContent;
-      if (node.nodeType === 3 && text?.includes('|')) {
-        node.textContent = text.replace(/\|/g, '\\|');
+    const walker = document.createTreeWalker(cell, NODE_FILTER_SHOW_TEXT);
+    let node: Node | null;
+    while ((node = walker.nextNode())) {
+      if (node.textContent?.includes('|')) {
+        node.textContent = node.textContent.replace(/\|/g, '\\|');
       }
     }
   }
@@ -692,8 +693,10 @@ function flattenTableCellBreaks(document: Document): void {
     for (const br of brs) {
       br.replaceWith(' ');
     }
-    
-    const blocks = Array.from(cell.querySelectorAll('div, p, ul, li, h1, h2, h3, h4, h5, h6'));
+
+    const blocks = Array.from(
+      cell.querySelectorAll('div, p, ul, li, h1, h2, h3, h4, h5, h6')
+    );
     for (const block of blocks) {
       if (!block.parentNode) continue;
       const span = document.createElement('span');
@@ -707,7 +710,7 @@ function flattenTableCellBreaks(document: Document): void {
       }
       block.replaceWith(span);
     }
-    
+
     const filterNewlines = (node: Node): void => {
       if (node.nodeType === 3 && node.nodeValue) {
         node.nodeValue = node.nodeValue.replace(/\r?\n/g, ' ');
@@ -940,7 +943,7 @@ function matchTypeScript(ctx: DetectionContext): boolean {
   return false;
 }
 function matchSql(ctx: DetectionContext): boolean {
-  return /\b(?:select\s+.+?\s+from|insert\s+into|update\s+.+?\s+set|delete\s+from|create\s+(?:table|database|index|view|function|procedure|trigger|user|role)|alter\s+(?:table|database|index|view))\b/.test(
+  return /\b(?:select\s+(?:.+?\s+from|[\d*@])|insert\s+into|update\s+.+?\s+set|delete\s+from|create\s+(?:table|database|index|view|function|procedure|trigger|user|role)|alter\s+(?:table|database|index|view))\b/.test(
     ctx.lower
   );
 }
@@ -1086,12 +1089,13 @@ export function detectLanguageFromCode(code: string): string | undefined {
 // region Markdown Cleanup
 
 const MAX_LINE_LENGTH = 80;
+const FENCE_PATTERN = /^\s*(`{3,}|~{3,})/;
 const REGEX = {
   HEADING_MARKER: /^#{1,6}\s/m,
   HEADING_STRICT: /^#{1,6}\s+/m,
   EMPTY_HEADING_LINE: /^#{1,6}[ \t\u00A0]*$/,
   ANCHOR_ONLY_HEADING: /^#{1,6}\s+\[[^\]]+\]\(#[^)]+\)\s*$/,
-  FENCE_START: /^\s*(`{3,}|~{3,})/,
+  FENCE_START: FENCE_PATTERN,
   LIST_MARKER: /^(?:[-*+])\s/m,
   TOC_LINK: /^- \[[^\]]+\]\(#[^)]+\)\s*$/,
   TOC_HEADING:
@@ -1369,10 +1373,10 @@ function normalizeInlineCodeTokens(text: string): string {
     const trimmed = inner.trim();
     if (trimmed === inner) return match;
     if (!/[A-Za-z0-9]/.test(trimmed)) return match;
-    
+
     const parts = /^(\s*)(.*?)(\s*)$/.exec(inner);
     if (!parts) return match;
-    
+
     return `${parts[1] ?? ''}\`${parts[2] ?? ''}\`${parts[3] ?? ''}`;
   });
 }
@@ -1386,6 +1390,9 @@ function normalizeMarkdownSpacing(text: string): string {
     .replace(REGEX.SPACING_LIST_NUM_COMBINED, '$1\n\n$2')
     .replace(REGEX.PUNCT_ONLY_LIST_ARTIFACT, '')
     .replace(REGEX.DOUBLE_NEWLINE_REDUCER, '\n\n');
+
+  // Fix missing spaces after sentence-ending punctuation followed by uppercase
+  result = result.replace(/([.!?:;])([A-Z])/g, '$1 $2');
 
   // Trim whitespace around token-like inline code spans.
   result = normalizeInlineCodeTokens(result);
@@ -1449,15 +1456,15 @@ function normalizeNestedListIndentation(text: string): string {
     }
   );
 }
-export function cleanupMarkdownArtifacts(
+/**
+ * Iterate over markdown content, splitting it into fenced (code) and
+ * non-fenced segments.  Fenced lines pass through unchanged; non-fenced
+ * segments are joined and handed to `processTextSegment` for transformation.
+ */
+export function processFencedContent(
   content: string,
-  options?: CleanupOptions
+  processTextSegment: (text: string) => string
 ): string {
-  if (!content) return '';
-
-  const checkAbort = createAbortChecker(options);
-  checkAbort('markdown:cleanup:begin');
-
   const lines = content.split(/\r?\n/);
   let fenceMarker: string | null = null;
   const segments: string[] = [];
@@ -1465,7 +1472,7 @@ export function cleanupMarkdownArtifacts(
 
   const flushBuffer = (): void => {
     if (buffer.length > 0) {
-      segments.push(processTextBuffer(buffer, options));
+      segments.push(processTextSegment(buffer.join('\n')));
       buffer = [];
     }
   };
@@ -1482,8 +1489,8 @@ export function cleanupMarkdownArtifacts(
         fenceMarker = null;
       }
     } else {
-      const match = REGEX.FENCE_START.exec(line);
-      const newMarker = match ? (match[1] ?? '```') : null;
+      const match = FENCE_PATTERN.exec(line);
+      const newMarker = match?.[1] ?? null;
       if (!newMarker) {
         buffer.push(line);
       } else {
@@ -1495,8 +1502,31 @@ export function cleanupMarkdownArtifacts(
   }
 
   flushBuffer();
+  return segments.join('\n');
+}
 
-  return segments.join('\n').trim();
+function stripLeadingBreadcrumbNoise(text: string): string {
+  // Remove a single short plain-text line at the very start if followed
+  // (within one optional blank line) by an H1 or H2 heading.
+  return text.replace(
+    /^([^\n#>|`\-*+\d[\]()]{1,40})\n(\s*\n)?(?=#{1,2}\s)/,
+    ''
+  );
+}
+
+export function cleanupMarkdownArtifacts(
+  content: string,
+  options?: CleanupOptions
+): string {
+  if (!content) return '';
+
+  throwIfAborted(options?.signal, options?.url ?? '', 'markdown:cleanup:begin');
+
+  const result = processFencedContent(content, (text) =>
+    processTextBuffer(text.split('\n'), options)
+  ).trim();
+
+  return stripLeadingBreadcrumbNoise(result);
 }
 
 // endregion

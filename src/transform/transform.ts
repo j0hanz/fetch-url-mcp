@@ -14,6 +14,7 @@ import {
   extractTitleFromRawMarkdown,
   isRawTextContent,
   prepareDocumentForMarkdown,
+  processFencedContent,
   removeNoiseFromHtml,
   serializeDocumentForMarkdown,
 } from '../lib/content.js';
@@ -28,7 +29,7 @@ import {
   redactUrl,
 } from '../lib/core.js';
 import { isRawTextContentUrl } from '../lib/http.js';
-import { createAbortError, throwIfAborted } from '../lib/utils.js';
+import { throwIfAborted } from '../lib/utils.js';
 import { FetchError, getErrorMessage, toError } from '../lib/utils.js';
 import { isObject } from '../lib/utils.js';
 
@@ -89,8 +90,6 @@ interface StageBudget {
   totalBudgetMs: number;
   elapsedMs: number;
 }
-
-const abortPolicy = { throwIfAborted, createAbortError };
 
 function isWhitespaceChar(code: number): boolean {
   return code === 9 || code === 10 || code === 12 || code === 13 || code === 32;
@@ -432,7 +431,7 @@ function extractArticle(
   }
 
   const checkAbort = (stage: string): void => {
-    abortPolicy.throwIfAborted(signal, url, stage);
+    throwIfAborted(signal, url, stage);
   };
 
   try {
@@ -557,7 +556,7 @@ function extractContentContext(
   }
 
   try {
-    abortPolicy.throwIfAborted(options.signal, url, 'extract:begin');
+    throwIfAborted(options.signal, url, 'extract:begin');
 
     // F2: Extract metadata from <head> BEFORE truncation to preserve it
     const earlyMetadata = willTruncate(html)
@@ -574,14 +573,14 @@ function extractContentContext(
     const { document } = stageTracker.run(url, 'extract:parse', () =>
       parseHTML(limitedHtml)
     );
-    abortPolicy.throwIfAborted(options.signal, url, 'extract:parsed');
+    throwIfAborted(options.signal, url, 'extract:parsed');
 
     applyBaseUri(document, url);
 
     const lateMetadata = stageTracker.run(url, 'extract:metadata', () =>
       extractMetadata(document, url)
     );
-    abortPolicy.throwIfAborted(options.signal, url, 'extract:metadata');
+    throwIfAborted(options.signal, url, 'extract:metadata');
 
     // Merge early (pre-truncation) with late (post-truncation) metadata
     const metadata = mergeMetadata(earlyMetadata, lateMetadata);
@@ -592,7 +591,7 @@ function extractContentContext(
         )
       : null;
 
-    abortPolicy.throwIfAborted(options.signal, url, 'extract:article');
+    throwIfAborted(options.signal, url, 'extract:article');
 
     return {
       article,
@@ -603,7 +602,7 @@ function extractContentContext(
   } catch (error: unknown) {
     if (error instanceof FetchError) throw error;
 
-    abortPolicy.throwIfAborted(options.signal, url, 'extract:error');
+    throwIfAborted(options.signal, url, 'extract:error');
 
     logError('Failed to extract content', asError(error));
 
@@ -622,9 +621,6 @@ export function extractContent(
   const result = extractContentContext(html, url, options);
   return { article: result.article, metadata: result.metadata };
 }
-
-const ABORT_CHECK_LINE_INTERVAL = 500;
-const CR_CHAR_CODE = 13;
 
 function resolveRelativeHref(
   href: string,
@@ -703,8 +699,6 @@ function isAbsoluteOrSpecialUrl(href: string): boolean {
   return URL.canParse(trimmedHref);
 }
 
-const FENCE_LINE_PATTERN = /^\s*(`{3,}|~{3,})/;
-
 function resolveRelativeUrlsInSegment(
   markdown: string,
   baseUrl: string,
@@ -747,70 +741,10 @@ function resolveRelativeUrls(
 
   if (!markdown) return markdown;
 
-  let output = '';
-  let buffer = '';
-  let fenceMarker: string | null = null;
-  const len = markdown.length;
-  let lastIndex = 0;
-  let lineCount = 0;
-
-  while (lastIndex < len) {
-    if (++lineCount % ABORT_CHECK_LINE_INTERVAL === 0) {
-      abortPolicy.throwIfAborted(signal, baseUrl, 'markdown:resolve-urls');
-    }
-
-    // Extract next line (handling CR+LF)
-    let nextIndex = markdown.indexOf('\n', lastIndex);
-    const isLastLine = nextIndex === -1;
-    if (isLastLine) nextIndex = len;
-
-    const lineWithNewline = isLastLine
-      ? markdown.slice(lastIndex)
-      : markdown.slice(lastIndex, nextIndex + 1);
-
-    const lineEnd =
-      !isLastLine &&
-      nextIndex > lastIndex &&
-      markdown.charCodeAt(nextIndex - 1) === CR_CHAR_CODE
-        ? nextIndex - 1
-        : isLastLine
-          ? len
-          : nextIndex;
-    const trimmed = markdown.slice(lastIndex, lineEnd).trimStart();
-
-    if (fenceMarker) {
-      // Inside a code fence — pass through without URL resolution
-      output += lineWithNewline;
-      if (
-        trimmed.startsWith(fenceMarker) &&
-        trimmed.slice(fenceMarker.length).trim() === ''
-      ) {
-        fenceMarker = null;
-      }
-    } else {
-      const fenceMatch = FENCE_LINE_PATTERN.exec(
-        markdown.slice(lastIndex, lineEnd)
-      );
-      if (fenceMatch?.[1]) {
-        // Entering a code fence — flush buffered content first
-        if (buffer) {
-          output += resolveRelativeUrlsInSegment(buffer, baseUrl, origin);
-          buffer = '';
-        }
-        output += lineWithNewline;
-        fenceMarker = fenceMatch[1];
-      } else {
-        buffer += lineWithNewline;
-      }
-    }
-
-    lastIndex = isLastLine ? len : nextIndex + 1;
-  }
-
-  if (buffer) {
-    output += resolveRelativeUrlsInSegment(buffer, baseUrl, origin);
-  }
-  return output;
+  return processFencedContent(markdown, (text) => {
+    throwIfAborted(signal, baseUrl, 'markdown:resolve-urls');
+    return resolveRelativeUrlsInSegment(text, baseUrl, origin);
+  });
 }
 
 function translateHtmlToMarkdown(params: {
@@ -822,7 +756,7 @@ function translateHtmlToMarkdown(params: {
 }): string {
   const { html, url, signal, document, skipNoiseRemoval } = params;
 
-  abortPolicy.throwIfAborted(signal, url, 'markdown:begin');
+  throwIfAborted(signal, url, 'markdown:begin');
 
   const cleanedHtml = skipNoiseRemoval
     ? html
@@ -830,13 +764,13 @@ function translateHtmlToMarkdown(params: {
         removeNoiseFromHtml(html, document, url, signal)
       );
 
-  abortPolicy.throwIfAborted(signal, url, 'markdown:cleaned');
+  throwIfAborted(signal, url, 'markdown:cleaned');
 
   const content = stageTracker.run(url, 'markdown:translate', () =>
     translateHtmlFragmentToMarkdown(cleanedHtml)
   );
 
-  abortPolicy.throwIfAborted(signal, url, 'markdown:translated');
+  throwIfAborted(signal, url, 'markdown:translated');
 
   const cleaned = cleanupMarkdownArtifacts(
     content,
@@ -1989,13 +1923,31 @@ export function transformHtmlToMarkdownInProcess(
   const totalStage = stageTracker.start(url, 'transform:total');
 
   try {
-    abortPolicy.throwIfAborted(signal, url, 'transform:begin');
+    throwIfAborted(signal, url, 'transform:begin');
 
     validateBinaryContent(html, url);
 
     const result =
-      tryRawContentPipeline(html, url, options) ??
-      tryHtmlContentPipeline(html, url, options, signal);
+      stageTracker.run(url, 'transform:raw', () =>
+        tryTransformRawContent({
+          html,
+          url,
+          includeMetadata: options.includeMetadata,
+          ...(options.inputTruncated ? { inputTruncated: true } : {}),
+        })
+      ) ??
+      ((): MarkdownTransformResult => {
+        const context = stageTracker.run(url, 'transform:extract', () =>
+          resolveContentSource({
+            html,
+            url,
+            includeMetadata: options.includeMetadata,
+            ...(signal ? { signal } : {}),
+            ...(options.inputTruncated ? { inputTruncated: true } : {}),
+          })
+        );
+        return buildMarkdownFromContext(context, url, signal);
+      })();
 
     stageTracker.end(totalStage, { truncated: result.truncated });
     return result;
@@ -2014,40 +1966,6 @@ function validateBinaryContent(html: string, url: string): void {
       { reason: 'binary_content_detected', stage: 'transform:validate' }
     );
   }
-}
-
-function tryRawContentPipeline(
-  html: string,
-  url: string,
-  options: TransformOptions
-): MarkdownTransformResult | null {
-  return stageTracker.run(url, 'transform:raw', () =>
-    tryTransformRawContent({
-      html,
-      url,
-      includeMetadata: options.includeMetadata,
-      ...(options.inputTruncated ? { inputTruncated: true } : {}),
-    })
-  );
-}
-
-function tryHtmlContentPipeline(
-  html: string,
-  url: string,
-  options: TransformOptions,
-  signal?: AbortSignal
-): MarkdownTransformResult {
-  const context = stageTracker.run(url, 'transform:extract', () =>
-    resolveContentSource({
-      html,
-      url,
-      includeMetadata: options.includeMetadata,
-      ...(signal ? { signal } : {}),
-      ...(options.inputTruncated ? { inputTruncated: true } : {}),
-    })
-  );
-
-  return buildMarkdownFromContext(context, url, signal);
 }
 
 interface TransformPoolStats {
@@ -2078,7 +1996,7 @@ function transformInputInProcess(
   );
 }
 
-function buildWorkerTransformOptions(options: TransformOptions): {
+function workerTransformOptions(options: TransformOptions): {
   includeMetadata: boolean;
   signal?: AbortSignal;
   inputTruncated?: boolean;
@@ -2101,14 +2019,10 @@ async function transformWithWorkerPool(
   }
 
   if (typeof htmlOrBuffer === 'string') {
-    return pool.transform(
-      htmlOrBuffer,
-      url,
-      buildWorkerTransformOptions(options)
-    );
+    return pool.transform(htmlOrBuffer, url, workerTransformOptions(options));
   }
   return pool.transform(htmlOrBuffer, url, {
-    ...buildWorkerTransformOptions(options),
+    ...workerTransformOptions(options),
     ...(options.encoding ? { encoding: options.encoding } : {}),
   });
 }
@@ -2130,7 +2044,7 @@ function resolveWorkerFallback(
     return transformInputInProcess(htmlOrBuffer, url, options);
   }
 
-  abortPolicy.throwIfAborted(options.signal, url, 'transform:worker-fallback');
+  throwIfAborted(options.signal, url, 'transform:worker-fallback');
 
   if (error instanceof FetchError) throw error;
 
@@ -2168,7 +2082,7 @@ async function transformInputToMarkdown(
   const totalStage = stageTracker.start(url, 'transform:total');
 
   try {
-    abortPolicy.throwIfAborted(options.signal, url, 'transform:begin');
+    throwIfAborted(options.signal, url, 'transform:begin');
     const result = await runWorkerTransformWithFallback(
       htmlOrBuffer,
       url,
