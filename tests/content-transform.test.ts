@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { after, describe, it } from 'node:test';
 
-import { cleanupMarkdownArtifacts } from '../dist/lib/content.js';
+import { cleanupMarkdownArtifacts } from '../dist/lib/md-cleanup.js';
 import { FetchError } from '../dist/lib/utils.js';
 import {
   shutdownTransformWorkerPool,

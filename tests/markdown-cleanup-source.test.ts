@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { cleanupMarkdownArtifacts } from '../src/lib/content.js';
+import { cleanupMarkdownArtifacts } from '../src/lib/md-cleanup.js';
 
 describe('markdown cleanup source regression', () => {
   it('removes punctuation-only list artifacts from extracted markdown', () => {

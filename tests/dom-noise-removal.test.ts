@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { removeNoiseFromHtml } from '../dist/lib/content.js';
 import { config } from '../dist/lib/core.js';
+import { removeNoiseFromHtml } from '../dist/lib/dom-prep.js';
 
 describe('Dialog preservation', () => {
   it('preserves dialogs with >500 chars text content', () => {

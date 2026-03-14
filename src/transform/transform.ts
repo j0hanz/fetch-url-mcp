@@ -6,18 +6,9 @@ import { isProbablyReaderable, Readability } from '@mozilla/readability';
 import { parseHTML } from 'linkedom';
 
 import {
-  addSourceToMarkdown,
-  buildMetadataFooter,
-  cleanupMarkdownArtifacts,
   detectLanguageFromCode,
   extractLanguageFromClassName,
-  extractTitleFromRawMarkdown,
-  isRawTextContent,
-  prepareDocumentForMarkdown,
-  processFencedContent,
-  removeNoiseFromHtml,
-  serializeDocumentForMarkdown,
-} from '../lib/content.js';
+} from '../lib/code-lang.js';
 import { config } from '../lib/core.js';
 import {
   getOperationId,
@@ -28,7 +19,22 @@ import {
   logWarn,
   redactUrl,
 } from '../lib/core.js';
+import {
+  prepareDocumentForMarkdown,
+  removeNoiseFromHtml,
+  serializeDocumentForMarkdown,
+} from '../lib/dom-prep.js';
 import { isRawTextContentUrl } from '../lib/http.js';
+import {
+  cleanupMarkdownArtifacts,
+  processFencedContent,
+} from '../lib/md-cleanup.js';
+import {
+  addSourceToMarkdown,
+  buildMetadataFooter,
+  extractTitleFromRawMarkdown,
+  isRawTextContent,
+} from '../lib/md-metadata.js';
 import { throwIfAborted } from '../lib/utils.js';
 import { FetchError, getErrorMessage, toError } from '../lib/utils.js';
 import { isObject } from '../lib/utils.js';

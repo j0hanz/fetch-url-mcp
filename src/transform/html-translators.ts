@@ -7,7 +7,7 @@ import {
 import {
   detectLanguageFromCode,
   resolveLanguageFromAttributes,
-} from '../lib/content.js';
+} from '../lib/code-lang.js';
 import { isLikeNode, isObject } from '../lib/utils.js';
 
 // ---------------------------------------------------------------------------
