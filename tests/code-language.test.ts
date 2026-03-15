@@ -57,6 +57,13 @@ describe('detectLanguageFromCode', () => {
     );
   });
 
+  it('detects HTML fragments before shared Python keywords', () => {
+    assert.equal(
+      detectLanguageFromCode('<div class="h-screen">  <!-- ... --></div>'),
+      'html'
+    );
+  });
+
   it('detects JSON snippets', () => {
     assert.equal(detectLanguageFromCode('{"name":"fetch-url-mcp"}'), 'json');
   });
@@ -65,6 +72,13 @@ describe('detectLanguageFromCode', () => {
     assert.equal(
       detectLanguageFromCode('name: fetch-url-mcp\nversion: 1'),
       'yaml'
+    );
+  });
+
+  it('detects Tailwind theme directives as CSS', () => {
+    assert.equal(
+      detectLanguageFromCode('@theme {\n  --spacing: 1px;\n}'),
+      'css'
     );
   });
 

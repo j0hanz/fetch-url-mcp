@@ -411,6 +411,165 @@ describe('transformHtmlToMarkdown favicon rendering', () => {
       )
     );
   });
+
+  it('repairs malformed API-doc permalinks, overload headings, and history tables', () => {
+    const html = `
+      <html>
+        <body>
+          <main>
+            <article>
+              <section>
+                <h2>
+                  API surface
+                  <span><a class="mark" href="#api-surface" id="api-surface">#</a></span>
+                </h2>
+                <p>Reference overview.</p>
+              </section>
+              <section>
+                <h4>
+                  <code>alpha(options)</code>
+                  <span><a class="mark" href="#alpha-options" id="alpha-options">#</a></span>
+                </h4>
+              </section>
+              <section>
+                <h4>
+                  <code>beta(source, options)</code>
+                  <span><a class="mark" href="#beta-options" id="beta-options">#</a></span>
+                </h4>
+                <div class="api_metadata">
+                  <details class="changelog">
+                    <summary>History</summary>
+                    <table>
+                      <thead><tr><th>Version<th>Changes<tbody>
+                      <tr><td>v2.0.0<td><p>Second change.
+                      <tr><td>v1.0.0<td><p>First change.
+                    </table>
+                  </details>
+                </div>
+                <p>Call the API.</p>
+              </section>
+            </article>
+          </main>
+        </body>
+      </html>
+    `;
+
+    const result = transformHtmlToMarkdownInProcess(
+      html,
+      'https://example.com/docs/api',
+      { includeMetadata: false }
+    );
+
+    assert.ok(result.markdown.includes('## API surface'));
+    assert.equal(result.markdown.includes('[#](#api-surface)'), false);
+    assert.equal(result.markdown.includes('alpha(options)'), false);
+    assert.ok(result.markdown.includes('#### `beta(source, options)`'));
+    assert.match(result.markdown, /\|\s*v2\.0\.0\s*\|\s*Second change\.\s*\|/);
+    assert.match(result.markdown, /\|\s*v1\.0\.0\s*\|\s*First change\.\s*\|/);
+  });
+
+  it('cleans code-demo preview panes and prefers body headings for extracted docs pages', () => {
+    const html = `
+      <html>
+        <head>
+          <title>height - Sizing - Tailwind CSS</title>
+          <link rel="icon" sizes="32x32" href="/favicon-32x32.png" />
+        </head>
+        <body>
+          <main>
+            <article>
+              <h1 data-title="true">height</h1>
+              <p>Utilities for setting the height of an element with enough descriptive prose to keep readability extraction active for this regression fixture and mirror real-world utility documentation pages.</p>
+              <div data-content="true">
+                <table>
+                  <thead>
+                    <tr><th>Class</th><th>Styles</th></tr>
+                  </thead>
+                  <tbody>
+                    <tr>
+                      <td><code>h-<var>&lt;number&gt;</var></code></td>
+                      <td><p><code>height: calc(var(--spacing) * <var>&lt;number&gt;</var>);</code></p></td>
+                    </tr>
+                  </tbody>
+                </table>
+                <h2>Examples</h2>
+                <h3>Basic example</h3>
+                <p>Use <code>h-<var>&lt;number&gt;</var></code> utilities like <code>h-24</code> and <code>h-64</code> to set an element to a fixed height based on the spacing scale:</p>
+                <div>
+                  <div class="not-prose isolate">
+                    <figure>
+                      <div>
+                        <div><p>h-96</p></div>
+                        <div><p>h-80</p></div>
+                      </div>
+                      <div>
+                        <pre class="shiki tailwindcss-theme" tabindex="0"><code><span class="line"><span>&lt;</span><span>div</span><span> class</span><span>=</span><span>"</span><span>h-96</span><span> ..."</span><span>&gt;</span><span>h-96</span><span>&lt;/</span><span>div</span><span>&gt;</span></span><span class="line"><span>&lt;</span><span>div</span><span> class</span><span>=</span><span>"</span><span>h-80</span><span> ..."</span><span>&gt;</span><span>h-80</span><span>&lt;/</span><span>div</span><span>&gt;</span></span><span class="line"></span></code></pre>
+                      </div>
+                    </figure>
+                  </div>
+                </div>
+                <h3>Matching dynamic viewport</h3>
+                <p>Use <code>h-dvh</code> utility to make an element span the entire height of the viewport as browser UI expands or contracts while retaining enough prose to remain article-like for extraction.</p>
+                <div>
+                  <div class="not-prose isolate">
+                    <div class="mb-4">
+                      <div class="flex space-x-2">
+                        <svg viewBox="0 0 16 16"><path d="M1 1h14v14H1z"></path></svg>
+                        <p>Scroll the viewport to see the viewport height change</p>
+                      </div>
+                    </div>
+                    <figure>
+                      <div>
+                        <svg viewBox="0 0 16 16"><path d="M1 1h14v14H1z"></path></svg>
+                        <div>tailwindcss.com</div>
+                        <p>h-dvh</p>
+                      </div>
+                      <div>
+                        <pre class="shiki tailwindcss-theme" tabindex="0"><code><span class="line"><span>&lt;</span><span>div</span><span> class</span><span>=</span><span>"</span><span>h-dvh</span><span>"</span><span>&gt;</span></span><span class="line"><span>  &lt;!-- ... --&gt;</span></span><span class="line"><span>&lt;/</span><span>div</span><span>&gt;</span></span><span class="line"></span></code></pre>
+                      </div>
+                    </figure>
+                  </div>
+                </div>
+                <h2>Customizing your theme</h2>
+                <p>The <code>h-<var>&lt;number&gt;</var></code> utilities are driven by the <code>--spacing</code> theme variable.</p>
+                <pre class="shiki tailwindcss-theme" tabindex="0"><code><span class="line"><span>@theme {</span></span><span class="line"><span>  --spacing: 1px;</span></span><span class="line"><span>}</span></span></code></pre>
+              </div>
+            </article>
+          </main>
+        </body>
+      </html>
+    `;
+
+    const result = transformHtmlToMarkdownInProcess(
+      html,
+      'https://tailwindcss.com/docs/height',
+      { includeMetadata: false }
+    );
+
+    assert.ok(result.markdown.startsWith('# height\n\n'));
+    assert.equal(result.markdown.includes('![tailwindcss.com]'), false);
+    assert.equal(result.markdown.includes('Scroll the viewport'), false);
+    assert.equal(result.markdown.includes('tailwindcss.com'), false);
+    assert.equal(result.markdown.includes('\nh-96\n\nh-80\n'), false);
+    assert.ok(result.markdown.includes('```html'));
+    assert.ok(
+      /<div class="h-96 \.\.\.">h-96<\/div>\s*<div class="h-80 \.\.\.">h-80<\/div>/.test(
+        result.markdown
+      )
+    );
+    assert.ok(result.markdown.includes('```css'));
+    assert.ok(/@theme\s*\{\s*--spacing: 1px;\s*\}/.test(result.markdown));
+    assert.ok(
+      result.markdown.includes(
+        '| h-\\<number\\> | height: calc(var(--spacing) \\* \\<number\\>); |'
+      )
+    );
+    assert.ok(
+      result.markdown.includes(
+        'Use `h-<number>` utilities like `h-24` and `h-64`'
+      )
+    );
+  });
 });
 
 describe('transformHtmlToMarkdown next flight supplements', () => {

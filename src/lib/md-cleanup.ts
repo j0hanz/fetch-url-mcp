@@ -23,6 +23,8 @@ const REGEX = {
   HEADING_STRICT: /^#{1,6}\s+/m,
   EMPTY_HEADING_LINE: /^#{1,6}[ \t\u00A0]*$/,
   ANCHOR_ONLY_HEADING: /^#{1,6}\s+\[[^\]]+\]\(#[^)]+\)\s*$/,
+  HEADING_TRAILING_PERMALINK:
+    /^(#{1,6}\s+.+?)\s*\[(?:#|¶|§|¤|🔗)\]\(#[^)]+\)\s*$/gmu,
   FENCE_START: FENCE_PATTERN,
   LIST_MARKER: /^(?:[-*+])\s/m,
   TOC_LINK: /^- \[[^\]]+\]\(#[^)]+\)\s*$/,
@@ -40,7 +42,10 @@ const REGEX = {
   HEADING_CODE_BLOCK: /(^#{1,6}\s+\w+)```/gm,
   SPACING_LINK_FIX: /\]\(([^)]+)\)\[/g,
   SPACING_ADJ_COMBINED: /(?:\]\([^)]+\)|`[^`]+`)(?=[A-Za-z0-9])/g,
+  SPACING_CODE_PAD_BEFORE: /(\S)[ \t]{2,}(?=`[^`\n]+`)/g,
+  SPACING_CODE_PAD_AFTER: /(`[^`\n]+`)[ \t]{2,}(?=\S)/g,
   SPACING_CODE_DASH: /(`[^`]+`)\s*\\-\s*/g,
+  SPACING_ESCAPED_DASH: /(?<=[\w)\]`])\s*\\-\s*(?=[A-Za-z0-9([])/g,
   SPACING_ESCAPES: /\\([[\].])/g,
   SPACING_LIST_NUM_COMBINED:
     /^((?![-*+] |\d+\. |[ \t]).+)\n((?:[-*+]|\d+\.) )/gm,
@@ -66,6 +71,7 @@ const TYPEDOC_PREFIXES = [
   'See also:',
 ] as const;
 interface CleanupOptions {
+  preserveEmptyHeadings?: boolean;
   signal?: AbortSignal;
   url?: string;
 }
@@ -89,6 +95,20 @@ function hasFollowingContent(lines: string[], startIndex: number): boolean {
     if (!isBlank(lines[i])) return true;
   }
   return false;
+}
+function findNextNonBlankLine(
+  lines: string[],
+  startIndex: number
+): string | undefined {
+  for (
+    let i = startIndex + 1;
+    i < Math.min(lines.length, startIndex + HAS_FOLLOWING_LOOKAHEAD);
+    i++
+  ) {
+    const line = lines[i];
+    if (!isBlank(line)) return line?.trim();
+  }
+  return undefined;
 }
 function stripAnchorOnlyHeading(line: string): string {
   return line.replace(/^(#{1,6})\s+\[([^\]]+)\]\(#[^)]+\)\s*$/, '$1 $2');
@@ -215,6 +235,10 @@ function tryPromoteOrphan(
 
   const isSpecialPrefix = SPECIAL_PREFIXES.test(trimmed);
   if (!isSpecialPrefix && !hasFollowingContent(lines, i)) return null;
+  if (!isSpecialPrefix) {
+    const nextLine = findNextNonBlankLine(lines, i);
+    if (nextLine && REGEX.HEADING_MARKER.test(nextLine)) return null;
+  }
 
   return `${prefix}${trimmed}`;
 }
@@ -240,11 +264,16 @@ function normalizePreprocessLine(
   lines: string[],
   i: number,
   trimmed: string,
-  line: string
+  line: string,
+  options?: CleanupOptions
 ): string | null {
   if (REGEX.EMPTY_HEADING_LINE.test(trimmed)) return null;
   if (!REGEX.ANCHOR_ONLY_HEADING.test(trimmed)) return line;
-  if (!hasFollowingContent(lines, i)) return null;
+  if (!hasFollowingContent(lines, i)) {
+    return options?.preserveEmptyHeadings
+      ? stripAnchorOnlyHeading(trimmed)
+      : null;
+  }
   return stripAnchorOnlyHeading(trimmed);
 }
 function maybeSkipTocBlock(
@@ -290,7 +319,8 @@ function preprocessLines(lines: string[], options?: CleanupOptions): string {
       lines,
       i,
       trimmed,
-      currentLine
+      currentLine,
+      options
     );
     if (normalizedLine === null) continue;
 
@@ -332,21 +362,116 @@ function removeSkipLinks(text: string): string {
 function normalizeInlineCodeTokens(text: string): string {
   return text.replace(/`([^`\n]+)`/g, (match: string, inner: string) => {
     const trimmed = inner.trim();
-    if (trimmed === inner) return match;
     if (!/[A-Za-z0-9]/.test(trimmed)) return match;
 
     const parts = /^(\s*)(.*?)(\s*)$/.exec(inner);
     if (!parts) return match;
 
-    return `${parts[1] ?? ''}\`${parts[2] ?? ''}\`${parts[3] ?? ''}`;
+    const normalized = collapseQualifiedIdentifierSpacing(parts[2] ?? '');
+    if (trimmed === inner && normalized === inner) return match;
+    return `${parts[1] ?? ''}\`${normalized}\`${parts[3] ?? ''}`;
   });
+}
+
+function collapseQualifiedIdentifierSpacing(text: string): string {
+  let result = text;
+
+  for (let i = 0; i < PROPERTY_FIX_MAX_PASSES; i++) {
+    const next = result.replace(
+      /\b([A-Za-z_$][\w$]*)\.\s+(?=[A-Za-z_$<])/g,
+      '$1.'
+    );
+    if (next === result) break;
+    result = next;
+  }
+
+  return result;
+}
+
+function normalizeMarkdownLinkText(text: string): string {
+  const normalized = collapseQualifiedIdentifierSpacing(
+    text.replace(/\\`/g, '`').replace(/\\</g, '<').replace(/\\>/g, '>')
+  );
+  return normalized.replace(/</g, '\\<').replace(/>/g, '\\>');
+}
+
+function normalizeMarkdownLinkLabels(text: string): string {
+  return text.replace(
+    /\[([^\]]+)\]\(([^)]+)\)/g,
+    (_match: string, linkText: string, url: string) =>
+      `[${normalizeMarkdownLinkText(linkText)}](${url})`
+  );
+}
+
+function collapseInlineCodePadding(text: string): string {
+  return text
+    .replace(/(\S)[ \t]{2,}(?=`[^`\n]+`)/g, '$1 ')
+    .replace(/(`[^`\n]+`)[ \t]{2,}(?=\S)/g, '$1 ');
+}
+
+function escapeAngleBracketsInMarkdownTables(text: string): string {
+  return text.replace(/^(?!\|\s*[-: ]+\|)(\|.*\|)\s*$/gm, (line: string) =>
+    line
+      .replace(/<\/([A-Za-z][A-Za-z0-9-]*)>/g, '\\</$1\\>')
+      .replace(/<([A-Za-z][A-Za-z0-9-]*)>/g, '\\<$1\\>')
+  );
+}
+
+function stripTrailingHeadingPermalinks(text: string): string {
+  return text
+    .replace(REGEX.HEADING_TRAILING_PERMALINK, '$1')
+    .replace(/^(#{1,6})\s{2,}/gm, '$1 ')
+    .replace(/^(#{1,6}\s+.*?)[ \t]+$/gm, '$1');
+}
+
+function getHeadingInfo(line: string): { level: number } | null {
+  const match = /^(#{1,6})\s+/.exec(line.trim());
+  if (!match) return null;
+  return { level: match[1]?.length ?? 0 };
+}
+
+function removeEmptyHeadingSections(text: string): string {
+  const lines = text.split('\n');
+  const kept: string[] = [];
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i] ?? '';
+    const heading = getHeadingInfo(line);
+    if (!heading) {
+      kept.push(line);
+      continue;
+    }
+
+    let nextIndex = i + 1;
+    while (nextIndex < lines.length && isBlank(lines[nextIndex])) {
+      nextIndex += 1;
+    }
+
+    const nextLine = lines[nextIndex];
+    if (nextLine === undefined) {
+      kept.push(line);
+      continue;
+    }
+
+    const nextHeading = getHeadingInfo(nextLine);
+    if (nextHeading && nextHeading.level <= heading.level) {
+      continue;
+    }
+
+    kept.push(line);
+  }
+
+  return kept.join('\n').replace(REGEX.DOUBLE_NEWLINE_REDUCER, '\n\n');
 }
 
 function normalizeMarkdownSpacing(text: string): string {
   let result = text
-    .replace(REGEX.SPACING_LINK_FIX, ']($1)\n\n[')
+    .replace(REGEX.SPACING_LINK_FIX, ']($1) [')
     .replace(REGEX.SPACING_ADJ_COMBINED, '$& ')
+    .replace(REGEX.SPACING_CODE_PAD_BEFORE, '$1 ')
+    .replace(REGEX.SPACING_CODE_PAD_AFTER, '$1 ')
     .replace(REGEX.SPACING_CODE_DASH, '$1 - ')
+    .replace(REGEX.SPACING_ESCAPED_DASH, ' - ')
     .replace(REGEX.SPACING_ESCAPES, '$1')
     .replace(REGEX.SPACING_LIST_NUM_COMBINED, '$1\n\n$2')
     .replace(REGEX.PUNCT_ONLY_LIST_ARTIFACT, '')
@@ -357,18 +482,10 @@ function normalizeMarkdownSpacing(text: string): string {
 
   // Trim whitespace around token-like inline code spans.
   result = normalizeInlineCodeTokens(result);
+  result = collapseInlineCodePadding(result);
 
-  // Unescape backticks inside markdown link text
-  result = result.replace(
-    /\[([^\]]*\\`[^\]]*)\]\(([^)]+)\)/g,
-    (_match: string, linkText: string, url: string) =>
-      `[${linkText.replace(/\\`/g, '`')}](${url})`
-  );
-  result = result.replace(
-    /\[([^\]]*<[^\]]*)\]\(([^)]+)\)/g,
-    (_match: string, linkText: string, url: string) =>
-      `[${linkText.replace(/</g, '\\<').replace(/>/g, '\\>')}](${url})`
-  );
+  result = normalizeMarkdownLinkLabels(result);
+  result = escapeAngleBracketsInMarkdownTables(result);
 
   return normalizeNestedListIndentation(result);
 }
@@ -404,7 +521,8 @@ function applyGlobalRegexes(text: string, options?: CleanupOptions): string {
   result = normalizeMarkdownSpacing(result);
 
   checkAbort('markdown:cleanup:properties');
-  return fixConcatenatedProperties(result);
+  result = fixConcatenatedProperties(result);
+  return stripTrailingHeadingPermalinks(result);
 }
 function normalizeNestedListIndentation(text: string): string {
   return text.replace(
@@ -483,9 +601,18 @@ export function cleanupMarkdownArtifacts(
 
   throwIfAborted(options?.signal, options?.url ?? '', 'markdown:cleanup:begin');
 
-  const result = processFencedContent(content, (text) =>
+  let result = processFencedContent(content, (text) =>
     processTextBuffer(text.split('\n'), options)
   ).trim();
+
+  if (!options?.preserveEmptyHeadings) {
+    throwIfAborted(
+      options?.signal,
+      options?.url ?? '',
+      'markdown:cleanup:empty-headings'
+    );
+    result = removeEmptyHeadingSections(result);
+  }
 
   return stripLeadingBreadcrumbNoise(result);
 }

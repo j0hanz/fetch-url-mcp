@@ -812,7 +812,9 @@ function translateHtmlToMarkdown(params: {
 
   const cleaned = cleanupMarkdownArtifacts(
     content,
-    signal ? { signal, url } : { url }
+    signal
+      ? { preserveEmptyHeadings: true, signal, url }
+      : { preserveEmptyHeadings: true, url }
   );
   return url ? resolveRelativeUrls(cleaned, url, signal) : cleaned;
 }
@@ -1132,6 +1134,7 @@ interface ContentSource {
   readonly originalHtml: string;
   readonly title: string | undefined;
   readonly primaryHeading: string | undefined;
+  readonly suppressSyntheticFavicon?: boolean;
   readonly favicon: string | undefined;
   readonly metadata: ReturnType<typeof createContentMetadataBlock>;
   readonly extractedMetadata: ExtractedMetadata;
@@ -1164,6 +1167,26 @@ const PRIMARY_HEADING_ROOT_SELECTORS = [
   '[itemprop="text"]',
 ] as const;
 
+function normalizeSyntheticTitleToken(value: string | undefined): string {
+  return (value ?? '').replace(/\s+/g, ' ').trim().toLowerCase();
+}
+
+function shouldPreferPrimaryHeadingTitle(
+  primaryHeading: string | undefined,
+  title: string | undefined
+): boolean {
+  const primary = normalizeSyntheticTitleToken(primaryHeading);
+  if (!primary) return false;
+
+  const normalizedTitle = normalizeSyntheticTitleToken(title);
+  if (!normalizedTitle) return true;
+  if (normalizedTitle === primary) return true;
+
+  return normalizedTitle
+    .split(/\s*(?:[-|:•·]|–|—)\s*/u)
+    .some((part) => part === primary);
+}
+
 function findContentRoot(document: Document): string | undefined {
   for (const selector of CONTENT_ROOT_SELECTORS) {
     const element = document.querySelector(selector);
@@ -1181,14 +1204,27 @@ function findContentRoot(document: Document): string | undefined {
 }
 
 function findPrimaryHeading(document: Document): string | undefined {
+  for (const headingSelector of ['[data-title="true"]', 'h1'] as const) {
+    const heading = document.querySelector(headingSelector);
+    if (!heading) continue;
+    const text = heading.textContent.trim();
+    if (text) return text;
+  }
+
   for (const selector of PRIMARY_HEADING_ROOT_SELECTORS) {
     const root = document.querySelector(selector);
     if (!root) continue;
 
-    const heading = root.querySelector('h1, h2');
-    if (!heading) continue;
-    const text = heading.textContent.trim();
-    if (text) return text;
+    for (const headingSelector of [
+      '[data-title="true"]',
+      'h1',
+      'h2',
+    ] as const) {
+      const heading = root.querySelector(headingSelector);
+      if (!heading) continue;
+      const text = heading.textContent.trim();
+      if (text) return text;
+    }
   }
 
   return undefined;
@@ -1406,6 +1442,17 @@ function buildContentSource(params: {
     includeMetadata
   );
 
+  const preparedDocument = document;
+  let primaryHeading = document
+    ? TransformHeuristics.findPrimaryHeading(document)
+    : undefined;
+  if (preparedDocument) {
+    prepareDocumentForMarkdown(preparedDocument, url, signal);
+    primaryHeading =
+      TransformHeuristics.findPrimaryHeading(preparedDocument) ??
+      primaryHeading;
+  }
+
   const base: Pick<
     ContentSource,
     | 'favicon'
@@ -1419,9 +1466,7 @@ function buildContentSource(params: {
     metadata,
     extractedMetadata: extractedMeta,
     truncated,
-    primaryHeading: document
-      ? TransformHeuristics.findPrimaryHeading(document)
-      : undefined,
+    primaryHeading,
     originalHtml: html,
   };
 
@@ -1430,30 +1475,48 @@ function buildContentSource(params: {
       `<!DOCTYPE html><html><body>${article.content}</body></html>`
     );
     prepareDocumentForMarkdown(articleDoc, url, signal);
+    const articleTitle =
+      article.title !== undefined
+        ? normalizeDocumentTitle(article.title, url)
+        : extractedMeta.title;
     const preferPrimaryHeading =
-      TransformHeuristics.isGithubRepositoryRootUrl(url);
+      TransformHeuristics.isGithubRepositoryRootUrl(url) ||
+      shouldPreferPrimaryHeadingTitle(base.primaryHeading, articleTitle);
+    const resolvedTitle =
+      (preferPrimaryHeading ? base.primaryHeading : undefined) ?? articleTitle;
+
     return {
       ...base,
       sourceHtml: articleDoc.body.innerHTML,
-      title:
-        (preferPrimaryHeading ? base.primaryHeading : undefined) ??
-        (article.title !== undefined
-          ? normalizeDocumentTitle(article.title, url)
-          : undefined),
+      title: resolvedTitle,
+      suppressSyntheticFavicon:
+        normalizeSyntheticTitleToken(resolvedTitle) ===
+        normalizeSyntheticTitleToken(base.primaryHeading),
       skipNoiseRemoval: true,
     };
   }
 
   if (document) {
-    prepareDocumentForMarkdown(document, url, signal);
+    const resolvedDocument = preparedDocument ?? document;
+    const contentRoot = TransformHeuristics.findContentRoot(resolvedDocument);
+    const preferPrimaryHeading = shouldPreferPrimaryHeadingTitle(
+      base.primaryHeading,
+      extractedMeta.title
+    );
+    const resolvedTitle =
+      (preferPrimaryHeading ? base.primaryHeading : undefined) ??
+      extractedMeta.title;
 
-    const contentRoot = TransformHeuristics.findContentRoot(document);
     return {
       ...base,
-      sourceHtml: contentRoot ?? serializeDocumentForMarkdown(document, html),
-      title: extractedMeta.title,
+      sourceHtml:
+        contentRoot ?? serializeDocumentForMarkdown(resolvedDocument, html),
+      title: resolvedTitle,
+      suppressSyntheticFavicon:
+        normalizeSyntheticTitleToken(resolvedTitle) ===
+        normalizeSyntheticTitleToken(base.primaryHeading),
       skipNoiseRemoval: true,
-      document,
+      document: resolvedDocument,
     };
   }
 
@@ -1907,8 +1970,12 @@ function maybeStripGithubPrimaryHeading(
   return stripLeadingHeading(markdown, context.primaryHeading ?? '');
 }
 
-function buildSyntheticTitlePrefix(url: string, favicon?: string): string {
-  if (!favicon) return ' ';
+function buildSyntheticTitlePrefix(
+  url: string,
+  favicon?: string,
+  suppressFavicon?: boolean
+): string {
+  if (!favicon || suppressFavicon) return ' ';
 
   let alt = '';
   try {
@@ -1929,7 +1996,11 @@ function maybePrependSyntheticTitle(
     return markdown;
   }
 
-  return `#${buildSyntheticTitlePrefix(url, context.favicon)}${context.title}\n\n${markdown}`;
+  return `#${buildSyntheticTitlePrefix(
+    url,
+    context.favicon,
+    context.suppressSyntheticFavicon
+  )}${context.title}\n\n${markdown}`;
 }
 
 function buildMarkdownFromContext(

@@ -21,6 +21,9 @@ const NOISE_PATTERNS: readonly RegExp[] = [
 const HEADER_NOISE_PATTERN =
   /\b(site-header|masthead|topbar|navbar|nav(?:bar)?|menu|header-nav)\b/i;
 const FIXED_OR_HIGH_Z_PATTERN = /\b(?:fixed|sticky|z-(?:4\d|50)|isolate)\b/;
+const HEADING_PERMALINK_TEXT_PATTERN = /^(?:#|¶|§|¤|🔗)$/u;
+const HEADING_PERMALINK_CLASS_PATTERN =
+  /\b(?:mark|permalink|hash-link|anchor(?:js)?-?link|header-?link|heading-anchor|deep-link)\b/i;
 const SKIP_URL_PREFIXES = [
   '#',
   'javascript:',
@@ -54,6 +57,9 @@ const NAVIGATION_ROLES = new Set([
   'alertdialog',
   'search',
 ]);
+const INLINE_DEMO_INSTRUCTION_MAX_CHARS = 160;
+const REDUNDANT_PREVIEW_SEGMENT_MAX_CHARS = 60;
+const REDUNDANT_PREVIEW_MAX_SEGMENTS = 12;
 const INTERACTIVE_CONTENT_ROLES = new Set([
   'tabpanel',
   'tab',
@@ -436,11 +442,7 @@ function cleanHeadings(document: Document): void {
     for (let j = anchors.length - 1; j >= 0; j--) {
       const a = anchors[j];
       if (!a?.parentNode) continue;
-      const href = a.getAttribute('href') ?? '';
-      const txt = (a.textContent || '').replace(/[\u200B\s]/g, '');
-      if (href.startsWith('#') && txt.length === 0) {
-        a.remove();
-      }
+      if (isHeadingPermalinkAnchor(a)) a.remove();
     }
 
     // Strip zero-width spaces from text nodes
@@ -449,6 +451,62 @@ function cleanHeadings(document: Document): void {
     while ((node = walker.nextNode())) {
       if (node.textContent?.includes('\u200B')) {
         node.textContent = node.textContent.replace(/\u200B/g, '');
+      }
+    }
+  }
+}
+
+function getCollapsedHeadingAnchorText(anchor: Element): string {
+  return (anchor.textContent || '').replace(/[\u200B\s]/g, '');
+}
+
+function isHeadingPermalinkAnchor(anchor: Element): boolean {
+  const href = anchor.getAttribute('href') ?? '';
+  if (!href.startsWith('#')) return false;
+
+  const text = getCollapsedHeadingAnchorText(anchor);
+  if (text.length === 0 || HEADING_PERMALINK_TEXT_PATTERN.test(text)) {
+    return true;
+  }
+
+  const className = anchor.getAttribute('class') ?? '';
+  if (HEADING_PERMALINK_CLASS_PATTERN.test(className) && text.length <= 2) {
+    return true;
+  }
+
+  const ariaHidden = anchor.getAttribute('aria-hidden');
+  const tabindex = anchor.getAttribute('tabindex');
+  return (ariaHidden === 'true' || tabindex === '-1') && text.length <= 2;
+}
+
+function getDirectRows(section: Element): Element[] {
+  return Array.from(section.children).filter((child) => child.tagName === 'TR');
+}
+
+function getDirectCells(row: Element): Element[] {
+  return Array.from(row.children).filter(
+    (child) => child.tagName === 'TH' || child.tagName === 'TD'
+  );
+}
+
+function hoistNestedRows(table: Element): void {
+  const sections = Array.from(table.querySelectorAll('thead,tbody,tfoot'));
+
+  for (const section of sections) {
+    const rows = getDirectRows(section);
+
+    for (const row of rows) {
+      let insertAfter: Element = row;
+
+      for (const cell of getDirectCells(row)) {
+        const nestedRows = Array.from(cell.querySelectorAll('tr')).filter(
+          (nested) => nested.closest('table') === table
+        );
+
+        for (const nestedRow of nestedRows) {
+          insertAfter.after(nestedRow);
+          insertAfter = nestedRow;
+        }
       }
     }
   }
@@ -599,6 +657,189 @@ function escapeTableCellPipes(document: Document): void {
   }
 }
 
+function normalizeWhitespace(value: string): string {
+  return value.replace(/\s+/g, ' ').trim();
+}
+
+function hasDirectPreDescendant(element: Element): boolean {
+  return (
+    element.tagName === 'PRE' ||
+    Array.from(element.children).some(
+      (child) => child.tagName === 'PRE' || child.querySelector('pre') !== null
+    )
+  );
+}
+
+function collectLeafTextSegments(element: Element): string[] {
+  const seen = new Set<string>();
+  const segments: string[] = [];
+  const candidates = element.querySelectorAll('p,li,div,span');
+
+  for (const candidate of candidates) {
+    if (
+      candidate.children.length > 0 ||
+      candidate.querySelector('pre,code,table,ul,ol,blockquote,figure') !== null
+    ) {
+      continue;
+    }
+
+    const text = normalizeWhitespace(candidate.textContent || '');
+    if (
+      text.length === 0 ||
+      text.length > REDUNDANT_PREVIEW_SEGMENT_MAX_CHARS ||
+      seen.has(text)
+    ) {
+      continue;
+    }
+
+    seen.add(text);
+    segments.push(text);
+  }
+
+  if (segments.length > 0) return segments;
+
+  const fallback = normalizeWhitespace(element.textContent || '');
+  return fallback ? [fallback] : [];
+}
+
+function isHostnameLike(value: string): boolean {
+  return /^[a-z0-9.-]+\.[a-z]{2,}$/i.test(value);
+}
+
+function hasPreviewMedia(element: Element): boolean {
+  return element.querySelector('svg,canvas') !== null;
+}
+
+function isRedundantCodePreview(
+  preview: Element,
+  codeContainer: Element
+): boolean {
+  if (
+    preview.tagName === 'FIGCAPTION' ||
+    preview.querySelector(
+      'a[href],button,input,select,textarea,form,video,audio,iframe,table,ul,ol,blockquote'
+    ) !== null
+  ) {
+    return false;
+  }
+
+  const segments = collectLeafTextSegments(preview);
+  if (
+    segments.length === 0 ||
+    segments.length > REDUNDANT_PREVIEW_MAX_SEGMENTS ||
+    segments.some(
+      (segment) => segment.length > REDUNDANT_PREVIEW_SEGMENT_MAX_CHARS
+    )
+  ) {
+    return false;
+  }
+
+  const codeText = normalizeWhitespace(codeContainer.textContent || '');
+  if (!codeText) return false;
+
+  const matchingSegments = segments.filter((segment) =>
+    codeText.includes(segment)
+  );
+  if (matchingSegments.length === segments.length) return true;
+
+  return (
+    (hasPreviewMedia(preview) ||
+      segments.some((segment) => isHostnameLike(segment))) &&
+    matchingSegments.length > 0 &&
+    segments.every(
+      (segment) => segment.length <= REDUNDANT_PREVIEW_SEGMENT_MAX_CHARS
+    )
+  );
+}
+
+function pruneFigurePreviewPanes(document: Document): void {
+  for (const figure of document.querySelectorAll('figure')) {
+    const directChildren = Array.from(figure.children);
+    const codeChild = directChildren.find((child) =>
+      hasDirectPreDescendant(child)
+    );
+    if (!codeChild) continue;
+
+    for (const child of directChildren) {
+      if (child === codeChild || child.tagName === 'FIGCAPTION') continue;
+      if (isRedundantCodePreview(child, codeChild)) child.remove();
+    }
+  }
+}
+
+function isDemoInstructionBlock(element: Element): boolean {
+  if (
+    element.querySelector(
+      'a[href],pre,code,table,ul,ol,blockquote,figure,h1,h2,h3,h4,h5,h6'
+    ) !== null
+  ) {
+    return false;
+  }
+
+  const text = normalizeWhitespace(element.textContent || '');
+  if (
+    text.length === 0 ||
+    text.length > INLINE_DEMO_INSTRUCTION_MAX_CHARS ||
+    /[.!?]$/.test(text)
+  ) {
+    return false;
+  }
+
+  return collectLeafTextSegments(element).length <= 3;
+}
+
+function pruneDemoInstructionBlocks(document: Document): void {
+  for (const container of document.querySelectorAll('div,section,article')) {
+    const children = Array.from(container.children);
+    const figureIndex = children.findIndex(
+      (child) =>
+        child.tagName === 'FIGURE' && child.querySelector('pre') !== null
+    );
+    if (figureIndex <= 0) continue;
+
+    for (let i = 0; i < figureIndex; i++) {
+      const child = children[i];
+      if (child && isDemoInstructionBlock(child)) child.remove();
+    }
+  }
+}
+
+function normalizeHighlightedCodeLines(document: Document): void {
+  for (const code of document.querySelectorAll('pre > code')) {
+    const directChildren = Array.from(code.children);
+    if (directChildren.length < 2) continue;
+
+    const directSpans = directChildren.filter(
+      (child) => child.tagName === 'SPAN'
+    );
+    if (directSpans.length !== directChildren.length) continue;
+
+    const hasLineClass = directSpans.some((child) =>
+      (child.getAttribute('class') ?? '').split(/\s+/).includes('line')
+    );
+    const hasNewlineNode = Array.from(code.childNodes).some(
+      (node) => node.nodeType === 3 && /[\r\n]/.test(node.textContent ?? '')
+    );
+
+    if (hasNewlineNode || !hasLineClass) continue;
+
+    for (let i = 0; i < directSpans.length - 1; i++) {
+      const current = directSpans[i];
+      const next = current?.nextSibling;
+      if (next?.nodeType === 3 && (next.textContent ?? '').startsWith('\n')) {
+        continue;
+      }
+      current?.after(document.createTextNode('\n'));
+    }
+  }
+}
+
+function cleanCodeExamples(document: Document): void {
+  pruneFigurePreviewPanes(document);
+  pruneDemoInstructionBlocks(document);
+  normalizeHighlightedCodeLines(document);
+}
+
 function separateAdjacentInlineElements(document: Document): void {
   const badges = document.querySelectorAll(
     'span.chakra-badge, [data-scope="badge"], [class*="badge"]'
@@ -626,6 +867,7 @@ export function prepareDocumentForMarkdown(
 
   stripNoise(document, context, signal);
   stripTabTriggers(document);
+  cleanCodeExamples(document);
   separateAdjacentInlineElements(document);
   flattenTableCellBreaks(document);
   escapeTableCellPipes(document);
@@ -655,6 +897,8 @@ function normalizeTableStructure(document: Document): void {
         }
       }
     }
+
+    hoistNestedRows(table);
   }
 }
 

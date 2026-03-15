@@ -87,7 +87,8 @@ const PYTHON_UNIQUE_REGEX =
   /\b(?:def |elif |except |finally:|yield |lambda |raise |pass$)/m;
 const JS_SIGNAL_REGEX =
   /\b(?:const |let |var |function |require\(|=>|===|!==|console\.)/;
-const CSS_REGEX = /@media|@import|@keyframes/;
+const CSS_REGEX =
+  /@media|@import|@keyframes|@theme\b|@utility\b|@layer\b|@apply\b|@variant\b|@custom-variant\b|@reference\b|@source\b/;
 const CSS_PROPERTY_REGEX = /^\s*[a-z][\w-]*\s*:/;
 function containsJsxTag(code: string): boolean {
   const len = code.length;
@@ -217,6 +218,8 @@ function hasJsSignals(lowerCode: string): boolean {
 }
 
 function matchPython(ctx: DetectionContext): boolean {
+  if (matchHtml(ctx)) return false;
+
   const l = ctx.lower;
   if (l.includes('print(') || l.includes('__name__')) return true;
   if (l.includes('self.') || l.includes('elif ')) return true;
@@ -250,6 +253,7 @@ const LANGUAGES: LanguageDef[] = [
   { lang: 'jsx', weight: 22, match: matchJsx },
   { lang: 'typescript', weight: 20, match: matchTypeScript },
   { lang: 'sql', weight: 20, match: matchSql },
+  { lang: 'html', weight: 19, match: matchHtml },
   { lang: 'python', weight: 18, match: matchPython },
   {
     lang: 'css',
@@ -259,7 +263,6 @@ const LANGUAGES: LanguageDef[] = [
   { lang: 'bash', weight: 15, match: (ctx) => detectBashIndicators(ctx.lines) },
   { lang: 'yaml', weight: 15, match: (ctx) => detectYamlStructure(ctx.lines) },
   { lang: 'javascript', weight: 15, match: (ctx) => JS_REGEX.test(ctx.lower) },
-  { lang: 'html', weight: 12, match: matchHtml },
   {
     lang: 'json',
     weight: 10,
