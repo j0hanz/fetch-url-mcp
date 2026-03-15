@@ -1289,7 +1289,7 @@ function isGithubRepositoryRootUrl(url: string): boolean {
   return parsed.pathname.split('/').filter(Boolean).length === 2;
 }
 
-export const TransformHeuristics = {
+const TransformHeuristics = {
   findContentRoot,
   findPrimaryHeading,
   isGithubRepositoryRootUrl,

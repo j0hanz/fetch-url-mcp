@@ -69,17 +69,6 @@ export function sendJson(
   res.end(JSON.stringify(body));
 }
 
-export function sendText(
-  res: ServerResponse,
-  status: number,
-  body: string
-): void {
-  res.statusCode = status;
-  res.setHeader('Content-Type', 'text/plain; charset=utf-8');
-  setNoStoreHeaders(res);
-  res.end(body);
-}
-
 export function sendEmpty(res: ServerResponse, status: number): void {
   res.statusCode = status;
   res.setHeader('Content-Length', '0');

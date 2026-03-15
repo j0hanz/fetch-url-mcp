@@ -6,7 +6,7 @@ import type { ExtractedMetadata } from './transform/types.js';
 
 const URL_FIELD_MAX_LENGTH = 2048;
 
-export const METADATA_LIMITS = {
+const METADATA_LIMITS = {
   title: 512,
   description: 2048,
   author: 512,
@@ -47,7 +47,7 @@ const normalizedMetadataSchema = z.object({
   modifiedAt: normalizedMetadataField(METADATA_LIMITS.modifiedAt),
 });
 
-export const extractedMetadataSchema = z.strictObject({
+const extractedMetadataSchema = z.strictObject({
   title: metadataTextField(METADATA_LIMITS.title).optional(),
   description: metadataTextField(METADATA_LIMITS.description).optional(),
   author: metadataTextField(METADATA_LIMITS.author).optional(),

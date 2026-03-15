@@ -409,7 +409,7 @@ interface RuntimeState {
 const runtimeState: RuntimeState = {
   httpMode: false,
 };
-export interface AppServerHttpConfig {
+interface AppServerHttpConfig {
   headersTimeoutMs: number | undefined;
   requestTimeoutMs: number | undefined;
   keepAliveTimeoutMs: number | undefined;
@@ -421,7 +421,7 @@ export interface AppServerHttpConfig {
   shutdownCloseAllConnections: boolean;
 }
 
-export interface AppServerConfig {
+interface AppServerConfig {
   name: string;
   version: string;
   port: number;
@@ -475,7 +475,7 @@ function buildServerConfig(): AppServerConfig {
   };
 }
 
-export interface AppFetcherConfig {
+interface AppFetcherConfig {
   timeout: number;
   maxRedirects: number;
   userAgent: string;
@@ -491,7 +491,7 @@ function buildFetcherConfig(): AppFetcherConfig {
   };
 }
 
-export interface AppTransformConfig {
+interface AppTransformConfig {
   timeoutMs: number;
   stageWarnRatio: number;
   metadataFormat: string;
@@ -518,7 +518,7 @@ function buildTransformConfig(): AppTransformConfig {
   };
 }
 
-export interface AppTasksConfig {
+interface AppTasksConfig {
   maxTotal: number;
   maxPerOwner: number;
   emitStatusNotifications: boolean;
@@ -540,7 +540,7 @@ function buildTasksConfig(): AppTasksConfig {
   };
 }
 
-export interface AppCacheConfig {
+interface AppCacheConfig {
   enabled: boolean;
   ttl: number;
   maxKeys: number;
@@ -556,7 +556,7 @@ function buildCacheConfig(): AppCacheConfig {
   };
 }
 
-export interface AppNoiseRemovalConfig {
+interface AppNoiseRemovalConfig {
   extraTokens: string[];
   extraSelectors: string[];
   enabledCategories: string[];
@@ -595,7 +595,7 @@ function buildNoiseRemovalConfig(): AppNoiseRemovalConfig {
   };
 }
 
-export interface AppMarkdownCleanupConfig {
+interface AppMarkdownCleanupConfig {
   promoteOrphanHeadings: boolean;
   removeSkipLinks: boolean;
   removeTocBlocks: boolean;

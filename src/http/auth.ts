@@ -63,7 +63,7 @@ export const corsPolicy = new CorsPolicy();
 const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '::1']);
 const WILDCARD_HOSTS = new Set(['0.0.0.0', '::']);
 
-export class InsufficientScopeError extends InvalidTokenError {
+class InsufficientScopeError extends InvalidTokenError {
   constructor(
     readonly requiredScopes: readonly string[],
     message = 'Insufficient scope'
