@@ -2,11 +2,13 @@ import assert from 'node:assert/strict';
 import { after, describe, it } from 'node:test';
 
 import { NodeHtmlMarkdown } from 'node-html-markdown';
+import { ZodError } from 'zod';
 
 import * as cache from '../dist/lib/core.js';
 import { config } from '../dist/lib/core.js';
 import { normalizeUrl } from '../dist/lib/http.js';
 import { cleanupMarkdownArtifacts } from '../dist/lib/md-cleanup.js';
+import { fetchUrlOutputSchema } from '../dist/schemas.js';
 import { fetchUrlToolHandler } from '../dist/tools/fetch-url.js';
 import {
   htmlToMarkdown,
@@ -108,6 +110,35 @@ describe('fetchUrlToolHandler', () => {
     // assert.equal(resourceLink.mimeType, 'text/markdown');
     assert.ok((structured.markdown as string).includes('Hello'));
     assertTextBlockMatchesStructured(response);
+  });
+
+  it('fails clearly when tool output does not match the declared outputSchema', async (t) => {
+    t.mock.method(globalThis, 'fetch', async () => {
+      return new Response('<html><body><p>Hello</p></body></html>', {
+        status: 200,
+        headers: { 'content-type': 'text/html' },
+      });
+    });
+
+    t.mock.method(fetchUrlOutputSchema, 'safeParse', () => {
+      return {
+        success: false,
+        error: new ZodError([]),
+      };
+    });
+
+    await assert.rejects(
+      () =>
+        fetchUrlToolHandler({
+          url: 'https://example.com/output-schema-failure',
+        }),
+      (error: Error & { code?: number; data?: unknown }) => {
+        assert.equal(error.code, -32603);
+        assert.match(error.message, /outputSchema/);
+        assert.ok(error.data);
+        return true;
+      }
+    );
   });
 
   it('emits the optimized 8-step progress sequence on a cache miss', async (t) => {

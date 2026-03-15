@@ -4,6 +4,7 @@ import { describe, it } from 'node:test';
 import {
   config,
   getMcpLogLevel,
+  logError,
   runWithRequestContext,
   unregisterMcpSessionServer,
 } from '../dist/lib/core.js';
@@ -45,6 +46,35 @@ describe('logging/setLevel session scoping', () => {
       assert.equal(config.logging.level, defaultLevel);
     } finally {
       unregisterMcpSessionServer(sessionId);
+      await server.close();
+    }
+  });
+
+  it('omits stack traces from MCP logging payloads', async (t) => {
+    const server = await createMcpServer();
+    let sentMessage: unknown;
+
+    try {
+      t.mock.method(server, 'isConnected', () => true);
+      t.mock.method(
+        server.server,
+        'sendLoggingMessage',
+        async (message: unknown) => {
+          sentMessage = message;
+        }
+      );
+
+      logError('Tool execution failed', new Error('Boom'));
+      await new Promise((resolve) => setImmediate(resolve));
+
+      const payload = sentMessage as { data?: Record<string, unknown> };
+      const data = payload.data;
+
+      assert.ok(data);
+      assert.equal(data.message, 'Tool execution failed');
+      assert.equal(data.error, 'Boom');
+      assert.equal('stack' in data, false);
+    } finally {
       await server.close();
     }
   });

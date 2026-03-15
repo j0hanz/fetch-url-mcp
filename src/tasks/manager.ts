@@ -67,11 +67,70 @@ const DEFAULT_PAGE_SIZE = 50;
 const CLEANUP_INTERVAL_MS = 60_000;
 const MAX_CURSOR_LENGTH = 256;
 const RESULT_DELIVERY_GRACE_MS = 10_000;
+const TASK_STATUS_VALUES = new Set<TaskStatus>([
+  'working',
+  'input_required',
+  'completed',
+  'failed',
+  'cancelled',
+]);
+const TASK_STATUS_TRANSITIONS: Readonly<
+  Record<TaskStatus, ReadonlySet<TaskStatus>>
+> = {
+  working: new Set([
+    'working',
+    'input_required',
+    'completed',
+    'failed',
+    'cancelled',
+  ]),
+  input_required: new Set([
+    'input_required',
+    'working',
+    'completed',
+    'failed',
+    'cancelled',
+  ]),
+  completed: new Set(['completed']),
+  failed: new Set(['failed']),
+  cancelled: new Set(['cancelled']),
+};
 
 function isTerminalStatus(status: TaskStatus): boolean {
   return (
     status === 'completed' || status === 'failed' || status === 'cancelled'
   );
+}
+
+function isTaskStatus(value: unknown): value is TaskStatus {
+  return (
+    typeof value === 'string' && TASK_STATUS_VALUES.has(value as TaskStatus)
+  );
+}
+
+function resolveNextTaskStatus(
+  task: TaskState,
+  updates: Partial<Omit<TaskState, 'taskId' | 'createdAt'>>
+): TaskStatus {
+  const nextStatus = updates.status;
+  if (nextStatus === undefined) return task.status;
+
+  if (!isTaskStatus(nextStatus)) {
+    throw new McpError(
+      ErrorCode.InternalError,
+      `Invalid task status '${String(nextStatus)}'`
+    );
+  }
+
+  const allowedTransitions = TASK_STATUS_TRANSITIONS[task.status];
+  if (!allowedTransitions.has(nextStatus)) {
+    throw new McpError(
+      ErrorCode.InternalError,
+      `Invalid task status transition: '${task.status}' -> '${nextStatus}'`
+    );
+  }
+
+  return nextStatus;
 }
 
 function normalizeTaskTtl(ttl: number | undefined): number {
@@ -247,7 +306,12 @@ class TaskManager {
 
     if (isTerminalStatus(task.status)) return;
 
-    this.applyTaskUpdate(task, updates);
+    const nextStatus = resolveNextTaskStatus(task, updates);
+
+    this.applyTaskUpdate(task, {
+      ...updates,
+      ...(updates.status === undefined ? {} : { status: nextStatus }),
+    });
 
     this.notifyWaiters(task);
   }

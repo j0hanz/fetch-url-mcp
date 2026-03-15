@@ -1135,6 +1135,72 @@ function resolveErrorText(err: unknown): string {
   if (typeof err === 'string') return err;
   return 'unknown error';
 }
+
+const MCP_LOG_META_BLOCKLIST = new Set(['stack']);
+const MCP_LOG_MAX_DEPTH = 5;
+
+function isPlainLogObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function sanitizeMcpLogValue(value: unknown, depth = 0): unknown {
+  if (depth >= MCP_LOG_MAX_DEPTH) {
+    return '[truncated]';
+  }
+
+  if (
+    value === null ||
+    typeof value === 'string' ||
+    typeof value === 'number' ||
+    typeof value === 'boolean'
+  ) {
+    return value;
+  }
+
+  if (typeof value === 'bigint') return value.toString();
+  if (value instanceof Error) return value.message;
+
+  if (Array.isArray(value)) {
+    return value
+      .map((entry) => sanitizeMcpLogValue(entry, depth + 1))
+      .filter((entry) => entry !== undefined);
+  }
+
+  if (isPlainLogObject(value)) {
+    const sanitized: Record<string, unknown> = {};
+    for (const [key, entry] of Object.entries(value)) {
+      if (MCP_LOG_META_BLOCKLIST.has(key)) continue;
+
+      const normalized = sanitizeMcpLogValue(entry, depth + 1);
+      if (normalized !== undefined) {
+        sanitized[key] = normalized;
+      }
+    }
+    return sanitized;
+  }
+
+  return undefined;
+}
+
+function buildMcpLogData(
+  message: string,
+  meta?: LogMetadata
+): string | Record<string, unknown> {
+  if (!meta || Object.keys(meta).length === 0) {
+    return message;
+  }
+
+  const sanitized = sanitizeMcpLogValue(meta);
+  if (!isPlainLogObject(sanitized) || Object.keys(sanitized).length === 0) {
+    return { message };
+  }
+
+  return {
+    ...sanitized,
+    message,
+  };
+}
+
 function safeWriteStderr(line: string): void {
   if (!stderrAvailable) return;
   if (process.stderr.destroyed || process.stderr.writableEnded) {
@@ -1166,8 +1232,7 @@ function writeLog(level: LogLevel, message: string, meta?: LogMetadata): void {
         {
           level: level === 'warn' ? 'warning' : level,
           logger: 'fetch-url-mcp',
-          // Preserve existing behavior: MCP payload includes only message + provided meta (not ALS context meta).
-          data: meta ? { message, ...meta } : message,
+          data: buildMcpLogData(message, meta),
         },
         sessionId
       )

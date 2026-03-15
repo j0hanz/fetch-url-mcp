@@ -368,7 +368,11 @@ class AuthService {
       throw new InvalidTokenError('X-API-Key not supported for OAuth');
     }
 
-    throw new InvalidTokenError('Missing Authorization header');
+    throw new InvalidTokenError(
+      config.auth.mode === 'static'
+        ? 'Missing Authorization or X-API-Key header'
+        : 'Missing Authorization header'
+    );
   }
 
   private resolveBearerToken(authHeader: string): string {

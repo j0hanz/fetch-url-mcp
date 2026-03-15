@@ -278,6 +278,7 @@ describe('http auth and host/origin validation', () => {
       unauthorized: {
         status: number;
         headers: Record<string, string | string[] | undefined>;
+        body: string;
       };
       metadata: {
         status: number;
@@ -286,6 +287,10 @@ describe('http auth and host/origin validation', () => {
 
     assert.equal(payload.unauthorized.status, 401);
     assert.equal(payload.unauthorized.headers['www-authenticate'], undefined);
+    assert.match(
+      payload.unauthorized.body,
+      /Missing Authorization or X-API-Key header/
+    );
     assert.equal(payload.metadata.status, 404);
   });
 

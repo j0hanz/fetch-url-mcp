@@ -192,11 +192,16 @@ function buildResponse(
 
   const validation = fetchUrlOutputSchema.safeParse(structuredContent);
   if (!validation.success) {
+    const issues = formatZodError(validation.error);
     logWarn('Tool output schema validation failed', {
       url: inputUrl,
-      issues: formatZodError(validation.error),
+      issues,
     });
-    return { content };
+    throw new McpError(
+      ErrorCode.InternalError,
+      'fetch-url produced output that does not match its declared outputSchema',
+      { issues }
+    );
   }
 
   return { content, structuredContent };
@@ -280,6 +285,9 @@ export async function fetchUrlToolHandler(
 ): Promise<ToolResponseBase> {
   return executeFetch(input, extra).catch((error: unknown) => {
     logError('fetch-url tool error', toError(error));
+    if (error instanceof McpError) {
+      throw error;
+    }
     return handleToolError(error, input.url, 'Failed to fetch URL');
   });
 }

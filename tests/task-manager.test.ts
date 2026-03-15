@@ -185,6 +185,23 @@ describe('TaskManager.createTask ttl normalization', () => {
 });
 
 describe('TaskManager.updateTask terminal behavior', () => {
+  it('rejects invalid runtime status values', () => {
+    const ownerKey = `invalid-status-${Date.now()}`;
+    const task = taskManager.createTask(undefined, 'Task started', ownerKey);
+
+    assert.throws(
+      () =>
+        taskManager.updateTask(task.taskId, {
+          status: 'mystery-status' as never,
+        }),
+      (error: unknown) =>
+        error instanceof Error &&
+        /Invalid task status 'mystery-status'/.test(error.message)
+    );
+
+    assert.equal(taskManager.getTask(task.taskId, ownerKey)?.status, 'working');
+  });
+
   it('does not mutate terminal tasks', () => {
     const ownerKey = `terminal-freeze-${Date.now()}`;
     const task = taskManager.createTask(undefined, 'Task started', ownerKey);
