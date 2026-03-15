@@ -75,7 +75,7 @@
     "linkedom": "^0.18.12",
     "node-html-markdown": "^2.0.0",
     "ts-morph": "^27.0.2",
-    "undici": "^7.24.1",
+    "undici": "^7.24.3",
     "zod": "^4.3.6"
   },
   "devDependencies": {
