@@ -348,6 +348,8 @@ async function runTaskToolExecution(params: {
           signal: controller.signal,
           requestId: taskId,
           _meta: relatedMeta,
+          canReportProgress: () =>
+            taskManager.getTask(taskId)?.status === 'working',
           ...compact({ sendNotification }),
           onProgress: (_progress, message) => {
             updateWorkingTaskStatus(server, taskId, message);

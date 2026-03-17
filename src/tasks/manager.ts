@@ -9,12 +9,7 @@ import { config } from '../lib/core.js';
 import { toError } from '../lib/utils.js';
 import { type CancellableTimeout, createUnrefTimeout } from '../lib/utils.js';
 
-export type TaskStatus =
-  | 'working'
-  | 'input_required'
-  | 'completed'
-  | 'failed'
-  | 'cancelled';
+export type TaskStatus = 'working' | 'completed' | 'failed' | 'cancelled';
 
 export interface TaskError {
   code: number;
@@ -69,7 +64,6 @@ const MAX_CURSOR_LENGTH = 256;
 const RESULT_DELIVERY_GRACE_MS = 10_000;
 const TASK_STATUS_VALUES = new Set<TaskStatus>([
   'working',
-  'input_required',
   'completed',
   'failed',
   'cancelled',
@@ -77,20 +71,7 @@ const TASK_STATUS_VALUES = new Set<TaskStatus>([
 const TASK_STATUS_TRANSITIONS: Readonly<
   Record<TaskStatus, ReadonlySet<TaskStatus>>
 > = {
-  working: new Set([
-    'working',
-    'input_required',
-    'completed',
-    'failed',
-    'cancelled',
-  ]),
-  input_required: new Set([
-    'input_required',
-    'working',
-    'completed',
-    'failed',
-    'cancelled',
-  ]),
+  working: new Set(['working', 'completed', 'failed', 'cancelled']),
   completed: new Set(['completed']),
   failed: new Set(['failed']),
   cancelled: new Set(['cancelled']),

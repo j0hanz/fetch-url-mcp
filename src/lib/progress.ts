@@ -29,6 +29,7 @@ export interface ToolHandlerExtra {
   _meta?: RequestMeta;
   sendNotification?: (notification: ProgressNotification) => Promise<void>;
   onProgress?: (progress: number, message: string) => void;
+  canReportProgress?: () => boolean;
 }
 export interface ProgressReporter {
   report: (progress: number, message: string) => void;
@@ -56,7 +57,8 @@ class ToolProgressReporter implements ProgressReporter {
     private readonly relatedTaskMeta: { taskId: string } | undefined,
     private readonly onProgress:
       | ((progress: number, message: string) => void)
-      | undefined
+      | undefined,
+    private readonly canReportProgress: (() => boolean) | undefined
   ) {}
 
   static create(extra?: ToolHandlerExtra): ProgressReporter {
@@ -64,6 +66,7 @@ class ToolProgressReporter implements ProgressReporter {
     const sendNotification = extra?.sendNotification;
     const relatedTaskMeta = resolveRelatedTaskMeta(extra?._meta);
     const onProgress = extra?.onProgress;
+    const canReportProgress = extra?.canReportProgress;
 
     if (token === null && !onProgress) {
       return { report: () => {} };
@@ -73,7 +76,8 @@ class ToolProgressReporter implements ProgressReporter {
       token,
       sendNotification,
       relatedTaskMeta,
-      onProgress
+      onProgress,
+      canReportProgress
     );
   }
 
@@ -85,6 +89,7 @@ class ToolProgressReporter implements ProgressReporter {
    */
   report(progress: number, message: string): void {
     if (this.isTerminal) return;
+    if (this.canReportProgress && !this.canReportProgress()) return;
     const effectiveProgress = Math.max(progress, this.lastProgress);
     const isIncreasing = effectiveProgress > this.lastProgress;
     this.lastProgress = effectiveProgress;

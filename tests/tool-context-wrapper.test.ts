@@ -72,4 +72,34 @@ describe('Progress notification timeout', () => {
     // Verify sendNotification was called
     assert.equal(sendNotificationMock.mock.calls.length, 1);
   });
+
+  it('suppresses progress after task execution is no longer reportable', async () => {
+    const { createProgressReporter } = await import('../dist/lib/progress.js');
+    const sendNotificationMock = mock.fn(async () => {});
+    const onProgressMock = mock.fn();
+    let canReport = true;
+
+    const extra = {
+      _meta: {
+        progressToken: 'task-progress',
+        'io.modelcontextprotocol/related-task': { taskId: 'task-123' },
+      },
+      sendNotification: sendNotificationMock,
+      onProgress: onProgressMock,
+      canReportProgress: () => canReport,
+    } as unknown;
+
+    const reporter = createProgressReporter(
+      extra as Parameters<typeof createProgressReporter>[0]
+    );
+
+    reporter.report(1, 'Preparing request');
+    canReport = false;
+    reporter.report(8, 'Cancelled');
+
+    await new Promise((resolve) => setImmediate(resolve));
+
+    assert.equal(onProgressMock.mock.calls.length, 1);
+    assert.equal(sendNotificationMock.mock.calls.length, 1);
+  });
 });

@@ -28,6 +28,15 @@ import {
 
 export const serverVersion: string = readServerVersion(import.meta.url);
 type LogLevel = 'debug' | 'info' | 'warn' | 'error';
+type McpLogLevel =
+  | 'debug'
+  | 'info'
+  | 'notice'
+  | 'warning'
+  | 'error'
+  | 'critical'
+  | 'alert'
+  | 'emergency';
 const LOG_LEVELS: readonly LogLevel[] = ['debug', 'info', 'warn', 'error'];
 const ALLOWED_LOG_LEVELS: ReadonlySet<string> = new Set(LOG_LEVELS);
 const DEFAULT_HEADING_KEYWORDS = [
@@ -986,8 +995,8 @@ const requestContext = new AsyncLocalStorage<RequestContext>({
 });
 let mcpServer: McpServer | undefined;
 const sessionServers = new Map<string, McpServer>();
-const sessionMcpLogLevels = new Map<string, LogLevel>();
-let stdioMcpLogLevel: LogLevel | undefined;
+const sessionMcpLogLevels = new Map<string, McpLogLevel>();
+let stdioMcpLogLevel: McpLogLevel | undefined;
 let stderrAvailable = true;
 process.stderr.on('error', () => {
   stderrAvailable = false;
@@ -1100,25 +1109,43 @@ const LEVEL_PRIORITY: Readonly<Record<LogLevel, number>> = {
 function shouldLog(level: LogLevel): boolean {
   return LEVEL_PRIORITY[level] >= LEVEL_PRIORITY[config.logging.level];
 }
-const LOG_LEVEL_ALIASES: Readonly<Record<string, LogLevel>> = {
+const MCP_LOG_LEVEL_PRIORITY: Readonly<Record<McpLogLevel, number>> = {
+  emergency: 0,
+  alert: 1,
+  critical: 2,
+  error: 3,
+  warning: 4,
+  notice: 5,
+  info: 6,
+  debug: 7,
+};
+const LOG_LEVEL_ALIASES: Readonly<Record<string, McpLogLevel>> = {
   debug: 'debug',
   info: 'info',
-  notice: 'info',
-  warning: 'warn',
-  warn: 'warn',
+  notice: 'notice',
+  warning: 'warning',
+  warn: 'warning',
   error: 'error',
-  critical: 'error',
-  alert: 'error',
-  emergency: 'error',
+  critical: 'critical',
+  alert: 'alert',
+  emergency: 'emergency',
 };
-function normalizeLogLevel(level: string): LogLevel | undefined {
+function normalizeLogLevel(level: string): McpLogLevel | undefined {
   return LOG_LEVEL_ALIASES[level.toLowerCase()];
 }
+function toMcpLogLevel(level: LogLevel): McpLogLevel {
+  return level === 'warn' ? 'warning' : level;
+}
 function shouldForwardMcpLog(level: LogLevel, sessionId?: string): boolean {
-  const mcpLevel = sessionId
-    ? (sessionMcpLogLevels.get(sessionId) ?? config.logging.level)
-    : (stdioMcpLogLevel ?? config.logging.level);
-  return LEVEL_PRIORITY[level] >= LEVEL_PRIORITY[mcpLevel];
+  const emittedLevel = toMcpLogLevel(level);
+  const configuredLevel = sessionId
+    ? (sessionMcpLogLevels.get(sessionId) ??
+      toMcpLogLevel(config.logging.level))
+    : (stdioMcpLogLevel ?? toMcpLogLevel(config.logging.level));
+  return (
+    MCP_LOG_LEVEL_PRIORITY[emittedLevel] <=
+    MCP_LOG_LEVEL_PRIORITY[configuredLevel]
+  );
 }
 function resolveErrorText(err: unknown): string {
   if (err instanceof Error) {
@@ -1282,11 +1309,13 @@ export function logError(message: string, error?: Error | LogMetadata): void {
     error instanceof Error ? formatErrorMeta(error) : (error ?? {});
   writeLog('error', message, errorMeta);
 }
-export function getMcpLogLevel(sessionId?: string): LogLevel {
+export function getMcpLogLevel(sessionId?: string): McpLogLevel {
   if (sessionId) {
-    return sessionMcpLogLevels.get(sessionId) ?? config.logging.level;
+    return (
+      sessionMcpLogLevels.get(sessionId) ?? toMcpLogLevel(config.logging.level)
+    );
   }
-  return stdioMcpLogLevel ?? config.logging.level;
+  return stdioMcpLogLevel ?? toMcpLogLevel(config.logging.level);
 }
 export function setLogLevel(level: string, sessionId?: string): void {
   const normalized = normalizeLogLevel(level);

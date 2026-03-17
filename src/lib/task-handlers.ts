@@ -305,16 +305,6 @@ export function registerTaskHandlers(
       });
     }
 
-    // Forward-compat: input_required is a valid MCP task status but not currently
-    // produced by any tool in this server. Kept for future spec support.
-    if (task.status === 'input_required') {
-      throw new McpError(
-        ErrorCode.InvalidRequest,
-        'Task requires additional input',
-        { taskId: task.taskId, status: 'input_required' }
-      );
-    }
-
     const result: ServerResult = isServerResult(task.result)
       ? task.result
       : { content: [] };

@@ -119,6 +119,7 @@ describe('MCP task-augmented tools', () => {
 
   it('allows tasks to be cancelled', async (t) => {
     const server = await createMcpServer();
+    const notifications: unknown[] = [];
 
     t.mock.method(globalThis, 'fetch', async () => {
       await new Promise((resolve) => setTimeout(resolve, 200));
@@ -134,14 +135,21 @@ describe('MCP task-augmented tools', () => {
       const getTask = getRequestHandler(server, 'tasks/get');
       const getTaskResult = getRequestHandler(server, 'tasks/result');
 
-      const createResult = (await callTool({
-        method: 'tools/call',
-        params: {
-          name: 'fetch-url',
-          arguments: { url: 'https://example.com/task-cancel' },
-          task: { ttl: 10_000 },
+      const createResult = (await callTool(
+        {
+          method: 'tools/call',
+          params: {
+            name: 'fetch-url',
+            arguments: { url: 'https://example.com/task-cancel' },
+            task: { ttl: 10_000 },
+          },
         },
-      })) as {
+        {
+          sendNotification: async (notification: unknown) => {
+            notifications.push(notification);
+          },
+        }
+      )) as {
         task?: { taskId?: string };
         _meta?: unknown;
       };
@@ -156,6 +164,8 @@ describe('MCP task-augmented tools', () => {
         method: 'tasks/cancel',
         params: { taskId },
       });
+
+      const notificationCountAtCancel = notifications.length;
 
       const taskStatus = (await getTask({
         jsonrpc: '2.0',
@@ -182,6 +192,9 @@ describe('MCP task-augmented tools', () => {
         (error: unknown) =>
           error instanceof Error && error.message.includes('Task was cancelled')
       );
+
+      await new Promise((resolve) => setTimeout(resolve, 250));
+      assert.equal(notifications.length, notificationCountAtCancel);
     } finally {
       await server.close();
     }
