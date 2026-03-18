@@ -74,7 +74,7 @@
     "@mozilla/readability": "^0.6.0",
     "linkedom": "^0.18.12",
     "node-html-markdown": "^2.0.0",
-    "undici": "^7.24.3",
+    "undici": "^7.24.4",
     "zod": "^4.3.6"
   },
   "devDependencies": {
@@ -86,11 +86,11 @@
     "eslint-plugin-de-morgan": "^2.1.1",
     "eslint-plugin-depend": "^1.5.0",
     "eslint-plugin-unused-imports": "^4.4.1",
-    "knip": "^5.86.0",
+    "knip": "^5.88.0",
     "prettier": "^3.8.1",
     "tsx": "^4.21.0",
     "typescript": "^5.9.3",
-    "typescript-eslint": "^8.57.0"
+    "typescript-eslint": "^8.57.1"
   },
   "engines": {
     "node": ">=24"
