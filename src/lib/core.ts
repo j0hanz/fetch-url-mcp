@@ -590,6 +590,8 @@ function buildNoiseRemovalConfig(): AppNoiseRemovalConfig {
       'newsletters',
       'social-share',
       'nav-footer',
+      'author-blocks',
+      'related-content',
     ],
     debug: false,
     aggressiveMode: false,

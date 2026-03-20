@@ -92,12 +92,23 @@ const PROMO_TOKENS_ALWAYS = [
   'fb-post',
   'instagram-media',
   'social-embed',
+  'author-bio',
+  'byline',
+  'sharedaddy',
+  'sharing',
 ];
 const PROMO_TOKENS_AGGRESSIVE = ['ad', 'related', 'comment'];
 const PROMO_TOKENS_BY_CATEGORY = {
   'cookie-banners': ['cookie', 'consent', 'popup', 'modal', 'overlay', 'toast'],
   newsletters: ['newsletter', 'subscribe'],
-  'social-share': ['share', 'social'],
+  'social-share': ['share', 'social', 'share-button'],
+  'author-blocks': ['author-bio', 'byline', 'author-info', 'writer-profile'],
+  'related-content': [
+    'related-post',
+    'related-article',
+    'more-stories',
+    'recommended-posts',
+  ],
 };
 
 // Noise selector configurations
@@ -121,8 +132,6 @@ interface NoiseContext {
   readonly flags: {
     readonly navFooter: boolean;
     readonly cookieBanners: boolean;
-    readonly newsletters: boolean;
-    readonly socialShare: boolean;
   };
   readonly structuralTags: Set<string>;
   readonly weights: NoiseWeights;
@@ -150,7 +159,7 @@ function addTokens(target: Set<string>, tokens: readonly string[]): void {
 }
 function getPromoMatchers(
   currentConfig: NoiseRemovalConfig,
-  flags: NoiseContext['flags']
+  enabledCategories: Set<string>
 ): PromoTokenMatchers {
   const baseTokens = new Set(PROMO_TOKENS_ALWAYS);
   const aggressiveTokens = new Set<string>();
@@ -159,14 +168,10 @@ function getPromoMatchers(
     addTokens(aggressiveTokens, PROMO_TOKENS_AGGRESSIVE);
   }
 
-  if (flags.cookieBanners) {
-    addTokens(baseTokens, PROMO_TOKENS_BY_CATEGORY['cookie-banners']);
-  }
-  if (flags.newsletters) {
-    addTokens(baseTokens, PROMO_TOKENS_BY_CATEGORY['newsletters']);
-  }
-  if (flags.socialShare) {
-    addTokens(baseTokens, PROMO_TOKENS_BY_CATEGORY['social-share']);
+  for (const [category, tokens] of Object.entries(PROMO_TOKENS_BY_CATEGORY)) {
+    if (enabledCategories.has(category)) {
+      addTokens(baseTokens, tokens);
+    }
   }
 
   for (const t of currentConfig.extraTokens) {
@@ -207,8 +212,6 @@ function getContext(): NoiseContext {
   const flags = {
     navFooter: isEnabled('nav-footer'),
     cookieBanners: isEnabled('cookie-banners'),
-    newsletters: isEnabled('newsletters'),
-    socialShare: isEnabled('social-share'),
   };
 
   const structuralTags = new Set(BASE_STRUCTURAL_TAGS);
@@ -217,7 +220,7 @@ function getContext(): NoiseContext {
     structuralTags.add('canvas');
   }
 
-  const promoMatchers = getPromoMatchers(currentConfig, flags);
+  const promoMatchers = getPromoMatchers(currentConfig, enabled);
   const extraSelectors = currentConfig.extraSelectors
     .map((s) => s.trim())
     .filter((s) => s.length > 0);
@@ -244,7 +247,9 @@ function getContext(): NoiseContext {
     structuralTags,
     weights: currentConfig.weights,
     promoMatchers,
-    promoEnabled: flags.cookieBanners || flags.newsletters || flags.socialShare,
+    promoEnabled: Object.keys(PROMO_TOKENS_BY_CATEGORY).some((cat) =>
+      enabled.has(cat)
+    ),
     extraSelectors,
     baseSelector,
     candidateSelector,
