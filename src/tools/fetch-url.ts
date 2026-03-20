@@ -1,5 +1,3 @@
-import { randomUUID } from 'node:crypto';
-
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type {
   ContentBlock,
@@ -8,14 +6,7 @@ import type {
 import { ErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js';
 import { z } from 'zod';
 
-import {
-  config,
-  getRequestId,
-  logDebug,
-  logError,
-  logWarn,
-  runWithRequestContext,
-} from '../lib/core.js';
+import { config, logDebug, logError, logWarn } from '../lib/core.js';
 import {
   appendTruncationMarker,
   type InlineContentResult,
@@ -24,19 +15,16 @@ import {
   parseCachedMarkdownResult,
   performSharedFetch,
   type PipelineResult,
-  readNestedRecord,
   serializeMarkdownResult,
-  type SharedFetchStage,
   TRUNCATION_MARKER,
   withSignal,
 } from '../lib/fetch-pipeline.js';
 import { handleToolError } from '../lib/mcp-tools.js';
 import {
   createProgressReporter,
-  type ProgressReporter,
   type ToolHandlerExtra,
 } from '../lib/progress.js';
-import { isAbortError, isObject, toError } from '../lib/utils.js';
+import { isAbortError, toError } from '../lib/utils.js';
 import { formatZodError } from '../lib/zod.js';
 
 import {
@@ -45,10 +33,16 @@ import {
   normalizeExtractedMetadata,
   normalizePageTitle,
 } from '../schemas.js';
+import { withRequestContextIfMissing } from '../tasks/owner.js';
 import {
   registerTaskCapableTool,
+  type TaskCapableToolDescriptor,
   unregisterTaskCapableTool,
 } from '../tasks/tool-registry.js';
+import {
+  FetchUrlProgressPlan,
+  getFetchCompletionStatusMessage,
+} from './fetch-url-progress.js';
 
 type FetchUrlInput = z.infer<typeof fetchUrlInputSchema>;
 
@@ -81,10 +75,6 @@ const TOOL_ICON = {
 const HARD_TOOL_TIMEOUT_MS = 300_000;
 const CODE_HOSTS = new Set(['github.com', 'gitlab.com', 'bitbucket.org']);
 
-/* -------------------------------------------------------------------------------------------------
- * URL context & progress
- * ------------------------------------------------------------------------------------------------- */
-
 function getUrlContext(urlStr: string): string {
   try {
     const u = new URL(urlStr);
@@ -109,32 +99,6 @@ function getUrlContext(urlStr: string): string {
     return basename ? `${host}/…/${basename}` : host;
   } catch {
     return 'unknown';
-  }
-}
-
-function mapFetchStageToProgress(
-  stage: SharedFetchStage,
-  context: string
-): { step: number; message: string } {
-  switch (stage) {
-    case 'resolve_url':
-      return { step: 2, message: 'Resolving URL' };
-    case 'check_cache':
-      return { step: 3, message: 'Checking cache' };
-    case 'cache_hit':
-      return { step: 4, message: 'Loaded from cache' };
-    case 'cache_restore':
-      return { step: 5, message: 'Restoring cached content' };
-    case 'fetch_remote':
-      return { step: 4, message: `Fetching ${context}` };
-    case 'response_ready':
-      return { step: 5, message: 'Received response' };
-    case 'transform_start':
-      return { step: 6, message: 'Parsing HTML → Markdown' };
-    case 'prepare_output':
-      return { step: 6, message: 'Preparing output' };
-    case 'finalize_output':
-      return { step: 7, message: 'Finalizing output' };
   }
 }
 
@@ -222,9 +186,8 @@ function buildToolAbortSignal(extraSignal?: AbortSignal): AbortSignal {
 
 function buildFetchOptions(
   url: string,
-  context: string,
   signal: AbortSignal | undefined,
-  progress: ProgressReporter | undefined,
+  progressPlan: FetchUrlProgressPlan,
   forceRefresh?: boolean
 ): Parameters<typeof performSharedFetch>[0] {
   return {
@@ -232,8 +195,7 @@ function buildFetchOptions(
     ...withSignal(signal),
     ...(forceRefresh ? { forceRefresh: true } : {}),
     onStage: (stage) => {
-      const { step, message } = mapFetchStageToProgress(stage, context);
-      progress?.report(step, message);
+      progressPlan.reportStage(stage);
     },
     transform: async ({ buffer, encoding, truncated }, normalizedUrl) => {
       return markdownTransform(
@@ -255,26 +217,20 @@ async function executeFetch(
   const signal = buildToolAbortSignal(extra?.signal);
   const progress = createProgressReporter(extra);
   const context = getUrlContext(url);
+  const progressPlan = new FetchUrlProgressPlan(progress, context);
 
   logDebug('Fetching URL', { url });
 
   try {
-    progress.report(1, 'Preparing request');
+    progressPlan.reportStart();
     const { pipeline, inlineResult } = await performSharedFetch(
-      buildFetchOptions(url, context, signal, progress, input.forceRefresh)
+      buildFetchOptions(url, signal, progressPlan, input.forceRefresh)
     );
 
-    const chars = inlineResult.contentSize;
-    const size =
-      chars < 1000
-        ? `${chars} chars`
-        : chars < 1_000_000
-          ? `${(chars / 1024).toFixed(1)} KB`
-          : `${(chars / (1024 * 1024)).toFixed(1)} MB`;
-    progress.report(8, `Done — ${size}`);
+    progressPlan.reportSuccess(inlineResult.contentSize);
     return buildResponse(pipeline, inlineResult, url);
   } catch (error) {
-    progress.report(8, isAbortError(error) ? 'Cancelled' : 'Failed');
+    progressPlan.reportFailure(isAbortError(error));
     throw error;
   }
 }
@@ -303,7 +259,6 @@ const TOOL_DEFINITION = {
   inputSchema: fetchUrlInputSchema,
   outputSchema: z.toJSONSchema(fetchUrlOutputSchema) as Record<string, unknown>,
   handler: fetchUrlToolHandler,
-  execution: { taskSupport: 'optional' } as const,
   annotations: {
     readOnlyHint: true,
     destructiveHint: false,
@@ -312,67 +267,16 @@ const TOOL_DEFINITION = {
   } satisfies ToolAnnotations,
 };
 
-/**
- * Stdio-path guard: ensures a request context (requestId, sessionId) is set
- * in AsyncLocalStorage before invoking the handler. On the HTTP path the SDK
- * populates `extra.requestId`/`extra.requestInfo`, so this is a no-op there.
- * On the stdio path there is no SDK-provided context, so we derive one from
- * the extra fields or generate a fresh UUID.
- */
-export function withRequestContextIfMissing<TParams, TResult, TExtra = unknown>(
-  handler: (params: TParams, extra?: TExtra) => Promise<TResult>
-): (params: TParams, extra?: TExtra) => Promise<TResult> {
-  return async (params, extra) => {
-    const existingRequestId = getRequestId();
-    if (existingRequestId) {
-      return handler(params, extra);
-    }
+type TaskSupport = 'optional' | 'forbidden';
 
-    const derivedRequestId = resolveRequestIdFromExtra(extra) ?? randomUUID();
-    const derivedSessionId = resolveSessionIdFromExtra(extra);
-
-    return runWithRequestContext(
-      {
-        requestId: derivedRequestId,
-        operationId: derivedRequestId,
-        ...(derivedSessionId ? { sessionId: derivedSessionId } : {}),
-      },
-      () => handler(params, extra)
-    );
-  };
+export interface ToolRegistrationControls {
+  setTaskSupport: (support: TaskSupport) => void;
 }
 
-function resolveRequestIdFromExtra(extra: unknown): string | undefined {
-  if (!isObject(extra)) return undefined;
-
-  const { requestId } = extra as { requestId?: unknown };
-  if (typeof requestId === 'string') return requestId;
-  if (typeof requestId === 'number') return String(requestId);
-
-  return undefined;
-}
-
-function resolveSessionIdFromExtra(extra: unknown): string | undefined {
-  if (!isObject(extra)) return undefined;
-
-  const { sessionId } = extra as { sessionId?: unknown };
-  if (typeof sessionId === 'string') return sessionId;
-
-  const headers = readNestedRecord(extra, ['requestInfo', 'headers']);
-  const headerValue = headers ? headers['mcp-session-id'] : undefined;
-
-  return typeof headerValue === 'string' ? headerValue : undefined;
-}
-
-export function registerTools(server: McpServer): void {
-  if (!config.tools.enabled.includes(FETCH_URL_TOOL_NAME)) {
-    unregisterTaskCapableTool(FETCH_URL_TOOL_NAME);
-    return;
-  }
-
-  registerTaskCapableTool({
+function createTaskCapableDescriptor(): TaskCapableToolDescriptor<FetchUrlInput> {
+  return {
     name: FETCH_URL_TOOL_NAME,
-    parseArguments: (args) => {
+    parseArguments: (args: unknown) => {
       const parsed = fetchUrlInputSchema.safeParse(args);
       if (!parsed.success) {
         throw new McpError(
@@ -383,7 +287,27 @@ export function registerTools(server: McpServer): void {
       return parsed.data;
     },
     execute: fetchUrlToolHandler,
-  });
+    getCompletionStatusMessage: getFetchCompletionStatusMessage,
+  };
+}
+
+function setRegisteredToolTaskSupport(
+  registeredTool: Record<string, unknown>,
+  support: TaskSupport
+): void {
+  registeredTool.execution = { taskSupport: support };
+}
+
+export function registerTools(server: McpServer): ToolRegistrationControls {
+  if (!config.tools.enabled.includes(FETCH_URL_TOOL_NAME)) {
+    unregisterTaskCapableTool(FETCH_URL_TOOL_NAME);
+    return {
+      setTaskSupport: () => {},
+    };
+  }
+
+  const descriptor = createTaskCapableDescriptor();
+  registerTaskCapableTool(descriptor);
 
   const registeredTool = server.registerTool(
     TOOL_DEFINITION.name,
@@ -393,12 +317,23 @@ export function registerTools(server: McpServer): void {
       inputSchema: TOOL_DEFINITION.inputSchema,
       outputSchema: TOOL_DEFINITION.outputSchema,
       annotations: TOOL_DEFINITION.annotations,
-      execution: TOOL_DEFINITION.execution,
+      execution: { taskSupport: 'optional' as const },
       icons: [TOOL_ICON],
     } as { inputSchema: typeof fetchUrlInputSchema } & Record<string, unknown>,
     withRequestContextIfMissing(TOOL_DEFINITION.handler)
   );
-  // SDK workaround: RegisteredTool type omits `execution`
-  (registeredTool as Record<string, unknown>).execution =
-    TOOL_DEFINITION.execution;
+
+  const registeredToolRecord = registeredTool as Record<string, unknown>;
+  setRegisteredToolTaskSupport(registeredToolRecord, 'optional');
+
+  return {
+    setTaskSupport: (support) => {
+      if (support === 'optional') {
+        registerTaskCapableTool(descriptor);
+      } else {
+        unregisterTaskCapableTool(FETCH_URL_TOOL_NAME);
+      }
+      setRegisteredToolTaskSupport(registeredToolRecord, support);
+    },
+  };
 }

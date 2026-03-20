@@ -10,13 +10,15 @@ import {
 import { z } from 'zod';
 
 import {
+  parseExtendedCallToolRequest,
+  withRelatedTaskMeta,
+} from '../tasks/call-contract.js';
+import {
   abortTaskExecution,
   emitTaskStatusNotification,
-  type ExtendedCallToolRequest,
   handleToolCallRequest,
   throwTaskNotFound,
   toTaskSummary,
-  withRelatedTaskMeta,
 } from '../tasks/execution.js';
 import { taskManager } from '../tasks/manager.js';
 import {
@@ -30,66 +32,7 @@ import {
   hasTaskCapableTool,
 } from '../tasks/tool-registry.js';
 import { logWarn, runWithRequestContext } from './core.js';
-import { formatZodError } from './zod.js';
-
-/* -------------------------------------------------------------------------------------------------
- * Server lifecycle cleanup hooks
- *
- * WARNING (S-3): This section monkey-patches `server.close` and `server.server.onclose`
- * to inject cleanup callbacks. This is fragile and may break if the MCP SDK
- * changes the close/shutdown lifecycle. Isolated here until the SDK exposes a
- * first-class lifecycle cleanup registration API. If the SDK adds native
- * onClose/onShutdown hooks, migrate to those and remove the patching.
- * ------------------------------------------------------------------------------------------------- */
-
-type CleanupCallback = () => void;
-const patchedCleanupServers = new WeakSet<McpServer>();
-const serverCleanupCallbacks = new WeakMap<McpServer, Set<CleanupCallback>>();
-function getServerCleanupCallbackSet(server: McpServer): Set<CleanupCallback> {
-  let callbacks = serverCleanupCallbacks.get(server);
-  if (!callbacks) {
-    callbacks = new Set<CleanupCallback>();
-    serverCleanupCallbacks.set(server, callbacks);
-  }
-  return callbacks;
-}
-function drainServerCleanupCallbacks(server: McpServer): void {
-  const callbacks = serverCleanupCallbacks.get(server);
-  if (!callbacks || callbacks.size === 0) return;
-
-  const pending = [...callbacks];
-  callbacks.clear();
-  for (const callback of pending) {
-    try {
-      callback();
-    } catch (error: unknown) {
-      logWarn('Server cleanup callback failed', { error });
-    }
-  }
-}
-function ensureServerCleanupHooks(server: McpServer): void {
-  if (patchedCleanupServers.has(server)) return;
-  patchedCleanupServers.add(server);
-
-  const originalOnClose = server.server.onclose;
-  server.server.onclose = () => {
-    drainServerCleanupCallbacks(server);
-    originalOnClose?.();
-  };
-
-  const originalClose = server.close.bind(server);
-  server.close = async (): Promise<void> => {
-    drainServerCleanupCallbacks(server);
-    await originalClose();
-  };
-}
-export function registerServerLifecycleCleanup(
-  server: McpServer,
-  callback: CleanupCallback
-): void {
-  ensureServerCleanupHooks(server);
-  getServerCleanupCallbackSet(server).add(callback);
-}
+import { getSdkCallToolHandler } from './sdk-interop.js';
 
 export {
   cancelTasksForOwner,
@@ -120,47 +63,6 @@ const TaskResultSchema = z.looseObject({
   method: z.literal('tasks/result'),
   params: z.looseObject({ taskId: z.string() }),
 });
-const MIN_TASK_TTL_MS = 1_000;
-const MAX_TASK_TTL_MS = 86_400_000;
-const ExtendedCallToolRequestSchema: z.ZodType<ExtendedCallToolRequest> =
-  z.looseObject({
-    method: z.literal('tools/call'),
-    params: z.strictObject({
-      name: z.string().min(1),
-      arguments: z.record(z.string(), z.unknown()).optional(),
-      task: z
-        .strictObject({
-          ttl: z
-            .number()
-            .int()
-            .min(MIN_TASK_TTL_MS)
-            .max(MAX_TASK_TTL_MS)
-            .optional(),
-        })
-        .optional(),
-      _meta: z
-        .looseObject({
-          progressToken: z.union([z.string(), z.number()]).optional(),
-          'io.modelcontextprotocol/related-task': z
-            .strictObject({
-              taskId: z.string(),
-            })
-            .optional(),
-        })
-        .optional(),
-    }),
-  });
-function parseExtendedCallToolRequest(
-  request: unknown
-): ExtendedCallToolRequest {
-  const parsed = ExtendedCallToolRequestSchema.safeParse(request);
-  if (parsed.success) return parsed.data;
-
-  throw new McpError(
-    ErrorCode.InvalidParams,
-    `Invalid tool request params: ${formatZodError(parsed.error)}`
-  );
-}
 function resolveOwnerScopedExtra(extra: unknown): {
   parsedExtra: ReturnType<typeof parseHandlerExtra>;
   ownerKey: string;
@@ -171,8 +73,6 @@ function resolveOwnerScopedExtra(extra: unknown): {
     ownerKey: resolveTaskOwnerKey(parsedExtra),
   };
 }
-type RequestHandlerFn = (request: unknown, extra?: unknown) => Promise<unknown>;
-
 interface TaskHandlerRegistrationOptions {
   requireInterception?: boolean;
 }
@@ -180,15 +80,6 @@ interface TaskHandlerRegistrationOptions {
 interface TaskHandlerRegistrationResult {
   interceptedToolsCall: boolean;
   taskCapableToolsRegistered: boolean;
-}
-
-function getSdkCallToolHandler(server: McpServer): RequestHandlerFn | null {
-  // S-2: see tests/sdk-compat-guard.test.ts
-  const maybeHandlers: unknown = Reflect.get(server.server, '_requestHandlers');
-  if (!(maybeHandlers instanceof Map)) return null;
-
-  const handler: unknown = maybeHandlers.get('tools/call');
-  return typeof handler === 'function' ? (handler as RequestHandlerFn) : null;
 }
 export function registerTaskHandlers(
   server: McpServer,
@@ -216,19 +107,18 @@ export function registerTaskHandlers(
       CallToolRequestSchema,
       async (request, extra) => {
         const parsedExtra = parseHandlerExtra(extra);
-        const context = resolveToolCallContext(parsedExtra);
         const requestId =
-          context.requestId !== undefined
-            ? String(context.requestId)
+          parsedExtra?.requestId !== undefined
+            ? String(parsedExtra.requestId)
             : randomUUID();
-
-        const sessionId = parsedExtra?.sessionId;
 
         return runWithRequestContext(
           {
             requestId,
             operationId: requestId,
-            ...(sessionId ? { sessionId } : {}),
+            ...(parsedExtra?.sessionId
+              ? { sessionId: parsedExtra.sessionId }
+              : {}),
           },
           () => {
             const toolName = request.params.name;
@@ -243,6 +133,10 @@ export function registerTaskHandlers(
             }
 
             const parsed = parseExtendedCallToolRequest(request);
+            const context = resolveToolCallContext(
+              parsedExtra,
+              parsed.params._meta
+            );
             return handleToolCallRequest(server, parsed, context);
           }
         );

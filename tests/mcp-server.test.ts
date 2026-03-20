@@ -1,7 +1,11 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
+import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+
+import { setTaskToolCallCapability } from '../dist/lib/sdk-interop.js';
 import { createMcpServer } from '../dist/server.js';
+import { registerTools as registerFetchUrlTool } from '../dist/tools/fetch-url.js';
 
 function getPrivateMap(target: object, key: string): Map<string, unknown> {
   const value = Reflect.get(target, key);
@@ -190,6 +194,44 @@ describe('MCP Server', () => {
         undefined,
         'single-page result should not contain nextCursor'
       );
+    });
+
+    it('can downgrade task-capable tool support when task interception is unavailable', async () => {
+      const server = new McpServer(
+        { name: 'test-server', version: '0.0.0' },
+        {
+          capabilities: {
+            tools: {},
+            tasks: {
+              list: {},
+              cancel: {},
+              requests: { tools: { call: {} } },
+            },
+          },
+        }
+      );
+
+      const toolControls = registerFetchUrlTool(server);
+      toolControls.setTaskSupport('forbidden');
+      setTaskToolCallCapability(server, false);
+
+      const capabilities = getPrivateObject<{
+        tasks?: { requests?: Record<string, unknown> };
+      }>(server.server, '_capabilities');
+      assert.equal(capabilities?.tasks?.requests?.tools, undefined);
+
+      const requestHandlers = getPrivateMap(server.server, '_requestHandlers');
+      const listTools = requestHandlers.get('tools/list') as (
+        request: unknown
+      ) => Promise<{
+        tools?: { name: string; execution?: { taskSupport?: string } }[];
+      }>;
+      const result = await listTools({ method: 'tools/list' });
+      const fetchTool = result.tools?.find((tool) => tool.name === 'fetch-url');
+      assert.ok(fetchTool);
+      assert.equal(fetchTool.execution?.taskSupport, 'forbidden');
+
+      await server.close();
     });
   });
 

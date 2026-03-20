@@ -6,6 +6,7 @@ export interface TaskCapableToolDescriptor<TArgs = unknown> {
   name: string;
   parseArguments: (args: unknown) => TArgs;
   execute: (args: TArgs, extra?: ToolHandlerExtra) => Promise<ServerResult>;
+  getCompletionStatusMessage?: (result: ServerResult) => string | undefined;
 }
 
 const taskCapableTools = new Map<string, TaskCapableToolDescriptor>();

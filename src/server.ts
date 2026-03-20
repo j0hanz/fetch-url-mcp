@@ -13,6 +13,7 @@ import {
   setLogLevel,
   setMcpServer,
 } from './lib/core.js';
+import { setTaskToolCallCapability } from './lib/sdk-interop.js';
 import {
   abortAllTaskExecutions,
   registerTaskHandlers,
@@ -26,7 +27,7 @@ import {
   registerInstructionResource,
 } from './resources/index.js';
 import { buildServerInstructions } from './resources/instructions.js';
-import { registerAllTools } from './tools/index.js';
+import { registerTools as registerFetchUrlTool } from './tools/fetch-url.js';
 import { shutdownTransformWorkerPool } from './transform/transform.js';
 
 /* -------------------------------------------------------------------------------------------------
@@ -72,6 +73,13 @@ function createServerCapabilities(): McpServerCapabilities {
       },
     },
   };
+}
+
+function syncTaskCapabilityAdvertisement(
+  server: McpServer,
+  taskToolCallEnabled: boolean
+): void {
+  setTaskToolCallCapability(server, taskToolCallEnabled);
 }
 
 interface ServerInfo {
@@ -134,13 +142,16 @@ async function createMcpServerWithOptions(
     setMcpServer(server);
   }
 
-  registerAllTools(server);
+  const toolControls = registerFetchUrlTool(server);
   registerGetHelpPrompt(server, serverInstructions, localIcon);
   registerInstructionResource(server, serverInstructions, localIcon);
   registerCacheResourceTemplate(server, localIcon);
-  registerTaskHandlers(server, {
+  const taskRegistration = registerTaskHandlers(server, {
     requireInterception: config.tasks.requireInterception,
   });
+  const taskToolCallEnabled = taskRegistration.interceptedToolsCall;
+  toolControls.setTaskSupport(taskToolCallEnabled ? 'optional' : 'forbidden');
+  syncTaskCapabilityAdvertisement(server, taskToolCallEnabled);
   registerLoggingSetLevelHandler(server);
   attachServerErrorHandler(server);
 

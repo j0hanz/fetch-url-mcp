@@ -1,10 +1,17 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 
 import type { ServerResult } from '@modelcontextprotocol/sdk/types.js';
 import { z } from 'zod';
 
+import { getRequestId, runWithRequestContext } from '../lib/core.js';
 import type { ProgressNotification } from '../lib/progress.js';
-import { isObject } from '../lib/utils.js';
+import type { ToolHandlerExtra } from '../lib/progress.js';
+import { isObject, readNestedRecord } from '../lib/utils.js';
+
+import {
+  sanitizeToolCallMeta,
+  type ToolCallRequestMeta,
+} from './call-contract.js';
 
 /* -------------------------------------------------------------------------------------------------
  * Handler extra parsing & owner-key resolution
@@ -16,15 +23,19 @@ interface HandlerExtra {
   signal?: AbortSignal;
   requestId?: string | number;
   sendNotification?: (notification: ProgressNotification) => Promise<void>;
+  requestInfo?: unknown;
 }
 
-export interface ToolCallContext {
+export interface ToolExecutionContext {
   ownerKey: string;
   sessionId?: string;
   signal?: AbortSignal;
   requestId?: string | number;
   sendNotification?: (notification: ProgressNotification) => Promise<void>;
+  requestMeta?: ToolCallRequestMeta;
 }
+
+export type ToolCallContext = ToolExecutionContext;
 
 /** Strip keys whose value is `undefined`, returning an object with only the
  * present keys. Return type correctly omits the `undefined` union so the result
@@ -105,14 +116,81 @@ export function resolveTaskOwnerKey(extra?: HandlerExtra): string {
   return 'default';
 }
 
-export function resolveToolCallContext(extra?: HandlerExtra): ToolCallContext {
+export function resolveRequestIdFromExtra(extra: unknown): string | undefined {
+  if (!isObject(extra)) return undefined;
+
+  const { requestId } = extra as { requestId?: unknown };
+  if (typeof requestId === 'string') return requestId;
+  if (typeof requestId === 'number') return String(requestId);
+
+  return undefined;
+}
+
+export function resolveSessionIdFromExtra(extra: unknown): string | undefined {
+  if (!isObject(extra)) return undefined;
+
+  const { sessionId } = extra as { sessionId?: unknown };
+  if (typeof sessionId === 'string') return sessionId;
+
+  const headers = readNestedRecord(extra, ['requestInfo', 'headers']);
+  const headerValue = headers ? headers['mcp-session-id'] : undefined;
+  return typeof headerValue === 'string' ? headerValue : undefined;
+}
+
+export function resolveToolExecutionContext(
+  extra?: HandlerExtra,
+  requestMeta?: ToolCallRequestMeta
+): ToolExecutionContext {
   return compact({
     ownerKey: resolveTaskOwnerKey(extra),
     sessionId: extra?.sessionId,
     signal: extra?.signal,
     requestId: extra?.requestId,
     sendNotification: extra?.sendNotification,
-  }) as ToolCallContext;
+    requestMeta: sanitizeToolCallMeta(requestMeta),
+  }) as ToolExecutionContext;
+}
+
+export function resolveToolCallContext(
+  extra?: HandlerExtra,
+  requestMeta?: ToolCallRequestMeta
+): ToolCallContext {
+  return resolveToolExecutionContext(extra, requestMeta);
+}
+
+export function buildToolHandlerExtra(
+  context: ToolExecutionContext,
+  requestMeta?: ToolCallRequestMeta
+): ToolHandlerExtra {
+  return compact({
+    signal: context.signal,
+    requestId: context.requestId,
+    sendNotification: context.sendNotification,
+    _meta: sanitizeToolCallMeta(requestMeta ?? context.requestMeta),
+  }) as ToolHandlerExtra;
+}
+
+export function withRequestContextIfMissing<TParams, TResult, TExtra = unknown>(
+  handler: (params: TParams, extra?: TExtra) => Promise<TResult>
+): (params: TParams, extra?: TExtra) => Promise<TResult> {
+  return async (params, extra) => {
+    const existingRequestId = getRequestId();
+    if (existingRequestId) {
+      return handler(params, extra);
+    }
+
+    const derivedRequestId = resolveRequestIdFromExtra(extra) ?? randomUUID();
+    const derivedSessionId = resolveSessionIdFromExtra(extra);
+
+    return runWithRequestContext(
+      {
+        requestId: derivedRequestId,
+        operationId: derivedRequestId,
+        ...(derivedSessionId ? { sessionId: derivedSessionId } : {}),
+      },
+      () => handler(params, extra)
+    );
+  };
 }
 
 export function isServerResult(value: unknown): value is ServerResult {

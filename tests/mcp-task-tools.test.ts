@@ -32,6 +32,63 @@ function getRequestHandler(
 }
 
 describe('MCP task-augmented tools', () => {
+  it('strips client-supplied related-task metadata from direct-call progress notifications', async (t) => {
+    const server = await createMcpServer();
+    const notifications: Array<{
+      method?: string;
+      params?: {
+        progressToken?: string;
+        _meta?: {
+          'io.modelcontextprotocol/related-task'?: { taskId?: string };
+        };
+      };
+    }> = [];
+
+    t.mock.method(globalThis, 'fetch', async () => {
+      return new Response('<html><body><p>Direct fetch</p></body></html>', {
+        status: 200,
+        headers: { 'content-type': 'text/html' },
+      });
+    });
+
+    try {
+      const callTool = getRequestHandler(server, 'tools/call');
+
+      await callTool(
+        {
+          method: 'tools/call',
+          params: {
+            name: 'fetch-url',
+            arguments: { url: 'https://example.com/direct-progress' },
+            _meta: {
+              progressToken: 'prog-direct',
+              'io.modelcontextprotocol/related-task': { taskId: 'forged-task' },
+            },
+          },
+        },
+        {
+          sendNotification: async (notification: unknown) => {
+            notifications.push(notification as (typeof notifications)[number]);
+          },
+        }
+      );
+
+      const progressNotifications = notifications.filter(
+        (notification) => notification.method === 'notifications/progress'
+      );
+      assert.ok(progressNotifications.length > 0);
+      for (const notification of progressNotifications) {
+        assert.equal(notification.params?.progressToken, 'prog-direct');
+        assert.equal(
+          notification.params?._meta?.['io.modelcontextprotocol/related-task'],
+          undefined
+        );
+      }
+    } finally {
+      await server.close();
+    }
+  });
+
   it('supports task-augmented fetch-url calls and task polling', async (t) => {
     const server = await createMcpServer();
 
@@ -189,12 +246,100 @@ describe('MCP task-augmented tools', () => {
             method: 'tasks/result',
             params: { taskId },
           }),
-        (error: unknown) =>
-          error instanceof Error && error.message.includes('Task was cancelled')
+        (error: unknown) => {
+          assert.ok(error instanceof Error);
+          assert.equal(
+            (error as Error & { code?: number }).code,
+            -32600,
+            'cancelled tasks/result should use InvalidRequest'
+          );
+          assert.match(error.message, /Task was cancelled/);
+          assert.deepEqual((error as Error & { data?: unknown }).data, {
+            taskId,
+            status: 'cancelled',
+            statusMessage: 'The task was cancelled by request.',
+          });
+          return true;
+        }
       );
 
       await new Promise((resolve) => setTimeout(resolve, 250));
       assert.equal(notifications.length, notificationCountAtCancel);
+    } finally {
+      await server.close();
+    }
+  });
+
+  it('emits task progress notifications on the original progress token with the real related-task id', async (t) => {
+    const server = await createMcpServer();
+    const notifications: Array<{
+      method?: string;
+      params?: {
+        progressToken?: string;
+        progress?: number;
+        _meta?: {
+          'io.modelcontextprotocol/related-task'?: { taskId?: string };
+        };
+      };
+    }> = [];
+
+    t.mock.method(globalThis, 'fetch', async () => {
+      return new Response('<html><body><p>Task progress</p></body></html>', {
+        status: 200,
+        headers: { 'content-type': 'text/html' },
+      });
+    });
+
+    try {
+      const callTool = getRequestHandler(server, 'tools/call');
+      const getTaskResult = getRequestHandler(server, 'tasks/result');
+
+      const createResult = (await callTool(
+        {
+          method: 'tools/call',
+          params: {
+            name: 'fetch-url',
+            arguments: { url: 'https://example.com/task-progress' },
+            task: { ttl: 10_000 },
+            _meta: {
+              progressToken: 'prog-task',
+              'io.modelcontextprotocol/related-task': { taskId: 'forged-task' },
+            },
+          },
+        },
+        {
+          sendNotification: async (notification: unknown) => {
+            notifications.push(notification as (typeof notifications)[number]);
+          },
+        }
+      )) as {
+        task?: { taskId?: string };
+      };
+
+      const taskId = createResult.task?.taskId;
+      assert.ok(taskId);
+
+      await getTaskResult({
+        jsonrpc: '2.0',
+        id: 30,
+        method: 'tasks/result',
+        params: { taskId },
+      });
+      await new Promise((resolve) => setImmediate(resolve));
+
+      const progressNotifications = notifications.filter(
+        (notification) => notification.method === 'notifications/progress'
+      );
+      assert.ok(progressNotifications.length > 0);
+
+      for (const notification of progressNotifications) {
+        assert.equal(notification.params?.progressToken, 'prog-task');
+        assert.equal(
+          notification.params?._meta?.['io.modelcontextprotocol/related-task']
+            ?.taskId,
+          taskId
+        );
+      }
     } finally {
       await server.close();
     }

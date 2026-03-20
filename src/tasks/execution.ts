@@ -7,19 +7,21 @@ import {
 
 import { config } from '../lib/core.js';
 import { logWarn, runWithRequestContext } from '../lib/core.js';
-import type {
-  ProgressNotification,
-  ToolHandlerExtra,
-} from '../lib/progress.js';
+import type { ProgressNotification } from '../lib/progress.js';
 import { getErrorMessage } from '../lib/utils.js';
 import { isObject } from '../lib/utils.js';
 
+import {
+  buildRelatedTaskMeta,
+  type ExtendedCallToolRequest,
+} from './call-contract.js';
 import {
   type CreateTaskResult,
   taskManager,
   type TaskState,
 } from './manager.js';
 import {
+  buildToolHandlerExtra,
   compact,
   type ToolCallContext,
   tryReadToolStructuredError,
@@ -31,34 +33,6 @@ import {
 } from './tool-registry.js';
 
 const TASK_NOT_FOUND_ERROR_CODE = ErrorCode.InvalidParams;
-
-/* -------------------------------------------------------------------------------------------------
- * Extended tool-call request shape (task-aware)
- * ------------------------------------------------------------------------------------------------- */
-
-export interface ExtendedCallToolRequest {
-  method: 'tools/call';
-  params: {
-    name: string;
-    arguments?: Record<string, unknown> | undefined;
-    task?:
-      | {
-          ttl?: number | undefined;
-        }
-      | undefined;
-    _meta?:
-      | {
-          progressToken?: string | number | undefined;
-          'io.modelcontextprotocol/related-task'?:
-            | { taskId: string }
-            | undefined;
-          [key: string]: unknown;
-        }
-      | undefined;
-    [key: string]: unknown;
-  };
-  [key: string]: unknown;
-}
 
 /* -------------------------------------------------------------------------------------------------
  * Abort-controller management for in-flight task executions
@@ -148,23 +122,6 @@ export function toTaskSummary(task: {
   };
 }
 
-export function withRelatedTaskMeta(
-  result: ServerResult,
-  taskId: string
-): ServerResult {
-  const relatedTaskMeta = {
-    'io.modelcontextprotocol/related-task': { taskId },
-  };
-
-  return {
-    ...result,
-    _meta: {
-      ...result._meta,
-      ...relatedTaskMeta,
-    },
-  };
-}
-
 export function emitTaskStatusNotification(
   server: McpServer,
   task: TaskState
@@ -223,20 +180,6 @@ function assertKnownTool(name: string): void {
   if (!hasTaskCapableTool(name)) {
     throw new McpError(ErrorCode.MethodNotFound, `Unknown tool: '${name}'`);
   }
-}
-
-/* -------------------------------------------------------------------------------------------------
- * Task result builders
- * ------------------------------------------------------------------------------------------------- */
-
-function buildRelatedTaskMeta(
-  taskId: string,
-  meta?: ExtendedCallToolRequest['params']['_meta']
-): Record<string, unknown> {
-  return {
-    ...(meta ?? {}),
-    'io.modelcontextprotocol/related-task': { taskId },
-  };
 }
 
 function buildCreateTaskResult(
@@ -306,7 +249,8 @@ function resolveToolAndArgs(params: ExtendedCallToolRequest['params']): {
 }
 
 function buildTaskCompletionUpdate(
-  result: Awaited<ReturnType<TaskCapableToolDescriptor['execute']>>
+  result: Awaited<ReturnType<TaskCapableToolDescriptor['execute']>>,
+  tool: TaskCapableToolDescriptor
 ): Parameters<(typeof taskManager)['updateTask']>[1] {
   const isToolError =
     isObject(result) && 'isError' in result && result.isError === true;
@@ -315,7 +259,8 @@ function buildTaskCompletionUpdate(
     status: isToolError ? 'failed' : 'completed',
     statusMessage: isToolError
       ? (tryReadToolStructuredError(result) ?? 'Tool execution failed')
-      : 'Task completed successfully.',
+      : (tool.getCompletionStatusMessage?.(result) ??
+        'Task completed successfully.'),
     result,
   };
 }
@@ -359,7 +304,7 @@ async function runTaskToolExecution(params: {
         updateTaskAndEmitStatus(
           server,
           taskId,
-          buildTaskCompletionUpdate(result)
+          buildTaskCompletionUpdate(result, tool)
         );
       } catch (error: unknown) {
         const failure = buildTaskFailureState(error);
@@ -409,15 +354,7 @@ async function handleDirectToolCall(
   context: ToolCallContext
 ): Promise<ServerResult> {
   const { tool, args } = resolveToolAndArgs(params);
-
-  const extra = compact({
-    signal: context.signal,
-    requestId: context.requestId,
-    sendNotification: context.sendNotification,
-    _meta: params._meta,
-  }) as ToolHandlerExtra;
-
-  return tool.execute(args, extra);
+  return tool.execute(args, buildToolHandlerExtra(context, params._meta));
 }
 
 export async function handleToolCallRequest(

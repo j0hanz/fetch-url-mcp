@@ -48,6 +48,9 @@ function resolveRelatedTaskMeta(
 class ToolProgressReporter implements ProgressReporter {
   private isTerminal = false;
   private lastProgress = -1;
+  private lastMessage: string | undefined;
+  private pendingNotification: ProgressNotification | undefined;
+  private isDispatching = false;
 
   private constructor(
     private readonly token: ProgressToken | null,
@@ -92,14 +95,15 @@ class ToolProgressReporter implements ProgressReporter {
     if (this.canReportProgress && !this.canReportProgress()) return;
     const effectiveProgress = Math.max(progress, this.lastProgress);
     const isIncreasing = effectiveProgress > this.lastProgress;
+    const isMessageChanged = message !== this.lastMessage;
     this.lastProgress = effectiveProgress;
+    this.lastMessage = message;
 
     if (effectiveProgress >= FETCH_PROGRESS_TOTAL) {
       this.isTerminal = true;
     }
-    // Only fire onProgress when progress actually increases to avoid duplicate
-    // task status updates (onProgress drives updateWorkingTaskStatus in task mode).
-    if (isIncreasing && this.onProgress) {
+
+    if ((isIncreasing || isMessageChanged) && this.onProgress) {
       try {
         this.onProgress(effectiveProgress, message);
       } catch (error: unknown) {
@@ -111,49 +115,76 @@ class ToolProgressReporter implements ProgressReporter {
       }
     }
     if (!isIncreasing || this.token === null || !this.sendNotification) return;
-    const { sendNotification } = this;
 
-    const notification = this.createProgressNotification(
+    this.pendingNotification = this.createProgressNotification(
       this.token,
       effectiveProgress,
       message
     );
+    this.flushNotifications();
+  }
 
-    // Fire without chaining to avoid queue buildup and delayed reports
-    // that could fire after the task reaches a terminal state.
+  private flushNotifications(): void {
+    if (this.isDispatching || !this.sendNotification) return;
+    this.isDispatching = true;
+
     void (async (): Promise<void> => {
-      let timeoutId: NodeJS.Timeout | undefined;
-      const timeoutPromise = new Promise<{ timeout: true }>((resolve) => {
-        timeoutId = setTimeout(() => {
-          resolve({ timeout: true });
-        }, PROGRESS_NOTIFICATION_TIMEOUT_MS);
-        timeoutId.unref();
-      });
-
       try {
-        const outcome = await Promise.race([
-          sendNotification(notification).then(() => ({ ok: true as const })),
-          timeoutPromise,
-        ]);
+        while (this.pendingNotification) {
+          if (this.canReportProgress && !this.canReportProgress()) {
+            this.pendingNotification = undefined;
+            return;
+          }
 
-        if ('timeout' in outcome) {
-          logWarn('Progress notification timed out', {
-            progress: effectiveProgress,
-            message,
-          });
+          const notification = this.pendingNotification;
+          this.pendingNotification = undefined;
+          await this.sendWithTimeout(notification);
         }
-      } catch (error: unknown) {
-        logWarn('Failed to send progress notification', {
-          error: getErrorMessage(error),
-          progress: effectiveProgress,
-          message,
-        });
       } finally {
-        if (timeoutId) {
-          clearTimeout(timeoutId);
+        this.isDispatching = false;
+        if (this.pendingNotification) {
+          this.flushNotifications();
         }
       }
     })();
+  }
+
+  private async sendWithTimeout(
+    notification: ProgressNotification
+  ): Promise<void> {
+    if (!this.sendNotification) return;
+
+    let timeoutId: NodeJS.Timeout | undefined;
+    const timeoutPromise = new Promise<{ timeout: true }>((resolve) => {
+      timeoutId = setTimeout(() => {
+        resolve({ timeout: true });
+      }, PROGRESS_NOTIFICATION_TIMEOUT_MS);
+      timeoutId.unref();
+    });
+
+    try {
+      const outcome = await Promise.race([
+        this.sendNotification(notification).then(() => ({ ok: true as const })),
+        timeoutPromise,
+      ]);
+
+      if ('timeout' in outcome) {
+        logWarn('Progress notification timed out', {
+          progress: notification.params.progress,
+          message: notification.params.message,
+        });
+      }
+    } catch (error: unknown) {
+      logWarn('Failed to send progress notification', {
+        error: getErrorMessage(error),
+        progress: notification.params.progress,
+        message: notification.params.message,
+      });
+    } finally {
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+      }
+    }
   }
 
   private createProgressNotification(

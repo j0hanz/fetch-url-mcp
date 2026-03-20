@@ -22,10 +22,7 @@ import {
   logError,
   logInfo,
   registerMcpSessionServer,
-  resolveMcpSessionIdByServer,
   runWithRequestContext,
-  unregisterMcpSessionServer,
-  unregisterMcpSessionServerByServer,
 } from '../lib/core.js';
 import {
   composeCloseHandlers,
@@ -45,7 +42,6 @@ import {
   isMcpRequestBody,
   type JsonRpcId,
 } from '../lib/mcp-tools.js';
-import { cancelTasksForOwner } from '../lib/task-handlers.js';
 import { toError } from '../lib/utils.js';
 import {
   applyHttpServerTuning,
@@ -99,6 +95,10 @@ import {
   createRateLimitManagerImpl,
   type RateLimitManagerImpl,
 } from './rate-limit.js';
+import {
+  teardownSessionRegistration,
+  teardownSessionResources,
+} from './session-teardown.js';
 
 // ---------------------------------------------------------------------------
 // MCP session gateway
@@ -480,13 +480,10 @@ class McpSessionGateway {
     const session = this.store.remove(sessionId);
     if (!session) return;
 
-    cancelTasksForOwner(
-      `session:${sessionId}`,
-      'The task was cancelled because the MCP session ended.'
-    );
-
-    unregisterMcpSessionServer(sessionId);
-    void closeMcpServerBestEffort(session.server, `${context}-server`);
+    void teardownSessionResources(session, {
+      cancelMessage: 'The task was cancelled because the MCP session ended.',
+      closeServerReason: `${context}-server`,
+    });
   }
 
   private reserveCapacity(res: ServerResponse, requestId: JsonRpcId): boolean {
@@ -496,18 +493,13 @@ class McpSessionGateway {
       evictOldest: (store) => {
         const evicted = store.evictOldest();
         if (evicted) {
-          const sessionId = resolveMcpSessionIdByServer(evicted.server);
-          if (sessionId) {
-            cancelTasksForOwner(
-              `session:${sessionId}`,
-              'The task was cancelled because the MCP session was evicted.'
-            );
-            unregisterMcpSessionServer(sessionId);
-          }
-
-          unregisterMcpSessionServerByServer(evicted.server);
-          void closeTransportBestEffort(evicted.transport, 'session-eviction');
-          void closeMcpServerBestEffort(evicted.server, 'session-eviction');
+          void teardownSessionResources(evicted, {
+            cancelMessage:
+              'The task was cancelled because the MCP session was evicted.',
+            closeTransportReason: 'session-eviction',
+            closeServerReason: 'session-eviction',
+            unregisterByServer: true,
+          });
           return true;
         }
         return false;
@@ -870,24 +862,14 @@ function createShutdownHandler(options: {
       const batch = sessions.slice(i, i + closeBatchSize);
       await Promise.all(
         batch.map(async (session) => {
-          const sessionId = resolveMcpSessionIdByServer(session.server);
-          if (sessionId) {
-            cancelTasksForOwner(
-              `session:${sessionId}`,
-              'The task was cancelled because the HTTP server is shutting down.'
-            );
-            unregisterMcpSessionServer(sessionId);
-          }
-
-          unregisterMcpSessionServerByServer(session.server);
-          await closeTransportBestEffort(
-            session.transport,
-            'shutdown-session-close'
-          );
-          await closeMcpServerBestEffort(
-            session.server,
-            'shutdown-session-close'
-          );
+          await teardownSessionResources(session, {
+            cancelMessage:
+              'The task was cancelled because the HTTP server is shutting down.',
+            closeTransportReason: 'shutdown-session-close',
+            closeServerReason: 'shutdown-session-close',
+            unregisterByServer: true,
+            awaitClose: true,
+          });
         })
       );
     }
@@ -919,14 +901,10 @@ export async function startHttpServer(): Promise<{
     config.server.sessionTtlMs,
     {
       onEvictSession: (session) => {
-        const sessionId = resolveMcpSessionIdByServer(session.server);
-        if (!sessionId) return;
-
-        cancelTasksForOwner(
-          `session:${sessionId}`,
+        teardownSessionRegistration(
+          session.server,
           'The task was cancelled because the MCP session expired.'
         );
-        unregisterMcpSessionServer(sessionId);
       },
     }
   );

@@ -1,13 +1,15 @@
-import { AsyncLocalStorage } from 'node:async_hooks';
-import { Buffer } from 'node:buffer';
 import { randomUUID } from 'node:crypto';
 import { setInterval } from 'node:timers';
 
 import { ErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js';
 
 import { config } from '../lib/core.js';
-import { toError } from '../lib/utils.js';
-import { type CancellableTimeout, createUnrefTimeout } from '../lib/utils.js';
+
+import { decodeTaskCursor, encodeTaskCursor } from './cursor-codec.js';
+import {
+  TaskWaiterRegistry,
+  waitForTerminalTask as waitForTerminalTaskWithDeadline,
+} from './waiters.js';
 
 export type TaskStatus = 'working' | 'completed' | 'failed' | 'cancelled';
 
@@ -60,7 +62,6 @@ const DEFAULT_OWNER_KEY = 'default';
 const DEFAULT_PAGE_SIZE = 50;
 
 const CLEANUP_INTERVAL_MS = 60_000;
-const MAX_CURSOR_LENGTH = 256;
 const RESULT_DELIVERY_GRACE_MS = 10_000;
 const TASK_STATUS_VALUES = new Set<TaskStatus>([
   'working',
@@ -125,7 +126,9 @@ function normalizeTaskTtl(ttl: number | undefined): number {
 class TaskManager {
   private tasks = new Map<string, InternalTaskState>();
   private ownerCounts = new Map<string, number>();
-  private waiters = new Map<string, Set<(task: TaskState) => void>>();
+  private readonly waiters = new TaskWaiterRegistry<InternalTaskState>(
+    isTerminalStatus
+  );
   private cleanupInterval: ReturnType<typeof setInterval> | null = null;
 
   private ensureCleanupLoop(): void {
@@ -394,35 +397,11 @@ class TaskManager {
 
   private resolveAnchorTaskId(cursor?: string): string | null {
     if (cursor === undefined) return null;
-    const decoded = this.decodeCursor(cursor);
+    const decoded = decodeTaskCursor(cursor);
     if (decoded === null) {
       throw new McpError(ErrorCode.InvalidParams, 'Invalid cursor');
     }
     return decoded.anchorTaskId;
-  }
-
-  private addWaiter(taskId: string, waiter: (task: TaskState) => void): void {
-    let set = this.waiters.get(taskId);
-    if (!set) {
-      set = new Set();
-      this.waiters.set(taskId, set);
-    }
-    set.add(waiter);
-  }
-
-  private removeWaiter(
-    taskId: string,
-    waiter: ((task: TaskState) => void) | null
-  ): void {
-    if (!waiter) return;
-
-    const set = this.waiters.get(taskId);
-    if (!set) return;
-
-    set.delete(waiter);
-    if (set.size === 0) {
-      this.waiters.delete(taskId);
-    }
   }
 
   async waitForTerminalTask(
@@ -430,106 +409,22 @@ class TaskManager {
     ownerKey: string,
     signal?: AbortSignal
   ): Promise<TaskState | undefined> {
-    const task = this.lookupActiveTask(taskId, ownerKey);
-    if (!task) return undefined;
-
-    if (isTerminalStatus(task.status)) return task;
-
-    // isExpired() above guarantees task.ttl has not elapsed; compute deadlineMs
-    // for the promise-based timeout below.
-    const deadlineMs = task._createdAtMs + task.ttl;
-
-    return new Promise((resolve, reject) => {
-      // Bind resolve/reject to the AsyncLocalStorage context of the caller, so that any context values (e.g. requestId) are preserved when we later call them from a different tick.
-      const resolveInContext = AsyncLocalStorage.bind(
-        (value: TaskState | undefined): void => {
-          resolve(value);
-        }
-      );
-      const rejectInContext = AsyncLocalStorage.bind((error: unknown): void => {
-        reject(toError(error));
-      });
-
-      let settled = false;
-      let waiter: ((updated: TaskState) => void) | null = null;
-      let deadlineTimeout: CancellableTimeout<{ timeout: true }> | undefined;
-
-      const cleanup = (): void => {
-        if (deadlineTimeout) {
-          deadlineTimeout.cancel();
-          deadlineTimeout = undefined;
-        }
-        if (signal) {
-          signal.removeEventListener('abort', onAbort);
-        }
-      };
-
-      const settleOnce = (fn: () => void): void => {
-        if (settled) return;
-        settled = true;
-        fn();
-      };
-
-      const onAbort = (): void => {
-        settleOnce(() => {
-          cleanup();
-          this.removeWaiter(taskId, waiter);
-          rejectInContext(
-            new McpError(ErrorCode.ConnectionClosed, 'Request was cancelled')
-          );
-        });
-      };
-
-      waiter = (updated: TaskState): void => {
-        settleOnce(() => {
-          cleanup();
-          if (updated.ownerKey !== ownerKey) {
-            resolveInContext(undefined);
-            return;
-          }
-          resolveInContext(updated);
-        });
-      };
-
-      if (signal?.aborted) {
-        onAbort();
-        return;
-      }
-
-      this.addWaiter(taskId, waiter);
-
-      if (signal) {
-        signal.addEventListener('abort', onAbort, { once: true });
-      }
-
-      const timeoutMs = Math.max(0, deadlineMs - Date.now());
-
-      deadlineTimeout = createUnrefTimeout(timeoutMs, { timeout: true });
-      void deadlineTimeout.promise
-        .then(() => {
-          settleOnce(() => {
-            cleanup();
-            this.removeWaiter(taskId, waiter);
-            this.removeTask(taskId);
-            rejectInContext(
-              new McpError(ErrorCode.InvalidParams, 'Task expired', {
-                taskId,
-              })
-            );
-          });
-        })
-        .catch(rejectInContext);
+    return waitForTerminalTaskWithDeadline({
+      taskId,
+      ownerKey,
+      ...(signal ? { signal } : {}),
+      lookupTask: (currentTaskId, currentOwnerKey) =>
+        this.lookupActiveTask(currentTaskId, currentOwnerKey),
+      removeTask: (currentTaskId) => {
+        this.removeTask(currentTaskId);
+      },
+      registry: this.waiters,
+      isTerminalStatus,
     });
   }
 
   private notifyWaiters(task: TaskState): void {
-    if (!isTerminalStatus(task.status)) return;
-
-    const waiters = this.waiters.get(task.taskId);
-    if (!waiters) return;
-
-    this.waiters.delete(task.taskId);
-    for (const waiter of waiters) waiter(task);
+    this.waiters.notify(task as InternalTaskState);
   }
 
   private isExpired(task: InternalTaskState, now = Date.now()): boolean {
@@ -553,46 +448,14 @@ class TaskManager {
     }
   }
 
-  private encodeCursor(taskId: string): string {
-    // Base64url-encode the taskId to produce a compact opaque cursor string.
-    // The taskId is a UUID, which is 36 ASCII chars, so the resulting cursor will be 48 chars (36 * 4/3) plus padding if any.
-    return Buffer.from(taskId, 'utf8').toString('base64url');
-  }
-
-  private decodeCursor(cursor: string): { anchorTaskId: string } | null {
-    try {
-      if (!isValidBase64UrlCursor(cursor)) return null;
-      const decoded = Buffer.from(cursor, 'base64url').toString('utf8');
-      // Basic sanity: non-empty and plausible taskId length (UUIDs are 36 chars)
-      if (!decoded || decoded.length > 128) return null;
-      return { anchorTaskId: decoded };
-    } catch {
-      return null;
-    }
-  }
-
   private resolveNextCursor(
     page: TaskState[],
     hasMore: boolean
   ): string | undefined {
     if (!hasMore) return undefined;
     const lastTask = page.at(-1);
-    return lastTask ? this.encodeCursor(lastTask.taskId) : undefined;
+    return lastTask ? encodeTaskCursor(lastTask.taskId) : undefined;
   }
-}
-
-function isValidBase64UrlCursor(cursor: string): boolean {
-  if (!cursor) return false;
-  if (cursor.length > MAX_CURSOR_LENGTH) return false;
-  if (!/^[A-Za-z0-9_-]+={0,2}$/u.test(cursor)) return false;
-  const firstPaddingIndex = cursor.indexOf('=');
-  if (firstPaddingIndex !== -1) {
-    for (let i = firstPaddingIndex; i < cursor.length; i += 1) {
-      if (cursor[i] !== '=') return false;
-    }
-    return cursor.length % 4 === 0;
-  }
-  return cursor.length % 4 !== 1;
 }
 
 export const taskManager = new TaskManager();

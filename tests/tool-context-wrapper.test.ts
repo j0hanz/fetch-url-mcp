@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { describe, it, mock } from 'node:test';
 
 import { getRequestId, runWithRequestContext } from '../dist/lib/core.js';
-import { withRequestContextIfMissing } from '../dist/tools/fetch-url.js';
+import { withRequestContextIfMissing } from '../dist/tasks/owner.js';
 
 describe('withRequestContextIfMissing', () => {
   it('establishes a request context when none exists', async () => {
@@ -42,35 +42,69 @@ describe('withRequestContextIfMissing', () => {
 });
 
 describe('Progress notification timeout', () => {
-  it('times out progress notifications after 5 seconds', async () => {
+  it('coalesces queued progress updates while one notification is in flight', async () => {
     const { createProgressReporter } = await import('../dist/lib/progress.js');
-    const startTime = Date.now();
+    let resolveFirstSend: (() => void) | undefined;
+    const sentProgress: number[] = [];
 
-    // Mock sendNotification that takes 10 seconds (longer than 5-second timeout)
-    const sendNotificationMock = mock.fn(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 10000));
+    const sendNotificationMock = mock.fn(async (notification) => {
+      sentProgress.push(
+        (notification as { params: { progress: number } }).params.progress
+      );
+
+      if (sentProgress.length === 1) {
+        await new Promise<void>((resolve) => {
+          resolveFirstSend = resolve;
+        });
+      }
     });
 
-    const extra = {
+    const reporter = createProgressReporter({
       _meta: { progressToken: 'test-token' },
       sendNotification: sendNotificationMock,
-    };
+    });
 
-    const reporter = createProgressReporter(extra);
+    reporter.report(1, 'Preparing request');
+    reporter.report(2, 'Resolving URL');
+    reporter.report(3, 'Checking cache');
 
-    // Progress report should timeout after 5 seconds, not wait 10 seconds
-    await reporter.report(50, 'test progress');
-
-    const elapsedMs = Date.now() - startTime;
-
-    // Verify it completed in less than 8 seconds (giving buffer for test execution)
-    assert.ok(
-      elapsedMs < 8000,
-      `Expected timeout within 8s but took ${elapsedMs}ms`
-    );
-
-    // Verify sendNotification was called
     assert.equal(sendNotificationMock.mock.calls.length, 1);
+    resolveFirstSend?.();
+
+    await new Promise((resolve) => setImmediate(resolve));
+    await new Promise((resolve) => setImmediate(resolve));
+
+    assert.deepEqual(sentProgress, [1, 3]);
+    assert.equal(sendNotificationMock.mock.calls.length, 2);
+  });
+
+  it('times out an in-flight notification and then delivers the newest queued update', async () => {
+    const { createProgressReporter } = await import('../dist/lib/progress.js');
+    const sentProgress: number[] = [];
+
+    const sendNotificationMock = mock.fn(async (notification) => {
+      sentProgress.push(
+        (notification as { params: { progress: number } }).params.progress
+      );
+
+      if (sentProgress.length === 1) {
+        await new Promise(() => {});
+      }
+    });
+
+    const reporter = createProgressReporter({
+      _meta: { progressToken: 'test-timeout-token' },
+      sendNotification: sendNotificationMock,
+    });
+
+    reporter.report(1, 'Preparing request');
+    reporter.report(2, 'Resolving URL');
+
+    await new Promise((resolve) => setTimeout(resolve, 5_400));
+    await new Promise((resolve) => setImmediate(resolve));
+
+    assert.deepEqual(sentProgress, [1, 2]);
+    assert.equal(sendNotificationMock.mock.calls.length, 2);
   });
 
   it('suppresses progress after task execution is no longer reportable', async () => {
@@ -101,5 +135,27 @@ describe('Progress notification timeout', () => {
 
     assert.equal(onProgressMock.mock.calls.length, 1);
     assert.equal(sendNotificationMock.mock.calls.length, 1);
+  });
+
+  it('updates task status callbacks when the message changes at the same step', async () => {
+    const { createProgressReporter } = await import('../dist/lib/progress.js');
+    const onProgressMock = mock.fn();
+
+    const reporter = createProgressReporter({
+      onProgress: onProgressMock,
+    });
+
+    reporter.report(6, 'Parsing HTML -> Markdown');
+    reporter.report(6, 'Preparing output');
+
+    assert.equal(onProgressMock.mock.calls.length, 2);
+    assert.deepEqual(onProgressMock.mock.calls[0]?.arguments, [
+      6,
+      'Parsing HTML -> Markdown',
+    ]);
+    assert.deepEqual(onProgressMock.mock.calls[1]?.arguments, [
+      6,
+      'Preparing output',
+    ]);
   });
 });

@@ -140,6 +140,37 @@ describe('TaskManager.listTasks cursor', () => {
         err instanceof Error && err.message.toLowerCase().includes('cursor')
     );
   });
+
+  it('rejects legacy base64 task-id cursors and tampered opaque cursors', () => {
+    const ownerKey = `cursor-opaque-${Date.now()}`;
+    taskManager.createTask(undefined, 'Task 1', ownerKey);
+    taskManager.createTask(undefined, 'Task 2', ownerKey);
+    taskManager.createTask(undefined, 'Task 3', ownerKey);
+
+    const legacyCursor = Buffer.from('legacy-task-id', 'utf8').toString(
+      'base64url'
+    );
+    assert.throws(
+      () => taskManager.listTasks({ ownerKey, cursor: legacyCursor, limit: 1 }),
+      (err: unknown) =>
+        err instanceof Error && err.message.toLowerCase().includes('cursor')
+    );
+
+    const page1 = taskManager.listTasks({ ownerKey, limit: 2 });
+    assert.equal(typeof page1.nextCursor, 'string');
+    assert.ok(page1.nextCursor);
+
+    assert.throws(
+      () =>
+        taskManager.listTasks({
+          ownerKey,
+          cursor: `${page1.nextCursor}x`,
+          limit: 1,
+        }),
+      (err: unknown) =>
+        err instanceof Error && err.message.toLowerCase().includes('cursor')
+    );
+  });
 });
 
 describe('TaskManager.createTask ttl normalization', () => {
