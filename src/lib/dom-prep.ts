@@ -2,12 +2,20 @@ import { parseHTML } from 'linkedom';
 
 import { config, logDebug } from './core.js';
 
+// ── Thresholds ──────────────────────────────────────────────────────
 const NOISE_SCAN_LIMIT = 50_000;
 const MIN_BODY_CONTENT_LENGTH = 100;
 const DIALOG_MIN_CHARS_FOR_PRESERVATION = 500;
 const NAV_FOOTER_MIN_CHARS_FOR_PRESERVATION = 500;
 const ABORT_CHECK_INTERVAL = 500;
 const NODE_FILTER_SHOW_TEXT = 4;
+const ASIDE_NAV_LINK_DENSITY_THRESHOLD = 0.5;
+const ASIDE_NAV_MIN_LINKS = 10;
+const INLINE_DEMO_INSTRUCTION_MAX_CHARS = 160;
+const REDUNDANT_PREVIEW_SEGMENT_MAX_CHARS = 60;
+const REDUNDANT_PREVIEW_MAX_SEGMENTS = 12;
+
+// ── Regex patterns ──────────────────────────────────────────────────
 const HTML_DOCUMENT_MARKERS = /<\s*(?:!doctype|html|head|body)\b/i;
 const HTML_FRAGMENT_MARKERS =
   /<\s*(?:article|main|section|div|nav|footer|header|aside|table|ul|ol)\b/i;
@@ -24,6 +32,11 @@ const FIXED_OR_HIGH_Z_PATTERN = /\b(?:fixed|sticky|z-(?:4\d|50)|isolate)\b/;
 const HEADING_PERMALINK_TEXT_PATTERN = /^(?:#|¶|§|¤|🔗)$/u;
 const HEADING_PERMALINK_CLASS_PATTERN =
   /\b(?:mark|permalink|hash-link|anchor(?:js)?-?link|header-?link|heading-anchor|deep-link)\b/i;
+const HIDDEN_STYLE_REGEX =
+  /\b(?:display\s*:\s*none|visibility\s*:\s*hidden)\b/i;
+const NO_MATCH_REGEX = /a^/i;
+
+// ── URL prefixes to skip during resolution ──────────────────────────
 const SKIP_URL_PREFIXES = [
   '#',
   'javascript:',
@@ -32,6 +45,8 @@ const SKIP_URL_PREFIXES = [
   'data:',
   'blob:',
 ];
+
+// ── Tag / role sets ─────────────────────────────────────────────────
 const BASE_STRUCTURAL_TAGS = new Set([
   'script',
   'style',
@@ -57,9 +72,6 @@ const NAVIGATION_ROLES = new Set([
   'alertdialog',
   'search',
 ]);
-const INLINE_DEMO_INSTRUCTION_MAX_CHARS = 160;
-const REDUNDANT_PREVIEW_SEGMENT_MAX_CHARS = 60;
-const REDUNDANT_PREVIEW_MAX_SEGMENTS = 12;
 const INTERACTIVE_CONTENT_ROLES = new Set([
   'tabpanel',
   'tab',
@@ -74,6 +86,8 @@ const INTERACTIVE_CONTENT_ROLES = new Set([
   'tooltip',
   'alert',
 ]);
+
+// ── Promo tokens ────────────────────────────────────────────────────
 const PROMO_TOKENS_ALWAYS = [
   'banner',
   'promo',
@@ -98,7 +112,7 @@ const PROMO_TOKENS_ALWAYS = [
   'sharing',
 ];
 const PROMO_TOKENS_AGGRESSIVE = ['ad', 'related', 'comment'];
-const PROMO_TOKENS_BY_CATEGORY = {
+const PROMO_TOKENS_BY_CATEGORY: Record<string, string[]> = {
   'cookie-banners': ['cookie', 'consent', 'popup', 'modal', 'overlay', 'toast'],
   newsletters: ['newsletter', 'subscribe'],
   'social-share': ['share', 'social', 'share-button'],
@@ -111,7 +125,7 @@ const PROMO_TOKENS_BY_CATEGORY = {
   ],
 };
 
-// Noise selector configurations
+// ── Noise selector configurations ───────────────────────────────────
 const BASE_NOISE_SELECTORS = {
   navFooter:
     'nav,footer,header[class*="site"],header[class*="nav"],header[class*="menu"],[role="banner"],[role="navigation"],[class*="breadcrumb"]',
@@ -119,10 +133,9 @@ const BASE_NOISE_SELECTORS = {
   hidden:
     '[style*="display: none"],[style*="display:none"],[style*="visibility: hidden"],[style*="visibility:hidden"],[hidden],[aria-hidden="true"]',
 };
-const NO_MATCH_REGEX = /a^/i;
 
-// Noise removal types
-type NoiseRemovalConfig = typeof config.noiseRemoval;
+// ── Types ───────────────────────────────────────────────────────────
+type NoiseRemovalConfig = (typeof config)['noiseRemoval'];
 type NoiseWeights = NoiseRemovalConfig['weights'];
 interface PromoTokenMatchers {
   readonly base: RegExp;
@@ -141,6 +154,23 @@ interface NoiseContext {
   readonly baseSelector: string;
   readonly candidateSelector: string;
 }
+
+// ── Noise rule engine types ─────────────────────────────────────────
+interface ElementAttrs {
+  readonly tagName: string;
+  readonly className: string;
+  readonly id: string;
+  readonly role: string | null;
+  readonly isInteractive: boolean;
+  readonly isHidden: boolean;
+  readonly element: Element;
+}
+
+interface NoiseRule {
+  readonly weight: keyof NoiseWeights;
+  readonly test: (attrs: ElementAttrs, context: NoiseContext) => boolean;
+}
+
 let cachedContext: NoiseContext | undefined;
 let lastContextKey: string | undefined;
 
@@ -281,8 +311,6 @@ function isWithinPrimaryContent(element: Element): boolean {
   }
   return false;
 }
-const ASIDE_NAV_LINK_DENSITY_THRESHOLD = 0.5;
-const ASIDE_NAV_MIN_LINKS = 10;
 function isNavigationAside(element: Element): boolean {
   if (element.querySelector('nav')) return true;
   const links = element.querySelectorAll('a[href]');
@@ -327,98 +355,92 @@ function removeNodes(nodes: ArrayLike<Element>): void {
     }
   }
 }
-const HIDDEN_STYLE_REGEX =
-  /\b(?:display\s*:\s*none|visibility\s*:\s*hidden)\b/i;
 
-function calculateNavFooterScore(
-  tagName: string,
-  className: string,
-  id: string,
-  role: string | null,
-  weights: NoiseWeights
-): number {
-  let score = 0;
-  if (ALWAYS_NOISE_TAGS.has(tagName)) score += weights.structural;
-
-  if (tagName === 'header') {
-    if (
-      (role && NAVIGATION_ROLES.has(role)) ||
-      HEADER_NOISE_PATTERN.test(`${className} ${id}`)
-    ) {
-      score += weights.structural;
-    }
-  }
-
-  if (tagName === 'aside') {
-    score += weights.structural;
-  }
-
-  if (role && NAVIGATION_ROLES.has(role)) {
-    if (tagName !== 'aside' || role !== 'complementary') {
-      score += weights.structural;
-    }
-  }
-  return score;
-}
-
-function calculatePromoScore(
-  element: Element,
-  className: string,
-  id: string,
-  context: NoiseContext
-): number {
-  if (!context.promoEnabled) return 0;
-
+function isPromoMatch(attrs: ElementAttrs, context: NoiseContext): boolean {
+  if (!context.promoEnabled) return false;
   const aggTest =
-    context.promoMatchers.aggressive.test(className) ||
-    context.promoMatchers.aggressive.test(id);
-  const isAggressiveMatch = aggTest && !isWithinPrimaryContent(element);
-  const isBaseMatch =
-    !aggTest &&
-    (context.promoMatchers.base.test(className) ||
-      context.promoMatchers.base.test(id));
-
-  return isAggressiveMatch || isBaseMatch ? context.weights.promo : 0;
+    context.promoMatchers.aggressive.test(attrs.className) ||
+    context.promoMatchers.aggressive.test(attrs.id);
+  if (aggTest) return !isWithinPrimaryContent(attrs.element);
+  return (
+    context.promoMatchers.base.test(attrs.className) ||
+    context.promoMatchers.base.test(attrs.id)
+  );
 }
+
+const NOISE_RULES: readonly NoiseRule[] = [
+  // Structural tags (script, style, form, etc.) — not interactive
+  {
+    weight: 'structural',
+    test: (a, c) => c.structuralTags.has(a.tagName) && !a.isInteractive,
+  },
+  // Nav/footer: always-noise tags (nav, footer)
+  {
+    weight: 'structural',
+    test: (a, c) => c.flags.navFooter && ALWAYS_NOISE_TAGS.has(a.tagName),
+  },
+  // Nav/footer: header with navigation role or noise class/id
+  {
+    weight: 'structural',
+    test: (a, c) =>
+      c.flags.navFooter &&
+      a.tagName === 'header' &&
+      ((a.role !== null && NAVIGATION_ROLES.has(a.role)) ||
+        HEADER_NOISE_PATTERN.test(`${a.className} ${a.id}`)),
+  },
+  // Nav/footer: aside elements
+  {
+    weight: 'structural',
+    test: (a, c) => c.flags.navFooter && a.tagName === 'aside',
+  },
+  // Nav/footer: navigation roles (except aside+complementary)
+  {
+    weight: 'structural',
+    test: (a, c) =>
+      c.flags.navFooter &&
+      a.role !== null &&
+      NAVIGATION_ROLES.has(a.role) &&
+      (a.tagName !== 'aside' || a.role !== 'complementary'),
+  },
+  // Hidden elements — not interactive
+  {
+    weight: 'hidden',
+    test: (a) => a.isHidden && !a.isInteractive,
+  },
+  // Sticky/fixed positioned elements
+  {
+    weight: 'stickyFixed',
+    test: (a) => FIXED_OR_HIGH_Z_PATTERN.test(a.className),
+  },
+  // Promotional/noise content
+  {
+    weight: 'promo',
+    test: isPromoMatch,
+  },
+];
 
 function isNoiseElement(element: Element, context: NoiseContext): boolean {
   const tagName = element.tagName.toLowerCase();
-  const className = element.getAttribute('class') ?? '';
-  const id = element.getAttribute('id') ?? '';
   const role = element.getAttribute('role');
   const style = element.getAttribute('style');
-  const elIsInteractive = isInteractive(element, role);
-  const elIsHidden =
-    element.hasAttribute('hidden') ||
-    element.getAttribute('aria-hidden') === 'true' ||
-    (style !== null && HIDDEN_STYLE_REGEX.test(style));
+  const attrs: ElementAttrs = {
+    tagName,
+    className: element.getAttribute('class') ?? '',
+    id: element.getAttribute('id') ?? '',
+    role,
+    isInteractive: isInteractive(element, role),
+    isHidden:
+      element.hasAttribute('hidden') ||
+      element.getAttribute('aria-hidden') === 'true' ||
+      (style !== null && HIDDEN_STYLE_REGEX.test(style)),
+    element,
+  };
 
   let score = 0;
   const { weights } = context;
-
-  // Structural
-  if (context.structuralTags.has(tagName) && !elIsInteractive) {
-    score += weights.structural;
+  for (const rule of NOISE_RULES) {
+    if (rule.test(attrs, context)) score += weights[rule.weight];
   }
-
-  // Nav/Footer Scoring
-  if (context.flags.navFooter) {
-    score += calculateNavFooterScore(tagName, className, id, role, weights);
-  }
-
-  // Hidden
-  if (elIsHidden && !elIsInteractive) {
-    score += weights.hidden;
-  }
-
-  // Sticky/Fixed
-  if (FIXED_OR_HIGH_Z_PATTERN.test(className)) {
-    score += weights.stickyFixed;
-  }
-
-  // Promo
-  score += calculatePromoScore(element, className, id, context);
-
   return score >= weights.threshold;
 }
 function cleanHeadings(document: Document): void {

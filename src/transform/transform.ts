@@ -99,13 +99,6 @@ function isWhitespaceChar(code: number): boolean {
   return code === 9 || code === 10 || code === 12 || code === 13 || code === 32;
 }
 
-function containsWhitespace(value: string): boolean {
-  for (let i = 0; i < value.length; i += 1) {
-    if (isWhitespaceChar(value.charCodeAt(i))) return true;
-  }
-  return false;
-}
-
 function buildTransformSignal(signal?: AbortSignal): AbortSignal | undefined {
   const { timeoutMs } = config.transform;
   if (timeoutMs <= 0) return signal;
@@ -664,7 +657,10 @@ function resolveRelativeHref(
   origin: string
 ): string {
   const trimmedHref = href.trim();
-  if (!trimmedHref || containsWhitespace(trimmedHref)) return href;
+  if (!trimmedHref) return href;
+  for (let i = 0; i < trimmedHref.length; i += 1) {
+    if (isWhitespaceChar(trimmedHref.charCodeAt(i))) return href;
+  }
   if (isAbsoluteOrSpecialUrl(trimmedHref)) return trimmedHref;
 
   try {
@@ -945,24 +941,16 @@ const MAX_EMPTY_SECTION_RATIO = 0.05;
 const MIN_LINE_LENGTH_FOR_TRUNCATION_CHECK = 20;
 const MAX_TRUNCATED_LINE_RATIO = 0.95;
 
-function needsDocumentWrapper(html: string): boolean {
-  const trimmed = html.trim().toLowerCase();
-  return (
-    !trimmed.startsWith('<!doctype') &&
-    !trimmed.startsWith('<html') &&
-    !trimmed.startsWith('<body')
-  );
-}
-
-function wrapHtmlFragment(html: string): string {
-  return `<!DOCTYPE html><html><body>${html}</body></html>`;
-}
-
 function resolveHtmlDocument(htmlOrDocument: string | Document): Document {
   if (typeof htmlOrDocument !== 'string') return htmlOrDocument;
 
-  const htmlToParse = needsDocumentWrapper(htmlOrDocument)
-    ? wrapHtmlFragment(htmlOrDocument)
+  const trimmed = htmlOrDocument.trim().toLowerCase();
+  const needsWrapper =
+    !trimmed.startsWith('<!doctype') &&
+    !trimmed.startsWith('<html') &&
+    !trimmed.startsWith('<body');
+  const htmlToParse = needsWrapper
+    ? `<!DOCTYPE html><html><body>${htmlOrDocument}</body></html>`
     : htmlOrDocument;
 
   try {
@@ -971,16 +959,6 @@ function resolveHtmlDocument(htmlOrDocument: string | Document): Document {
     // Don't crash on parse failures.
     return parseHTML('<!DOCTYPE html><html><body></body></html>').document;
   }
-}
-
-function stripNonVisibleNodes(root: ParentNode): void {
-  for (const el of root.querySelectorAll('script,style,noscript')) {
-    el.remove();
-  }
-}
-
-function resolveNodeText(node: Node): string {
-  return node.textContent ?? '';
 }
 
 function getTextContentSkippingHidden(node: Node, parts: string[]): void {
@@ -1017,8 +995,10 @@ function getTextContentSkippingHidden(node: Node, parts: string[]): void {
 function getVisibleTextLength(htmlOrDocument: string | Document): number {
   if (typeof htmlOrDocument === 'string') {
     const doc = resolveHtmlDocument(htmlOrDocument);
-    stripNonVisibleNodes(doc.body);
-    return resolveNodeText(doc.body).replace(/\s+/g, ' ').trim().length;
+    for (const el of doc.body.querySelectorAll('script,style,noscript')) {
+      el.remove();
+    }
+    return (doc.body.textContent || '').replace(/\s+/g, ' ').trim().length;
   }
   const parts: string[] = [];
   getTextContentSkippingHidden(htmlOrDocument.body, parts);
@@ -1304,54 +1284,44 @@ const TransformHeuristics = {
   isGithubRepositoryRootUrl,
 } as const;
 
-function buildArticleDocument(article: ExtractedArticle): Document {
-  return parseHTML(
-    `<!DOCTYPE html><html><body>${article.content}</body></html>`
-  ).document;
-}
-
-function hasSufficientArticleContentRatio(
-  article: ExtractedArticle,
-  document: Document
-): boolean {
-  const originalLength = getVisibleTextLength(document);
-  if (originalLength < MIN_HTML_LENGTH_FOR_GATE) return true;
-
-  return article.textContent.length / originalLength >= MIN_CONTENT_RATIO;
-}
-
-function passesRetentionChecks(
-  articleDoc: Document,
-  document: Document
-): boolean {
-  return RETENTION_RULES.every(({ selector, minOriginal, ratio }) => {
-    const original = countMatchingElements(document, selector);
-    if (original < minOriginal) return true;
-    return countMatchingElements(articleDoc, selector) / original >= ratio;
-  });
-}
-
-function hasAcceptableEmptySectionRatio(articleDoc: Document): boolean {
-  const articleHeadings = countMatchingElements(
-    articleDoc,
-    'h1,h2,h3,h4,h5,h6'
-  );
-  if (articleHeadings < MIN_HEADINGS_FOR_EMPTY_SECTION_GATE) return true;
-
-  const emptySectionRatio =
-    countEmptyHeadingSections(articleDoc) / articleHeadings;
-  return emptySectionRatio <= MAX_EMPTY_SECTION_RATIO;
-}
-
 function shouldUseArticleContent(
   article: ExtractedArticle,
   document: Document
 ): boolean {
-  if (!hasSufficientArticleContentRatio(article, document)) return false;
+  // Content ratio gate
+  const originalLength = getVisibleTextLength(document);
+  if (originalLength >= MIN_HTML_LENGTH_FOR_GATE) {
+    if (article.textContent.length / originalLength < MIN_CONTENT_RATIO)
+      return false;
+  }
 
-  const articleDoc = buildArticleDocument(article);
-  if (!passesRetentionChecks(articleDoc, document)) return false;
-  if (!hasAcceptableEmptySectionRatio(articleDoc)) return false;
+  const articleDoc = parseHTML(
+    `<!DOCTYPE html><html><body>${article.content}</body></html>`
+  ).document;
+
+  // Retention checks
+  const passesRetention = RETENTION_RULES.every(
+    ({ selector, minOriginal, ratio }) => {
+      const original = countMatchingElements(document, selector);
+      if (original < minOriginal) return true;
+      return countMatchingElements(articleDoc, selector) / original >= ratio;
+    }
+  );
+  if (!passesRetention) return false;
+
+  // Empty section ratio
+  const articleHeadings = countMatchingElements(
+    articleDoc,
+    'h1,h2,h3,h4,h5,h6'
+  );
+  if (articleHeadings >= MIN_HEADINGS_FOR_EMPTY_SECTION_GATE) {
+    if (
+      countEmptyHeadingSections(articleDoc) / articleHeadings >
+      MAX_EMPTY_SECTION_RATIO
+    ) {
+      return false;
+    }
+  }
 
   return !hasTruncatedSentences(article.textContent);
 }
@@ -1507,23 +1477,18 @@ function resolveContentSource(params: {
   });
 }
 
-function shouldStripGithubPrimaryHeading(
-  context: ContentSource,
-  url: string
-): boolean {
-  return (
-    context.primaryHeading !== undefined &&
-    TransformHeuristics.isGithubRepositoryRootUrl(url)
-  );
-}
-
 function maybeStripGithubPrimaryHeading(
   markdown: string,
   context: ContentSource,
   url: string
 ): string {
-  if (!shouldStripGithubPrimaryHeading(context, url)) return markdown;
-  return stripLeadingHeading(markdown, context.primaryHeading ?? '');
+  if (
+    context.primaryHeading === undefined ||
+    !TransformHeuristics.isGithubRepositoryRootUrl(url)
+  ) {
+    return markdown;
+  }
+  return stripLeadingHeading(markdown, context.primaryHeading);
 }
 
 function buildSyntheticTitlePrefix(
