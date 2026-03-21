@@ -208,14 +208,15 @@ const TRANSFORM_WORKER_PATH = new URL(import.meta.url);
 class TaskQueue<T extends { id: string }> {
   private items: (T | undefined)[] = [];
   private head = 0;
+  private activeCount = 0;
 
   get depth(): number {
-    const d = this.items.length - this.head;
-    return d > 0 ? d : 0;
+    return this.activeCount;
   }
 
   enqueue(item: T): void {
     this.items.push(item);
+    this.activeCount += 1;
   }
 
   dequeue(): T | null {
@@ -224,6 +225,7 @@ class TaskQueue<T extends { id: string }> {
       this.head += 1;
 
       if (item) {
+        this.activeCount -= 1;
         this.compact();
         return item;
       }
@@ -237,7 +239,8 @@ class TaskQueue<T extends { id: string }> {
     for (let i = this.head; i < this.items.length; i += 1) {
       const item = this.items[i];
       if (item?.id === id) {
-        this.items.splice(i, 1);
+        this.items[i] = undefined;
+        this.activeCount -= 1;
         this.compact();
         return item;
       }
@@ -252,6 +255,7 @@ class TaskQueue<T extends { id: string }> {
     }
     this.items.length = 0;
     this.head = 0;
+    this.activeCount = 0;
   }
 
   private compact(): void {
@@ -491,7 +495,9 @@ class WorkerPool implements TransformWorkerPool {
       id,
       url,
       includeMetadata: options.includeMetadata,
-      ...(options.inputTruncated ? { inputTruncated: true } : {}),
+      ...(options.inputTruncated
+        ? { inputTruncated: options.inputTruncated }
+        : {}),
       signal: options.signal,
       abortListener,
       context,
@@ -680,8 +686,8 @@ class WorkerPool implements TransformWorkerPool {
 
     this.markIdle(workerIndex);
 
-    if (message.type === 'result') {
-      this.finalizeTask(inflight.context, () => {
+    this.finalizeTask(inflight.context, () => {
+      if (message.type === 'result') {
         inflight.resolve({
           markdown: message.result.markdown,
           truncated: message.result.truncated,
@@ -690,26 +696,20 @@ class WorkerPool implements TransformWorkerPool {
             ? { metadata: message.result.metadata }
             : {}),
         });
-      });
-    } else {
-      const err = message.error;
-      if (err.name === 'FetchError') {
-        this.finalizeTask(inflight.context, () => {
-          inflight.reject(
-            new FetchError(
-              err.message,
-              err.url,
-              err.statusCode,
-              err.details ?? {}
-            )
-          );
-        });
       } else {
-        this.finalizeTask(inflight.context, () => {
-          inflight.reject(new Error(err.message));
-        });
+        const err = message.error;
+        inflight.reject(
+          err.name === 'FetchError'
+            ? new FetchError(
+                err.message,
+                err.url,
+                err.statusCode,
+                err.details ?? {}
+              )
+            : new Error(err.message)
+        );
       }
-    }
+    });
 
     this.drainQueue();
   }
@@ -783,24 +783,32 @@ class WorkerPool implements TransformWorkerPool {
   }
 
   private dispatchFromQueue(workerIndex: number, slot: WorkerSlot): void {
-    const task = this.queue.dequeue();
+    let task = this.queue.dequeue();
+    while (task) {
+      const currentTask = task;
+      if (this.closed) {
+        this.clearAbortListener(currentTask.signal, currentTask.abortListener);
+        this.finalizeTask(currentTask.context, () => {
+          currentTask.reject(new Error(WorkerPool.CLOSED_MESSAGE));
+        });
+        return;
+      }
+
+      if (currentTask.signal?.aborted) {
+        this.clearAbortListener(currentTask.signal, currentTask.abortListener);
+        this.finalizeTask(currentTask.context, () => {
+          currentTask.reject(
+            createAbortError(currentTask.url, 'transform:dispatch')
+          );
+        });
+        task = this.queue.dequeue();
+        continue;
+      }
+
+      break;
+    }
+
     if (!task) return;
-
-    if (this.closed) {
-      this.clearAbortListener(task.signal, task.abortListener);
-      this.finalizeTask(task.context, () => {
-        task.reject(new Error(WorkerPool.CLOSED_MESSAGE));
-      });
-      return;
-    }
-
-    if (task.signal?.aborted) {
-      this.clearAbortListener(task.signal, task.abortListener);
-      this.finalizeTask(task.context, () => {
-        task.reject(createAbortError(task.url, 'transform:dispatch'));
-      });
-      return;
-    }
 
     slot.busy = true;
     slot.currentTaskId = task.id;
