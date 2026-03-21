@@ -62,15 +62,7 @@ interface ToolResponseBase {
 export const FETCH_URL_TOOL_NAME = 'fetch-url';
 
 const FETCH_URL_TOOL_DESCRIPTION = `
-<role>Web Content Extractor</role>
-<task>Fetch public webpages and convert HTML to clean Markdown.</task>
-<constraints>
-- READ-ONLY. No JavaScript execution.
-- GitHub/GitLab/Bitbucket URLs auto-transform to raw endpoints (check resolvedUrl).
-- forceRefresh only bypasses cache; it does not bypass fetch or inline truncation limits.
-- For large pages/timeouts, use task mode (task: {}).
-- If error queue_full, retry with task mode.
-</constraints>
+Fetch public webpages and convert HTML to clean Markdown.
 `.trim();
 
 const TOOL_ICON = {

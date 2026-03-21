@@ -65,6 +65,18 @@ function decodeNextFlightPayloads(html: string): string[] {
   return payloads;
 }
 
+function parseObjectEntries(body: string): Map<string, string> {
+  const entries = new Map<string, string>();
+  for (const part of body.split(',')) {
+    const entryMatch =
+      /(?:"([^"]+)"|([A-Za-z_$][\w$]*)):([A-Za-z_$][\w$]*)$/.exec(part.trim());
+    const key = entryMatch?.[1] ?? entryMatch?.[2];
+    const value = entryMatch?.[3];
+    if (key && value) entries.set(key, value);
+  }
+  return entries;
+}
+
 function parseFlightObjectRefs(text: string): {
   templateMap: Map<string, string>;
   aliasMap: Map<string, string>;
@@ -91,17 +103,7 @@ function parseFlightObjectRefs(text: string): {
       continue;
     }
 
-    const entries = new Map<string, string>();
-    for (const part of body.split(',')) {
-      const entryMatch =
-        /(?:"([^"]+)"|([A-Za-z_$][\w$]*)):([A-Za-z_$][\w$]*)$/.exec(
-          part.trim()
-        );
-      const key = entryMatch?.[1] ?? entryMatch?.[2];
-      const value = entryMatch?.[3];
-      if (key && value) entries.set(key, value);
-    }
-
+    const entries = parseObjectEntries(body);
     if (entries.size > 0) objectMaps.set(objectName, entries);
   }
 
@@ -196,25 +198,26 @@ function findMarkdownSection(
 ): { start: number; end: number } | null {
   const target = normalizeSupplementHeadingText(title);
 
-  for (let i = 0; i < lines.length; i += 1) {
-    const heading = getMarkdownHeadingInfo(lines[i] ?? '');
-    if (heading?.title !== target) continue;
+  const startIndex = lines.findIndex((line) => {
+    const heading = getMarkdownHeadingInfo(line);
+    return heading?.title === target;
+  });
 
-    let end = lines.length;
-    for (let j = i + 1; j < lines.length; j += 1) {
-      const nextLine = lines[j];
-      const nextHeading =
-        nextLine !== undefined ? getMarkdownHeadingInfo(nextLine) : null;
-      if (nextHeading && nextHeading.level <= heading.level) {
-        end = j;
-        break;
-      }
+  if (startIndex === -1) return null;
+
+  const startHeading = getMarkdownHeadingInfo(lines[startIndex] ?? '');
+  if (!startHeading) return null;
+
+  let end = lines.length;
+  for (let j = startIndex + 1; j < lines.length; j += 1) {
+    const nextHeading = getMarkdownHeadingInfo(lines[j] ?? '');
+    if (nextHeading && nextHeading.level <= startHeading.level) {
+      end = j;
+      break;
     }
-
-    return { start: i, end };
   }
 
-  return null;
+  return { start: startIndex, end };
 }
 
 function getSectionBody(
@@ -260,18 +263,39 @@ function appendMarkdownSection(
   return replaceMarkdownSection(lines, title, nextBody);
 }
 
-function extractNextFlightSupplement(
-  originalHtml: string
-): NextFlightSupplement | null {
-  const payloads = decodeNextFlightPayloads(originalHtml);
-  if (payloads.length === 0) return null;
+function conditionallyAppendMarkdownSection(
+  lines: string[],
+  title: string,
+  content: string,
+  exclusionPattern?: RegExp
+): void {
+  const section = findMarkdownSection(lines, title);
+  if (!section) return;
 
-  const text = payloads.join('\n');
-  const refs = parseFlightObjectRefs(text);
+  const bodyText = getSectionBody(lines, section);
+  if (exclusionPattern?.test(bodyText)) return;
 
-  const installMatch = FLIGHT_INSTALL_RE.exec(text);
-  const importMatch = FLIGHT_IMPORT_RE.exec(text);
+  appendMarkdownSection(lines, title, content);
+}
 
+function mergeMermaidDiagramSection(
+  lines: string[],
+  title: string,
+  mermaidBlock: string
+): void {
+  const section = findMarkdownSection(lines, title);
+  if (!section) return;
+
+  const sectionBody = getSectionBody(lines, section);
+  if (sectionBody.includes('```mermaid')) return;
+
+  const nextBody = sectionBody
+    ? `${sectionBody}\n\n${mermaidBlock}`
+    : mermaidBlock;
+  replaceMarkdownSection(lines, title, nextBody);
+}
+
+function extractFlightApiTables(text: string): Map<string, string> {
   const apiTables = new Map<string, string>();
   for (const match of text.matchAll(FLIGHT_API_RE)) {
     const title = match[1];
@@ -298,14 +322,23 @@ function extractNextFlightSupplement(
     const table = buildMarkdownTable(rows);
     if (table) apiTables.set(title, table);
   }
+  return apiTables;
+}
 
+function extractFlightMermaidDiagrams(text: string): Map<string, string> {
   const mermaidDiagrams = new Map<string, string>();
   for (const match of text.matchAll(FLIGHT_MERMAID_SECTION_RE)) {
     const title = match[1] ? decodeFlightStringValue(match[1]).trim() : '';
     const chart = match[2] ? buildMermaidBlock(match[2]) : '';
     if (title && chart) mermaidDiagrams.set(title, chart);
   }
+  return mermaidDiagrams;
+}
 
+function extractFlightDemoBlocks(
+  text: string,
+  refs: ReturnType<typeof parseFlightObjectRefs>
+): Map<string, string> {
   const demoCodeBlocks = new Map<string, string>();
   for (const match of text.matchAll(FLIGHT_DEMO_RE)) {
     const title = match[1];
@@ -318,13 +351,27 @@ function extractNextFlightSupplement(
     const codeBlock = code ? buildCodeBlock(code) : '';
     if (title && codeBlock) demoCodeBlocks.set(title, codeBlock);
   }
+  return demoCodeBlocks;
+}
+
+function extractNextFlightSupplement(
+  originalHtml: string
+): NextFlightSupplement | null {
+  const payloads = decodeNextFlightPayloads(originalHtml);
+  if (payloads.length === 0) return null;
+
+  const text = payloads.join('\n');
+  const refs = parseFlightObjectRefs(text);
+
+  const installMatch = FLIGHT_INSTALL_RE.exec(text);
+  const importMatch = FLIGHT_IMPORT_RE.exec(text);
 
   return {
     ...(installMatch ? { installationCommands: installMatch.slice(1) } : {}),
     ...(importMatch ? { importCommands: importMatch.slice(1) } : {}),
-    apiTables,
-    demoCodeBlocks,
-    mermaidDiagrams,
+    apiTables: extractFlightApiTables(text),
+    demoCodeBlocks: extractFlightDemoBlocks(text, refs),
+    mermaidDiagrams: extractFlightMermaidDiagrams(text),
   };
 }
 
@@ -338,31 +385,21 @@ export function supplementMarkdownFromNextFlight(
   const lines = markdown.split('\n');
 
   if (supplement.installationCommands?.length) {
-    const installationSection = findMarkdownSection(lines, 'Installation');
-    if (installationSection) {
-      const installBody = getSectionBody(lines, installationSection);
-      if (!/(npm|pnpm|yarn|bun|npx)\s+(install|add)/.test(installBody)) {
-        appendMarkdownSection(
-          lines,
-          'Installation',
-          buildCodeBlock(supplement.installationCommands.join('\n'))
-        );
-      }
-    }
+    conditionallyAppendMarkdownSection(
+      lines,
+      'Installation',
+      buildCodeBlock(supplement.installationCommands.join('\n')),
+      /(npm|pnpm|yarn|bun|npx)\s+(install|add)/
+    );
   }
 
   if (supplement.importCommands?.length) {
-    const importSection = findMarkdownSection(lines, 'Import');
-    if (importSection) {
-      const importBody = getSectionBody(lines, importSection);
-      if (!/import\s+\{/.test(importBody)) {
-        appendMarkdownSection(
-          lines,
-          'Import',
-          buildCodeBlock(supplement.importCommands.join('\n\n'))
-        );
-      }
-    }
+    conditionallyAppendMarkdownSection(
+      lines,
+      'Import',
+      buildCodeBlock(supplement.importCommands.join('\n\n')),
+      /import\s+\{/
+    );
   }
 
   for (const [title, table] of supplement.apiTables) {
@@ -370,16 +407,7 @@ export function supplementMarkdownFromNextFlight(
   }
 
   for (const [title, mermaidBlock] of supplement.mermaidDiagrams) {
-    const section = findMarkdownSection(lines, title);
-    if (!section) continue;
-
-    const sectionBody = getSectionBody(lines, section);
-    if (sectionBody.includes('```mermaid')) continue;
-
-    const nextBody = sectionBody
-      ? `${sectionBody}\n\n${mermaidBlock}`
-      : mermaidBlock;
-    replaceMarkdownSection(lines, title, nextBody);
+    mergeMermaidDiagramSection(lines, title, mermaidBlock);
   }
 
   for (const [title, codeBlock] of supplement.demoCodeBlocks) {
