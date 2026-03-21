@@ -745,7 +745,7 @@ describe('fetchUrlToolHandler', () => {
       <html>
         <body>
           <main>
-            <div class="related fixed"><p>KEEP_RELATED</p></div>
+            <div class="related"><p>KEEP_RELATED</p></div>
           </main>
         </body>
       </html>

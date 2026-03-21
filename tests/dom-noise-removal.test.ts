@@ -493,7 +493,7 @@ describe('Header noise scoring', () => {
 });
 
 describe('Social embed promo detection', () => {
-  it('promo tokens alone do not exceed threshold', () => {
+  it('removes promo-only elements outside primary content', () => {
     const html = `
       <html>
         <body>
@@ -509,10 +509,9 @@ describe('Social embed promo detection', () => {
 
     const result = removeNoiseFromHtml(html, undefined, 'https://example.com');
 
-    // Promo score (35) alone does not reach threshold (50)
     assert.ok(
-      result.includes('Embedded tweet'),
-      'Promo-only element should be preserved (below threshold)'
+      !result.includes('Embedded tweet'),
+      'Promo-only element outside main should be removed'
     );
     assert.ok(
       result.includes('Main content'),

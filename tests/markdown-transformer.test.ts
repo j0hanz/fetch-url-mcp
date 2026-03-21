@@ -34,10 +34,10 @@ describe('htmlToMarkdown noise filtering', () => {
     assert.ok(!markdown.includes('ROLETEXT'));
     assert.ok(!markdown.includes('HIDDENSTYLE'));
 
-    // Weaker signals preserved (score < 50)
-    assert.ok(markdown.includes('PROMO'));
-    assert.ok(markdown.includes('FIXED'));
-    assert.ok(markdown.includes('ZISO'));
+    // Promo and sticky/fixed signals now also removed
+    assert.ok(!markdown.includes('PROMO'));
+    assert.ok(!markdown.includes('FIXED'));
+    assert.ok(!markdown.includes('ZISO'));
   });
 
   it('removes <aside> outside primary content as noise', () => {

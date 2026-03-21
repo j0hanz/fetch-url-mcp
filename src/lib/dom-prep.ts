@@ -136,7 +136,6 @@ const BASE_NOISE_SELECTORS = {
 
 // ── Types ───────────────────────────────────────────────────────────
 type NoiseRemovalConfig = (typeof config)['noiseRemoval'];
-type NoiseWeights = NoiseRemovalConfig['weights'];
 interface PromoTokenMatchers {
   readonly base: RegExp;
   readonly aggressive: RegExp;
@@ -147,28 +146,11 @@ interface NoiseContext {
     readonly cookieBanners: boolean;
   };
   readonly structuralTags: Set<string>;
-  readonly weights: NoiseWeights;
   readonly promoMatchers: PromoTokenMatchers;
   readonly promoEnabled: boolean;
   readonly extraSelectors: string[];
   readonly baseSelector: string;
   readonly candidateSelector: string;
-}
-
-// ── Noise rule engine types ─────────────────────────────────────────
-interface ElementAttrs {
-  readonly tagName: string;
-  readonly className: string;
-  readonly id: string;
-  readonly role: string | null;
-  readonly isInteractive: boolean;
-  readonly isHidden: boolean;
-  readonly element: Element;
-}
-
-interface NoiseRule {
-  readonly weight: keyof NoiseWeights;
-  readonly test: (attrs: ElementAttrs, context: NoiseContext) => boolean;
 }
 
 let cachedContext: NoiseContext | undefined;
@@ -184,9 +166,6 @@ function buildTokenRegex(tokens: Set<string>): RegExp {
     'i'
   );
 }
-function addTokens(target: Set<string>, tokens: readonly string[]): void {
-  for (const token of tokens) target.add(token);
-}
 function getPromoMatchers(
   currentConfig: NoiseRemovalConfig,
   enabledCategories: Set<string>
@@ -195,12 +174,12 @@ function getPromoMatchers(
   const aggressiveTokens = new Set<string>();
 
   if (currentConfig.aggressiveMode) {
-    addTokens(aggressiveTokens, PROMO_TOKENS_AGGRESSIVE);
+    for (const token of PROMO_TOKENS_AGGRESSIVE) aggressiveTokens.add(token);
   }
 
   for (const [category, tokens] of Object.entries(PROMO_TOKENS_BY_CATEGORY)) {
     if (enabledCategories.has(category)) {
-      addTokens(baseTokens, tokens);
+      for (const token of tokens) baseTokens.add(token);
     }
   }
 
@@ -223,7 +202,6 @@ function getContext(): NoiseContext {
     extraSelectors: currentConfig.extraSelectors,
     aggressiveMode: currentConfig.aggressiveMode,
     preserveSvgCanvas: currentConfig.preserveSvgCanvas,
-    weights: currentConfig.weights,
   });
   if (cachedContext !== undefined && lastContextKey === contextKey)
     return cachedContext;
@@ -275,7 +253,6 @@ function getContext(): NoiseContext {
   cachedContext = {
     flags,
     structuralTags,
-    weights: currentConfig.weights,
     promoMatchers,
     promoEnabled: Object.keys(PROMO_TOKENS_BY_CATEGORY).some((cat) =>
       enabled.has(cat)
@@ -356,92 +333,69 @@ function removeNodes(nodes: ArrayLike<Element>): void {
   }
 }
 
-function isPromoMatch(attrs: ElementAttrs, context: NoiseContext): boolean {
+function isPromoMatch(
+  className: string,
+  id: string,
+  element: Element,
+  context: NoiseContext
+): boolean {
   if (!context.promoEnabled) return false;
   const aggTest =
-    context.promoMatchers.aggressive.test(attrs.className) ||
-    context.promoMatchers.aggressive.test(attrs.id);
-  if (aggTest) return !isWithinPrimaryContent(attrs.element);
+    context.promoMatchers.aggressive.test(className) ||
+    context.promoMatchers.aggressive.test(id);
+  if (aggTest) return !isWithinPrimaryContent(element);
   return (
-    context.promoMatchers.base.test(attrs.className) ||
-    context.promoMatchers.base.test(attrs.id)
+    context.promoMatchers.base.test(className) ||
+    context.promoMatchers.base.test(id)
   );
 }
-
-const NOISE_RULES: readonly NoiseRule[] = [
-  // Structural tags (script, style, form, etc.) — not interactive
-  {
-    weight: 'structural',
-    test: (a, c) => c.structuralTags.has(a.tagName) && !a.isInteractive,
-  },
-  // Nav/footer: always-noise tags (nav, footer)
-  {
-    weight: 'structural',
-    test: (a, c) => c.flags.navFooter && ALWAYS_NOISE_TAGS.has(a.tagName),
-  },
-  // Nav/footer: header with navigation role or noise class/id
-  {
-    weight: 'structural',
-    test: (a, c) =>
-      c.flags.navFooter &&
-      a.tagName === 'header' &&
-      ((a.role !== null && NAVIGATION_ROLES.has(a.role)) ||
-        HEADER_NOISE_PATTERN.test(`${a.className} ${a.id}`)),
-  },
-  // Nav/footer: aside elements
-  {
-    weight: 'structural',
-    test: (a, c) => c.flags.navFooter && a.tagName === 'aside',
-  },
-  // Nav/footer: navigation roles (except aside+complementary)
-  {
-    weight: 'structural',
-    test: (a, c) =>
-      c.flags.navFooter &&
-      a.role !== null &&
-      NAVIGATION_ROLES.has(a.role) &&
-      (a.tagName !== 'aside' || a.role !== 'complementary'),
-  },
-  // Hidden elements — not interactive
-  {
-    weight: 'hidden',
-    test: (a) => a.isHidden && !a.isInteractive,
-  },
-  // Sticky/fixed positioned elements
-  {
-    weight: 'stickyFixed',
-    test: (a) => FIXED_OR_HIGH_Z_PATTERN.test(a.className),
-  },
-  // Promotional/noise content
-  {
-    weight: 'promo',
-    test: isPromoMatch,
-  },
-];
 
 function isNoiseElement(element: Element, context: NoiseContext): boolean {
   const tagName = element.tagName.toLowerCase();
   const role = element.getAttribute('role');
+  const className = element.getAttribute('class') ?? '';
+  const id = element.getAttribute('id') ?? '';
+  const interactive = isInteractive(element, role);
   const style = element.getAttribute('style');
-  const attrs: ElementAttrs = {
-    tagName,
-    className: element.getAttribute('class') ?? '',
-    id: element.getAttribute('id') ?? '',
-    role,
-    isInteractive: isInteractive(element, role),
-    isHidden:
-      element.hasAttribute('hidden') ||
-      element.getAttribute('aria-hidden') === 'true' ||
-      (style !== null && HIDDEN_STYLE_REGEX.test(style)),
-    element,
-  };
+  const hidden =
+    element.hasAttribute('hidden') ||
+    element.getAttribute('aria-hidden') === 'true' ||
+    (style !== null && HIDDEN_STYLE_REGEX.test(style));
 
-  let score = 0;
-  const { weights } = context;
-  for (const rule of NOISE_RULES) {
-    if (rule.test(attrs, context)) score += weights[rule.weight];
+  // Structural tags (script, style, form, etc.)
+  if (context.structuralTags.has(tagName) && !interactive) return true;
+
+  if (context.flags.navFooter) {
+    // Always-noise tags (nav, footer)
+    if (ALWAYS_NOISE_TAGS.has(tagName)) return true;
+    // Header with navigation role or noise class/id
+    if (
+      tagName === 'header' &&
+      ((role !== null && NAVIGATION_ROLES.has(role)) ||
+        HEADER_NOISE_PATTERN.test(`${className} ${id}`))
+    )
+      return true;
+    // Aside elements
+    if (tagName === 'aside') return true;
+    // Navigation roles (except aside+complementary)
+    if (
+      role !== null &&
+      NAVIGATION_ROLES.has(role) &&
+      (tagName !== 'aside' || role !== 'complementary')
+    )
+      return true;
   }
-  return score >= weights.threshold;
+
+  // Hidden elements
+  if (hidden && !interactive) return true;
+
+  // Sticky/fixed positioned elements
+  if (FIXED_OR_HIGH_Z_PATTERN.test(className)) return true;
+
+  // Promotional/noise content
+  if (isPromoMatch(className, id, element, context)) return true;
+
+  return false;
 }
 function cleanHeadings(document: Document): void {
   const headings = document.querySelectorAll('h1,h2,h3,h4,h5,h6');
@@ -664,21 +618,45 @@ function surfaceHiddenTabPanels(document: Document): void {
 }
 
 function stripTabTriggers(document: Document): void {
-  surfaceHiddenTabPanels(document);
   const tabs = document.querySelectorAll('button[role="tab"]');
   for (let i = tabs.length - 1; i >= 0; i--) {
     tabs[i]?.remove();
   }
 }
 
-function escapeTableCellPipes(document: Document): void {
+function normalizeTableCells(document: Document): void {
   const cells = document.querySelectorAll('td, th');
   for (const cell of cells) {
+    const brs = cell.querySelectorAll('br');
+    for (const br of brs) {
+      br.replaceWith(' ');
+    }
+
+    const blocks = Array.from(
+      cell.querySelectorAll('div, p, ul, li, h1, h2, h3, h4, h5, h6')
+    );
+    for (const block of blocks) {
+      if (!block.parentNode) continue;
+      const span = document.createElement('span');
+      span.appendChild(document.createTextNode(' '));
+      while (block.firstChild) {
+        span.appendChild(block.firstChild);
+      }
+      span.appendChild(document.createTextNode(' '));
+      for (const attr of Array.from(block.attributes)) {
+        span.setAttribute(attr.name, attr.value);
+      }
+      block.replaceWith(span);
+    }
+
     const walker = document.createTreeWalker(cell, NODE_FILTER_SHOW_TEXT);
     let node: Node | null;
     while ((node = walker.nextNode())) {
-      if (node.textContent?.includes('|')) {
-        node.textContent = node.textContent.replace(/\|/g, '\\|');
+      if (node.nodeValue) {
+        node.nodeValue = node.nodeValue.replace(/\r?\n/g, ' ');
+        if (node.nodeValue.includes('|')) {
+          node.nodeValue = node.nodeValue.replace(/\|/g, '\\|');
+        }
       }
     }
   }
@@ -892,12 +870,12 @@ export function prepareDocumentForMarkdown(
     });
   }
 
+  surfaceHiddenTabPanels(document);
   stripNoise(document, context, signal);
   stripTabTriggers(document);
   cleanCodeExamples(document);
   separateAdjacentInlineElements(document);
-  flattenTableCellBreaks(document);
-  escapeTableCellPipes(document);
+  normalizeTableCells(document);
   normalizeTableStructure(document);
 
   if (baseUrl) resolveUrls(document, baseUrl);
@@ -929,43 +907,6 @@ function normalizeTableStructure(document: Document): void {
   }
 }
 
-function flattenTableCellBreaks(document: Document): void {
-  const cells = document.querySelectorAll('td, th');
-  for (const cell of cells) {
-    const brs = cell.querySelectorAll('br');
-    for (const br of brs) {
-      br.replaceWith(' ');
-    }
-
-    const blocks = Array.from(
-      cell.querySelectorAll('div, p, ul, li, h1, h2, h3, h4, h5, h6')
-    );
-    for (const block of blocks) {
-      if (!block.parentNode) continue;
-      const span = document.createElement('span');
-      span.appendChild(document.createTextNode(' '));
-      while (block.firstChild) {
-        span.appendChild(block.firstChild);
-      }
-      span.appendChild(document.createTextNode(' '));
-      for (const attr of Array.from(block.attributes)) {
-        span.setAttribute(attr.name, attr.value);
-      }
-      block.replaceWith(span);
-    }
-
-    const filterNewlines = (node: Node): void => {
-      if (node.nodeType === 3 && node.nodeValue) {
-        node.nodeValue = node.nodeValue.replace(/\r?\n/g, ' ');
-      } else {
-        for (const child of Array.from(node.childNodes)) {
-          filterNewlines(child);
-        }
-      }
-    };
-    filterNewlines(cell);
-  }
-}
 export function removeNoiseFromHtml(
   html: string,
   document?: Document,
