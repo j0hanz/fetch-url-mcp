@@ -1508,12 +1508,25 @@ function resolveContentSource(params: {
   });
 }
 
-function buildMarkdownFromContext(
-  context: ContentSource,
-  url: string,
-  signal?: AbortSignal
-): MarkdownTransformResult {
-  let content = stageTracker.run(url, 'transform:markdown', () =>
+interface MarkdownRenderContext {
+  readonly context: ContentSource;
+  readonly url: string;
+  readonly signal: AbortSignal | undefined;
+}
+
+interface RenderedMarkdownStage {
+  readonly markdown: string;
+  readonly title: string | undefined;
+  readonly truncated: boolean;
+  readonly metadata: ExtractedMetadata;
+}
+
+function renderMarkdownStage({
+  context,
+  url,
+  signal,
+}: MarkdownRenderContext): string {
+  return stageTracker.run(url, 'transform:markdown', () =>
     htmlToMarkdown(context.sourceHtml, context.metadata, {
       url,
       ...(signal ? { signal } : {}),
@@ -1521,13 +1534,18 @@ function buildMarkdownFromContext(
       ...(context.skipNoiseRemoval ? { skipNoiseRemoval: true } : {}),
     })
   );
-  content = maybeStripGithubPrimaryHeading(
-    content,
+}
+
+function postprocessMarkdownStage(
+  { context, url, signal }: MarkdownRenderContext,
+  markdown: string
+): RenderedMarkdownStage {
+  let content = maybeStripGithubPrimaryHeading(
+    markdown,
     context.primaryHeading,
     url
   );
   content = maybePrependSyntheticTitle(content, context, url);
-
   content = supplementMarkdownFromNextFlight(content, context.originalHtml);
   content = cleanupMarkdownArtifacts(
     content,
@@ -1540,6 +1558,16 @@ function buildMarkdownFromContext(
     truncated: context.truncated,
     metadata: context.extractedMetadata,
   };
+}
+
+function buildMarkdownFromContext(
+  context: ContentSource,
+  url: string,
+  signal?: AbortSignal
+): MarkdownTransformResult {
+  const renderContext = { context, url, signal };
+  const markdown = renderMarkdownStage(renderContext);
+  return postprocessMarkdownStage(renderContext, markdown);
 }
 
 function resolveTransformContentResult(

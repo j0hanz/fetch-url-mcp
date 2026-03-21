@@ -114,7 +114,6 @@ function buildStructuredContent(
 ): Record<string, unknown> {
   const truncated = inlineResult.truncated ?? pipeline.data.truncated;
   const markdown = finalizeInlineMarkdown(inlineResult.content, {
-    truncated: pipeline.data.truncated,
     maxChars: config.constants.maxInlineContentChars,
   });
 

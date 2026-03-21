@@ -79,6 +79,15 @@ const HEADING_KEYWORDS = new Set(
 // ── Prefix patterns ─────────────────────────────────────────────────
 const SPECIAL_PREFIXES =
   /^(?:example|note|tip|warning|important|caution):\s+\S/i;
+const REPL_PROMPT_LINE =
+  /^(?:>>>|\.\.\.|In \[\d+\]:|Out\[\d+\]:|\.\.\.\\?>)\s*/;
+const LEADING_DOCS_CHROME_PATTERNS = [
+  /^Edit this page$/i,
+  /^Toggle table of contents sidebar$/i,
+  /^Toggle site navigation sidebar$/i,
+  /^Toggle Light \/ Dark \/ Auto color theme$/i,
+  /^Back to top$/i,
+] as const;
 
 // ── TypeDoc prefixes ────────────────────────────────────────────────
 const TYPEDOC_PREFIXES = [
@@ -166,6 +175,7 @@ function isTitleCaseOrKeyword(trimmed: string): boolean {
 }
 function getHeadingPrefix(trimmed: string): string | null {
   if (trimmed.length > MAX_LINE_LENGTH) return null;
+  if (REPL_PROMPT_LINE.test(trimmed)) return null;
 
   // Fast path: Check common markdown markers first
   const firstChar = trimmed.charCodeAt(0);
@@ -514,6 +524,17 @@ function normalizeMarkdownSpacing(text: string): string {
 
   return normalizeNestedListIndentation(result);
 }
+function stripLeadingDocsChrome(text: string): string {
+  const lines = text.split('\n');
+  const cleaned = lines.map((line, index) => {
+    if (index >= 12) return line;
+    const trimmed = line.trim();
+    return LEADING_DOCS_CHROME_PATTERNS.some((pattern) => pattern.test(trimmed))
+      ? ''
+      : line;
+  });
+  return cleaned.join('\n').replace(REGEX.DOUBLE_NEWLINE_REDUCER, '\n\n');
+}
 function fixConcatenatedProperties(text: string): string {
   let result = text;
   for (let k = 0; k < PROPERTY_FIX_MAX_PASSES; k++) {
@@ -660,5 +681,5 @@ export function cleanupMarkdownArtifacts(
     result = removeEmptyHeadingSections(result);
   }
 
-  return stripLeadingBreadcrumbNoise(result);
+  return stripLeadingBreadcrumbNoise(stripLeadingDocsChrome(result));
 }

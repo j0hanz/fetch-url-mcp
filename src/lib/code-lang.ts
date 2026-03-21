@@ -1,6 +1,5 @@
 const ASCII_SPACE = 32;
 const ASCII_TAB = 9;
-const ASCII_LT = 60;
 const ASCII_DIGIT_0 = 48;
 const ASCII_DIGIT_9 = 57;
 const ASCII_UPPER_A = 65;
@@ -89,15 +88,15 @@ const JS_SIGNAL_REGEX =
 const CSS_REGEX =
   /@media|@import|@keyframes|@theme\b|@utility\b|@layer\b|@apply\b|@variant\b|@custom-variant\b|@reference\b|@source\b/;
 const CSS_PROPERTY_REGEX = /^\s*[a-z][\w-]*\s*:/;
+const PYTHON_REPL_PROMPT_REGEX = /^\s*(?:>>>|\.\.\.)\s/m;
+const PYTHON_OUTPUT_HINT_REGEX =
+  /<(?:QuerySet|[A-Z][A-Za-z0-9_]*:\s)|\bdatetime\.datetime\(|\bDoesNotExist:/;
+const WINDOWS_SHELL_PROMPT_REGEX = /^\s*\.\.\.\\?>\s+\S/m;
+const JSX_TAG_REGEX =
+  /<\/?[A-Z][A-Za-z0-9]*(?:\s+[A-Za-z_:][\w:.-]*(?:\s*=\s*(?:"[^"]*"|'[^']*'|\{[^}]*\}))?)*\s*\/?>/m;
+
 function containsJsxTag(code: string): boolean {
-  const len = code.length;
-  for (let i = 0; i < len - 1; i++) {
-    if (code.charCodeAt(i) === ASCII_LT) {
-      const next = code.charCodeAt(i + 1);
-      if (next >= ASCII_UPPER_A && next <= ASCII_UPPER_Z) return true;
-    }
-  }
-  return false;
+  return JSX_TAG_REGEX.test(code);
 }
 function isBashLine(line: string): boolean {
   const trimmed = line.trimStart();
@@ -107,7 +106,7 @@ function isBashLine(line: string): boolean {
   if (
     trimmed.startsWith('#!') ||
     trimmed.startsWith('$ ') ||
-    trimmed.startsWith('# ')
+    WINDOWS_SHELL_PROMPT_REGEX.test(trimmed)
   ) {
     return true;
   }
@@ -133,10 +132,9 @@ function detectCssStructure(lines: readonly string[]): boolean {
   for (const line of lines) {
     const trimmed = line.trimStart();
     if (trimmed.length === 0) continue;
+    if (trimmed.startsWith('# ') || trimmed.startsWith('//')) continue;
 
-    const hasSelector =
-      (trimmed.startsWith('.') || trimmed.startsWith('#')) &&
-      trimmed.includes('{');
+    const hasSelector = /^[.#][A-Za-z_-][\w-]*\s*\{/.test(trimmed);
 
     if (hasSelector) return true;
     if (
@@ -214,6 +212,10 @@ function matchPython(ctx: DetectionContext): boolean {
   if (matchHtml(ctx)) return false;
 
   const l = ctx.lower;
+  if (PYTHON_REPL_PROMPT_REGEX.test(ctx.code)) return true;
+  if (PYTHON_OUTPUT_HINT_REGEX.test(ctx.code)) return true;
+  if (/^\s*[A-Za-z_][\w.]*\s*=\s*[A-Z][\w.]*\(/m.test(ctx.code)) return true;
+  if (/^\s*[A-Za-z_][\w.]*\.[A-Za-z_][\w]*\s*$/m.test(ctx.code)) return true;
   if (l.includes('print(') || l.includes('__name__')) return true;
   if (l.includes('self.') || l.includes('elif ')) return true;
   // Check for Python's None/True/False using original case (they are capitalized in Python)

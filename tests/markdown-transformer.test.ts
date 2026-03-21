@@ -230,6 +230,23 @@ describe('htmlToMarkdown code blocks', () => {
 
     assert.ok(markdown.includes('[Doc](./doc.md)'));
   });
+
+  it('renders definition lists as term/definition pairs', () => {
+    const html = `
+      <dl>
+        <dt><strong>Feature A</strong></dt>
+        <dd><p>Explains feature A.</p></dd>
+        <dt><strong>Feature B</strong></dt>
+        <dd><p>Explains feature B.</p></dd>
+      </dl>
+    `;
+    const markdown = htmlToMarkdown(html);
+
+    assert.ok(markdown.includes('**Feature A**'));
+    assert.ok(markdown.includes(': Explains feature A.'));
+    assert.ok(markdown.includes('**Feature B**'));
+    assert.ok(markdown.includes(': Explains feature B.'));
+  });
 });
 
 describe('htmlToMarkdown image alt text', () => {

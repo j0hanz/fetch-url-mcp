@@ -136,6 +136,22 @@ const BASE_NOISE_SELECTORS = {
   hidden:
     '[style*="display: none"],[style*="display:none"],[style*="visibility: hidden"],[style*="visibility:hidden"],[hidden],[aria-hidden="true"]',
 };
+const DOCS_CONTROL_SELECTORS = [
+  '.content-icon-container',
+  '.edit-this-page',
+  '.toc-overlay-icon',
+  '.theme-toggle-container',
+  '.sidebar-toggle',
+  '.sidebar-drawer',
+  '.toc-drawer',
+  '.mobile-header',
+  '.overlay.sidebar-overlay',
+  '.overlay.toc-overlay',
+  '.back-to-top',
+  '.backtotop',
+  '.headerlink',
+  '[title="Edit this page"]',
+] as const;
 
 // ── Types ───────────────────────────────────────────────────────────
 type NoiseRemovalConfig = (typeof config)['noiseRemoval'];
@@ -907,6 +923,38 @@ function separateAdjacentInlineElements(document: Document): void {
   }
 }
 
+function stripDocsControls(document: Document): void {
+  removeNodes(document.querySelectorAll(DOCS_CONTROL_SELECTORS.join(',')));
+}
+
+function runDocsControlPass(document: Document): void {
+  normalizeTabContent(document);
+  cleanHeadings(document);
+  stripDocsControls(document);
+  stripPromoLinks(document);
+  separateAdjacentInlineElements(document);
+}
+
+function runStructuralNoisePass(
+  document: Document,
+  signal?: AbortSignal
+): void {
+  stripNoise(document, signal);
+}
+
+function runCodeExamplePass(document: Document): void {
+  cleanCodeExamples(document);
+}
+
+function runTableNormalizationPass(document: Document): void {
+  normalizeTableCells(document);
+  normalizeTableStructure(document);
+}
+
+function runUrlResolutionPass(document: Document, baseUrl?: string): void {
+  if (baseUrl) resolveUrls(document, baseUrl);
+}
+
 // Called on both raw documents (pre-article path) and article fragments
 // (post-Readability). Some passes (stripTabTriggers, etc.) are no-ops
 // on Readability output since tabs are already stripped or absent.
@@ -915,16 +963,11 @@ export function prepareDocumentForMarkdown(
   baseUrl?: string,
   signal?: AbortSignal
 ): void {
-  normalizeTabContent(document);
-  cleanHeadings(document);
-  stripNoise(document, signal);
-  stripPromoLinks(document);
-  cleanCodeExamples(document);
-  separateAdjacentInlineElements(document);
-  normalizeTableCells(document);
-  normalizeTableStructure(document);
-
-  if (baseUrl) resolveUrls(document, baseUrl);
+  runDocsControlPass(document);
+  runStructuralNoisePass(document, signal);
+  runCodeExamplePass(document);
+  runTableNormalizationPass(document);
+  runUrlResolutionPass(document, baseUrl);
 }
 
 // Some sites put tbody/thead/tfoot inside td/th, which breaks markdown tables.

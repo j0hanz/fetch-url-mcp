@@ -704,3 +704,148 @@ describe('transformHtmlToMarkdown mandatory noise removal', () => {
     );
   });
 });
+
+describe('transformHtmlToMarkdown documentation regressions', () => {
+  it('strips docs chrome and preserves definition-list features', () => {
+    const html = `
+      <html>
+        <body>
+          <main>
+            <div class="content-icon-container">
+              <div class="edit-this-page">
+                <a title="Edit this page"><span class="visually-hidden">Edit this page</span></a>
+              </div>
+              <label class="toc-overlay-icon">
+                <div class="visually-hidden">Toggle table of contents sidebar</div>
+              </label>
+            </div>
+            <article role="main">
+              <section id="introduction">
+                <h1>Introduction<a class="headerlink" href="#introduction">#</a></h1>
+                <p>This page introduces the package and includes enough descriptive prose to keep the documentation fixture representative of the real article path.</p>
+                <section id="features">
+                  <h2>Features<a class="headerlink" href="#features">#</a></h2>
+                  <dl>
+                    <dt><strong>Comprehensive account functionality</strong></dt>
+                    <dd><p>Supports multiple authentication schemes.</p></dd>
+                    <dt><strong>Social Login</strong></dt>
+                    <dd><p>Supports external identity providers.</p></dd>
+                  </dl>
+                </section>
+              </section>
+            </article>
+          </main>
+        </body>
+      </html>
+    `;
+
+    const result = transformHtmlToMarkdownInProcess(
+      html,
+      'https://docs.allauth.org/en/latest/introduction/index.html',
+      { includeMetadata: false }
+    );
+
+    assert.equal(result.markdown.includes('Edit this page'), false);
+    assert.equal(
+      result.markdown.includes('Toggle table of contents sidebar'),
+      false
+    );
+    assert.ok(result.markdown.includes('## Features'));
+    assert.ok(
+      result.markdown.includes('**Comprehensive account functionality**')
+    );
+    assert.ok(
+      result.markdown.includes(': Supports multiple authentication schemes.')
+    );
+    assert.ok(result.markdown.includes('**Social Login**'));
+  });
+
+  it('preserves spacing around Django inline links', () => {
+    const html = `
+      <html>
+        <body>
+          <main>
+            <article>
+              <h1>URL dispatcher</h1>
+              <p>Django determines the root URLconf module to use, but if the incoming <code>HttpRequest</code> object has a <a href="https://docs.djangoproject.com/en/6.0/ref/request-response/#django.http.HttpRequest.urlconf" title="django.http.HttpRequest.urlconf">urlconf</a> attribute (set by middleware), its value will be used.</p>
+              <p><code>urlpatterns</code> should be a <a href="https://docs.python.org/3/glossary.html#term-sequence" title="(in Python v3.14)">sequence</a> of <a href="https://docs.djangoproject.com/en/6.0/ref/urls/#django.urls.path" title="django.urls.path">path()</a> and/or <a href="https://docs.djangoproject.com/en/6.0/ref/urls/#django.urls.re_path" title="django.urls.re_path">re_path()</a> instances.</p>
+            </article>
+          </main>
+        </body>
+      </html>
+    `;
+
+    const result = transformHtmlToMarkdownInProcess(
+      html,
+      'https://docs.djangoproject.com/en/6.0/topics/http/urls/',
+      { includeMetadata: false }
+    );
+
+    assert.match(result.markdown, /\[urlconf]\([^)]+\) attribute/);
+    assert.match(
+      result.markdown,
+      /\[path\(\)]\([^)]+\) and\/or \[re\\?_path\(\)]\([^)]+\)/
+    );
+  });
+
+  it('classifies Django shell commands and REPL transcripts as shell and python', () => {
+    const html = `
+      <html>
+        <body>
+          <main>
+            <article>
+              <h1>Writing your first Django app, part 2</h1>
+              <p>This tutorial includes both shell commands and interactive Python snippets for working with Django models.</p>
+              <pre><code>$ python manage.py shell</code></pre>
+              <pre><code># No questions are in the system yet.
+>>> Question.objects.all()
+&lt;QuerySet []&gt;</code></pre>
+            </article>
+          </main>
+        </body>
+      </html>
+    `;
+
+    const result = transformHtmlToMarkdownInProcess(
+      html,
+      'https://docs.djangoproject.com/en/6.0/intro/tutorial02/',
+      { includeMetadata: false }
+    );
+
+    assert.ok(result.markdown.includes('```bash'));
+    assert.ok(result.markdown.includes('$ python manage.py shell'));
+    assert.ok(result.markdown.includes('```python'));
+    assert.ok(result.markdown.includes('>>> Question.objects.all()'));
+    assert.equal(result.markdown.includes('```jsx'), false);
+  });
+
+  it('classifies serializer expression blocks as python instead of css', () => {
+    const html = `
+      <html>
+        <body>
+          <main>
+            <article>
+              <h1>Serializers</h1>
+              <p>Serializer examples frequently show Python expressions and their evaluated output.</p>
+              <pre><code>serializer = CommentSerializer(comment)
+serializer.data
+# {'email': 'leila@example.com', 'content': 'foo bar'}</code></pre>
+            </article>
+          </main>
+        </body>
+      </html>
+    `;
+
+    const result = transformHtmlToMarkdownInProcess(
+      html,
+      'https://www.django-rest-framework.org/api-guide/serializers/',
+      { includeMetadata: false }
+    );
+
+    assert.ok(result.markdown.includes('```python'));
+    assert.equal(result.markdown.includes('```css'), false);
+    assert.ok(
+      result.markdown.includes('serializer = CommentSerializer(comment)')
+    );
+  });
+});

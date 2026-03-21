@@ -145,31 +145,35 @@ function normalizeMarkdownForTruncation(
 
 export function finalizeInlineMarkdown(
   markdown: string | undefined,
-  options: { truncated?: boolean; maxChars?: number } = {}
+  options: { maxChars?: number } = {}
 ): string | undefined {
   if (markdown === undefined) return undefined;
 
-  const normalized = normalizeMarkdownForTruncation(
-    markdown,
-    options.truncated ?? false
-  );
   const maxChars = options.maxChars ?? 0;
 
-  return maxChars > 0 && normalized.length > maxChars
-    ? truncateWithMarker(normalized, maxChars, TRUNCATION_MARKER)
-    : normalized;
+  return maxChars > 0 && markdown.length > maxChars
+    ? truncateWithMarker(markdown, maxChars, TRUNCATION_MARKER)
+    : markdown;
 }
 
-function applyInlineContentLimit(content: string): InlineContentResult {
-  const contentSize = content.length;
+function applyInlineContentLimit(
+  content: string,
+  truncated = false
+): InlineContentResult {
+  const normalized = normalizeMarkdownForTruncation(content, truncated);
+  const contentSize = normalized.length;
   const inlineLimit = config.constants.maxInlineContentChars;
 
   if (inlineLimit <= 0 || contentSize <= inlineLimit) {
-    return { content, contentSize };
+    return {
+      content: normalized,
+      contentSize,
+      ...(truncated ? { truncated } : {}),
+    };
   }
 
   return {
-    content: truncateWithMarker(content, inlineLimit, TRUNCATION_MARKER),
+    content: truncateWithMarker(normalized, inlineLimit, TRUNCATION_MARKER),
     contentSize,
     truncated: true,
   };
@@ -570,7 +574,10 @@ export async function performSharedFetch(
   );
   options.onStage?.('prepare_output');
   options.onStage?.('finalize_output');
-  const inlineResult = applyInlineContentLimit(pipeline.data.content);
+  const inlineResult = applyInlineContentLimit(
+    pipeline.data.content,
+    pipeline.data.truncated
+  );
 
   return { pipeline, inlineResult };
 }

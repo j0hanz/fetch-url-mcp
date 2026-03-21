@@ -135,4 +135,26 @@ describe('markdown cleanup', () => {
     assert.ok(cleaned.includes('`name`'));
     assert.ok(cleaned.includes('`already-clean`'));
   });
+
+  it('removes leading docs chrome controls near the top of the document', () => {
+    const input = [
+      '# Introduction',
+      '',
+      'Edit this page',
+      '',
+      'Toggle table of contents sidebar',
+      '',
+      '## Features',
+      '',
+      'Feature details.',
+    ].join('\n');
+
+    const cleaned = cleanupMarkdownArtifacts(input);
+
+    assert.ok(cleaned.startsWith('# Introduction'));
+    assert.equal(cleaned.includes('Edit this page'), false);
+    assert.equal(cleaned.includes('Toggle table of contents sidebar'), false);
+    assert.ok(cleaned.includes('## Features'));
+    assert.ok(cleaned.includes('Feature details.'));
+  });
 });

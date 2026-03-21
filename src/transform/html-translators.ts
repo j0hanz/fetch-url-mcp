@@ -423,23 +423,30 @@ function buildSpanTranslator(ctx: unknown): Record<string, unknown> {
 // DL helpers
 // ---------------------------------------------------------------------------
 
-function resolveDlNodeName(child: unknown): string {
-  if (!isLikeNode(child)) return '';
-  const raw = child.nodeName;
-  return typeof raw === 'string' ? raw.toUpperCase() : '';
-}
+function normalizeDefinitionListContent(content: string): string {
+  const lines = content
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean);
+  if (lines.length === 0) return '';
 
-function resolveDlTextContent(child: unknown): string {
-  if (!isLikeNode(child)) return '';
-  const raw = child.textContent;
-  return typeof raw === 'string' ? raw.trim() : '';
-}
+  const normalized: string[] = [];
 
-function buildDlChildFragment(child: unknown): string | null {
-  const nodeName = resolveDlNodeName(child);
-  if (nodeName === 'DT') return `**${resolveDlTextContent(child)}**\n`;
-  if (nodeName === 'DD') return `: ${resolveDlTextContent(child)}\n`;
-  return null;
+  for (const line of lines) {
+    const isDefinition = line.startsWith(': ');
+    const previous = normalized[normalized.length - 1];
+    if (
+      previous &&
+      previous.length > 0 &&
+      !previous.startsWith(': ') &&
+      !isDefinition
+    ) {
+      normalized.push('');
+    }
+    normalized.push(line);
+  }
+
+  return normalized.join('\n');
 }
 
 // ---------------------------------------------------------------------------
@@ -450,21 +457,19 @@ function createCustomTranslators(): TranslatorConfigObject {
   return {
     code: (ctx: unknown) => buildCodeTranslator(ctx),
     img: (ctx: unknown) => buildImageTranslator(ctx),
-    dl: (ctx: unknown) => {
-      if (!isObject(ctx)) return { content: '' };
-      const { node } = ctx as { node?: unknown };
-      if (!isLikeNode(node)) return { content: '' };
-
-      const childNodes = Array.from(node.childNodes ?? []);
-
-      let items = '';
-      for (const child of childNodes) {
-        const fragment = buildDlChildFragment(child);
-        if (fragment !== null) items += fragment;
-      }
-
-      return { content: items ? `\n${items}\n` : '' };
-    },
+    dl: () => ({
+      postprocess: ({ content }: { content: string }) => {
+        const normalized = normalizeDefinitionListContent(content);
+        return normalized ? `\n\n${normalized}\n\n` : '';
+      },
+    }),
+    dt: () => ({
+      postprocess: ({ content }: { content: string }) => `${content.trim()}\n`,
+    }),
+    dd: () => ({
+      postprocess: ({ content }: { content: string }) =>
+        content.trim() ? `: ${content.trim()}\n` : '',
+    }),
     div: buildDivTranslator,
     kbd: () => ({
       postprocess: ({ content }: { content: string }) => `\`${content}\``,

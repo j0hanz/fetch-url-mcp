@@ -135,6 +135,32 @@ describe('detectLanguageFromCode', () => {
     );
   });
 
+  it('detects Python REPL transcripts', () => {
+    assert.equal(
+      detectLanguageFromCode(
+        '>>> Question.objects.all()\n<QuerySet []>\n>>> q.was_published_recently()\nTrue'
+      ),
+      'python'
+    );
+  });
+
+  it('detects Windows shell prompts as shell transcripts', () => {
+    assert.equal(detectLanguageFromCode('...\\> py manage.py shell'), 'bash');
+  });
+
+  it('does not misclassify QuerySet output as JSX', () => {
+    assert.notEqual(detectLanguageFromCode('<QuerySet []>'), 'jsx');
+  });
+
+  it('does not misclassify comment-prefixed mapping output as CSS', () => {
+    assert.notEqual(
+      detectLanguageFromCode(
+        "# {'email': 'leila@example.com', 'content': 'foo bar'}"
+      ),
+      'css'
+    );
+  });
+
   it('extracts language from class names', () => {
     assert.equal(
       resolveLanguageFromAttributes('language-typescript', ''),
