@@ -274,9 +274,9 @@ class CancelAckTracker {
   private readonly pending = new Map<
     string,
     {
-      promise: Promise<void>;
-      resolve: () => void;
-      timeout: CancellableTimeout<void>;
+      promise: Promise<unknown>;
+      resolve: (value?: unknown) => void;
+      timeout: CancellableTimeout<unknown>;
     }
   >();
 
@@ -289,20 +289,26 @@ class CancelAckTracker {
 
   wait(id: string, timeoutMs: number): Promise<void> {
     const existing = this.pending.get(id);
-    if (existing) return existing.promise;
+    if (existing) return existing.promise as Promise<void>;
 
-    let resolve: () => void = () => {};
     const timeout = createUnrefTimeout(timeoutMs, undefined);
-    const racePromise = new Promise<void>((finish) => {
-      resolve = finish;
-    });
+    const { promise: racePromise, resolve } =
+      Promise.withResolvers<undefined>();
 
-    const promise = Promise.race([racePromise, timeout.promise]).finally(() => {
-      this.pending.delete(id);
-      timeout.cancel();
-    });
+    const promise = Promise.race([racePromise, timeout.promise])
+      .finally(() => {
+        this.pending.delete(id);
+        timeout.cancel();
+      })
+      .then(() => {
+        return;
+      });
 
-    this.pending.set(id, { promise, resolve, timeout });
+    this.pending.set(id, {
+      promise,
+      resolve: resolve as (value?: unknown) => void,
+      timeout,
+    });
     return promise;
   }
 
@@ -384,17 +390,18 @@ class WorkerPool implements TransformWorkerPool {
       });
     }
 
-    return new Promise<MarkdownTransformResult>((resolve, reject) => {
-      const task = this.createPendingTask(
-        htmlOrBuffer,
-        url,
-        options,
-        resolve,
-        reject
-      );
-      this.queue.enqueue(task);
-      this.drainQueue();
-    });
+    const { promise, resolve, reject } =
+      Promise.withResolvers<MarkdownTransformResult>();
+    const task = this.createPendingTask(
+      htmlOrBuffer,
+      url,
+      options,
+      resolve,
+      reject
+    );
+    this.queue.enqueue(task);
+    this.drainQueue();
+    return promise;
   }
 
   getQueueDepth(): number {

@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from 'node:crypto';
+import { hash, randomUUID } from 'node:crypto';
 
 import type { ServerResult } from '@modelcontextprotocol/sdk/types.js';
 import { z } from 'zod';
@@ -112,7 +112,7 @@ export function resolveTaskOwnerKey(extra?: HandlerExtra): string {
   if (extra?.sessionId) return `session:${extra.sessionId}`;
   if (extra?.authInfo?.clientId) return `client:${extra.authInfo.clientId}`;
   if (extra?.authInfo?.token)
-    return `token:${createHash('sha256').update(extra.authInfo.token).digest('hex')}`;
+    return `token:${hash('sha256', extra.authInfo.token, 'hex')}`;
   return 'default';
 }
 

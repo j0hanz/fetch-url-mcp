@@ -70,84 +70,87 @@ export async function waitForTerminalTask<TTask extends WaitableTask>(options: {
 
   const deadlineMs = task._createdAtMs + task.ttl;
 
-  return new Promise((resolve, reject) => {
-    const resolveInContext = AsyncLocalStorage.bind(
-      (value: TTask | undefined): void => {
-        resolve(value);
-      }
-    );
-    const rejectInContext = AsyncLocalStorage.bind((error: unknown): void => {
-      reject(toError(error));
+  const { promise, resolve, reject } = Promise.withResolvers<
+    TTask | undefined
+  >();
+  const resolveInContext = AsyncLocalStorage.bind(
+    (value: TTask | undefined): void => {
+      resolve(value);
+    }
+  );
+  const rejectInContext = AsyncLocalStorage.bind((error: unknown): void => {
+    reject(toError(error));
+  });
+
+  let settled = false;
+  let waiter: TaskWaiter<TTask> | null = null;
+  let deadlineTimeout: CancellableTimeout<{ timeout: true }> | undefined;
+
+  const cleanup = (): void => {
+    if (deadlineTimeout) {
+      deadlineTimeout.cancel();
+      deadlineTimeout = undefined;
+    }
+    if (options.signal) {
+      options.signal.removeEventListener('abort', onAbort);
+    }
+  };
+
+  const settleOnce = (fn: () => void): void => {
+    if (settled) return;
+    settled = true;
+    fn();
+  };
+
+  const onAbort = (): void => {
+    settleOnce(() => {
+      cleanup();
+      options.registry.remove(options.taskId, waiter);
+      rejectInContext(
+        new McpError(ErrorCode.ConnectionClosed, 'Request was cancelled')
+      );
     });
+  };
 
-    let settled = false;
-    let waiter: TaskWaiter<TTask> | null = null;
-    let deadlineTimeout: CancellableTimeout<{ timeout: true }> | undefined;
-
-    const cleanup = (): void => {
-      if (deadlineTimeout) {
-        deadlineTimeout.cancel();
-        deadlineTimeout = undefined;
+  waiter = (updated: TTask): void => {
+    settleOnce(() => {
+      cleanup();
+      if (updated.ownerKey !== options.ownerKey) {
+        resolveInContext(undefined);
+        return;
       }
-      if (options.signal) {
-        options.signal.removeEventListener('abort', onAbort);
-      }
-    };
+      resolveInContext(updated);
+    });
+  };
 
-    const settleOnce = (fn: () => void): void => {
-      if (settled) return;
-      settled = true;
-      fn();
-    };
+  if (options.signal?.aborted) {
+    onAbort();
+    return;
+  }
 
-    const onAbort = (): void => {
+  options.registry.add(options.taskId, waiter);
+
+  if (options.signal) {
+    options.signal.addEventListener('abort', onAbort, { once: true });
+  }
+
+  const timeoutMs = Math.max(0, deadlineMs - Date.now());
+
+  deadlineTimeout = createUnrefTimeout(timeoutMs, { timeout: true });
+  void deadlineTimeout.promise
+    .then(() => {
       settleOnce(() => {
         cleanup();
         options.registry.remove(options.taskId, waiter);
+        options.removeTask(options.taskId);
         rejectInContext(
-          new McpError(ErrorCode.ConnectionClosed, 'Request was cancelled')
+          new McpError(ErrorCode.InvalidParams, 'Task expired', {
+            taskId: options.taskId,
+          })
         );
       });
-    };
+    })
+    .catch(rejectInContext);
 
-    waiter = (updated: TTask): void => {
-      settleOnce(() => {
-        cleanup();
-        if (updated.ownerKey !== options.ownerKey) {
-          resolveInContext(undefined);
-          return;
-        }
-        resolveInContext(updated);
-      });
-    };
-
-    if (options.signal?.aborted) {
-      onAbort();
-      return;
-    }
-
-    options.registry.add(options.taskId, waiter);
-
-    if (options.signal) {
-      options.signal.addEventListener('abort', onAbort, { once: true });
-    }
-
-    const timeoutMs = Math.max(0, deadlineMs - Date.now());
-
-    deadlineTimeout = createUnrefTimeout(timeoutMs, { timeout: true });
-    void deadlineTimeout.promise
-      .then(() => {
-        settleOnce(() => {
-          cleanup();
-          options.registry.remove(options.taskId, waiter);
-          options.removeTask(options.taskId);
-          rejectInContext(
-            new McpError(ErrorCode.InvalidParams, 'Task expired', {
-              taskId: options.taskId,
-            })
-          );
-        });
-      })
-      .catch(rejectInContext);
-  });
+  return promise;
 }

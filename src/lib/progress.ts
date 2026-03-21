@@ -1,3 +1,5 @@
+import { setTimeout as setTimeoutPromise } from 'node:timers/promises';
+
 import { logError, logWarn } from './core.js';
 import { getErrorMessage, isObject } from './utils.js';
 
@@ -154,17 +156,22 @@ class ToolProgressReporter implements ProgressReporter {
   ): Promise<void> {
     if (!this.sendNotification) return;
 
-    let timeoutId: NodeJS.Timeout | undefined;
-    const timeoutPromise = new Promise<{ timeout: true }>((resolve) => {
-      timeoutId = setTimeout(() => {
-        resolve({ timeout: true });
-      }, PROGRESS_NOTIFICATION_TIMEOUT_MS);
-      timeoutId.unref();
+    const ac = new AbortController();
+    const timeoutPromise = setTimeoutPromise(
+      PROGRESS_NOTIFICATION_TIMEOUT_MS,
+      { timeout: true as const },
+      { signal: ac.signal, ref: false }
+    ).catch((err: unknown) => {
+      if ((err as Error).name === 'AbortError') return { ok: true as const };
+      throw err;
     });
 
     try {
       const outcome = await Promise.race([
-        this.sendNotification(notification).then(() => ({ ok: true as const })),
+        this.sendNotification(notification).then(() => {
+          ac.abort();
+          return { ok: true as const };
+        }),
         timeoutPromise,
       ]);
 
@@ -180,10 +187,6 @@ class ToolProgressReporter implements ProgressReporter {
         progress: notification.params.progress,
         message: notification.params.message,
       });
-    } finally {
-      if (timeoutId) {
-        clearTimeout(timeoutId);
-      }
     }
   }
 

@@ -925,18 +925,18 @@ async function listen(
   host: string,
   port: number
 ): Promise<void> {
-  await new Promise<void>((resolve, reject): void => {
-    function onError(err: Error): void {
-      server.off('error', onError);
-      reject(err);
-    }
+  const { promise, resolve, reject } = Promise.withResolvers<undefined>();
+  function onError(err: Error): void {
+    server.off('error', onError);
+    reject(err);
+  }
 
-    server.once('error', onError);
-    server.listen(port, host, (): void => {
-      server.off('error', onError);
-      resolve();
-    });
+  server.once('error', onError);
+  server.listen(port, host, (): void => {
+    server.off('error', onError);
+    resolve(undefined);
   });
+  await promise;
 }
 
 function resolveListeningPort(server: NetworkServer, fallback: number): number {
@@ -978,12 +978,12 @@ function createShutdownHandler(options: {
       );
     }
 
-    await new Promise<void>((resolve, reject): void => {
-      options.server.close((err): void => {
-        if (err) reject(err);
-        else resolve();
-      });
+    const { promise, resolve, reject } = Promise.withResolvers<undefined>();
+    options.server.close((err): void => {
+      if (err) reject(err);
+      else resolve(undefined);
     });
+    await promise;
   };
 }
 
