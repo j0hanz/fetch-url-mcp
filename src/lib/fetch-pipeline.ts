@@ -45,18 +45,14 @@ interface FetchTransformInput {
 function getOpenCodeFence(
   content: string
 ): { fenceChar: string; fenceLength: number } | null {
-  const FENCE_PATTERN = /^([ \t]*)(`{3,}|~{3,})/gm;
-  let match;
+  const FENCE_PATTERN = /^[ \t]*(`{3,}|~{3,})/gm;
   let inFence = false;
   let fenceChar: string | null = null;
   let fenceLength = 0;
 
-  while ((match = FENCE_PATTERN.exec(content)) !== null) {
-    const marker = match[2];
-    if (!marker) continue;
-
-    const [char] = marker;
-    if (!char) continue;
+  for (const match of content.matchAll(FENCE_PATTERN)) {
+    const marker = match[1] ?? '';
+    const char = marker[0] ?? '';
     const { length } = marker;
 
     if (!inFence) {
@@ -70,10 +66,7 @@ function getOpenCodeFence(
     }
   }
 
-  if (inFence && fenceChar) {
-    return { fenceChar, fenceLength };
-  }
-  return null;
+  return inFence && fenceChar ? { fenceChar, fenceLength } : null;
 }
 function findSafeLinkBoundary(content: string, limit: number): number {
   const lastBracket = content.lastIndexOf('[', limit);
@@ -93,9 +86,11 @@ function truncateWithMarker(
   marker: string
 ): string {
   if (content.length <= limit) return content;
+
   const maxContentLength = Math.max(0, limit - marker.length);
   const tentativeContent = content.substring(0, maxContentLength);
   const openFence = getOpenCodeFence(tentativeContent);
+
   if (openFence) {
     const fenceCloser = `\n${openFence.fenceChar.repeat(openFence.fenceLength)}\n`;
     const adjustedLength = Math.max(
@@ -106,11 +101,7 @@ function truncateWithMarker(
   }
 
   const safeBoundary = findSafeLinkBoundary(content, maxContentLength);
-  if (safeBoundary < maxContentLength) {
-    return `${content.substring(0, safeBoundary)}${marker}`.slice(0, limit);
-  }
-
-  return `${tentativeContent}${marker}`.slice(0, limit);
+  return `${content.substring(0, safeBoundary)}${marker}`.slice(0, limit);
 }
 function appendTruncationMarker(content: string, marker: string): string {
   if (!content) return marker;
@@ -125,11 +116,8 @@ function appendTruncationMarker(content: string, marker: string): string {
     contentWithFence,
     contentWithFence.length
   );
-  if (safeBoundary < contentWithFence.length) {
-    return `${contentWithFence.substring(0, safeBoundary)}${marker}`;
-  }
 
-  return `${contentWithFence}${marker}`;
+  return `${contentWithFence.substring(0, safeBoundary)}${marker}`;
 }
 
 function normalizeMarkdownForTruncation(
@@ -216,19 +204,13 @@ interface UrlResolution {
 function resolveNormalizedUrl(url: string): UrlResolution {
   const { normalizedUrl: validatedUrl } = normalizeUrl(url);
   const transformedResult = transformToRawUrl(validatedUrl);
-  if (!transformedResult.transformed) {
-    return {
-      normalizedUrl: validatedUrl,
-      originalUrl: validatedUrl,
-      transformed: false,
-    };
-  }
 
-  const { normalizedUrl: transformedUrl } = normalizeUrl(transformedResult.url);
   return {
-    normalizedUrl: transformedUrl,
+    normalizedUrl: transformedResult.transformed
+      ? normalizeUrl(transformedResult.url).normalizedUrl
+      : validatedUrl,
     originalUrl: validatedUrl,
-    transformed: true,
+    transformed: transformedResult.transformed,
   };
 }
 function logCacheMiss(
@@ -343,65 +325,39 @@ function persistCacheEntry<T>(
     });
   }
 }
-function persistAllCacheTargets<T>(
-  primaryCacheKey: string | null,
-  data: T,
-  serialize: ((result: T) => string) | undefined,
-  cacheNamespace: string,
-  cacheVary: Record<string, unknown> | string | undefined,
+function persistCacheTargets<T>(
   requestedUrl: string,
-  finalUrl: string | undefined
+  finalUrl: string | undefined,
+  cacheKey: string | null,
+  data: T,
+  options: FetchPipelineOptions<T>
 ): void {
-  if (primaryCacheKey) {
-    persistCacheEntry(
-      primaryCacheKey,
-      data,
-      serialize,
-      finalUrl ?? requestedUrl,
-      cacheNamespace
-    );
-  }
+  if (!cacheKey) return;
 
-  if (!finalUrl || finalUrl === requestedUrl) return;
-
-  const finalCacheKey = createCacheKey(cacheNamespace, finalUrl, cacheVary);
-  if (!finalCacheKey || finalCacheKey === primaryCacheKey) return;
-
-  persistCacheEntry(finalCacheKey, data, serialize, finalUrl, cacheNamespace);
-}
-
-function createTransformInput(
-  buffer: Uint8Array,
-  encoding: string,
-  truncated?: boolean
-): FetchTransformInput {
-  return {
-    buffer,
-    encoding,
-    ...(truncated ? { truncated: true } : {}),
-  };
-}
-
-async function fetchRemotePipelineData<T>(
-  options: FetchPipelineOptions<T>,
-  normalizedUrl: string
-): Promise<{ data: T; finalUrl?: string }> {
-  options.onStage?.('fetch_remote');
-  logDebug('Fetching URL', { url: normalizedUrl });
-
-  const { buffer, encoding, truncated, finalUrl } =
-    await fetchNormalizedUrlBuffer(normalizedUrl, withSignal(options.signal));
-
-  options.onStage?.('response_ready');
-  options.onStage?.('transform_start');
-
-  const resolvedFinalUrl = finalUrl || normalizedUrl;
-  const data = await options.transform(
-    createTransformInput(buffer, encoding, truncated),
-    resolvedFinalUrl
+  persistCacheEntry(
+    cacheKey,
+    data,
+    options.serialize,
+    finalUrl ?? requestedUrl,
+    options.cacheNamespace
   );
 
-  return { data, finalUrl };
+  if (finalUrl && finalUrl !== requestedUrl) {
+    const finalCacheKey = createCacheKey(
+      options.cacheNamespace,
+      finalUrl,
+      options.cacheVary
+    );
+    if (finalCacheKey && finalCacheKey !== cacheKey) {
+      persistCacheEntry(
+        finalCacheKey,
+        data,
+        options.serialize,
+        finalUrl,
+        options.cacheNamespace
+      );
+    }
+  }
 }
 
 export async function executeFetchPipeline<T>(
@@ -428,20 +384,31 @@ export async function executeFetchPipeline<T>(
   );
   if (cachedResult) return cachedResult;
 
-  const { data, finalUrl } = await fetchRemotePipelineData(
-    options,
-    resolvedUrl.normalizedUrl
+  options.onStage?.('fetch_remote');
+  logDebug('Fetching URL', { url: resolvedUrl.normalizedUrl });
+
+  const { buffer, encoding, truncated, finalUrl } =
+    await fetchNormalizedUrlBuffer(
+      resolvedUrl.normalizedUrl,
+      withSignal(options.signal)
+    );
+
+  options.onStage?.('response_ready');
+  options.onStage?.('transform_start');
+
+  const resolvedFinalUrl = finalUrl || resolvedUrl.normalizedUrl;
+  const data = await options.transform(
+    { buffer, encoding, ...(truncated ? { truncated: true } : {}) },
+    resolvedFinalUrl
   );
 
   if (isEnabled()) {
-    persistAllCacheTargets(
+    persistCacheTargets(
+      resolvedUrl.normalizedUrl,
+      finalUrl,
       cacheKey,
       data,
-      options.serialize,
-      options.cacheNamespace,
-      options.cacheVary,
-      resolvedUrl.normalizedUrl,
-      finalUrl
+      options
     );
   }
 
@@ -468,23 +435,25 @@ const markdownPipelineResultSchema = z.strictObject({
   truncated: z.boolean(),
 });
 
-function createMarkdownPipelineResult(params: {
+function createMarkdownPipelineResult({
+  markdown: rawMarkdown,
+  title,
+  metadata,
+  truncated,
+}: {
   markdown: string;
   title: string | undefined;
   metadata: ReturnType<typeof normalizeExtractedMetadata>;
   truncated: boolean;
 }): MarkdownPipelineResult {
-  const markdown = normalizeMarkdownForTruncation(
-    params.markdown,
-    params.truncated
-  );
+  const markdown = normalizeMarkdownForTruncation(rawMarkdown, truncated);
 
   return {
     content: markdown,
     markdown,
-    title: params.title,
-    ...(params.metadata ? { metadata: params.metadata } : {}),
-    truncated: params.truncated,
+    title,
+    ...(metadata ? { metadata } : {}),
+    truncated,
   };
 }
 
@@ -570,18 +539,10 @@ interface SharedFetchDeps {
 function buildSharedFetchPipelineOptions(
   options: SharedFetchOptions
 ): FetchPipelineOptions<MarkdownPipelineResult> {
-  const opts: FetchPipelineOptions<MarkdownPipelineResult> = {
-    url: options.url,
+  return {
+    ...options,
     cacheNamespace: 'markdown',
-    transform: options.transform,
   };
-  if (options.signal !== undefined) opts.signal = options.signal;
-  if (options.cacheVary !== undefined) opts.cacheVary = options.cacheVary;
-  if (options.forceRefresh) opts.forceRefresh = true;
-  if (options.onStage) opts.onStage = options.onStage;
-  if (options.serialize) opts.serialize = options.serialize;
-  if (options.deserialize) opts.deserialize = options.deserialize;
-  return opts;
 }
 export async function performSharedFetch(
   options: SharedFetchOptions,
