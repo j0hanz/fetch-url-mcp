@@ -1,5 +1,4 @@
 import { AsyncLocalStorage, AsyncResource } from 'node:async_hooks';
-import { Buffer } from 'node:buffer';
 import { availableParallelism } from 'node:os';
 import process from 'node:process';
 import { isSharedArrayBuffer } from 'node:util/types';
@@ -122,7 +121,7 @@ function ensureTightBuffer(buffer: Uint8Array): Uint8Array {
     return buffer;
   }
 
-  return Buffer.from(buffer);
+  return new Uint8Array(buffer);
 }
 
 function getTransferableBuffer(buffer: Uint8Array): ArrayBuffer | null {

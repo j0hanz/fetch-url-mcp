@@ -1,4 +1,3 @@
-import { Buffer } from 'node:buffer';
 import { randomBytes } from 'node:crypto';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 
@@ -476,7 +475,7 @@ class AuthService {
   ): string {
     // Base64 is only an encoding for header transport; it is NOT encryption.
     const credentials = `${clientId}:${clientSecret ?? ''}`;
-    return `Basic ${Buffer.from(credentials, 'utf8').toString('base64')}`;
+    return `Basic ${btoa(credentials)}`;
   }
 
   private buildIntrospectionRequest(

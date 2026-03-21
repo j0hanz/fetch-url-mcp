@@ -83,14 +83,12 @@ function decodeInput(input: string | Uint8Array, encoding?: string): string {
     normalizedEncoding === 'utf-8' ||
     normalizedEncoding === 'utf8'
   ) {
-    const buf = Buffer.isBuffer(input) ? input : Buffer.from(input);
-    return buf.toString('utf8');
+    return new TextDecoder('utf-8').decode(input);
   }
   try {
-    return new TextDecoder(normalizedEncoding).decode(input);
+    return new TextDecoder(normalizedEncoding, { fatal: true }).decode(input);
   } catch {
-    const buf = Buffer.isBuffer(input) ? input : Buffer.from(input);
-    return buf.toString('utf8');
+    return new TextDecoder('utf-8').decode(input);
   }
 }
 
@@ -266,7 +264,7 @@ function getUtf8ByteLength(html: string): number {
   return Buffer.byteLength(html, 'utf8');
 }
 
-function trimUtf8Buffer(buffer: Buffer, maxBytes: number): Buffer {
+function trimUtf8Buffer(buffer: Uint8Array, maxBytes: number): Uint8Array {
   if (buffer.length <= maxBytes) return buffer;
   if (maxBytes <= 0) return buffer.subarray(0, 0);
 
@@ -344,9 +342,9 @@ function truncateHtml(
     return { html: trimDanglingTagFragment(sliced), truncated: true };
   }
 
-  const htmlBuffer = Buffer.from(sliced, 'utf8');
+  const htmlBuffer = new TextEncoder().encode(sliced);
   const content = trimDanglingTagFragment(
-    trimUtf8Buffer(htmlBuffer, maxSize).toString('utf8')
+    new TextDecoder('utf-8').decode(trimUtf8Buffer(htmlBuffer, maxSize))
   );
 
   logWarn('HTML content exceeds maximum size, truncating', {

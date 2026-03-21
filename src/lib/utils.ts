@@ -3,6 +3,7 @@ import {
   createHash,
   createHmac,
   hash as oneShotHash,
+  randomBytes,
   timingSafeEqual,
 } from 'node:crypto';
 import {
@@ -77,20 +78,12 @@ function assertAllowedAlgorithm(
     throw new Error(`Hash algorithm not allowed: ${algorithm}`);
   }
 }
-export function timingSafeEqualUtf8(a: string, b: string): boolean {
-  const aBuffer = Buffer.from(a, 'utf8');
-  const bBuffer = Buffer.from(b, 'utf8');
-  if (aBuffer.length === bBuffer.length) {
-    return timingSafeEqual(aBuffer, bBuffer);
-  }
+const TIMING_SAFE_HMAC_KEY = randomBytes(32);
 
-  // If lengths differ, compare against a buffer of the same length filled with zeros.
-  const maxLength = Math.max(aBuffer.length, bBuffer.length);
-  const paddedA = Buffer.alloc(maxLength);
-  aBuffer.copy(paddedA);
-  const paddedB = Buffer.alloc(maxLength);
-  bBuffer.copy(paddedB);
-  return timingSafeEqual(paddedA, paddedB) && aBuffer.length === bBuffer.length;
+export function timingSafeEqualUtf8(a: string, b: string): boolean {
+  const aHash = createHmac('sha256', TIMING_SAFE_HMAC_KEY).update(a).digest();
+  const bHash = createHmac('sha256', TIMING_SAFE_HMAC_KEY).update(b).digest();
+  return timingSafeEqual(aHash, bHash);
 }
 function hashHex(
   algorithm: AllowedHashAlgorithm,
