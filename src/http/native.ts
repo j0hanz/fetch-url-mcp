@@ -76,8 +76,6 @@ import {
 import {
   type AuthenticatedContext,
   buildRequestContext,
-  closeMcpServerBestEffort,
-  closeTransportBestEffort,
   createRequestAbortSignal,
   createTransportAdapter,
   DEFAULT_BODY_LIMIT_BYTES,
@@ -101,6 +99,7 @@ import {
 import {
   teardownSessionRegistration,
   teardownSessionResources,
+  teardownUnregisteredSessionResources,
 } from './session-teardown.js';
 
 // ---------------------------------------------------------------------------
@@ -145,6 +144,42 @@ function isPingRequest(method: string): boolean {
   return method === 'ping';
 }
 
+type SessionTeardownOptions = Parameters<typeof teardownSessionResources>[1];
+type PostRequestBody = {
+  id?: JsonRpcId | undefined;
+  method?: string | undefined;
+} & Record<string, unknown>;
+
+function createSessionTeardownOptions(
+  mode: 'ended' | 'evicted' | 'shutdown',
+  context?: string
+): SessionTeardownOptions {
+  switch (mode) {
+    case 'ended':
+      return {
+        cancelMessage: 'The task was cancelled because the MCP session ended.',
+        closeServerReason: `${context ?? 'session'}-server`,
+      };
+    case 'evicted':
+      return {
+        cancelMessage:
+          'The task was cancelled because the MCP session was evicted.',
+        closeTransportReason: 'session-eviction',
+        closeServerReason: 'session-eviction',
+        unregisterByServer: true,
+      };
+    case 'shutdown':
+      return {
+        cancelMessage:
+          'The task was cancelled because the HTTP server is shutting down.',
+        closeTransportReason: 'shutdown-session-close',
+        closeServerReason: 'shutdown-session-close',
+        unregisterByServer: true,
+        awaitClose: true,
+      };
+  }
+}
+
 class McpSessionGateway {
   private readonly sessionInitTimeouts = new Map<string, NodeJS.Timeout>();
 
@@ -154,61 +189,14 @@ class McpSessionGateway {
   ) {}
 
   async handlePost(ctx: AuthenticatedContext): Promise<void> {
-    if (!acceptsJsonAndEventStream(getHeaderValue(ctx.req, 'accept'))) {
-      sendJson(ctx.res, 400, {
-        error:
-          'Accept header must include application/json and text/event-stream',
-      });
-      return;
-    }
+    const body = this.validatePostRequest(ctx);
+    if (!body) return;
 
-    const { body } = ctx;
-    if (isJsonRpcBatchRequest(body)) {
-      sendError(ctx.res, -32600, 'Batch requests not supported');
-      return;
-    }
-    if (!isMcpMessageBody(body)) {
-      sendError(ctx.res, -32600, 'Invalid request body');
-      return;
-    }
+    const postState = this.resolvePostRequestState(ctx, body);
+    if (!postState) return;
 
-    const requestId = body.id ?? null;
-    const method = isMcpRequestBody(body) ? body.method : null;
-    const isInitializedMethod =
-      method !== null && isInitializedNotification(method);
-    const isInitNotification = isInitializedMethod && body.id === undefined;
-    const sessionId = getMcpSessionId(ctx.req);
-
-    if (isInitializedMethod && !isInitNotification) {
-      sendError(
-        ctx.res,
-        -32600,
-        'notifications/initialized must be sent as a notification',
-        400,
-        requestId
-      );
-      return;
-    }
-
-    const session = sessionId
-      ? this.getAuthenticatedSessionById(
-          sessionId,
-          ctx.auth,
-          ctx.res,
-          requestId
-        )
-      : undefined;
-    if (
-      !this.ensurePostSessionAccess({
-        ctx,
-        sessionId,
-        session,
-        requestId,
-        method,
-        isInitNotification,
-      })
-    )
-      return;
+    const { requestId, method, sessionId, session, isInitNotification } =
+      postState;
 
     if (session && isInitNotification) {
       this.markSessionInitialized(sessionId, session);
@@ -260,6 +248,89 @@ class McpSessionGateway {
     sendJson(ctx.res, 200, { status: 'closed' });
   }
 
+  private validatePostRequest(
+    ctx: AuthenticatedContext
+  ): PostRequestBody | null {
+    if (!acceptsJsonAndEventStream(getHeaderValue(ctx.req, 'accept'))) {
+      sendJson(ctx.res, 400, {
+        error:
+          'Accept header must include application/json and text/event-stream',
+      });
+      return null;
+    }
+
+    const { body } = ctx;
+    if (isJsonRpcBatchRequest(body)) {
+      sendError(ctx.res, -32600, 'Batch requests not supported');
+      return null;
+    }
+    if (!isMcpMessageBody(body)) {
+      sendError(ctx.res, -32600, 'Invalid request body');
+      return null;
+    }
+
+    return body as PostRequestBody;
+  }
+
+  private resolvePostRequestState(
+    ctx: AuthenticatedContext,
+    body: PostRequestBody
+  ): {
+    requestId: JsonRpcId;
+    method: string | null;
+    sessionId: string | null;
+    session: SessionRecord | undefined;
+    isInitNotification: boolean;
+  } | null {
+    const requestId = body.id ?? null;
+    const method = typeof body.method === 'string' ? body.method : null;
+    const isInitializedMethod =
+      method !== null && isInitializedNotification(method);
+    const isInitNotification = isInitializedMethod && body.id === undefined;
+    const sessionId = getMcpSessionId(ctx.req);
+
+    if (isInitializedMethod && !isInitNotification) {
+      sendError(
+        ctx.res,
+        -32600,
+        'notifications/initialized must be sent as a notification',
+        400,
+        requestId
+      );
+      return null;
+    }
+
+    const authFingerprint = buildAuthFingerprint(ctx.auth);
+    const session = sessionId
+      ? (this.getAuthenticatedSessionById(
+          sessionId,
+          authFingerprint,
+          ctx.res,
+          requestId
+        ) ?? undefined)
+      : undefined;
+    if (
+      !this.ensurePostSessionAccess({
+        ctx,
+        sessionId,
+        session,
+        requestId,
+        method,
+        isInitNotification,
+      })
+    ) {
+      return null;
+    }
+
+    return {
+      requestId,
+      method,
+      sessionId,
+      session,
+      isInitNotification,
+    };
+  }
+
   private ensurePostSessionAccess(params: {
     ctx: AuthenticatedContext;
     sessionId: string | null;
@@ -307,6 +378,19 @@ class McpSessionGateway {
       );
     }
 
+    const negotiatedProtocolVersion = this.getInitializeProtocolVersion(
+      ctx,
+      requestId
+    );
+    if (!negotiatedProtocolVersion) return null;
+
+    return this.createNewSession(ctx, requestId, negotiatedProtocolVersion);
+  }
+
+  private getInitializeProtocolVersion(
+    ctx: AuthenticatedContext,
+    requestId: JsonRpcId
+  ): string | null {
     if (!isMcpRequestBody(ctx.body)) {
       sendError(ctx.res, -32600, 'Missing session ID', 400, requestId);
       return null;
@@ -352,7 +436,7 @@ class McpSessionGateway {
       return null;
     }
 
-    return this.createNewSession(ctx, requestId, negotiatedProtocolVersion);
+    return negotiatedProtocolVersion;
   }
 
   private getExistingTransport(
@@ -380,10 +464,11 @@ class McpSessionGateway {
   ): { sessionId: string; session: SessionRecord } | null {
     const sessionId = this.getRequiredSessionId(ctx.req, ctx.res, requestId);
     if (!sessionId) return null;
+    const authFingerprint = buildAuthFingerprint(ctx.auth);
 
     const session = this.getAuthenticatedSessionById(
       sessionId,
-      ctx.auth,
+      authFingerprint,
       ctx.res,
       requestId
     );
@@ -411,7 +496,7 @@ class McpSessionGateway {
 
   private getAuthenticatedSessionById(
     sessionId: string,
-    auth: AuthInfo | string | null,
+    authFingerprint: string | null,
     res: ServerResponse,
     requestId: JsonRpcId = null
   ): SessionRecord | null {
@@ -421,11 +506,7 @@ class McpSessionGateway {
       return null;
     }
 
-    const fingerprint =
-      typeof auth === 'string' || auth === null
-        ? auth
-        : buildAuthFingerprint(auth);
-    if (!fingerprint || session.authFingerprint !== fingerprint) {
+    if (!authFingerprint || session.authFingerprint !== authFingerprint) {
       sendError(res, -32600, 'Session not found', 404, requestId);
       return null;
     }
@@ -478,6 +559,10 @@ class McpSessionGateway {
     const transportImpl = new StreamableHTTPServerTransport({
       sessionIdGenerator: () => newSessionId,
     });
+    const unpublishedSession = {
+      server: sessionServer,
+      transport: transportImpl,
+    };
 
     const initTimeout = setTimeout(() => {
       const session = this.store.get(newSessionId);
@@ -492,8 +577,10 @@ class McpSessionGateway {
       }
 
       tracker.releaseSlot();
-      void closeTransportBestEffort(transportImpl, 'session-init-timeout');
-      void closeMcpServerBestEffort(sessionServer, 'session-init-timeout');
+      void teardownUnregisteredSessionResources(
+        unpublishedSession,
+        'session-init-timeout'
+      );
     }, config.server.sessionInitTimeoutMs);
     initTimeout.unref();
 
@@ -509,8 +596,10 @@ class McpSessionGateway {
     } catch (err) {
       clearTimeout(initTimeout);
       tracker.releaseSlot();
-      void closeTransportBestEffort(transportImpl, 'session-connect-failed');
-      void closeMcpServerBestEffort(sessionServer, 'session-connect-failed');
+      void teardownUnregisteredSessionResources(
+        unpublishedSession,
+        'session-connect-failed'
+      );
       throw err;
     }
 
@@ -540,10 +629,10 @@ class McpSessionGateway {
     const session = this.store.remove(sessionId);
     if (!session) return;
 
-    void teardownSessionResources(session, {
-      cancelMessage: 'The task was cancelled because the MCP session ended.',
-      closeServerReason: `${context}-server`,
-    });
+    void teardownSessionResources(
+      session,
+      createSessionTeardownOptions('ended', context)
+    );
   }
 
   private clearSessionInitTimeout(sessionId: string | null): void {
@@ -563,13 +652,10 @@ class McpSessionGateway {
       evictOldest: (store) => {
         const evicted = store.evictOldest();
         if (evicted) {
-          void teardownSessionResources(evicted, {
-            cancelMessage:
-              'The task was cancelled because the MCP session was evicted.',
-            closeTransportReason: 'session-eviction',
-            closeServerReason: 'session-eviction',
-            unregisterByServer: true,
-          });
+          void teardownSessionResources(
+            evicted,
+            createSessionTeardownOptions('evicted')
+          );
           return true;
         }
         return false;
@@ -966,14 +1052,10 @@ function createShutdownHandler(options: {
       const batch = sessions.slice(i, i + closeBatchSize);
       await Promise.all(
         batch.map(async (session) => {
-          await teardownSessionResources(session, {
-            cancelMessage:
-              'The task was cancelled because the HTTP server is shutting down.',
-            closeTransportReason: 'shutdown-session-close',
-            closeServerReason: 'shutdown-session-close',
-            unregisterByServer: true,
-            awaitClose: true,
-          });
+          await teardownSessionResources(
+            session,
+            createSessionTeardownOptions('shutdown')
+          );
         })
       );
     }

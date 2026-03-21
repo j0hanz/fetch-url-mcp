@@ -85,8 +85,9 @@ export function parseHandlerExtra(extra: unknown): HandlerExtra | undefined {
   if (!isObject(extra)) return undefined;
 
   const parsed: HandlerExtra = {};
-  const { sessionId, authInfo, signal, requestId, sendNotification } = extra;
-  if (typeof sessionId === 'string') parsed.sessionId = sessionId;
+  const { authInfo, signal, requestId, sendNotification } = extra;
+  const sessionId = resolveSessionIdFromExtra(extra);
+  if (sessionId) parsed.sessionId = sessionId;
 
   const normalizedAuthInfo = normalizeAuthInfo(authInfo);
   if (normalizedAuthInfo) {
@@ -126,6 +127,17 @@ function resolveRequestIdFromExtra(extra: unknown): string | undefined {
   return undefined;
 }
 
+function getHeaderString(
+  headers: Record<string, unknown>,
+  name: string
+): string | undefined {
+  const value = headers[name];
+  if (typeof value === 'string') return value;
+  if (!Array.isArray(value)) return undefined;
+
+  return value.find((entry): entry is string => typeof entry === 'string');
+}
+
 function resolveSessionIdFromExtra(extra: unknown): string | undefined {
   if (!isObject(extra)) return undefined;
 
@@ -138,8 +150,10 @@ function resolveSessionIdFromExtra(extra: unknown): string | undefined {
   const { headers } = requestInfo;
   if (!isObject(headers)) return undefined;
 
-  const headerValue = headers['mcp-session-id'];
-  return typeof headerValue === 'string' ? headerValue : undefined;
+  return (
+    getHeaderString(headers as Record<string, unknown>, 'mcp-session-id') ??
+    getHeaderString(headers as Record<string, unknown>, 'x-mcp-session-id')
+  );
 }
 
 function resolveToolExecutionContext(

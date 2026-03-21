@@ -1,8 +1,16 @@
 import assert from 'node:assert/strict';
 import { describe, it, mock } from 'node:test';
 
-import { getRequestId, runWithRequestContext } from '../dist/lib/core.js';
-import { withRequestContextIfMissing } from '../dist/tasks/owner.js';
+import {
+  getRequestId,
+  getSessionId,
+  runWithRequestContext,
+} from '../dist/lib/core.js';
+import {
+  parseHandlerExtra,
+  resolveToolCallContext,
+  withRequestContextIfMissing,
+} from '../dist/tasks/owner.js';
 
 describe('withRequestContextIfMissing', () => {
   it('establishes a request context when none exists', async () => {
@@ -38,6 +46,42 @@ describe('withRequestContextIfMissing', () => {
     );
 
     assert.equal(requestId, 'existing-request');
+  });
+
+  it('derives session context from requestInfo session headers', async () => {
+    const wrapped = withRequestContextIfMissing(async (_params: unknown) => {
+      return getSessionId();
+    });
+
+    const sessionId = await wrapped(
+      {},
+      {
+        requestInfo: {
+          headers: {
+            'x-mcp-session-id': 'session-from-request-info',
+          },
+        },
+      }
+    );
+
+    assert.equal(sessionId, 'session-from-request-info');
+    assert.equal(getSessionId(), undefined);
+  });
+
+  it('resolves task owner scope from requestInfo session headers', () => {
+    const parsedExtra = parseHandlerExtra({
+      requestInfo: {
+        headers: {
+          'x-mcp-session-id': 'session-owned-task',
+        },
+      },
+    });
+
+    assert.equal(parsedExtra?.sessionId, 'session-owned-task');
+
+    const context = resolveToolCallContext(parsedExtra);
+    assert.equal(context.sessionId, 'session-owned-task');
+    assert.equal(context.ownerKey, 'session:session-owned-task');
   });
 });
 

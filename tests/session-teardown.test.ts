@@ -6,6 +6,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import {
   teardownSessionRegistration,
   teardownSessionResources,
+  teardownUnregisteredSessionResources,
 } from '../dist/http/session-teardown.js';
 import {
   registerMcpSessionServer,
@@ -80,5 +81,28 @@ describe('session teardown helpers', () => {
       'cancelled'
     );
     assert.equal(transportClose.mock.calls.length, 1);
+  });
+
+  it('teardownUnregisteredSessionResources closes unpublished resources without session registration', async (t) => {
+    const server = new McpServer(
+      { name: 'test-unpublished-session-server', version: '0.0.0' },
+      { capabilities: { tools: {} } }
+    );
+    const serverClose = t.mock.method(server, 'close', async () => {});
+    const transportClose = mock.fn(async () => {});
+
+    await teardownUnregisteredSessionResources(
+      {
+        server,
+        transport: { close: transportClose } as unknown as Parameters<
+          typeof teardownUnregisteredSessionResources
+        >[0]['transport'],
+      },
+      'session-connect-failed'
+    );
+
+    assert.equal(resolveMcpSessionIdByServer(server), undefined);
+    assert.equal(transportClose.mock.calls.length, 1);
+    assert.equal(serverClose.mock.calls.length, 1);
   });
 });

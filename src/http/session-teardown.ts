@@ -26,6 +26,11 @@ interface SessionTeardownOptions {
   awaitClose?: boolean;
 }
 
+type SessionCloseOptions = Pick<
+  SessionTeardownOptions,
+  'closeServerReason' | 'closeTransportReason' | 'awaitClose'
+>;
+
 function cancelSessionTasks(server: McpServer, message: string): string | null {
   const sessionId = resolveMcpSessionIdByServer(server);
   if (!sessionId) return null;
@@ -35,16 +40,10 @@ function cancelSessionTasks(server: McpServer, message: string): string | null {
   return sessionId;
 }
 
-export async function teardownSessionResources(
+async function closeSessionResources(
   session: SessionRecordLike,
-  options: SessionTeardownOptions
+  options: SessionCloseOptions
 ): Promise<void> {
-  cancelSessionTasks(session.server, options.cancelMessage);
-
-  if (options.unregisterByServer) {
-    unregisterMcpSessionServerByServer(session.server);
-  }
-
   const closeTasks: Promise<unknown>[] = [];
   if (options.closeTransportReason) {
     closeTasks.push(
@@ -60,6 +59,30 @@ export async function teardownSessionResources(
   if (options.awaitClose && closeTasks.length > 0) {
     await Promise.all(closeTasks);
   }
+}
+
+export async function teardownSessionResources(
+  session: SessionRecordLike,
+  options: SessionTeardownOptions
+): Promise<void> {
+  cancelSessionTasks(session.server, options.cancelMessage);
+
+  if (options.unregisterByServer) {
+    unregisterMcpSessionServerByServer(session.server);
+  }
+
+  await closeSessionResources(session, options);
+}
+
+export async function teardownUnregisteredSessionResources(
+  session: SessionRecordLike,
+  context: string
+): Promise<void> {
+  await closeSessionResources(session, {
+    closeTransportReason: context,
+    closeServerReason: context,
+    awaitClose: true,
+  });
 }
 
 export function teardownSessionRegistration(
