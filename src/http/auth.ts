@@ -10,8 +10,13 @@ import type { AuthInfo } from '@modelcontextprotocol/sdk/server/auth/types.js';
 
 import { config } from '../lib/core.js';
 import { normalizeHost } from '../lib/url.js';
-import { hmacSha256Hex, timingSafeEqualUtf8 } from '../lib/utils.js';
-import { isObject } from '../lib/utils.js';
+import {
+  composeAbortSignal,
+  hmacSha256Hex,
+  isObject,
+  parseUrlOrNull,
+  timingSafeEqualUtf8,
+} from '../lib/utils.js';
 
 import {
   getHeaderValue,
@@ -160,43 +165,39 @@ class HostOriginPolicy {
     const isEncrypted =
       (req.socket as { encrypted?: boolean }).encrypted === true;
     const scheme = isEncrypted ? 'https' : 'http';
-    try {
-      const parsed = new URL(`${scheme}://${hostHeader}`);
-      const normalizedHost = normalizeHost(parsed.host);
-      if (!normalizedHost) return null;
+    const parsed = parseUrlOrNull(`${scheme}://${hostHeader}`);
+    if (!parsed) return null;
 
-      return {
-        scheme,
-        host: normalizedHost,
-        port: parsed.port || this.defaultPortForScheme(scheme),
-      };
-    } catch {
-      return null;
-    }
+    const normalizedHost = normalizeHost(parsed.host);
+    if (!normalizedHost) return null;
+
+    return {
+      scheme,
+      host: normalizedHost,
+      port: parsed.port || this.defaultPortForScheme(scheme),
+    };
   }
 
   private resolveOrigin(
     origin: string
   ): { scheme: 'http' | 'https'; host: string; port: string } | null {
     if (origin === 'null') return null;
-    try {
-      const parsed = new URL(origin);
-      const scheme = parsed.protocol === 'https:' ? 'https' : 'http';
-      if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
-        return null;
-      }
+    const parsed = parseUrlOrNull(origin);
+    if (!parsed) return null;
 
-      const normalizedHost = normalizeHost(parsed.host);
-      if (!normalizedHost) return null;
-
-      return {
-        scheme,
-        host: normalizedHost,
-        port: parsed.port || this.defaultPortForScheme(scheme),
-      };
-    } catch {
+    const scheme = parsed.protocol === 'https:' ? 'https' : 'http';
+    if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
       return null;
     }
+
+    const normalizedHost = normalizeHost(parsed.host);
+    if (!normalizedHost) return null;
+
+    return {
+      scheme,
+      host: normalizedHost,
+      port: parsed.port || this.defaultPortForScheme(scheme),
+    };
   }
 
   private defaultPortForScheme(scheme: 'http' | 'https'): string {
@@ -510,16 +511,13 @@ class AuthService {
     timeoutMs: number,
     signal?: AbortSignal
   ): Promise<unknown> {
-    const timeoutSignal = AbortSignal.timeout(timeoutMs);
-    const combinedSignal = signal
-      ? AbortSignal.any([signal, timeoutSignal])
-      : timeoutSignal;
+    const introspectionSignal = composeAbortSignal(signal, timeoutMs);
 
     const response = await fetch(url, {
       method: 'POST',
       headers: request.headers,
       body: request.body,
-      signal: combinedSignal,
+      ...(introspectionSignal ? { signal: introspectionSignal } : {}),
     });
 
     if (!response.ok) {

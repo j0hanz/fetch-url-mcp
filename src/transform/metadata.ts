@@ -1,5 +1,7 @@
 import { parseHTML } from 'linkedom';
 
+import { parseUrlOrNull } from '../lib/utils.js';
+
 import type { ExtractedMetadata } from './types.js';
 
 // ---------------------------------------------------------------------------
@@ -42,12 +44,8 @@ export function normalizeDocumentTitle(
 ): string {
   if (!baseUrl || !title.startsWith('GitHub - ')) return title;
 
-  let parsed: URL;
-  try {
-    parsed = new URL(baseUrl);
-  } catch {
-    return title;
-  }
+  const parsed = parseUrlOrNull(baseUrl);
+  if (!parsed) return title;
 
   const hostname = parsed.hostname.toLowerCase();
   if (hostname !== 'github.com' && hostname !== 'www.github.com') {
@@ -181,15 +179,16 @@ function resolveFaviconUrl(href: string, baseUrl: string): string | undefined {
   if (!trimmed) return undefined;
   if (trimmed.toLowerCase().startsWith('data:')) return undefined;
 
-  try {
-    const resolved = new URL(trimmed, baseUrl);
-    if (resolved.protocol !== 'http:' && resolved.protocol !== 'https:') {
-      return undefined;
-    }
-    return resolved.toString();
-  } catch {
+  const resolved = parseUrlOrNull(trimmed, baseUrl);
+  if (!resolved) {
     return undefined;
   }
+
+  if (resolved.protocol !== 'http:' && resolved.protocol !== 'https:') {
+    return undefined;
+  }
+
+  return resolved.toString();
 }
 
 // ---------------------------------------------------------------------------

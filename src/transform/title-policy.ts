@@ -1,3 +1,5 @@
+import { parseUrlOrNull } from '../lib/utils.js';
+
 export interface SyntheticTitleContext {
   readonly title: string | undefined;
   readonly favicon: string | undefined;
@@ -31,12 +33,8 @@ export function shouldPreferPrimaryHeadingTitle(
 }
 
 export function isGithubRepositoryRootUrl(url: string): boolean {
-  let parsed: URL;
-  try {
-    parsed = new URL(url);
-  } catch {
-    return false;
-  }
+  const parsed = parseUrlOrNull(url);
+  if (!parsed) return false;
 
   const hostname = parsed.hostname.toLowerCase();
   if (hostname !== 'github.com' && hostname !== 'www.github.com') {
@@ -101,12 +99,7 @@ function buildSyntheticTitlePrefix(
 ): string {
   if (!favicon || suppressFavicon) return ' ';
 
-  let alt = '';
-  try {
-    alt = new URL(url).hostname;
-  } catch {
-    /* skip */
-  }
+  const alt = parseUrlOrNull(url)?.hostname ?? '';
 
   return ` ![${alt}](${favicon}) `;
 }

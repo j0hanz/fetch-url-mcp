@@ -38,6 +38,7 @@ import {
   VALIDATION_ERROR_CODE,
 } from './url.js';
 import {
+  composeAbortSignal,
   createErrorWithCode,
   FetchError,
   isAbortError,
@@ -1735,10 +1736,7 @@ function buildRequestSignal(
   timeoutMs: number,
   external?: AbortSignal
 ): AbortSignal | undefined {
-  if (timeoutMs <= 0) return external;
-
-  const timeoutSignal = AbortSignal.timeout(timeoutMs);
-  return external ? AbortSignal.any([external, timeoutSignal]) : timeoutSignal;
+  return composeAbortSignal(external, timeoutMs);
 }
 function buildRequestInit(
   headers: HeadersInit,

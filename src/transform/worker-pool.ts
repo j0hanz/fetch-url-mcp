@@ -5,6 +5,7 @@ import process from 'node:process';
 import { isSharedArrayBuffer } from 'node:util/types';
 import {
   isMainThread,
+  isMarkedAsUntransferable,
   type Transferable as NodeTransferable,
   parentPort,
   Worker,
@@ -124,6 +125,13 @@ function ensureTightBuffer(buffer: Uint8Array): Uint8Array {
   return Buffer.from(buffer);
 }
 
+function getTransferableBuffer(buffer: Uint8Array): ArrayBuffer | null {
+  const backingBuffer = buffer.buffer;
+  if (isSharedArrayBuffer(backingBuffer)) return null;
+  if (!(backingBuffer instanceof ArrayBuffer)) return null;
+  return isMarkedAsUntransferable(backingBuffer) ? null : backingBuffer;
+}
+
 function buildWorkerDispatchPayload(task: PendingTask): WorkerDispatchPayload {
   const message: TransformWorkerTransformMessage = {
     type: 'transform',
@@ -139,13 +147,13 @@ function buildWorkerDispatchPayload(task: PendingTask): WorkerDispatchPayload {
   }
 
   const htmlBuffer = ensureTightBuffer(task.htmlBuffer);
-  const transferableHtmlBuffer = Uint8Array.from(htmlBuffer);
-  message.htmlBuffer = transferableHtmlBuffer;
+  message.htmlBuffer = htmlBuffer;
   if (task.encoding) message.encoding = task.encoding;
 
-  const backingBuffer = transferableHtmlBuffer.buffer;
-  if (isSharedArrayBuffer(backingBuffer)) return { message };
-  return { message, transferList: [backingBuffer] };
+  const transferableBuffer = getTransferableBuffer(htmlBuffer);
+  return transferableBuffer
+    ? { message, transferList: [transferableBuffer] }
+    : { message };
 }
 
 interface InflightTask {

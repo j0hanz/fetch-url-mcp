@@ -23,7 +23,12 @@ import {
   createProgressReporter,
   type ToolHandlerExtra,
 } from '../lib/progress.js';
-import { isAbortError, toError } from '../lib/utils.js';
+import {
+  composeAbortSignal,
+  isAbortError,
+  parseUrlOrNull,
+  toError,
+} from '../lib/utils.js';
 import { formatZodError } from '../lib/zod.js';
 
 import {
@@ -77,30 +82,28 @@ const HARD_TOOL_TIMEOUT_MS = 300_000;
 const CODE_HOSTS = new Set(['github.com', 'gitlab.com', 'bitbucket.org']);
 
 function getUrlContext(urlStr: string): string {
-  try {
-    const u = new URL(urlStr);
-    const host = u.hostname.replace(/^www\./, '');
-    const parts = u.pathname.split('/').filter(Boolean);
-    if (parts.length === 0) return host;
+  const parsed = parseUrlOrNull(urlStr);
+  if (!parsed) return 'unknown';
 
-    if (CODE_HOSTS.has(host) && parts.length >= 2) {
-      return `${host}/${parts[0] ?? ''}/${parts[1] ?? ''}`;
-    }
-    if (
-      host.endsWith('wikipedia.org') &&
-      parts[0] === 'wiki' &&
-      parts.length >= 2
-    ) {
-      return `wikipedia.org/${parts[1] ?? ''}`;
-    }
+  const host = parsed.hostname.replace(/^www\./, '');
+  const parts = parsed.pathname.split('/').filter(Boolean);
+  if (parts.length === 0) return host;
 
-    const raw = parts.at(-1) ?? '';
-    const basename = raw.length > 20 ? `${raw.substring(0, 17)}...` : raw;
-    if (parts.length === 1) return `${host}/${basename}`;
-    return basename ? `${host}/…/${basename}` : host;
-  } catch {
-    return 'unknown';
+  if (CODE_HOSTS.has(host) && parts.length >= 2) {
+    return `${host}/${parts[0] ?? ''}/${parts[1] ?? ''}`;
   }
+  if (
+    host.endsWith('wikipedia.org') &&
+    parts[0] === 'wiki' &&
+    parts.length >= 2
+  ) {
+    return `wikipedia.org/${parts[1] ?? ''}`;
+  }
+
+  const raw = parts.at(-1) ?? '';
+  const basename = raw.length > 20 ? `${raw.substring(0, 17)}...` : raw;
+  if (parts.length === 1) return `${host}/${basename}`;
+  return basename ? `${host}/…/${basename}` : host;
 }
 
 /* -------------------------------------------------------------------------------------------------
@@ -184,10 +187,11 @@ function buildResponse(
 function buildToolAbortSignal(extraSignal?: AbortSignal): AbortSignal {
   const timeout =
     config.tools.timeoutMs > 0 ? config.tools.timeoutMs : HARD_TOOL_TIMEOUT_MS;
-  const timeoutSignal = AbortSignal.timeout(timeout);
-  return extraSignal
-    ? AbortSignal.any([extraSignal, timeoutSignal])
-    : timeoutSignal;
+  const signal = composeAbortSignal(extraSignal, timeout);
+  if (!signal) {
+    throw new Error('Tool timeout signal could not be created');
+  }
+  return signal;
 }
 
 function buildFetchOptions(

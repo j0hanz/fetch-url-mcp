@@ -15,6 +15,34 @@ import { config, logDebug, logWarn } from './core.js';
 
 const UNKNOWN_ERROR_MESSAGE = 'Unknown error';
 
+export function composeAbortSignal(
+  signal?: AbortSignal,
+  timeoutMs?: number
+): AbortSignal | undefined {
+  const timeoutSignal =
+    timeoutMs && timeoutMs > 0 ? AbortSignal.timeout(timeoutMs) : undefined;
+  if (signal && timeoutSignal) {
+    return AbortSignal.any([signal, timeoutSignal]);
+  }
+  return signal ?? timeoutSignal;
+}
+
+export function parseUrlOrNull(input: string, base?: string): URL | null {
+  const urlCtor = URL as typeof URL & {
+    parse?: (input: string, base?: string) => URL | null;
+  };
+
+  if (typeof urlCtor.parse === 'function') {
+    return urlCtor.parse(input, base);
+  }
+
+  try {
+    return new URL(input, base);
+  } catch {
+    return null;
+  }
+}
+
 function getAbortReason(signal: AbortSignal): unknown {
   const record = isObject(signal) ? (signal as Record<string, unknown>) : null;
   return record && 'reason' in record ? record['reason'] : undefined;

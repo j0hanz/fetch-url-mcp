@@ -3,7 +3,12 @@ import { BlockList, isIP, SocketAddress } from 'node:net';
 
 import { config, logDebug } from './core.js';
 import { buildIpv4, normalizeHostname } from './net-utils.js';
-import { createErrorWithCode, isError, isSystemError } from './utils.js';
+import {
+  composeAbortSignal,
+  createErrorWithCode,
+  isError,
+  isSystemError,
+} from './utils.js';
 
 const DNS_LOOKUP_TIMEOUT_MS = 5000;
 const CNAME_LOOKUP_MAX_DEPTH = 5;
@@ -18,12 +23,7 @@ async function withTimeout<T>(
   signal?: AbortSignal,
   onAbort?: () => Error
 ): Promise<T> {
-  const timeoutSignal =
-    timeoutMs > 0 ? AbortSignal.timeout(timeoutMs) : undefined;
-  const raceSignal =
-    signal && timeoutSignal
-      ? AbortSignal.any([signal, timeoutSignal])
-      : (signal ?? timeoutSignal);
+  const raceSignal = composeAbortSignal(signal, timeoutMs);
   if (!raceSignal) return promise;
 
   return new Promise<T>((resolve, reject) => {

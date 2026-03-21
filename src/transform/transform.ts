@@ -34,9 +34,14 @@ import {
   extractTitleFromRawMarkdown,
   isRawTextContent,
 } from '../lib/md-metadata.js';
-import { throwIfAborted } from '../lib/utils.js';
-import { FetchError, getErrorMessage, toError } from '../lib/utils.js';
-import { isObject } from '../lib/utils.js';
+import {
+  composeAbortSignal,
+  FetchError,
+  getErrorMessage,
+  isObject,
+  throwIfAborted,
+  toError,
+} from '../lib/utils.js';
 
 import { translateHtmlFragmentToMarkdown } from './html-translators.js';
 import {
@@ -109,11 +114,7 @@ function isWhitespaceChar(code: number): boolean {
 }
 
 function buildTransformSignal(signal?: AbortSignal): AbortSignal | undefined {
-  const { timeoutMs } = config.transform;
-  if (timeoutMs <= 0) return signal;
-
-  const timeoutSignal = AbortSignal.timeout(timeoutMs);
-  return signal ? AbortSignal.any([signal, timeoutSignal]) : timeoutSignal;
+  return composeAbortSignal(signal, config.transform.timeoutMs);
 }
 
 class StageTracker {
