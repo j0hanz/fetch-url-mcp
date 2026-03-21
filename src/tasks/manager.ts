@@ -69,25 +69,9 @@ const TASK_STATUS_VALUES = new Set<TaskStatus>([
   'failed',
   'cancelled',
 ]);
-const TASK_STATUS_TRANSITIONS: Readonly<
-  Record<TaskStatus, ReadonlySet<TaskStatus>>
-> = {
-  working: new Set(['working', 'completed', 'failed', 'cancelled']),
-  completed: new Set(['completed']),
-  failed: new Set(['failed']),
-  cancelled: new Set(['cancelled']),
-};
 
 function isTerminalStatus(status: TaskStatus): boolean {
-  return (
-    status === 'completed' || status === 'failed' || status === 'cancelled'
-  );
-}
-
-function isTaskStatus(value: unknown): value is TaskStatus {
-  return (
-    typeof value === 'string' && TASK_STATUS_VALUES.has(value as TaskStatus)
-  );
+  return status !== 'working';
 }
 
 function resolveNextTaskStatus(
@@ -95,17 +79,16 @@ function resolveNextTaskStatus(
   updates: Partial<Omit<TaskState, 'taskId' | 'createdAt'>>
 ): TaskStatus {
   const nextStatus = updates.status;
-  if (nextStatus === undefined) return task.status;
+  if (!nextStatus || nextStatus === task.status) return task.status;
 
-  if (!isTaskStatus(nextStatus)) {
+  if (!TASK_STATUS_VALUES.has(nextStatus)) {
     throw new McpError(
       ErrorCode.InternalError,
-      `Invalid task status '${String(nextStatus)}'`
+      `Invalid task status '${nextStatus}'`
     );
   }
 
-  const allowedTransitions = TASK_STATUS_TRANSITIONS[task.status];
-  if (!allowedTransitions.has(nextStatus)) {
+  if (isTerminalStatus(task.status)) {
     throw new McpError(
       ErrorCode.InternalError,
       `Invalid task status transition: '${task.status}' -> '${nextStatus}'`
@@ -117,10 +100,7 @@ function resolveNextTaskStatus(
 
 function normalizeTaskTtl(ttl: number | undefined): number {
   if (!Number.isFinite(ttl)) return DEFAULT_TTL_MS;
-  const rounded = Math.trunc(Number(ttl));
-  if (rounded < MIN_TTL_MS) return MIN_TTL_MS;
-  if (rounded > MAX_TTL_MS) return MAX_TTL_MS;
-  return rounded;
+  return Math.max(MIN_TTL_MS, Math.min(Math.trunc(Number(ttl)), MAX_TTL_MS));
 }
 
 class TaskManager {
@@ -136,34 +116,31 @@ class TaskManager {
     if (this.cleanupInterval) return;
     this.cleanupInterval = setInterval(() => {
       this.removeExpiredTasks();
-      if (this.tasks.size === 0) {
-        this.stopCleanupLoop();
-      }
-    }, CLEANUP_INTERVAL_MS);
-    this.cleanupInterval.unref();
+      if (this.tasks.size === 0) this.stopCleanupLoop();
+    }, CLEANUP_INTERVAL_MS).unref();
   }
 
   private stopCleanupLoop(): void {
-    if (!this.cleanupInterval) return;
-    clearInterval(this.cleanupInterval);
-    this.cleanupInterval = null;
+    if (this.cleanupInterval) {
+      clearInterval(this.cleanupInterval);
+      this.cleanupInterval = null;
+    }
   }
 
   private removeExpiredTasks(): void {
     const now = Date.now();
-    for (const [id, task] of this.tasks) {
-      if (this.isExpired(task, now)) {
-        this.removeTask(id);
+    for (const task of this.tasks.values()) {
+      if (now - task._createdAtMs > task.ttl) {
+        this.removeTask(task.taskId);
       }
     }
   }
 
-  private removeTask(taskId: string): boolean {
+  private removeTask(taskId: string): void {
     const task = this.tasks.get(taskId);
-    if (!task) return false;
+    if (!task) return;
     this.tasks.delete(taskId);
     this.releaseTaskCapacity(task);
-    return true;
   }
 
   private applyTaskUpdate(
@@ -178,44 +155,24 @@ class TaskManager {
     task: InternalTaskState,
     statusMessage: string
   ): void {
-    this.applyTaskUpdate(task, {
-      status: 'cancelled',
-      statusMessage,
-    });
-    this.notifyWaiters(task);
+    this.applyTaskUpdate(task, { status: 'cancelled', statusMessage });
+    this.waiters.notify(task);
     this.releaseTaskCapacity(task);
-  }
-
-  private decrementActiveTaskCount(): void {
-    if (this.activeTaskCount === 0) return;
-    this.activeTaskCount -= 1;
   }
 
   private releaseTaskCapacity(task: InternalTaskState | TaskState): void {
     const internal = task as Partial<InternalTaskState>;
-    if (internal._capacityCounted === false) return;
-    if ('_capacityCounted' in internal) {
-      internal._capacityCounted = false;
+    if (!internal._capacityCounted) return;
+    internal._capacityCounted = false;
+
+    const nextCount = (this.ownerCounts.get(task.ownerKey) ?? 0) - 1;
+    if (nextCount > 0) {
+      this.ownerCounts.set(task.ownerKey, nextCount);
+    } else {
+      this.ownerCounts.delete(task.ownerKey);
     }
-    this.decrementOwnerCount(task.ownerKey);
-    this.decrementActiveTaskCount();
-  }
 
-  private countTasksForOwner(ownerKey: string): number {
-    return this.ownerCounts.get(ownerKey) ?? 0;
-  }
-
-  private incrementOwnerCount(ownerKey: string): void {
-    this.ownerCounts.set(ownerKey, (this.ownerCounts.get(ownerKey) ?? 0) + 1);
-  }
-
-  private decrementOwnerCount(ownerKey: string): void {
-    const previousCount = this.ownerCounts.get(ownerKey) ?? 0;
-    if (previousCount > 1) {
-      this.ownerCounts.set(ownerKey, previousCount - 1);
-      return;
-    }
-    this.ownerCounts.delete(ownerKey);
+    if (this.activeTaskCount > 0) this.activeTaskCount--;
   }
 
   private assertTaskCapacity(ownerKey: string): void {
@@ -228,8 +185,7 @@ class TaskManager {
       );
     }
 
-    const ownerCount = this.countTasksForOwner(ownerKey);
-    if (ownerCount >= maxPerOwner) {
+    if ((this.ownerCounts.get(ownerKey) ?? 0) >= maxPerOwner) {
       throw new McpError(
         ErrorCode.InvalidRequest,
         `Task capacity reached for owner (${maxPerOwner} tasks)`
@@ -262,7 +218,7 @@ class TaskManager {
     };
 
     this.tasks.set(task.taskId, task);
-    this.incrementOwnerCount(ownerKey);
+    this.ownerCounts.set(ownerKey, (this.ownerCounts.get(ownerKey) ?? 0) + 1);
     this.activeTaskCount += 1;
     this.ensureCleanupLoop();
     return task;
@@ -274,10 +230,9 @@ class TaskManager {
   ): InternalTaskState | undefined {
     const task = this.tasks.get(taskId);
     if (!task) return undefined;
-
     if (ownerKey && task.ownerKey !== ownerKey) return undefined;
 
-    if (this.isExpired(task)) {
+    if (Date.now() - task._createdAtMs > task.ttl) {
       this.removeTask(taskId);
       return undefined;
     }
@@ -298,7 +253,6 @@ class TaskManager {
       logWarn('updateTask called for unknown task', { taskId });
       return;
     }
-
     if (isTerminalStatus(task.status)) {
       logWarn('updateTask called for terminal task', {
         taskId,
@@ -314,7 +268,7 @@ class TaskManager {
       ...(updates.status === undefined ? {} : { status: nextStatus }),
     });
 
-    this.notifyWaiters(task);
+    this.waiters.notify(task);
     if (isTerminalStatus(nextStatus)) {
       this.releaseTaskCapacity(task);
     }
@@ -332,8 +286,7 @@ class TaskManager {
     }
 
     this.cancelActiveTask(task, 'The task was cancelled by request.');
-
-    return this.tasks.get(taskId);
+    return task;
   }
 
   cancelTasksByOwner(
@@ -343,15 +296,12 @@ class TaskManager {
     if (!ownerKey) return [];
 
     const cancelled: TaskState[] = [];
-
     for (const task of this.tasks.values()) {
-      if (task.ownerKey !== ownerKey) continue;
-      if (isTerminalStatus(task.status)) continue;
-
-      this.cancelActiveTask(task, statusMessage);
-      cancelled.push(task);
+      if (task.ownerKey === ownerKey && !isTerminalStatus(task.status)) {
+        this.cancelActiveTask(task, statusMessage);
+        cancelled.push(task);
+      }
     }
-
     return cancelled;
   }
 
@@ -368,7 +318,7 @@ class TaskManager {
     for (const task of this.tasks.values()) {
       if (task.ownerKey !== ownerKey) continue;
 
-      if (this.isExpired(task, now)) {
+      if (now - task._createdAtMs > task.ttl) {
         this.removeTask(task.taskId);
         continue;
       }
@@ -385,42 +335,32 @@ class TaskManager {
       if (page.length > pageSize) break;
     }
 
-    // Anchor task expired between pages; return empty list so callers stop
-    // pagination cleanly. Silently falling back to page 0 risks infinite loops
-    // for automated clients that always follow nextCursor.
-    if (!anchorFound) {
-      return [];
-    }
-
-    return page;
+    return anchorFound ? page : [];
   }
 
   listTasks(options: { ownerKey: string; cursor?: string; limit?: number }): {
     tasks: TaskState[];
     nextCursor?: string;
   } {
-    const { ownerKey, cursor, limit } = options;
+    const limit =
+      options.limit && options.limit > 0 ? options.limit : DEFAULT_PAGE_SIZE;
+    const anchorTaskId = this.resolveAnchorTaskId(options.cursor);
 
-    const pageSize = limit && limit > 0 ? limit : DEFAULT_PAGE_SIZE;
-    const anchorTaskId = this.resolveAnchorTaskId(cursor);
+    const page = this.collectPage(options.ownerKey, anchorTaskId, limit);
+    const hasMore = page.length > limit;
+    if (hasMore) page.pop();
 
-    const page = this.collectPage(ownerKey, anchorTaskId, pageSize);
-    const hasMore = page.length > pageSize;
-    if (hasMore) {
-      page.pop();
-    }
-
-    const nextCursor = this.resolveNextCursor(page, hasMore);
+    const lastTask = page.at(-1);
+    const nextCursor =
+      hasMore && lastTask ? encodeTaskCursor(lastTask.taskId) : undefined;
 
     return nextCursor ? { tasks: page, nextCursor } : { tasks: page };
   }
 
   private resolveAnchorTaskId(cursor?: string): string | null {
-    if (cursor === undefined) return null;
+    if (!cursor) return null;
     const decoded = decodeTaskCursor(cursor);
-    if (decoded === null) {
-      throw new McpError(ErrorCode.InvalidParams, 'Invalid cursor');
-    }
+    if (!decoded) throw new McpError(ErrorCode.InvalidParams, 'Invalid cursor');
     return decoded.anchorTaskId;
   }
 
@@ -432,49 +372,25 @@ class TaskManager {
     return waitForTerminalTaskWithDeadline({
       taskId,
       ownerKey,
-      ...(signal ? { signal } : {}),
-      lookupTask: (currentTaskId, currentOwnerKey) =>
-        this.lookupActiveTask(currentTaskId, currentOwnerKey),
-      removeTask: (currentTaskId) => {
-        this.removeTask(currentTaskId);
+      ...(signal && { signal }),
+      lookupTask: (id, owner) => this.lookupActiveTask(id, owner),
+      removeTask: (id) => {
+        this.removeTask(id);
       },
       registry: this.waiters,
       isTerminalStatus,
     });
   }
 
-  private notifyWaiters(task: TaskState): void {
-    this.waiters.notify(task as InternalTaskState);
-  }
-
-  private isExpired(task: InternalTaskState, now = Date.now()): boolean {
-    return now - task._createdAtMs > task.ttl;
-  }
-
-  private maybeUpdateLastUpdatedAt(task: InternalTaskState): void {
-    task.lastUpdatedAt = new Date().toISOString();
-  }
-
   shrinkTtlAfterDelivery(taskId: string): void {
     const task = this.tasks.get(taskId);
-    if (!task) return;
-    if (!isTerminalStatus(task.status)) return;
+    if (!task || !isTerminalStatus(task.status)) return;
 
-    const elapsed = Date.now() - task._createdAtMs;
-    const newTtl = elapsed + RESULT_DELIVERY_GRACE_MS;
+    const newTtl = Date.now() - task._createdAtMs + RESULT_DELIVERY_GRACE_MS;
     if (newTtl < task.ttl) {
       task.ttl = newTtl;
-      this.maybeUpdateLastUpdatedAt(task);
+      task.lastUpdatedAt = new Date().toISOString();
     }
-  }
-
-  private resolveNextCursor(
-    page: TaskState[],
-    hasMore: boolean
-  ): string | undefined {
-    if (!hasMore) return undefined;
-    const lastTask = page.at(-1);
-    return lastTask ? encodeTaskCursor(lastTask.taskId) : undefined;
   }
 }
 
