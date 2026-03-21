@@ -45,6 +45,13 @@ import {
   normalizeDocumentTitle,
 } from './metadata.js';
 import { supplementMarkdownFromNextFlight } from './next-flight.js';
+import {
+  isGithubRepositoryRootUrl,
+  maybePrependSyntheticTitle,
+  maybeStripGithubPrimaryHeading,
+  normalizeSyntheticTitleToken,
+  shouldPreferPrimaryHeadingTitle,
+} from './title-policy.js';
 import type {
   ExtractedArticle,
   ExtractedMetadata,
@@ -1084,7 +1091,6 @@ function hasTruncatedSentences(text: string): boolean {
 }
 
 const MIN_CONTENT_ROOT_LENGTH = 100;
-const HEADING_SCAN_LIMIT = 12;
 const BINARY_SAMPLE_SIZE = 2000;
 
 export function determineContentExtractionSource(
@@ -1161,26 +1167,6 @@ const PRIMARY_HEADING_ROOT_SELECTORS = [
   '.entry-content',
   '[itemprop="text"]',
 ] as const;
-
-function normalizeSyntheticTitleToken(value: string | undefined): string {
-  return (value ?? '').replace(/\s+/g, ' ').trim().toLowerCase();
-}
-
-function shouldPreferPrimaryHeadingTitle(
-  primaryHeading: string | undefined,
-  title: string | undefined
-): boolean {
-  const primary = normalizeSyntheticTitleToken(primaryHeading);
-  if (!primary) return false;
-
-  const normalizedTitle = normalizeSyntheticTitleToken(title);
-  if (!normalizedTitle) return true;
-  if (normalizedTitle === primary) return true;
-
-  return normalizedTitle
-    .split(/\s*(?:[-|:•·]|–|—)\s*/u)
-    .some((part) => part === primary);
-}
 
 function findContentRoot(document: Document): string | undefined {
   for (const selector of CONTENT_ROOT_SELECTORS) {
@@ -1266,22 +1252,6 @@ function countEmptyHeadingSections(root: ParentNode): number {
   }
 
   return emptyCount;
-}
-
-function isGithubRepositoryRootUrl(url: string): boolean {
-  let parsed: URL;
-  try {
-    parsed = new URL(url);
-  } catch {
-    return false;
-  }
-
-  const hostname = parsed.hostname.toLowerCase();
-  if (hostname !== 'github.com' && hostname !== 'www.github.com') {
-    return false;
-  }
-
-  return parsed.pathname.split('/').filter(Boolean).length === 2;
 }
 
 const TransformHeuristics = {
@@ -1486,53 +1456,6 @@ function resolveContentSource(params: {
   });
 }
 
-function maybeStripGithubPrimaryHeading(
-  markdown: string,
-  context: ContentSource,
-  url: string
-): string {
-  if (
-    context.primaryHeading === undefined ||
-    !TransformHeuristics.isGithubRepositoryRootUrl(url)
-  ) {
-    return markdown;
-  }
-  return stripLeadingHeading(markdown, context.primaryHeading);
-}
-
-function buildSyntheticTitlePrefix(
-  url: string,
-  favicon?: string,
-  suppressFavicon?: boolean
-): string {
-  if (!favicon || suppressFavicon) return ' ';
-
-  let alt = '';
-  try {
-    alt = new URL(url).hostname;
-  } catch {
-    /* skip */
-  }
-
-  return ` ![${alt}](${favicon}) `;
-}
-
-function maybePrependSyntheticTitle(
-  markdown: string,
-  context: ContentSource,
-  url: string
-): string {
-  if (!context.title || /^(#{1,6})\s/.test(markdown.trimStart())) {
-    return markdown;
-  }
-
-  return `#${buildSyntheticTitlePrefix(
-    url,
-    context.favicon,
-    context.suppressSyntheticFavicon
-  )}${context.title}\n\n${markdown}`;
-}
-
 function buildMarkdownFromContext(
   context: ContentSource,
   url: string,
@@ -1546,7 +1469,11 @@ function buildMarkdownFromContext(
       ...(context.skipNoiseRemoval ? { skipNoiseRemoval: true } : {}),
     })
   );
-  content = maybeStripGithubPrimaryHeading(content, context, url);
+  content = maybeStripGithubPrimaryHeading(
+    content,
+    context.primaryHeading,
+    url
+  );
   content = maybePrependSyntheticTitle(content, context, url);
 
   content = supplementMarkdownFromNextFlight(content, context.originalHtml);
@@ -1561,42 +1488,6 @@ function buildMarkdownFromContext(
     truncated: context.truncated,
     metadata: context.extractedMetadata,
   };
-}
-
-function normalizeHeadingText(value: string): string {
-  return value.replace(/\s+/g, ' ').trim().toLowerCase();
-}
-
-function stripLeadingHeading(markdown: string, headingText: string): string {
-  if (!markdown) return markdown;
-
-  const lines = markdown.split('\n');
-  const target = normalizeHeadingText(headingText);
-  let nonEmptySeen = 0;
-
-  for (
-    let i = 0;
-    i < lines.length && nonEmptySeen < HEADING_SCAN_LIMIT;
-    i += 1
-  ) {
-    const trimmed = lines[i]?.trim() ?? '';
-    if (!trimmed) continue;
-
-    nonEmptySeen += 1;
-    const match = /^(#{1,6})\s+(.+?)\s*$/.exec(trimmed);
-    if (!match) continue;
-
-    const current = normalizeHeadingText(match[2] ?? '');
-    if (current !== target) return markdown;
-
-    lines.splice(i, 1);
-    if ((lines[i] ?? '').trim() === '') {
-      lines.splice(i, 1);
-    }
-    return lines.join('\n');
-  }
-
-  return markdown;
 }
 
 const REPLACEMENT_CHAR = '\ufffd';
