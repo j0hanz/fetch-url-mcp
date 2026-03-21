@@ -3,7 +3,7 @@ import { setInterval } from 'node:timers';
 
 import { ErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js';
 
-import { config } from '../lib/core.js';
+import { config, logWarn } from '../lib/core.js';
 
 import { decodeTaskCursor, encodeTaskCursor } from './cursor-codec.js';
 import {
@@ -294,9 +294,18 @@ class TaskManager {
     updates: Partial<Omit<TaskState, 'taskId' | 'createdAt'>>
   ): void {
     const task = this.tasks.get(taskId);
-    if (!task) return;
+    if (!task) {
+      logWarn('updateTask called for unknown task', { taskId });
+      return;
+    }
 
-    if (isTerminalStatus(task.status)) return;
+    if (isTerminalStatus(task.status)) {
+      logWarn('updateTask called for terminal task', {
+        taskId,
+        currentStatus: task.status,
+      });
+      return;
+    }
 
     const nextStatus = resolveNextTaskStatus(task, updates);
 

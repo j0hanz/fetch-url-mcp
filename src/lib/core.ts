@@ -88,29 +88,48 @@ const EnvParser = {
   integerValue(
     envValue: string | undefined,
     min?: number,
-    max?: number
+    max?: number,
+    envName?: string
   ): number | null {
     if (!envValue) return null;
     const parsed = Number.parseInt(envValue, 10);
-    if (Number.isNaN(parsed)) return null;
-    if (min !== undefined && parsed < min) return null;
-    if (max !== undefined && parsed > max) return null;
+    if (Number.isNaN(parsed)) {
+      if (envName) {
+        process.stderr.write(
+          `Warning: ignoring invalid ${envName} value "${envValue}" (not an integer)\n`
+        );
+      }
+      return null;
+    }
+    if (
+      (min !== undefined && parsed < min) ||
+      (max !== undefined && parsed > max)
+    ) {
+      if (envName) {
+        process.stderr.write(
+          `Warning: ignoring out-of-range ${envName} value ${parsed} (allowed: ${min ?? '-∞'}..${max ?? '∞'})\n`
+        );
+      }
+      return null;
+    }
     return parsed;
   },
   optionalInteger(
     envValue: string | undefined,
     min?: number,
-    max?: number
+    max?: number,
+    envName?: string
   ): number | undefined {
-    return EnvParser.integerValue(envValue, min, max) ?? undefined;
+    return EnvParser.integerValue(envValue, min, max, envName) ?? undefined;
   },
   integer(
     envValue: string | undefined,
     defaultValue: number,
     min?: number,
-    max?: number
+    max?: number,
+    envName?: string
   ): number {
-    return EnvParser.integerValue(envValue, min, max) ?? defaultValue;
+    return EnvParser.integerValue(envValue, min, max, envName) ?? defaultValue;
   },
   boolean(envValue: string | undefined, defaultValue: boolean): boolean {
     if (!envValue) return defaultValue;
@@ -138,7 +157,13 @@ const EnvParser = {
   logLevel(envValue: string | undefined): LogLevel {
     if (!envValue) return 'info';
     const level = envValue.toLowerCase();
-    return ALLOWED_LOG_LEVELS.has(level) ? (level as LogLevel) : 'info';
+    if (!ALLOWED_LOG_LEVELS.has(level)) {
+      process.stderr.write(
+        `Warning: ignoring invalid LOG_LEVEL value "${envValue}", using default "info"\n`
+      );
+      return 'info';
+    }
+    return level as LogLevel;
   },
   transformWorkerMode(envValue: string | undefined): TransformWorkerMode {
     if (!envValue) return 'threads';
@@ -217,7 +242,8 @@ const MAX_INLINE_CONTENT_CHARS = EnvParser.integer(
   env['MAX_INLINE_CONTENT_CHARS'],
   0,
   0,
-  MAX_HTML_BYTES
+  MAX_HTML_BYTES,
+  'MAX_INLINE_CONTENT_CHARS'
 );
 const DEFAULT_SESSION_TTL_MS = 30 * 60 * 1000;
 const DEFAULT_SESSION_INIT_TIMEOUT_MS = 10000;
@@ -229,7 +255,8 @@ const DEFAULT_FETCH_TIMEOUT_MS = EnvParser.integer(
   env['FETCH_TIMEOUT_MS'],
   15000,
   1000,
-  60000
+  60000,
+  'FETCH_TIMEOUT_MS'
 );
 const DEFAULT_TOOL_TIMEOUT_MS =
   DEFAULT_FETCH_TIMEOUT_MS +
@@ -238,12 +265,16 @@ const DEFAULT_TOOL_TIMEOUT_MS =
 const DEFAULT_TASKS_MAX_TOTAL = EnvParser.integer(
   env['TASKS_MAX_TOTAL'],
   5000,
-  1
+  1,
+  undefined,
+  'TASKS_MAX_TOTAL'
 );
 const DEFAULT_TASKS_MAX_PER_OWNER = EnvParser.integer(
   env['TASKS_MAX_PER_OWNER'],
   1000,
-  1
+  1,
+  undefined,
+  'TASKS_MAX_PER_OWNER'
 );
 const RESOLVED_TASKS_MAX_PER_OWNER = Math.min(
   DEFAULT_TASKS_MAX_PER_OWNER,
@@ -259,19 +290,27 @@ interface WorkerResourceLimits {
 function resolveWorkerResourceLimits(): WorkerResourceLimits | undefined {
   const maxOldGenerationSizeMb = EnvParser.optionalInteger(
     env['TRANSFORM_WORKER_MAX_OLD_GENERATION_MB'],
-    1
+    1,
+    undefined,
+    'TRANSFORM_WORKER_MAX_OLD_GENERATION_MB'
   );
   const maxYoungGenerationSizeMb = EnvParser.optionalInteger(
     env['TRANSFORM_WORKER_MAX_YOUNG_GENERATION_MB'],
-    1
+    1,
+    undefined,
+    'TRANSFORM_WORKER_MAX_YOUNG_GENERATION_MB'
   );
   const codeRangeSizeMb = EnvParser.optionalInteger(
     env['TRANSFORM_WORKER_CODE_RANGE_MB'],
-    1
+    1,
+    undefined,
+    'TRANSFORM_WORKER_CODE_RANGE_MB'
   );
   const stackSizeMb = EnvParser.optionalInteger(
     env['TRANSFORM_WORKER_STACK_MB'],
-    1
+    1,
+    undefined,
+    'TRANSFORM_WORKER_STACK_MB'
   );
 
   if (
@@ -405,7 +444,7 @@ const host = (env['HOST'] ?? LOOPBACK_V4).trim();
 const port =
   env['PORT']?.trim() === '0'
     ? 0
-    : EnvParser.integer(env['PORT'], 3000, 1024, 65535);
+    : EnvParser.integer(env['PORT'], 3000, 1024, 65535, 'PORT');
 const httpsConfig = buildHttpsConfig();
 const allowRemote = EnvParser.boolean(env['ALLOW_REMOTE'], false);
 const baseUrl = new URL(
@@ -455,25 +494,41 @@ function buildServerConfig(): AppServerConfig {
     http: {
       headersTimeoutMs: EnvParser.optionalInteger(
         env['SERVER_HEADERS_TIMEOUT_MS'],
-        1
+        1,
+        undefined,
+        'SERVER_HEADERS_TIMEOUT_MS'
       ),
       requestTimeoutMs: EnvParser.optionalInteger(
         env['SERVER_REQUEST_TIMEOUT_MS'],
-        0
+        0,
+        undefined,
+        'SERVER_REQUEST_TIMEOUT_MS'
       ),
       keepAliveTimeoutMs: EnvParser.optionalInteger(
         env['SERVER_KEEP_ALIVE_TIMEOUT_MS'],
-        1
+        1,
+        undefined,
+        'SERVER_KEEP_ALIVE_TIMEOUT_MS'
       ),
       keepAliveTimeoutBufferMs: EnvParser.optionalInteger(
         env['SERVER_KEEP_ALIVE_TIMEOUT_BUFFER_MS'],
-        0
+        0,
+        undefined,
+        'SERVER_KEEP_ALIVE_TIMEOUT_BUFFER_MS'
       ),
       maxHeadersCount: EnvParser.optionalInteger(
         env['SERVER_MAX_HEADERS_COUNT'],
-        1
+        1,
+        undefined,
+        'SERVER_MAX_HEADERS_COUNT'
       ),
-      maxConnections: EnvParser.integer(env['SERVER_MAX_CONNECTIONS'], 0, 0),
+      maxConnections: EnvParser.integer(
+        env['SERVER_MAX_CONNECTIONS'],
+        0,
+        0,
+        undefined,
+        'SERVER_MAX_CONNECTIONS'
+      ),
       blockPrivateConnections: EnvParser.boolean(
         env['SERVER_BLOCK_PRIVATE_CONNECTIONS'],
         false
@@ -520,7 +575,8 @@ function buildTransformConfig(): AppTransformConfig {
       env['TRANSFORM_CANCEL_ACK_TIMEOUT_MS'],
       200,
       50,
-      5000
+      5000,
+      'TRANSFORM_CANCEL_ACK_TIMEOUT_MS'
     ),
     workerMode: EnvParser.transformWorkerMode(env['TRANSFORM_WORKER_MODE']),
     workerResourceLimits: resolveWorkerResourceLimits(),
@@ -1004,6 +1060,9 @@ process.stderr.on('error', () => {
   stderrAvailable = false;
 });
 export function setMcpServer(server: McpServer): void {
+  if (mcpServer) {
+    logWarn('setMcpServer called when server already set — overwriting');
+  }
   mcpServer = server;
 }
 export function registerMcpSessionServer(

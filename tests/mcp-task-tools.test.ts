@@ -345,7 +345,7 @@ describe('MCP task-augmented tools', () => {
     }
   });
 
-  it('returns InvalidParams for unknown task ids', async () => {
+  it('returns -32002 for unknown task ids', async () => {
     const server = await createMcpServer();
 
     try {
@@ -362,7 +362,7 @@ describe('MCP task-augmented tools', () => {
         (error: unknown) =>
           error instanceof Error &&
           /Task not found/.test(error.message) &&
-          (error as Error & { code?: number }).code === -32602
+          (error as Error & { code?: number }).code === -32002
       );
     } finally {
       await server.close();

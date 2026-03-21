@@ -11,6 +11,7 @@ import {
   get,
   isEnabled,
   logDebug,
+  logError,
   logWarn,
   set,
 } from './core.js';
@@ -155,7 +156,7 @@ export function finalizeInlineMarkdown(
   const maxChars = options.maxChars ?? 0;
 
   return maxChars > 0 && normalized.length > maxChars
-    ? normalized.slice(0, maxChars)
+    ? truncateWithMarker(normalized, maxChars, TRUNCATION_MARKER)
     : normalized;
 }
 
@@ -234,7 +235,14 @@ function logCacheMiss(
   normalizedUrl: string,
   error?: unknown
 ): void {
-  const log = reason.startsWith('deserialize') ? logWarn : logDebug;
+  // Deserialize exceptions indicate data corruption or schema drift —
+  // use logError so they surface in monitoring, not just debug logs.
+  const log =
+    reason === 'deserialize exception'
+      ? logError
+      : reason.startsWith('deserialize')
+        ? logWarn
+        : logDebug;
   log(`Cache miss due to ${reason}`, {
     namespace: cacheNamespace,
     url: normalizedUrl,

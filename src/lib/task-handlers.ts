@@ -166,44 +166,49 @@ export function registerTaskHandlers(
 
     if (!task) throwTaskNotFound();
 
-    taskManager.shrinkTtlAfterDelivery(taskId);
+    try {
+      if (task.status === 'failed') {
+        if (task.error) {
+          throw new McpError(
+            task.error.code,
+            task.error.message,
+            task.error.data
+          );
+        }
 
-    if (task.status === 'failed') {
-      if (task.error) {
-        throw new McpError(
-          task.error.code,
-          task.error.message,
-          task.error.data
-        );
+        const failedResult = (task.result ?? null) as ServerResult | null;
+        const fallback: ServerResult = failedResult ?? {
+          content: [
+            {
+              type: 'text',
+              text: task.statusMessage ?? 'Task execution failed',
+            },
+          ],
+          isError: true,
+        };
+
+        return withRelatedTaskMeta(fallback, task.taskId);
       }
 
-      const failedResult = (task.result ?? null) as ServerResult | null;
-      const fallback: ServerResult = failedResult ?? {
-        content: [
-          {
-            type: 'text',
-            text: task.statusMessage ?? 'Task execution failed',
-          },
-        ],
-        isError: true,
-      };
+      if (task.status === 'cancelled') {
+        throw new McpError(ErrorCode.InvalidRequest, 'Task was cancelled', {
+          taskId: task.taskId,
+          status: 'cancelled',
+          ...(task.statusMessage ? { statusMessage: task.statusMessage } : {}),
+        });
+      }
 
-      return withRelatedTaskMeta(fallback, task.taskId);
+      const result: ServerResult = isServerResult(task.result)
+        ? task.result
+        : { content: [] };
+
+      return withRelatedTaskMeta(result, task.taskId);
+    } finally {
+      // Shrink TTL only after the result has been fully constructed and
+      // is about to be delivered — avoids premature expiry if result
+      // construction throws.
+      taskManager.shrinkTtlAfterDelivery(taskId);
     }
-
-    if (task.status === 'cancelled') {
-      throw new McpError(ErrorCode.InvalidRequest, 'Task was cancelled', {
-        taskId: task.taskId,
-        status: 'cancelled',
-        ...(task.statusMessage ? { statusMessage: task.statusMessage } : {}),
-      });
-    }
-
-    const result: ServerResult = isServerResult(task.result)
-      ? task.result
-      : { content: [] };
-
-    return withRelatedTaskMeta(result, task.taskId);
   });
 
   server.server.setRequestHandler(TaskListSchema, (request, extra) => {

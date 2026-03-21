@@ -33,7 +33,10 @@ import {
   type TaskCapableToolDescriptor,
 } from './tool-registry.js';
 
-const TASK_NOT_FOUND_ERROR_CODE = ErrorCode.InvalidParams;
+// Server-defined error code for missing tasks. Uses -32002 (same range as
+// RESOURCE_NOT_FOUND_ERROR_CODE in resources/index.ts) to distinguish
+// "task not found" from parameter-validation errors (-32602).
+const TASK_NOT_FOUND_ERROR_CODE = -32002;
 
 /* -------------------------------------------------------------------------------------------------
  * Abort-controller management for in-flight task executions
@@ -53,6 +56,14 @@ function attachAbortController(taskId: string): AbortController {
     existing.abort();
     taskAbortControllers.delete(taskId);
   }
+
+  if (taskAbortControllers.size >= config.tasks.maxTotal) {
+    logWarn('Abort controller map reached task capacity — possible leak', {
+      size: taskAbortControllers.size,
+      maxTotal: config.tasks.maxTotal,
+    });
+  }
+
   const controller = new AbortController();
   taskAbortControllers.set(taskId, controller);
   return controller;

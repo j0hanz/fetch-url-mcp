@@ -1,4 +1,4 @@
-import { logWarn } from './core.js';
+import { logError, logWarn } from './core.js';
 import { getErrorMessage, isObject } from './utils.js';
 
 /* -------------------------------------------------------------------------------------------------
@@ -107,7 +107,7 @@ class ToolProgressReporter implements ProgressReporter {
       try {
         this.onProgress(effectiveProgress, message);
       } catch (error: unknown) {
-        logWarn('Progress callback failed', {
+        logError('Progress callback failed', {
           error: getErrorMessage(error),
           progress: effectiveProgress,
           message,

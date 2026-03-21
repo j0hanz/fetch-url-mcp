@@ -138,10 +138,6 @@ async function createMcpServerWithOptions(
   const serverInfo = createServerInfo(localIcon ? [localIcon] : undefined);
   const server = new McpServer(serverInfo, serverConfig);
 
-  if (shouldRegisterObservabilityServer(options)) {
-    setMcpServer(server);
-  }
-
   const toolControls = registerFetchUrlTool(server);
   registerGetHelpPrompt(server, serverInstructions, localIcon);
   registerInstructionResource(server, serverInstructions, localIcon);
@@ -154,6 +150,12 @@ async function createMcpServerWithOptions(
   syncTaskCapabilityAdvertisement(server, taskToolCallEnabled);
   registerLoggingSetLevelHandler(server);
   attachServerErrorHandler(server);
+
+  // Set global ref only after all registrations succeed so callers
+  // never observe a half-initialised server instance.
+  if (shouldRegisterObservabilityServer(options)) {
+    setMcpServer(server);
+  }
 
   return server;
 }
@@ -186,8 +188,18 @@ async function shutdownServer(
   // Ensure any in-flight tool executions are aborted promptly.
   abortAllTaskExecutions();
 
-  await shutdownTransformWorkerPool();
-  await server.close();
+  // Run shutdown steps independently so a failure in one does not
+  // prevent the others from executing.
+  const results = await Promise.allSettled([
+    shutdownTransformWorkerPool(),
+    server.close(),
+  ]);
+
+  for (const result of results) {
+    if (result.status === 'rejected') {
+      logError('Shutdown step failed', toError(result.reason));
+    }
+  }
 }
 
 function createShutdownHandler(server: McpServer): (signal: string) => void {
