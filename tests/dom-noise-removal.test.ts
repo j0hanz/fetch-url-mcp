@@ -818,3 +818,49 @@ describe('Badge element separation', () => {
     );
   });
 });
+
+describe('UTM promo link removal', () => {
+  it('removes links with utm_source parameter', () => {
+    const html = `
+      <html>
+        <body>
+          <main>
+            <p>Main content here</p>
+            <a target="_blank" href="https://example.com?utm_source=docs&utm_medium=link">Unlock premium</a>
+          </main>
+        </body>
+      </html>
+    `;
+
+    const result = removeNoiseFromHtml(html, undefined, 'https://example.com');
+
+    assert.ok(
+      !result.includes('Unlock premium'),
+      'UTM promo link should be removed'
+    );
+    assert.ok(
+      result.includes('Main content'),
+      'Main content should be preserved'
+    );
+  });
+
+  it('preserves links without UTM parameters', () => {
+    const html = `
+      <html>
+        <body>
+          <main>
+            <p>Content</p>
+            <a href="https://example.com/docs">Documentation</a>
+          </main>
+        </body>
+      </html>
+    `;
+
+    const result = removeNoiseFromHtml(html, undefined, 'https://example.com');
+
+    assert.ok(
+      result.includes('Documentation'),
+      'Normal link should be preserved'
+    );
+  });
+});

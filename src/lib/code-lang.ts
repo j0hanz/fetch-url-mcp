@@ -51,7 +51,6 @@ const BASH_PACKAGE_MANAGERS = [
   'cargo',
   'go',
 ] as const;
-const BASH_VERBS = new Set(['install', 'add', 'run', 'build', 'start']);
 const TYPESCRIPT_HINTS = [
   ': string',
   ':string',
@@ -123,13 +122,7 @@ function isBashLine(line: string): boolean {
     firstWord as (typeof BASH_PACKAGE_MANAGERS)[number]
   );
 
-  if (isPkgMgr && spaceIdx !== -1) {
-    const rest = trimmed.slice(spaceIdx + 1);
-    const secondSpaceIdx = rest.indexOf(' ');
-    const secondWord =
-      secondSpaceIdx === -1 ? rest : rest.slice(0, secondSpaceIdx);
-    if (BASH_VERBS.has(secondWord)) return true;
-  }
+  if (isPkgMgr && spaceIdx !== -1) return true;
 
   return false;
 }

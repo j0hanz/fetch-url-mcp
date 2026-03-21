@@ -86,6 +86,42 @@ describe('detectLanguageFromCode', () => {
     assert.equal(detectLanguageFromCode('SELECT 1;'), 'sql');
   });
 
+  it('detects SQL CREATE TABLE', () => {
+    assert.equal(
+      detectLanguageFromCode('CREATE TABLE users (id INT PRIMARY KEY);'),
+      'sql'
+    );
+  });
+
+  it('detects bash for npm install commands', () => {
+    assert.equal(detectLanguageFromCode('npm install react'), 'bash');
+  });
+
+  it('detects bash for yarn add commands', () => {
+    assert.equal(detectLanguageFromCode('yarn add next'), 'bash');
+  });
+
+  it('detects bash for pnpm add commands', () => {
+    assert.equal(detectLanguageFromCode('pnpm add tailwindcss'), 'bash');
+  });
+
+  it('detects bash for npm i shorthand', () => {
+    assert.equal(detectLanguageFromCode('npm i react'), 'bash');
+  });
+
+  it('detects bash for npx commands', () => {
+    assert.equal(detectLanguageFromCode('npx create-next-app'), 'bash');
+  });
+
+  it('does not detect yaml for JS import statements', () => {
+    const result = detectLanguageFromCode("import { useState } from 'react'");
+    assert.notEqual(
+      result,
+      'yaml',
+      'JS imports should not be detected as yaml'
+    );
+  });
+
   it('detects Go snippets', () => {
     assert.equal(detectLanguageFromCode('package main\nfunc main() {}'), 'go');
   });

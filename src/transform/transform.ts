@@ -17,6 +17,7 @@ import {
   redactUrl,
 } from '../lib/core.js';
 import {
+  normalizeTabContent,
   prepareDocumentForMarkdown,
   removeNoiseFromHtml,
   serializeDocumentForMarkdown,
@@ -417,6 +418,10 @@ function preserveCodeLanguageAttributes(doc: Document): void {
   }
 }
 
+// Pre-Readability cleanup on a cloned document.
+// Must strip tabs/breadcrumbs before Readability mangles role attributes.
+// The original document is NOT yet prepared (prepareDocumentForMarkdown
+// runs later in buildContentSource), so this clone starts from raw HTML.
 function extractArticle(
   document: unknown,
   url: string,
@@ -472,6 +477,7 @@ function extractArticle(
 
     preserveAlertElements(readabilityDoc);
     preserveCodeLanguageAttributes(readabilityDoc);
+    normalizeTabContent(readabilityDoc);
 
     for (const el of readabilityDoc.querySelectorAll(
       '[class*="breadcrumb"],[class*="pagination"]'
@@ -1362,6 +1368,7 @@ function buildContentSource(params: {
     ? TransformHeuristics.findPrimaryHeading(document)
     : undefined;
   if (preparedDocument) {
+    // Post-extraction cleanup on the original document (non-article path)
     prepareDocumentForMarkdown(preparedDocument, url, signal);
     primaryHeading =
       TransformHeuristics.findPrimaryHeading(preparedDocument) ??
@@ -1389,6 +1396,8 @@ function buildContentSource(params: {
     const { document: articleDoc } = parseHTML(
       `<!DOCTYPE html><html><body>${article.content}</body></html>`
     );
+    // Runs on Readability output — tab/noise ops are no-ops here,
+    // but table normalization and URL resolution still apply.
     prepareDocumentForMarkdown(articleDoc, url, signal);
     const articleTitle =
       article.title !== undefined

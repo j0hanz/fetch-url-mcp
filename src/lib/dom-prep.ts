@@ -34,6 +34,7 @@ const HEADING_PERMALINK_CLASS_PATTERN =
   /\b(?:mark|permalink|hash-link|anchor(?:js)?-?link|header-?link|heading-anchor|deep-link)\b/i;
 const HIDDEN_STYLE_REGEX =
   /\b(?:display\s*:\s*none|visibility\s*:\s*hidden)\b/i;
+const UTM_PARAM_REGEX = /[?&]utm_(?:source|medium|campaign)=/i;
 const NO_MATCH_REGEX = /a^/i;
 
 // ── URL prefixes to skip during resolution ──────────────────────────
@@ -148,8 +149,8 @@ interface NoiseContext {
   readonly structuralTags: Set<string>;
   readonly promoMatchers: PromoTokenMatchers;
   readonly promoEnabled: boolean;
-  readonly extraSelectors: string[];
-  readonly baseSelector: string;
+  readonly noiseSelector: string;
+  readonly extraSelector: string | null;
   readonly candidateSelector: string;
 }
 
@@ -237,7 +238,9 @@ function getContext(): NoiseContext {
   const selectors = [BASE_NOISE_SELECTORS.hidden];
   if (flags.navFooter) selectors.push(BASE_NOISE_SELECTORS.navFooter);
   if (flags.cookieBanners) selectors.push(BASE_NOISE_SELECTORS.cookieBanners);
-  const baseSelector = selectors.join(',');
+  const noiseSelector = selectors.join(',');
+  const extraSelector =
+    extraSelectors.length > 0 ? extraSelectors.join(',') : null;
 
   const candidateSelector = [
     ...structuralTags,
@@ -257,8 +260,8 @@ function getContext(): NoiseContext {
     promoEnabled: Object.keys(PROMO_TOKENS_BY_CATEGORY).some((cat) =>
       enabled.has(cat)
     ),
-    extraSelectors,
-    baseSelector,
+    noiseSelector,
+    extraSelector,
     candidateSelector,
   };
   lastContextKey = contextKey;
@@ -492,19 +495,21 @@ function hoistNestedRows(table: Element): void {
     }
   }
 }
-function stripNoise(
-  document: Document,
-  context: NoiseContext,
-  signal?: AbortSignal
-): void {
-  cleanHeadings(document);
+function stripNoise(document: Document, signal?: AbortSignal): void {
+  const context = getContext();
+
+  if (config.noiseRemoval.debug) {
+    logDebug('Noise removal audit enabled', {
+      categories: [...(context.flags.navFooter ? ['nav-footer'] : [])],
+    });
+  }
 
   // Structural Removal
-  const { baseSelector, extraSelectors } = context;
-  removeNodes(document.querySelectorAll(baseSelector));
+  removeNodes(document.querySelectorAll(context.noiseSelector));
 
-  if (extraSelectors.length > 0) {
-    removeNodes(document.querySelectorAll(extraSelectors.join(',')));
+  // Extra selectors (evaluated after base removal so DOM state is updated)
+  if (context.extraSelector) {
+    removeNodes(document.querySelectorAll(context.extraSelector));
   }
 
   // Candidates (conditional removal)
@@ -618,10 +623,24 @@ function surfaceHiddenTabPanels(document: Document): void {
 }
 
 function stripTabTriggers(document: Document): void {
-  const tabs = document.querySelectorAll('button[role="tab"]');
+  const tabs = document.querySelectorAll('[role="tab"]');
   for (let i = tabs.length - 1; i >= 0; i--) {
-    tabs[i]?.remove();
+    const tab = tabs[i];
+    if (!tab) continue;
+    const isSelected =
+      tab.getAttribute('aria-selected') === 'true' ||
+      tab.getAttribute('data-state') === 'active' ||
+      tab.hasAttribute('data-selected');
+    if (!isSelected) {
+      tab.remove();
+    }
   }
+}
+
+/** Surface hidden tab panels, then strip unselected tab triggers. */
+export function normalizeTabContent(document: Document): void {
+  surfaceHiddenTabPanels(document);
+  stripTabTriggers(document);
 }
 
 function normalizeTableCells(document: Document): void {
@@ -845,9 +864,21 @@ function cleanCodeExamples(document: Document): void {
   normalizeHighlightedCodeLines(document);
 }
 
+function stripPromoLinks(document: Document): void {
+  const links = document.querySelectorAll('a[href]');
+  for (let i = links.length - 1; i >= 0; i--) {
+    const link = links[i];
+    if (!link) continue;
+    const href = link.getAttribute('href');
+    if (href && UTM_PARAM_REGEX.test(href)) {
+      link.remove();
+    }
+  }
+}
+
 function separateAdjacentInlineElements(document: Document): void {
   const badges = document.querySelectorAll(
-    'span.chakra-badge, [data-scope="badge"], [class*="badge"]'
+    'span.chakra-badge, [data-scope="badge"], [class*="badge"], [data-slot="label"], [slot="label"]'
   );
   for (const badge of badges) {
     const next = badge.nextSibling;
@@ -857,22 +888,18 @@ function separateAdjacentInlineElements(document: Document): void {
   }
 }
 
+// Called on both raw documents (pre-article path) and article fragments
+// (post-Readability). Some passes (stripTabTriggers, etc.) are no-ops
+// on Readability output since tabs are already stripped or absent.
 export function prepareDocumentForMarkdown(
   document: Document,
   baseUrl?: string,
   signal?: AbortSignal
 ): void {
-  const context = getContext();
-
-  if (config.noiseRemoval.debug) {
-    logDebug('Noise removal audit enabled', {
-      categories: [...(context.flags.navFooter ? ['nav-footer'] : [])],
-    });
-  }
-
-  surfaceHiddenTabPanels(document);
-  stripNoise(document, context, signal);
-  stripTabTriggers(document);
+  normalizeTabContent(document);
+  cleanHeadings(document);
+  stripNoise(document, signal);
+  stripPromoLinks(document);
   cleanCodeExamples(document);
   separateAdjacentInlineElements(document);
   normalizeTableCells(document);

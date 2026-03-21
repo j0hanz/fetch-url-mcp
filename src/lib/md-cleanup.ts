@@ -1,32 +1,99 @@
 import { config } from './core.js';
-import {
-  ASCII_ASTERISK,
-  ASCII_BRACKET_OPEN,
-  ASCII_DASH,
-  ASCII_DIGIT_0,
-  ASCII_DIGIT_9,
-  ASCII_EXCLAMATION,
-  ASCII_HASH,
-  ASCII_PERIOD,
-  ASCII_PLUS,
-  ASCII_QUESTION,
-  FENCE_PATTERN,
-  HAS_FOLLOWING_LOOKAHEAD,
-  HEADING_KEYWORDS,
-  MAX_LINE_LENGTH,
-  PROPERTY_FIX_MAX_PASSES,
-  REGEX,
-  SPECIAL_PREFIXES,
-  TITLE_MAX_WORDS,
-  TITLE_MIN_CAPITALIZED,
-  TITLE_MIN_WORDS,
-  TOC_LINK_RATIO_THRESHOLD,
-  TOC_MAX_NON_EMPTY,
-  TOC_SCAN_LIMIT,
-  TYPEDOC_PREFIXES,
-} from './md-text-passes.js';
-import type { TextPass } from './md-text-passes.js';
 import { throwIfAborted } from './utils.js';
+
+// ── ASCII code constants ────────────────────────────────────────────
+const ASCII_HASH = 35;
+const ASCII_ASTERISK = 42;
+const ASCII_PLUS = 43;
+const ASCII_DASH = 45;
+const ASCII_PERIOD = 46;
+const ASCII_DIGIT_0 = 48;
+const ASCII_DIGIT_9 = 57;
+const ASCII_EXCLAMATION = 33;
+const ASCII_QUESTION = 63;
+const ASCII_BRACKET_OPEN = 91;
+
+// ── Title heuristic thresholds ──────────────────────────────────────
+const TITLE_MIN_WORDS = 2;
+const TITLE_MAX_WORDS = 10;
+const TITLE_MIN_CAPITALIZED = 2;
+
+// ── Processing limits ───────────────────────────────────────────────
+const HAS_FOLLOWING_LOOKAHEAD = 10;
+const PROPERTY_FIX_MAX_PASSES = 5;
+const MAX_LINE_LENGTH = 80;
+
+// ── TOC thresholds ──────────────────────────────────────────────────
+const TOC_SCAN_LIMIT = 20;
+const TOC_MAX_NON_EMPTY = 12;
+const TOC_LINK_RATIO_THRESHOLD = 0.8;
+
+// ── Fence pattern ───────────────────────────────────────────────────
+const FENCE_PATTERN = /^\s*(`{3,}|~{3,})/;
+
+// ── Regex collection ────────────────────────────────────────────────
+const REGEX = {
+  HEADING_MARKER: /^#{1,6}\s/m,
+  HEADING_STRICT: /^#{1,6}\s+/m,
+  EMPTY_HEADING_LINE: /^#{1,6}[ \t\u00A0]*$/,
+  ANCHOR_ONLY_HEADING: /^#{1,6}\s+\[[^\]]+\]\(#[^)]+\)\s*$/,
+  HEADING_TRAILING_PERMALINK:
+    /^(#{1,6}\s+.+?)\s*\[(?:#|¶|§|¤|🔗)\]\(#[^)]+\)\s*$/gmu,
+  FENCE_START: FENCE_PATTERN,
+  LIST_MARKER: /^(?:[-*+])\s/m,
+  TOC_LINK: /^- \[[^\]]+\]\(#[^)]+\)\s*$/,
+  TOC_HEADING:
+    /^(?:#{1,6}\s+)?(?:table of contents|contents|on this page)\s*$/i,
+  HTML_DOC_START: /^(<!doctype|<html)/i,
+  COMBINED_LINE_REMOVALS:
+    /^(?:\[Skip to (?:main )?(?:content|navigation)\]\(#[^)]*\)|\[Skip link\]\(#[^)]*\)|Was this page helpful\??|\[Back to top\]\(#[^)]*\)|\[\s*\]\(https?:\/\/[^)]*\))\s*$/gim,
+  ZERO_WIDTH_ANCHOR: /\[(?:\s|\u200B)*\]\(#[^)]*\)[ \t]*/g,
+  CONCATENATED_PROPS:
+    /([a-z_][a-z0-9_]{0,30}\??:\s+)([\u0022\u201C][^\u0022\u201C\u201D]*[\u0022\u201D])([a-z_][a-z0-9_]{0,30}\??:)/g,
+  DOUBLE_NEWLINE_REDUCER: /\n{3,}/g,
+  SOURCE_KEY: /^source:\s/im,
+  HEADING_SPACING: /(^#{1,6}\s[^\n]*)\n([^\n])/gm,
+  HEADING_CODE_BLOCK: /(^#{1,6}\s+\w+)```/gm,
+  SPACING_LINK_FIX: /\]\(([^)]+)\)\[/g,
+  SPACING_ADJ_COMBINED: /(?:\]\([^)]+\)|`[^`]+`)(?=[A-Za-z0-9])/g,
+  SPACING_CODE_PAD_BEFORE: /(\S)[ \t]{2,}(?=`[^`\n]+`)/g,
+  SPACING_CODE_PAD_AFTER: /(`[^`\n]+`)[ \t]{2,}(?=\S)/g,
+  SPACING_CODE_DASH: /(`[^`]+`)\s*\\-\s*/g,
+  SPACING_ESCAPED_DASH: /(?<=[\w)\]`])\s*\\-\s*(?=[A-Za-z0-9([])/g,
+  SPACING_ESCAPES: /\\([[\].])/g,
+  SPACING_LIST_NUM_COMBINED:
+    /^((?![-*+] |\d+\. |[ \t]).+)\n((?:[-*+]|\d+\.) )/gm,
+  PUNCT_ONLY_LIST_ARTIFACT:
+    /^(?:[-*+]|\d+\.)\s*(?:\\[-*+|/]|[-*+|/])(?:\s+(?:\\[-*+|/]|[-*+|/]))*\s*$/gm,
+  NESTED_LIST_INDENT: /^( +)((?:[-*+])|\d+\.)\s/gm,
+  TYPEDOC_COMMENT: /(`+)(?:(?!\1)[\s\S])*?\1|\s?\/\\?\*[\s\S]*?\\?\*\//g,
+} as const;
+
+// ── Heading keywords (config-driven) ────────────────────────────────
+const HEADING_KEYWORDS = new Set(
+  config.markdownCleanup.headingKeywords.map((value) =>
+    value.toLocaleLowerCase(config.i18n.locale)
+  )
+);
+
+// ── Prefix patterns ─────────────────────────────────────────────────
+const SPECIAL_PREFIXES =
+  /^(?:example|note|tip|warning|important|caution):\s+\S/i;
+
+// ── TypeDoc prefixes ────────────────────────────────────────────────
+const TYPEDOC_PREFIXES = [
+  'Defined in:',
+  'Returns:',
+  'Since:',
+  'See also:',
+] as const;
+
+// ── TextPass pipeline type ──────────────────────────────────────────
+interface TextPass {
+  readonly stage: string;
+  readonly enabled?: () => boolean;
+  readonly apply: (text: string) => string;
+}
 
 interface CleanupOptions {
   preserveEmptyHeadings?: boolean;
