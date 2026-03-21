@@ -20,6 +20,9 @@ const CODE_BLOCK = {
     `\`\`\`${language}\n${code}\n\`\`\``,
 };
 
+const MERMAID_POSTPROCESS = ({ content }: { content: string }): string =>
+  `\n\n\`\`\`mermaid\n${content.trim()}\n\`\`\`\n\n`;
+
 // ---------------------------------------------------------------------------
 // DOM helpers (translator-only)
 // ---------------------------------------------------------------------------
@@ -30,22 +33,20 @@ function getTagName(node: unknown): string {
   return typeof raw === 'string' ? raw.toUpperCase() : '';
 }
 
-function hasGetAttribute(
-  value: unknown
-): value is { getAttribute: (name: string) => string | null } {
-  return (
-    isObject(value) &&
-    typeof (value as { getAttribute?: unknown }).getAttribute === 'function'
-  );
+function getNode(ctx: unknown): unknown {
+  return isObject(ctx) ? (ctx as { node?: unknown }).node : undefined;
+}
+
+function getParent(ctx: unknown): unknown {
+  return isObject(ctx) ? (ctx as { parent?: unknown }).parent : undefined;
 }
 
 function getNodeAttr(
   node: unknown
 ): ((name: string) => string | null) | undefined {
-  if (!isLikeNode(node)) return undefined;
-  return typeof node.getAttribute === 'function'
-    ? node.getAttribute.bind(node)
-    : undefined;
+  if (!isLikeNode(node) || typeof node.getAttribute !== 'function')
+    return undefined;
+  return node.getAttribute.bind(node);
 }
 
 // ---------------------------------------------------------------------------
@@ -56,17 +57,8 @@ function buildInlineCode(content: string): string {
   const trimmed = content.trim();
   if (!trimmed) return '``';
 
-  let maxBackticks = 0;
-  let currentRun = 0;
-
-  for (const char of trimmed) {
-    if (char === '`') currentRun += 1;
-    else {
-      if (currentRun > maxBackticks) maxBackticks = currentRun;
-      currentRun = 0;
-    }
-  }
-  if (currentRun > maxBackticks) maxBackticks = currentRun;
+  const matches = trimmed.match(/`+/g);
+  const maxBackticks = matches ? Math.max(...matches.map((m) => m.length)) : 0;
 
   const delimiter = '`'.repeat(maxBackticks + 1);
   const padding = trimmed.startsWith('`') || trimmed.endsWith('`') ? ' ' : '';
@@ -81,9 +73,7 @@ function isCodeBlock(
 }
 
 function resolveAttributeLanguage(node: unknown): string | undefined {
-  const getAttribute = hasGetAttribute(node)
-    ? node.getAttribute.bind(node)
-    : undefined;
+  const getAttribute = getNodeAttr(node);
   const className = getAttribute?.('class') ?? '';
   const dataLanguage = getAttribute?.('data-language') ?? '';
   return resolveLanguageFromAttributes(className, dataLanguage);
@@ -127,9 +117,7 @@ function buildInlineCodeTranslator(): TranslatorConfig {
 
 function buildCodeTranslator(ctx: unknown): TranslatorConfig {
   const inlineCodeTranslator = buildInlineCodeTranslator();
-  if (!isObject(ctx)) return inlineCodeTranslator;
-  const { parent } = ctx as { parent?: unknown };
-  if (!isCodeBlock(parent)) return inlineCodeTranslator;
+  if (!isCodeBlock(getParent(ctx))) return inlineCodeTranslator;
 
   return { noEscape: true, preserveWhitespace: true };
 }
@@ -139,9 +127,7 @@ function buildCodeTranslator(ctx: unknown): TranslatorConfig {
 // ---------------------------------------------------------------------------
 
 function extractFirstSrcsetUrl(srcset: string): string {
-  const first = srcset.split(',')[0];
-  if (!first) return '';
-  return first.trim().split(/\s+/)[0] ?? '';
+  return srcset.split(',')[0]?.trim().split(/\s+/)[0] ?? '';
 }
 
 const LAZY_SRC_ATTRIBUTES = [
@@ -197,9 +183,6 @@ function resolveImageSrc(
     if (url) return url;
   }
 
-  // If the only available src is a data URI, omit the image URL entirely.
-  if (isDataUri(srcRaw)) return '';
-
   return '';
 }
 
@@ -234,12 +217,7 @@ function deriveAltFromImageUrl(src: string): string {
 }
 
 function buildImageTranslator(ctx: unknown): TranslatorConfig {
-  if (!isObject(ctx)) return { content: '' };
-
-  const { node } = ctx as { node?: unknown };
-  const getAttribute = hasGetAttribute(node)
-    ? node.getAttribute.bind(node)
-    : undefined;
+  const getAttribute = getNodeAttr(getNode(ctx));
 
   const src = resolveImageSrc(getAttribute);
   const existingAlt = getAttribute?.('alt') ?? '';
@@ -248,10 +226,7 @@ function buildImageTranslator(ctx: unknown): TranslatorConfig {
   }
 
   const alt = existingAlt.trim() || deriveAltFromImageUrl(src);
-
-  const markdown = `![${alt}](${src})`;
-
-  return { content: markdown };
+  return { content: `![${alt}](${src})` };
 }
 
 // ---------------------------------------------------------------------------
@@ -259,9 +234,9 @@ function buildImageTranslator(ctx: unknown): TranslatorConfig {
 // ---------------------------------------------------------------------------
 
 function buildPreTranslator(ctx: unknown): TranslatorConfig {
-  if (!isObject(ctx)) return {};
+  const node = getNode(ctx);
+  if (!node) return {};
 
-  const { node } = ctx as { node?: unknown };
   const attributeLanguage =
     resolveAttributeLanguage(node) ?? findLanguageFromCodeChild(node);
 
@@ -273,18 +248,15 @@ function buildPreTranslator(ctx: unknown): TranslatorConfig {
 }
 
 function buildMermaidPreTranslator(ctx: unknown): TranslatorConfig {
-  if (!isObject(ctx)) return buildPreTranslator(ctx);
-  const { node } = ctx as { node?: unknown };
+  const node = getNode(ctx);
   const getAttribute = getNodeAttr(node);
-  if (!getAttribute) return buildPreTranslator(ctx);
 
-  const className = getAttribute('class') ?? '';
+  const className = getAttribute?.('class') ?? '';
   if (className.includes('mermaid')) {
     return {
       noEscape: true,
       preserveWhitespace: true,
-      postprocess: ({ content }: { content: string }) =>
-        `\n\n\`\`\`mermaid\n${content.trim()}\n\`\`\`\n\n`,
+      postprocess: MERMAID_POSTPROCESS,
     };
   }
 
@@ -307,9 +279,6 @@ const GFM_ALERT_MAP: ReadonlyMap<string, string> = new Map([
   ['important', 'IMPORTANT'],
 ]);
 
-const ADMONITION_TOKEN_RE =
-  /^(?:note|tip|hint|info|warning|warn|danger|caution|important)$/i;
-
 function resolveGfmAlertType(className: string): string | undefined {
   const tokens = className.toLowerCase().split(/\s+/);
   for (const token of tokens) {
@@ -320,9 +289,7 @@ function resolveGfmAlertType(className: string): string | undefined {
 }
 
 function buildDivTranslator(ctx: unknown): Record<string, unknown> {
-  if (!isObject(ctx)) return {};
-  const { node } = ctx as { node?: unknown };
-  const getAttribute = getNodeAttr(node);
+  const getAttribute = getNodeAttr(getNode(ctx));
   if (!getAttribute) return {};
 
   const className = getAttribute('class') ?? '';
@@ -330,21 +297,21 @@ function buildDivTranslator(ctx: unknown): Record<string, unknown> {
     return {
       noEscape: true,
       preserveWhitespace: true,
-      postprocess: ({ content }: { content: string }) =>
-        `\n\n\`\`\`mermaid\n${content.trim()}\n\`\`\`\n\n`,
+      postprocess: MERMAID_POSTPROCESS,
     };
   }
-  const classTokens = className.split(/\s+/);
+
+  const alertType = resolveGfmAlertType(className);
   const isAdmonition =
     className.includes('admonition') ||
     className.includes('callout') ||
     className.includes('custom-block') ||
     getAttribute('role') === 'alert' ||
-    classTokens.some((t) => ADMONITION_TOKEN_RE.test(t));
+    alertType !== undefined;
+
   if (isAdmonition) {
     return {
       postprocess: ({ content }: { content: string }) => {
-        const alertType = resolveGfmAlertType(className);
         const lines = content.trim().split('\n');
         const header = alertType ? `> [!${alertType}]\n` : '';
         return `\n\n${header}> ${lines.join('\n> ')}\n\n`;
@@ -361,11 +328,11 @@ function buildDivTranslator(ctx: unknown): Record<string, unknown> {
 
       for (let i = 0; i < lines.length; i++) {
         const line = lines[i] ?? '';
-        const nextLine = i < lines.length - 1 ? (lines[i + 1] ?? '') : '';
-
         separated.push(line);
 
+        const nextLine = lines[i + 1];
         if (
+          nextLine !== undefined &&
           line.trim() &&
           nextLine.trim() &&
           line.includes(':') &&
@@ -383,15 +350,12 @@ function buildDivTranslator(ctx: unknown): Record<string, unknown> {
 }
 
 function buildSectionTranslator(ctx: unknown): Record<string, unknown> {
-  if (isObject(ctx)) {
-    const { node } = ctx as { node?: unknown };
-    const getAttribute = getNodeAttr(node);
-    if (getAttribute?.('class')?.includes('tsd-member')) {
-      return {
-        postprocess: ({ content }: { content: string }) =>
-          `\n\n&nbsp;\n\n${content}\n\n`,
-      };
-    }
+  const getAttribute = getNodeAttr(getNode(ctx));
+  if (getAttribute?.('class')?.includes('tsd-member')) {
+    return {
+      postprocess: ({ content }: { content: string }) =>
+        `\n\n&nbsp;\n\n${content}\n\n`,
+    };
   }
   return {
     postprocess: ({ content }: { content: string }) => `\n\n${content}\n\n`,
@@ -399,13 +363,8 @@ function buildSectionTranslator(ctx: unknown): Record<string, unknown> {
 }
 
 function buildSpanTranslator(ctx: unknown): Record<string, unknown> {
-  if (!isObject(ctx)) return {};
-  const { node } = ctx as { node?: unknown };
-  const getAttribute = getNodeAttr(node);
-  if (!getAttribute) return {};
-
-  const dataAs = getAttribute('data-as') ?? '';
-  if (dataAs === 'p') {
+  const getAttribute = getNodeAttr(getNode(ctx));
+  if (getAttribute?.('data-as') === 'p') {
     return {
       postprocess: ({ content }: { content: string }) =>
         `\n\n${content.trim()}\n\n`,
@@ -450,8 +409,8 @@ function normalizeDefinitionListContent(content: string): string {
 
 function createCustomTranslators(): TranslatorConfigObject {
   return {
-    code: (ctx: unknown) => buildCodeTranslator(ctx),
-    img: (ctx: unknown) => buildImageTranslator(ctx),
+    code: buildCodeTranslator,
+    img: buildImageTranslator,
     dl: () => ({
       postprocess: ({ content }: { content: string }) => {
         const normalized = normalizeDefinitionListContent(content);
