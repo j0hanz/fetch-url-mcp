@@ -127,7 +127,7 @@ const cachedPayloadCompatSchema = z.object({
     .optional(),
 });
 
-export const cachedPayloadSchema = cachedPayloadCompatSchema
+const cachedPayloadSchema = cachedPayloadCompatSchema
   .superRefine((value, ctx) => {
     if (typeof value.markdown === 'string') return;
 

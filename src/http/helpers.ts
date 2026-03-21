@@ -337,10 +337,7 @@ export function createTransportAdapter(
 // JSON body reading
 // ---------------------------------------------------------------------------
 
-export type JsonBodyErrorKind =
-  | 'payload-too-large'
-  | 'invalid-json'
-  | 'read-failed';
+type JsonBodyErrorKind = 'payload-too-large' | 'invalid-json' | 'read-failed';
 
 export class JsonBodyError extends Error {
   readonly kind: JsonBodyErrorKind;

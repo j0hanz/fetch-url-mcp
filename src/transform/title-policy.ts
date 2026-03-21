@@ -50,10 +50,7 @@ function normalizeHeadingText(value: string): string {
   return value.replace(/\s+/g, ' ').trim().toLowerCase();
 }
 
-export function stripLeadingHeading(
-  markdown: string,
-  headingText: string
-): string {
+function stripLeadingHeading(markdown: string, headingText: string): string {
   if (!markdown) return markdown;
 
   const lines = markdown.split('\n');

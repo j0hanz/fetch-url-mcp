@@ -26,16 +26,11 @@ import {
   normalizeUrl,
   transformToRawUrl,
 } from './http.js';
-import {
-  getErrorMessage,
-  readNestedRecord,
-  readString,
-  withSignal,
-} from './utils.js';
+import { getErrorMessage, isObject, withSignal } from './utils.js';
 
-export { readNestedRecord, withSignal };
+export { withSignal };
 
-export const TRUNCATION_MARKER = '...[truncated]';
+const TRUNCATION_MARKER = '...[truncated]';
 export interface InlineContentResult {
   content?: string;
   contentSize: number;
@@ -117,10 +112,7 @@ function truncateWithMarker(
 
   return `${tentativeContent}${marker}`.slice(0, limit);
 }
-export function appendTruncationMarker(
-  content: string,
-  marker: string
-): string {
+function appendTruncationMarker(content: string, marker: string): string {
   if (!content) return marker;
   if (content.endsWith(marker)) return content;
 
@@ -331,7 +323,11 @@ function persistCacheEntry<T>(
   cacheNamespace: string
 ): void {
   const serializer = serialize ?? JSON.stringify;
-  const title = readString(data, 'title');
+  const dataRecord = isObject(data)
+    ? (data as Record<string, unknown>)
+    : undefined;
+  const title =
+    typeof dataRecord?.title === 'string' ? dataRecord.title : undefined;
   const metadata = {
     url: normalizedUrl,
     ...(title === undefined ? {} : { title }),

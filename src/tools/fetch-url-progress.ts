@@ -12,7 +12,7 @@ function formatContentSize(contentSize: number): string {
   return `${(contentSize / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-export function buildFetchSuccessSummary(contentSize: number): string {
+function buildFetchSuccessSummary(contentSize: number): string {
   return `Done — ${formatContentSize(contentSize)}`;
 }
 

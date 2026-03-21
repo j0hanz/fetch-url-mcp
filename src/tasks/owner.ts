@@ -6,7 +6,7 @@ import { z } from 'zod';
 import { getRequestId, runWithRequestContext } from '../lib/core.js';
 import type { ProgressNotification } from '../lib/progress.js';
 import type { ToolHandlerExtra } from '../lib/progress.js';
-import { isObject, readNestedRecord } from '../lib/utils.js';
+import { isObject } from '../lib/utils.js';
 
 import {
   sanitizeToolCallMeta,
@@ -116,7 +116,7 @@ export function resolveTaskOwnerKey(extra?: HandlerExtra): string {
   return 'default';
 }
 
-export function resolveRequestIdFromExtra(extra: unknown): string | undefined {
+function resolveRequestIdFromExtra(extra: unknown): string | undefined {
   if (!isObject(extra)) return undefined;
 
   const { requestId } = extra as { requestId?: unknown };
@@ -126,18 +126,23 @@ export function resolveRequestIdFromExtra(extra: unknown): string | undefined {
   return undefined;
 }
 
-export function resolveSessionIdFromExtra(extra: unknown): string | undefined {
+function resolveSessionIdFromExtra(extra: unknown): string | undefined {
   if (!isObject(extra)) return undefined;
 
   const { sessionId } = extra as { sessionId?: unknown };
   if (typeof sessionId === 'string') return sessionId;
 
-  const headers = readNestedRecord(extra, ['requestInfo', 'headers']);
-  const headerValue = headers ? headers['mcp-session-id'] : undefined;
+  const requestInfo = extra.requestInfo;
+  if (!isObject(requestInfo)) return undefined;
+
+  const headers = requestInfo.headers;
+  if (!isObject(headers)) return undefined;
+
+  const headerValue = headers['mcp-session-id'];
   return typeof headerValue === 'string' ? headerValue : undefined;
 }
 
-export function resolveToolExecutionContext(
+function resolveToolExecutionContext(
   extra?: HandlerExtra,
   requestMeta?: ToolCallRequestMeta
 ): ToolExecutionContext {
