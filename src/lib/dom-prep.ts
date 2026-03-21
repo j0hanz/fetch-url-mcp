@@ -596,15 +596,19 @@ function resolveUrls(document: Document, baseUrlStr: string): void {
     else if (tag === 'source') processUrlElement(el, 'srcset', base, true);
   }
 }
+function getValidContentHtml(element: Element | null): string | null {
+  if (!element) return null;
+  const html = element.innerHTML.trim();
+  return html.length > MIN_BODY_CONTENT_LENGTH ? html : null;
+}
+
 export function resolveDocumentBody(document: Document): Element {
   const { body } = document;
-  if (body.innerHTML.trim().length > MIN_BODY_CONTENT_LENGTH) return body;
+  if (getValidContentHtml(body)) return body;
+
   const { children } = document.documentElement;
   for (const child of children) {
-    if (
-      child.tagName === 'BODY' &&
-      child.innerHTML.trim().length > MIN_BODY_CONTENT_LENGTH
-    ) {
+    if (child.tagName === 'BODY' && getValidContentHtml(child)) {
       return child;
     }
   }
@@ -617,11 +621,11 @@ export function serializeDocumentForMarkdown(
   fallback: string
 ): string {
   const body = resolveDocumentBody(document);
-  const bodyHtml = body.innerHTML;
-  if (bodyHtml.trim().length > MIN_BODY_CONTENT_LENGTH) return bodyHtml;
+  const bodyHtml = getValidContentHtml(body);
+  if (bodyHtml) return bodyHtml;
 
-  const outerHtml = document.documentElement.outerHTML;
-  if (outerHtml.trim().length > MIN_BODY_CONTENT_LENGTH) return outerHtml;
+  const outerHtml = document.documentElement.outerHTML.trim();
+  if (outerHtml.length > MIN_BODY_CONTENT_LENGTH) return outerHtml;
 
   return fallback;
 }
@@ -672,6 +676,33 @@ export function normalizeTabContent(document: Document): void {
   stripTabTriggers(document);
 }
 
+function convertBlockToSpan(block: Element, document: Document): void {
+  if (!block.parentNode) return;
+  const span = document.createElement('span');
+  span.appendChild(document.createTextNode(' '));
+  while (block.firstChild) {
+    span.appendChild(block.firstChild);
+  }
+  span.appendChild(document.createTextNode(' '));
+  for (const attr of Array.from(block.attributes)) {
+    span.setAttribute(attr.name, attr.value);
+  }
+  block.replaceWith(span);
+}
+
+function normalizeTableCellTextNodes(cell: Element, document: Document): void {
+  const walker = document.createTreeWalker(cell, NODE_FILTER_SHOW_TEXT);
+  let node: Node | null;
+  while ((node = walker.nextNode())) {
+    if (node.nodeValue) {
+      node.nodeValue = node.nodeValue.replace(/\r?\n/g, ' ');
+      if (node.nodeValue.includes('|')) {
+        node.nodeValue = node.nodeValue.replace(/\|/g, '\\|');
+      }
+    }
+  }
+}
+
 function normalizeTableCells(document: Document): void {
   const cells = document.querySelectorAll('td, th');
   for (const cell of cells) {
@@ -684,29 +715,10 @@ function normalizeTableCells(document: Document): void {
       cell.querySelectorAll('div, p, ul, li, h1, h2, h3, h4, h5, h6')
     );
     for (const block of blocks) {
-      if (!block.parentNode) continue;
-      const span = document.createElement('span');
-      span.appendChild(document.createTextNode(' '));
-      while (block.firstChild) {
-        span.appendChild(block.firstChild);
-      }
-      span.appendChild(document.createTextNode(' '));
-      for (const attr of Array.from(block.attributes)) {
-        span.setAttribute(attr.name, attr.value);
-      }
-      block.replaceWith(span);
+      convertBlockToSpan(block, document);
     }
 
-    const walker = document.createTreeWalker(cell, NODE_FILTER_SHOW_TEXT);
-    let node: Node | null;
-    while ((node = walker.nextNode())) {
-      if (node.nodeValue) {
-        node.nodeValue = node.nodeValue.replace(/\r?\n/g, ' ');
-        if (node.nodeValue.includes('|')) {
-          node.nodeValue = node.nodeValue.replace(/\|/g, '\\|');
-        }
-      }
-    }
+    normalizeTableCellTextNodes(cell, document);
   }
 }
 
@@ -763,29 +775,33 @@ function hasPreviewMedia(element: Element): boolean {
   return element.querySelector('svg,canvas') !== null;
 }
 
+function hasInteractiveOrComplexContent(preview: Element): boolean {
+  if (preview.tagName === 'FIGCAPTION') return true;
+  return (
+    preview.querySelector(
+      'a[href],button,input,select,textarea,form,video,audio,iframe,table,ul,ol,blockquote'
+    ) !== null
+  );
+}
+
+function hasValidTextSegments(segments: string[]): boolean {
+  return (
+    segments.length > 0 &&
+    segments.length <= REDUNDANT_PREVIEW_MAX_SEGMENTS &&
+    segments.every(
+      (segment) => segment.length <= REDUNDANT_PREVIEW_SEGMENT_MAX_CHARS
+    )
+  );
+}
+
 function isRedundantCodePreview(
   preview: Element,
   codeContainer: Element
 ): boolean {
-  if (
-    preview.tagName === 'FIGCAPTION' ||
-    preview.querySelector(
-      'a[href],button,input,select,textarea,form,video,audio,iframe,table,ul,ol,blockquote'
-    ) !== null
-  ) {
-    return false;
-  }
+  if (hasInteractiveOrComplexContent(preview)) return false;
 
   const segments = collectLeafTextSegments(preview);
-  if (
-    segments.length === 0 ||
-    segments.length > REDUNDANT_PREVIEW_MAX_SEGMENTS ||
-    segments.some(
-      (segment) => segment.length > REDUNDANT_PREVIEW_SEGMENT_MAX_CHARS
-    )
-  ) {
-    return false;
-  }
+  if (!hasValidTextSegments(segments)) return false;
 
   const codeText = normalizeWhitespace(codeContainer.textContent || '');
   if (!codeText) return false;
@@ -796,12 +812,8 @@ function isRedundantCodePreview(
   if (matchingSegments.length === segments.length) return true;
 
   return (
-    (hasPreviewMedia(preview) ||
-      segments.some((segment) => isHostnameLike(segment))) &&
-    matchingSegments.length > 0 &&
-    segments.every(
-      (segment) => segment.length <= REDUNDANT_PREVIEW_SEGMENT_MAX_CHARS
-    )
+    (hasPreviewMedia(preview) || segments.some(isHostnameLike)) &&
+    matchingSegments.length > 0
   );
 }
 
