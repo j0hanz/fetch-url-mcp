@@ -586,11 +586,28 @@ function resolveUrls(document: Document, baseUrlStr: string): void {
     else if (tag === 'source') processUrlElement(el, 'srcset', base, true);
   }
 }
+function resolveDocumentBody(document: Document): Element {
+  const { body } = document;
+  if (body.innerHTML.trim().length > MIN_BODY_CONTENT_LENGTH) return body;
+  const { children } = document.documentElement;
+  for (const child of children) {
+    if (
+      child.tagName === 'BODY' &&
+      child.innerHTML.trim().length > MIN_BODY_CONTENT_LENGTH
+    ) {
+      return child;
+    }
+  }
+
+  return body;
+}
+
 export function serializeDocumentForMarkdown(
   document: Document,
   fallback: string
 ): string {
-  const bodyHtml = document.body.innerHTML;
+  const body = resolveDocumentBody(document);
+  const bodyHtml = body.innerHTML;
   if (bodyHtml.trim().length > MIN_BODY_CONTENT_LENGTH) return bodyHtml;
 
   const outerHtml = document.documentElement.outerHTML;

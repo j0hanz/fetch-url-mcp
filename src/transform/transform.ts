@@ -944,15 +944,10 @@ const RETENTION_RULES: readonly RetentionRule[] = [
   { selector: 'pre', minOriginal: 1, ratio: 0.15 },
   { selector: 'table', minOriginal: 1, ratio: 0.5 },
   { selector: 'img', minOriginal: 4, ratio: 0.2 },
-  {
-    selector: 'button,[role="tab"],[role="tabpanel"],[aria-controls]',
-    minOriginal: 6,
-    ratio: 0.1,
-  },
 ];
 
 const MIN_HEADINGS_FOR_EMPTY_SECTION_GATE = 5;
-const MAX_EMPTY_SECTION_RATIO = 0.05;
+const MAX_EMPTY_SECTION_RATIO = 0.15;
 
 const MIN_LINE_LENGTH_FOR_TRUNCATION_CHECK = 20;
 const MAX_TRUNCATED_LINE_RATIO = 0.95;
@@ -1008,16 +1003,34 @@ function getTextContentSkippingHidden(node: Node, parts: string[]): void {
   }
 }
 
+function resolveBody(document: Document): Element {
+  const { body } = document;
+  if ((body.textContent || '').trim().length > 0) return body;
+  const { children } = document.documentElement;
+  for (const child of children) {
+    if (
+      child.tagName === 'BODY' &&
+      (child.textContent || '').trim().length > 0
+    ) {
+      return child;
+    }
+  }
+
+  return body;
+}
+
 function getVisibleTextLength(htmlOrDocument: string | Document): number {
   if (typeof htmlOrDocument === 'string') {
     const doc = resolveHtmlDocument(htmlOrDocument);
-    for (const el of doc.body.querySelectorAll('script,style,noscript')) {
+    const body = resolveBody(doc);
+    for (const el of body.querySelectorAll('script,style,noscript')) {
       el.remove();
     }
-    return (doc.body.textContent || '').replace(/\s+/g, ' ').trim().length;
+    return (body.textContent || '').replace(/\s+/g, ' ').trim().length;
   }
+  const body = resolveBody(htmlOrDocument);
   const parts: string[] = [];
-  getTextContentSkippingHidden(htmlOrDocument.body, parts);
+  getTextContentSkippingHidden(body, parts);
   return parts.join('').replace(/\s+/g, ' ').trim().length;
 }
 
