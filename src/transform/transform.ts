@@ -264,6 +264,13 @@ function getUtf8ByteLength(html: string): number {
   return Buffer.byteLength(html, 'utf8');
 }
 
+const UTF8_MASK = 0xc0;
+const UTF8_CONTINUATION = 0x80;
+const UTF8_2_BYTE = 0xc0;
+const UTF8_3_BYTE = 0xe0;
+const UTF8_4_BYTE = 0xf0;
+const UTF8_5_BYTE = 0xf8; // Limits 4-byte validity check
+
 function trimUtf8Buffer(buffer: Uint8Array, maxBytes: number): Uint8Array {
   if (buffer.length <= maxBytes) return buffer;
   if (maxBytes <= 0) return buffer.subarray(0, 0);
@@ -271,7 +278,10 @@ function trimUtf8Buffer(buffer: Uint8Array, maxBytes: number): Uint8Array {
   let end = maxBytes;
   let cursor = end - 1;
 
-  while (cursor >= 0 && ((buffer[cursor] ?? 0) & 0xc0) === 0x80) {
+  while (
+    cursor >= 0 &&
+    ((buffer[cursor] ?? 0) & UTF8_MASK) === UTF8_CONTINUATION
+  ) {
     cursor -= 1;
   }
 
@@ -280,9 +290,9 @@ function trimUtf8Buffer(buffer: Uint8Array, maxBytes: number): Uint8Array {
   const lead = buffer[cursor] ?? 0;
   let sequenceLength = 1;
 
-  if (lead >= 0xc0 && lead < 0xe0) sequenceLength = 2;
-  else if (lead >= 0xe0 && lead < 0xf0) sequenceLength = 3;
-  else if (lead >= 0xf0 && lead < 0xf8) sequenceLength = 4;
+  if (lead >= UTF8_2_BYTE && lead < UTF8_3_BYTE) sequenceLength = 2;
+  else if (lead >= UTF8_3_BYTE && lead < UTF8_4_BYTE) sequenceLength = 3;
+  else if (lead >= UTF8_4_BYTE && lead < UTF8_5_BYTE) sequenceLength = 4;
 
   if (cursor + sequenceLength > end) {
     end = cursor;
@@ -291,12 +301,21 @@ function trimUtf8Buffer(buffer: Uint8Array, maxBytes: number): Uint8Array {
   return buffer.subarray(0, end);
 }
 
+const CHAR_SLASH = 47;
+const CHAR_EXCLAMATION = 33;
+const CHAR_QUESTION = 63;
+const CHAR_A_UPPER = 65;
+const CHAR_Z_UPPER = 90;
+const CHAR_A_LOWER = 97;
+const CHAR_Z_LOWER = 122;
+const MAX_ENTITY_LENGTH = 10;
+
 function trimDanglingTagFragment(content: string): string {
   let result = content;
 
   // Trim dangling HTML entity (e.g. "&amp" cut before ";")
   const lastAmp = result.lastIndexOf('&');
-  if (lastAmp !== -1 && lastAmp > result.length - 10) {
+  if (lastAmp !== -1 && lastAmp > result.length - MAX_ENTITY_LENGTH) {
     const tail = result.slice(lastAmp + 1);
     if (!tail.includes(';') && /^[#a-zA-Z][a-zA-Z0-9]*$/.test(tail)) {
       result = result.substring(0, lastAmp);
@@ -312,11 +331,11 @@ function trimDanglingTagFragment(content: string): string {
     const code = result.codePointAt(lastOpen + 1);
     if (
       code !== undefined &&
-      (code === 47 || // '/'
-        code === 33 || // '!'
-        code === 63 || // '?'
-        (code >= 65 && code <= 90) || // A-Z
-        (code >= 97 && code <= 122)) // a-z
+      (code === CHAR_SLASH ||
+        code === CHAR_EXCLAMATION ||
+        code === CHAR_QUESTION ||
+        (code >= CHAR_A_UPPER && code <= CHAR_Z_UPPER) ||
+        (code >= CHAR_A_LOWER && code <= CHAR_Z_LOWER))
     ) {
       return result.substring(0, lastOpen);
     }
@@ -427,6 +446,18 @@ function preserveCodeLanguageAttributes(doc: Document): void {
   }
 }
 
+function prepareReadabilityDocument(readabilityDoc: Document): void {
+  preserveAlertElements(readabilityDoc);
+  preserveCodeLanguageAttributes(readabilityDoc);
+  normalizeTabContent(readabilityDoc);
+
+  for (const el of readabilityDoc.querySelectorAll(
+    '[class*="breadcrumb"],[class*="pagination"]'
+  )) {
+    el.remove();
+  }
+}
+
 // Pre-Readability cleanup on a cloned document.
 // Must strip tabs/breadcrumbs before Readability mangles role attributes.
 // The original document is NOT yet prepared (prepareDocumentForMarkdown
@@ -484,15 +515,7 @@ function extractArticle(
         ? (doc.cloneNode(true) as Document)
         : doc;
 
-    preserveAlertElements(readabilityDoc);
-    preserveCodeLanguageAttributes(readabilityDoc);
-    normalizeTabContent(readabilityDoc);
-
-    for (const el of readabilityDoc.querySelectorAll(
-      '[class*="breadcrumb"],[class*="pagination"]'
-    )) {
-      el.remove();
-    }
+    prepareReadabilityDocument(readabilityDoc);
 
     checkAbort('extract:article:parse');
 
@@ -1212,28 +1235,42 @@ function findContentRoot(document: Document): string | undefined {
   return undefined;
 }
 
-function findPrimaryHeading(document: Document): string | undefined {
-  for (const headingSelector of ['[data-title="true"]', 'h1'] as const) {
-    const heading = document.querySelector(headingSelector);
+const PRIMARY_HEADING_SELECTORS_GLOBAL = ['[data-title="true"]', 'h1'] as const;
+const PRIMARY_HEADING_SELECTORS_LOCAL = [
+  '[data-title="true"]',
+  'h1',
+  'h2',
+] as const;
+
+function extractHeadingText(
+  root: ParentNode,
+  selectors: readonly string[]
+): string | undefined {
+  for (const selector of selectors) {
+    const heading = root.querySelector(selector);
     if (!heading) continue;
     const text = heading.textContent.trim();
     if (text) return text;
   }
+  return undefined;
+}
+
+function findPrimaryHeading(document: Document): string | undefined {
+  const globalHeading = extractHeadingText(
+    document,
+    PRIMARY_HEADING_SELECTORS_GLOBAL
+  );
+  if (globalHeading) return globalHeading;
 
   for (const selector of PRIMARY_HEADING_ROOT_SELECTORS) {
     const root = document.querySelector(selector);
     if (!root) continue;
 
-    for (const headingSelector of [
-      '[data-title="true"]',
-      'h1',
-      'h2',
-    ] as const) {
-      const heading = root.querySelector(headingSelector);
-      if (!heading) continue;
-      const text = heading.textContent.trim();
-      if (text) return text;
-    }
+    const localHeading = extractHeadingText(
+      root,
+      PRIMARY_HEADING_SELECTORS_LOCAL
+    );
+    if (localHeading) return localHeading;
   }
 
   return undefined;
@@ -1288,32 +1325,31 @@ const TransformHeuristics = {
   isGithubRepositoryRootUrl,
 } as const;
 
-function evaluateArticleContent(
-  article: ExtractedArticle,
+function passesContentRatioGate(
+  articleTextLength: number,
   document: Document
-): Document | null {
-  // Content ratio gate
+): boolean {
   const originalLength = getVisibleTextLength(document);
   if (originalLength >= MIN_HTML_LENGTH_FOR_GATE) {
-    if (article.textContent.length / originalLength < MIN_CONTENT_RATIO)
-      return null;
-  }
-
-  const articleDoc = parseHTML(
-    `<!DOCTYPE html><html><body>${article.content}</body></html>`
-  ).document;
-
-  // Retention checks
-  const passesRetention = RETENTION_RULES.every(
-    ({ selector, minOriginal, ratio }) => {
-      const original = countMatchingElements(document, selector);
-      if (original < minOriginal) return true;
-      return countMatchingElements(articleDoc, selector) / original >= ratio;
+    if (articleTextLength / originalLength < MIN_CONTENT_RATIO) {
+      return false;
     }
-  );
-  if (!passesRetention) return null;
+  }
+  return true;
+}
 
-  // Empty section ratio
+function passesRetentionRules(
+  originalDoc: Document,
+  articleDoc: Document
+): boolean {
+  return RETENTION_RULES.every(({ selector, minOriginal, ratio }) => {
+    const original = countMatchingElements(originalDoc, selector);
+    if (original < minOriginal) return true;
+    return countMatchingElements(articleDoc, selector) / original >= ratio;
+  });
+}
+
+function passesEmptySectionRatio(articleDoc: Document): boolean {
   const articleHeadings = countMatchingElements(
     articleDoc,
     'h1,h2,h3,h4,h5,h6'
@@ -1323,11 +1359,115 @@ function evaluateArticleContent(
       countEmptyHeadingSections(articleDoc) / articleHeadings >
       MAX_EMPTY_SECTION_RATIO
     ) {
-      return null;
+      return false;
     }
+  }
+  return true;
+}
+
+function evaluateArticleContent(
+  article: ExtractedArticle,
+  document: Document
+): Document | null {
+  if (!passesContentRatioGate(article.textContent.length, document)) {
+    return null;
+  }
+
+  const articleDoc = parseHTML(
+    `<!DOCTYPE html><html><body>${article.content}</body></html>`
+  ).document;
+
+  if (!passesRetentionRules(document, articleDoc)) {
+    return null;
+  }
+
+  if (!passesEmptySectionRatio(articleDoc)) {
+    return null;
   }
 
   return hasTruncatedSentences(article.textContent) ? null : articleDoc;
+}
+
+type BaseContentSource = Pick<
+  ContentSource,
+  | 'favicon'
+  | 'metadata'
+  | 'extractedMetadata'
+  | 'truncated'
+  | 'primaryHeading'
+  | 'originalHtml'
+>;
+
+function buildArticleSource(
+  base: BaseContentSource,
+  params: {
+    evaluatedArticleDoc: Document;
+    article: ExtractedArticle;
+    extractedMeta: ExtractedMetadata;
+    url: string;
+    signal?: AbortSignal | undefined;
+  }
+): ContentSource {
+  const { evaluatedArticleDoc, article, extractedMeta, url, signal } = params;
+  prepareDocumentForMarkdown(evaluatedArticleDoc, url, signal);
+  const articleTitle =
+    article.title !== undefined
+      ? normalizeDocumentTitle(article.title, url)
+      : extractedMeta.title;
+  const title = resolveContentTitle({
+    primaryHeading: base.primaryHeading,
+    title: articleTitle,
+    preferPrimaryHeading:
+      TransformHeuristics.isGithubRepositoryRootUrl(url) ||
+      shouldPreferPrimaryHeadingTitle(base.primaryHeading, articleTitle),
+  });
+
+  return {
+    ...base,
+    sourceHtml: evaluatedArticleDoc.body.innerHTML,
+    ...title,
+    skipNoiseRemoval: true,
+  };
+}
+
+function buildDocumentSource(
+  base: BaseContentSource,
+  params: {
+    resolvedDocument: Document;
+    html: string;
+    extractedMeta: ExtractedMetadata;
+  }
+): ContentSource {
+  const { resolvedDocument, html, extractedMeta } = params;
+  const contentRoot = TransformHeuristics.findContentRoot(resolvedDocument);
+  const title = resolveContentTitle({
+    primaryHeading: base.primaryHeading,
+    title: extractedMeta.title,
+    preferPrimaryHeading: shouldPreferPrimaryHeadingTitle(
+      base.primaryHeading,
+      extractedMeta.title
+    ),
+  });
+
+  return {
+    ...base,
+    sourceHtml:
+      contentRoot ?? serializeDocumentForMarkdown(resolvedDocument, html),
+    ...title,
+    skipNoiseRemoval: true,
+    document: resolvedDocument,
+  };
+}
+
+function buildRawSource(
+  base: BaseContentSource,
+  params: { html: string; extractedMeta: ExtractedMetadata }
+): ContentSource {
+  return {
+    ...base,
+    sourceHtml: params.html,
+    title: params.extractedMeta.title,
+  };
 }
 
 function buildContentSource(params: {
@@ -1366,15 +1506,7 @@ function buildContentSource(params: {
     : undefined;
   const primaryHeading = preparedDocument?.primaryHeading;
 
-  const base: Pick<
-    ContentSource,
-    | 'favicon'
-    | 'metadata'
-    | 'extractedMetadata'
-    | 'truncated'
-    | 'primaryHeading'
-    | 'originalHtml'
-  > = {
+  const base: BaseContentSource = {
     favicon: extractedMeta.favicon,
     metadata,
     extractedMetadata: extractedMeta,
@@ -1384,54 +1516,24 @@ function buildContentSource(params: {
   };
 
   if (evaluatedArticleDoc && article) {
-    prepareDocumentForMarkdown(evaluatedArticleDoc, url, signal);
-    const articleTitle =
-      article.title !== undefined
-        ? normalizeDocumentTitle(article.title, url)
-        : extractedMeta.title;
-    const title = resolveContentTitle({
-      primaryHeading: base.primaryHeading,
-      title: articleTitle,
-      preferPrimaryHeading:
-        TransformHeuristics.isGithubRepositoryRootUrl(url) ||
-        shouldPreferPrimaryHeadingTitle(base.primaryHeading, articleTitle),
+    return buildArticleSource(base, {
+      evaluatedArticleDoc,
+      article,
+      extractedMeta,
+      url,
+      signal,
     });
-
-    return {
-      ...base,
-      sourceHtml: evaluatedArticleDoc.body.innerHTML,
-      ...title,
-      skipNoiseRemoval: true,
-    };
   }
 
   if (preparedDocument) {
-    const resolvedDocument = preparedDocument.document;
-    const contentRoot = TransformHeuristics.findContentRoot(resolvedDocument);
-    const title = resolveContentTitle({
-      primaryHeading: base.primaryHeading,
-      title: extractedMeta.title,
-      preferPrimaryHeading: shouldPreferPrimaryHeadingTitle(
-        base.primaryHeading,
-        extractedMeta.title
-      ),
+    return buildDocumentSource(base, {
+      resolvedDocument: preparedDocument.document,
+      html,
+      extractedMeta,
     });
-
-    return {
-      ...base,
-      sourceHtml:
-        contentRoot ?? serializeDocumentForMarkdown(resolvedDocument, html),
-      ...title,
-      skipNoiseRemoval: true,
-      document: resolvedDocument,
-    };
   }
 
-  return {
-    ...base,
-    sourceHtml: html,
-    title: extractedMeta.title,
-  };
+  return buildRawSource(base, { html, extractedMeta });
 }
 
 function resolveContentSource(params: {
