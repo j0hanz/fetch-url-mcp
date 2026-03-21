@@ -101,16 +101,20 @@ interface TaskStatusNotificationParams extends Record<string, unknown> {
 }
 
 type TaskSummary = CreateTaskResult['task'];
+type TaskLifecycleProjection = Pick<
+  TaskState,
+  | 'taskId'
+  | 'status'
+  | 'statusMessage'
+  | 'createdAt'
+  | 'lastUpdatedAt'
+  | 'ttl'
+  | 'pollInterval'
+>;
 
-export function toTaskSummary(task: {
-  taskId: string;
-  status: TaskState['status'];
-  statusMessage?: string;
-  createdAt: string;
-  lastUpdatedAt: string;
-  ttl: number;
-  pollInterval: number;
-}): TaskSummary {
+function projectTaskLifecycleFields(
+  task: TaskLifecycleProjection
+): TaskSummary & TaskStatusNotificationParams {
   return {
     taskId: task.taskId,
     status: task.status,
@@ -120,6 +124,10 @@ export function toTaskSummary(task: {
     ttl: task.ttl,
     pollInterval: task.pollInterval,
   };
+}
+
+export function toTaskSummary(task: TaskLifecycleProjection): TaskSummary {
+  return projectTaskLifecycleFields(task);
 }
 
 export function emitTaskStatusNotification(
@@ -149,15 +157,7 @@ export function emitTaskStatusNotification(
 function buildTaskStatusNotificationParams(
   task: TaskState
 ): TaskStatusNotificationParams {
-  return {
-    taskId: task.taskId,
-    status: task.status,
-    ...(task.statusMessage ? { statusMessage: task.statusMessage } : {}),
-    createdAt: task.createdAt,
-    lastUpdatedAt: task.lastUpdatedAt,
-    ttl: task.ttl,
-    pollInterval: task.pollInterval,
-  };
+  return projectTaskLifecycleFields(task);
 }
 
 /* -------------------------------------------------------------------------------------------------
@@ -215,12 +215,14 @@ function updateTaskAndEmitStatus(
 }
 
 function buildTaskFailureState(error: unknown): {
+  status: 'failed';
   statusMessage: string;
   error: { code: number; message: string; data?: unknown };
 } {
   const statusMessage = getErrorMessage(error);
   if (error instanceof McpError) {
     return {
+      status: 'failed',
       statusMessage,
       error: {
         code: error.code,
@@ -231,6 +233,7 @@ function buildTaskFailureState(error: unknown): {
   }
 
   return {
+    status: 'failed',
     statusMessage,
     error: {
       code: ErrorCode.InternalError,
@@ -307,13 +310,7 @@ async function runTaskToolExecution(params: {
           buildTaskCompletionUpdate(result, tool)
         );
       } catch (error: unknown) {
-        const failure = buildTaskFailureState(error);
-
-        updateTaskAndEmitStatus(server, taskId, {
-          status: 'failed',
-          statusMessage: failure.statusMessage,
-          error: failure.error,
-        });
+        updateTaskAndEmitStatus(server, taskId, buildTaskFailureState(error));
       } finally {
         clearTaskExecution(taskId);
       }

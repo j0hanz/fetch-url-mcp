@@ -1144,6 +1144,54 @@ interface ContentSource {
   readonly truncated: boolean;
 }
 
+function prepareContentSourceDocument(
+  document: Document,
+  url: string,
+  signal?: AbortSignal
+): { document: Document; primaryHeading: string | undefined } {
+  const initialPrimaryHeading =
+    TransformHeuristics.findPrimaryHeading(document);
+
+  prepareDocumentForMarkdown(document, url, signal);
+
+  return {
+    document,
+    primaryHeading:
+      TransformHeuristics.findPrimaryHeading(document) ?? initialPrimaryHeading,
+  };
+}
+
+function createPreparedArticleDocument(
+  articleContent: string,
+  url: string,
+  signal?: AbortSignal
+): Document {
+  const { document } = parseHTML(
+    `<!DOCTYPE html><html><body>${articleContent}</body></html>`
+  );
+  // Runs on Readability output — tab/noise ops are no-ops here,
+  // but table normalization and URL resolution still apply.
+  prepareDocumentForMarkdown(document, url, signal);
+  return document;
+}
+
+function resolveContentTitle(params: {
+  primaryHeading: string | undefined;
+  title: string | undefined;
+  preferPrimaryHeading: boolean;
+}): Pick<ContentSource, 'title' | 'suppressSyntheticFavicon'> {
+  const resolvedTitle =
+    (params.preferPrimaryHeading ? params.primaryHeading : undefined) ??
+    params.title;
+
+  return {
+    title: resolvedTitle,
+    suppressSyntheticFavicon:
+      normalizeSyntheticTitleToken(resolvedTitle) ===
+      normalizeSyntheticTitleToken(params.primaryHeading),
+  };
+}
+
 const CONTENT_ROOT_SELECTORS = [
   'article',
   'main',
@@ -1332,18 +1380,10 @@ function buildContentSource(params: {
     useArticleContent,
     includeMetadata
   );
-
-  const preparedDocument = document;
-  let primaryHeading = document
-    ? TransformHeuristics.findPrimaryHeading(document)
+  const preparedDocument = document
+    ? prepareContentSourceDocument(document, url, signal)
     : undefined;
-  if (preparedDocument) {
-    // Post-extraction cleanup on the original document (non-article path)
-    prepareDocumentForMarkdown(preparedDocument, url, signal);
-    primaryHeading =
-      TransformHeuristics.findPrimaryHeading(preparedDocument) ??
-      primaryHeading;
-  }
+  const primaryHeading = preparedDocument?.primaryHeading;
 
   const base: Pick<
     ContentSource,
@@ -1363,52 +1403,48 @@ function buildContentSource(params: {
   };
 
   if (useArticleContent && article) {
-    const { document: articleDoc } = parseHTML(
-      `<!DOCTYPE html><html><body>${article.content}</body></html>`
+    const articleDoc = createPreparedArticleDocument(
+      article.content,
+      url,
+      signal
     );
-    // Runs on Readability output — tab/noise ops are no-ops here,
-    // but table normalization and URL resolution still apply.
-    prepareDocumentForMarkdown(articleDoc, url, signal);
     const articleTitle =
       article.title !== undefined
         ? normalizeDocumentTitle(article.title, url)
         : extractedMeta.title;
-    const preferPrimaryHeading =
-      TransformHeuristics.isGithubRepositoryRootUrl(url) ||
-      shouldPreferPrimaryHeadingTitle(base.primaryHeading, articleTitle);
-    const resolvedTitle =
-      (preferPrimaryHeading ? base.primaryHeading : undefined) ?? articleTitle;
+    const title = resolveContentTitle({
+      primaryHeading: base.primaryHeading,
+      title: articleTitle,
+      preferPrimaryHeading:
+        TransformHeuristics.isGithubRepositoryRootUrl(url) ||
+        shouldPreferPrimaryHeadingTitle(base.primaryHeading, articleTitle),
+    });
 
     return {
       ...base,
       sourceHtml: articleDoc.body.innerHTML,
-      title: resolvedTitle,
-      suppressSyntheticFavicon:
-        normalizeSyntheticTitleToken(resolvedTitle) ===
-        normalizeSyntheticTitleToken(base.primaryHeading),
+      ...title,
       skipNoiseRemoval: true,
     };
   }
 
-  if (document) {
-    const resolvedDocument = preparedDocument ?? document;
+  if (preparedDocument) {
+    const resolvedDocument = preparedDocument.document;
     const contentRoot = TransformHeuristics.findContentRoot(resolvedDocument);
-    const preferPrimaryHeading = shouldPreferPrimaryHeadingTitle(
-      base.primaryHeading,
-      extractedMeta.title
-    );
-    const resolvedTitle =
-      (preferPrimaryHeading ? base.primaryHeading : undefined) ??
-      extractedMeta.title;
+    const title = resolveContentTitle({
+      primaryHeading: base.primaryHeading,
+      title: extractedMeta.title,
+      preferPrimaryHeading: shouldPreferPrimaryHeadingTitle(
+        base.primaryHeading,
+        extractedMeta.title
+      ),
+    });
 
     return {
       ...base,
       sourceHtml:
         contentRoot ?? serializeDocumentForMarkdown(resolvedDocument, html),
-      title: resolvedTitle,
-      suppressSyntheticFavicon:
-        normalizeSyntheticTitleToken(resolvedTitle) ===
-        normalizeSyntheticTitleToken(base.primaryHeading),
+      ...title,
       skipNoiseRemoval: true,
       document: resolvedDocument,
     };
@@ -1490,6 +1526,46 @@ function buildMarkdownFromContext(
   };
 }
 
+function resolveTransformContentResult(
+  html: string,
+  url: string,
+  options: TransformOptions,
+  signal?: AbortSignal
+): MarkdownTransformResult {
+  const rawResult = stageTracker.run(url, 'transform:raw', () =>
+    tryTransformRawContent({
+      html,
+      url,
+      includeMetadata: options.includeMetadata,
+      ...(options.inputTruncated ? { inputTruncated: true } : {}),
+    })
+  );
+  if (rawResult) return rawResult;
+
+  const context = stageTracker.run(url, 'transform:extract', () =>
+    resolveContentSource({
+      html,
+      url,
+      includeMetadata: options.includeMetadata,
+      ...(signal ? { signal } : {}),
+      ...(options.inputTruncated ? { inputTruncated: true } : {}),
+    })
+  );
+
+  return buildMarkdownFromContext(context, url, signal);
+}
+
+function completeTrackedTransform<T extends { truncated?: boolean }>(
+  totalStage: TransformStageContext | null,
+  result: T
+): T {
+  stageTracker.end(
+    totalStage,
+    result.truncated !== undefined ? { truncated: result.truncated } : undefined
+  );
+  return result;
+}
+
 const REPLACEMENT_CHAR = '\ufffd';
 const BINARY_INDICATOR_THRESHOLD = 0.1;
 
@@ -1524,31 +1600,10 @@ export function transformHtmlToMarkdownInProcess(
     throwIfAborted(signal, url, 'transform:begin');
 
     validateBinaryContent(html, url);
-
-    const result =
-      stageTracker.run(url, 'transform:raw', () =>
-        tryTransformRawContent({
-          html,
-          url,
-          includeMetadata: options.includeMetadata,
-          ...(options.inputTruncated ? { inputTruncated: true } : {}),
-        })
-      ) ??
-      ((): MarkdownTransformResult => {
-        const context = stageTracker.run(url, 'transform:extract', () =>
-          resolveContentSource({
-            html,
-            url,
-            includeMetadata: options.includeMetadata,
-            ...(signal ? { signal } : {}),
-            ...(options.inputTruncated ? { inputTruncated: true } : {}),
-          })
-        );
-        return buildMarkdownFromContext(context, url, signal);
-      })();
-
-    stageTracker.end(totalStage, { truncated: result.truncated });
-    return result;
+    return completeTrackedTransform(
+      totalStage,
+      resolveTransformContentResult(html, url, options, signal)
+    );
   } catch (error) {
     stageTracker.end(totalStage);
     throw error;
@@ -1681,13 +1736,10 @@ async function transformInputToMarkdown(
 
   try {
     throwIfAborted(options.signal, url, 'transform:begin');
-    const result = await runWorkerTransformWithFallback(
-      htmlOrBuffer,
-      url,
-      options
+    return completeTrackedTransform(
+      totalStage,
+      await runWorkerTransformWithFallback(htmlOrBuffer, url, options)
     );
-    stageTracker.end(totalStage, { truncated: result.truncated });
-    return result;
   } catch (error) {
     stageTracker.end(totalStage);
     throw error;

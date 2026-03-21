@@ -183,7 +183,7 @@ function sendHealth(
 // Health route helpers
 // ---------------------------------------------------------------------------
 
-function isVerboseHealthRequest(ctx: RequestContext): boolean {
+export function isVerboseHealthRequest(ctx: RequestContext): boolean {
   const value = ctx.url.searchParams.get('verbose');
   if (!value) return false;
   const normalized = value.trim().toLowerCase();

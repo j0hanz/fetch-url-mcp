@@ -34,6 +34,12 @@ export interface InlineContentResult {
   contentSize: number;
   truncated?: boolean;
 }
+interface FetchTransformInput {
+  buffer: Uint8Array;
+  encoding: string;
+  truncated?: boolean;
+}
+
 function getOpenCodeFence(
   content: string
 ): { fenceChar: string; fenceLength: number } | null {
@@ -126,6 +132,33 @@ export function appendTruncationMarker(
 
   return `${contentWithFence}${marker}`;
 }
+
+function normalizeMarkdownForTruncation(
+  markdown: string,
+  truncated: boolean
+): string {
+  return truncated
+    ? appendTruncationMarker(markdown, TRUNCATION_MARKER)
+    : markdown;
+}
+
+export function finalizeInlineMarkdown(
+  markdown: string | undefined,
+  options: { truncated?: boolean; maxChars?: number } = {}
+): string | undefined {
+  if (markdown === undefined) return undefined;
+
+  const normalized = normalizeMarkdownForTruncation(
+    markdown,
+    options.truncated ?? false
+  );
+  const maxChars = options.maxChars ?? 0;
+
+  return maxChars > 0 && normalized.length > maxChars
+    ? normalized.slice(0, maxChars)
+    : normalized;
+}
+
 function applyInlineContentLimit(content: string): InlineContentResult {
   const contentSize = content.length;
   const inlineLimit = config.constants.maxInlineContentChars;
@@ -148,10 +181,7 @@ interface FetchPipelineOptions<T> {
   cacheVary?: Record<string, unknown> | string;
   forceRefresh?: boolean;
   onStage?: (stage: SharedFetchStage) => void;
-  transform: (
-    input: { buffer: Uint8Array; encoding: string; truncated?: boolean },
-    url: string
-  ) => T | Promise<T>;
+  transform: (input: FetchTransformInput, url: string) => T | Promise<T>;
   serialize?: (result: T) => string;
   deserialize?: (cached: string) => T | undefined;
 }
@@ -179,6 +209,7 @@ interface UrlResolution {
   originalUrl: string;
   transformed: boolean;
 }
+
 function resolveNormalizedUrl(url: string): UrlResolution {
   const { normalizedUrl: validatedUrl } = normalizeUrl(url);
   const transformedResult = transformToRawUrl(validatedUrl);
@@ -252,6 +283,28 @@ function attemptCacheRetrieval<T>(
     cacheKey,
   };
 }
+
+function restoreCachedPipelineResult<T>(
+  options: FetchPipelineOptions<T>,
+  resolvedUrl: UrlResolution,
+  cacheKey: string | null
+): PipelineResult<T> | null {
+  if (options.forceRefresh) return null;
+
+  options.onStage?.('check_cache');
+  const cachedResult = attemptCacheRetrieval(
+    cacheKey,
+    options.deserialize,
+    options.cacheNamespace,
+    resolvedUrl.normalizedUrl
+  );
+  if (!cachedResult) return null;
+
+  options.onStage?.('cache_hit');
+  options.onStage?.('cache_restore');
+  return { ...cachedResult, originalUrl: resolvedUrl.originalUrl };
+}
+
 function persistCacheEntry<T>(
   cacheKey: string,
   data: T,
@@ -302,6 +355,41 @@ function persistAllCacheTargets<T>(
 
   persistCacheEntry(finalCacheKey, data, serialize, finalUrl, cacheNamespace);
 }
+
+function createTransformInput(
+  buffer: Uint8Array,
+  encoding: string,
+  truncated?: boolean
+): FetchTransformInput {
+  return {
+    buffer,
+    encoding,
+    ...(truncated ? { truncated: true } : {}),
+  };
+}
+
+async function fetchRemotePipelineData<T>(
+  options: FetchPipelineOptions<T>,
+  normalizedUrl: string
+): Promise<{ data: T; finalUrl?: string }> {
+  options.onStage?.('fetch_remote');
+  logDebug('Fetching URL', { url: normalizedUrl });
+
+  const { buffer, encoding, truncated, finalUrl } =
+    await fetchNormalizedUrlBuffer(normalizedUrl, withSignal(options.signal));
+
+  options.onStage?.('response_ready');
+  options.onStage?.('transform_start');
+
+  const resolvedFinalUrl = finalUrl || normalizedUrl;
+  const data = await options.transform(
+    createTransformInput(buffer, encoding, truncated),
+    resolvedFinalUrl
+  );
+
+  return { data, finalUrl };
+}
+
 export async function executeFetchPipeline<T>(
   options: FetchPipelineOptions<T>
 ): Promise<PipelineResult<T>> {
@@ -319,36 +407,16 @@ export async function executeFetchPipeline<T>(
     options.cacheVary
   );
 
-  if (!options.forceRefresh) {
-    options.onStage?.('check_cache');
-    const cachedResult = attemptCacheRetrieval(
-      cacheKey,
-      options.deserialize,
-      options.cacheNamespace,
-      resolvedUrl.normalizedUrl
-    );
-    if (cachedResult) {
-      options.onStage?.('cache_hit');
-      options.onStage?.('cache_restore');
-      return { ...cachedResult, originalUrl: resolvedUrl.originalUrl };
-    }
-  }
+  const cachedResult = restoreCachedPipelineResult(
+    options,
+    resolvedUrl,
+    cacheKey
+  );
+  if (cachedResult) return cachedResult;
 
-  options.onStage?.('fetch_remote');
-  logDebug('Fetching URL', { url: resolvedUrl.normalizedUrl });
-
-  const { buffer, encoding, truncated, finalUrl } =
-    await fetchNormalizedUrlBuffer(
-      resolvedUrl.normalizedUrl,
-      withSignal(options.signal)
-    );
-  options.onStage?.('response_ready');
-  const resolvedFinalUrl = finalUrl || resolvedUrl.normalizedUrl;
-  const transformUrl = resolvedFinalUrl;
-  options.onStage?.('transform_start');
-  const data = await options.transform(
-    { buffer, encoding, ...(truncated ? { truncated: true } : {}) },
-    transformUrl
+  const { data, finalUrl } = await fetchRemotePipelineData(
+    options,
+    resolvedUrl.normalizedUrl
   );
 
   if (isEnabled()) {
@@ -368,7 +436,7 @@ export async function executeFetchPipeline<T>(
     fromCache: false,
     url: resolvedUrl.normalizedUrl,
     originalUrl: resolvedUrl.originalUrl,
-    finalUrl,
+    ...(finalUrl ? { finalUrl } : {}),
     fetchedAt: new Date().toISOString(),
     cacheKey,
   };
@@ -377,6 +445,27 @@ export async function executeFetchPipeline<T>(
 export type MarkdownPipelineResult = MarkdownTransformResult & {
   readonly content: string;
 };
+
+function createMarkdownPipelineResult(params: {
+  markdown: string;
+  title: string | undefined;
+  metadata: ReturnType<typeof normalizeExtractedMetadata>;
+  truncated: boolean;
+}): MarkdownPipelineResult {
+  const markdown = normalizeMarkdownForTruncation(
+    params.markdown,
+    params.truncated
+  );
+
+  return {
+    content: markdown,
+    markdown,
+    title: params.title,
+    ...(params.metadata ? { metadata: params.metadata } : {}),
+    truncated: params.truncated,
+  };
+}
+
 export function parseCachedMarkdownResult(
   cached: string
 ): MarkdownPipelineResult | undefined {
@@ -387,22 +476,16 @@ export function parseCachedMarkdownResult(
   if (typeof markdown !== 'string') return undefined;
 
   const metadata = normalizeExtractedMetadata(payload.metadata);
-
-  const truncated = payload.truncated ?? false;
-  const persistedMarkdown = truncated
-    ? appendTruncationMarker(markdown, TRUNCATION_MARKER)
-    : markdown;
-
-  return {
-    content: persistedMarkdown,
-    markdown: persistedMarkdown,
+  return createMarkdownPipelineResult({
+    markdown,
     title: payload.title,
-    ...(metadata ? { metadata } : {}),
-    truncated,
-  };
+    metadata,
+    truncated: payload.truncated ?? false,
+  });
 }
+
 export const markdownTransform = async (
-  input: { buffer: Uint8Array; encoding: string; truncated?: boolean },
+  input: FetchTransformInput,
   url: string,
   signal?: AbortSignal
 ): Promise<MarkdownPipelineResult> => {
@@ -412,18 +495,20 @@ export const markdownTransform = async (
     ...withSignal(signal),
     ...(input.truncated ? { inputTruncated: true } : {}),
   });
-  const truncated = Boolean(result.truncated || input.truncated);
-  return { ...result, content: result.markdown, truncated };
+
+  return createMarkdownPipelineResult({
+    markdown: result.markdown,
+    title: result.title,
+    metadata: result.metadata,
+    truncated: Boolean(result.truncated || input.truncated),
+  });
 };
+
 export function serializeMarkdownResult(
   result: MarkdownPipelineResult
 ): string {
-  const persistedMarkdown = result.truncated
-    ? appendTruncationMarker(result.markdown, TRUNCATION_MARKER)
-    : result.markdown;
-
   const payload: CachedPayload = {
-    markdown: persistedMarkdown,
+    markdown: normalizeMarkdownForTruncation(result.markdown, result.truncated),
     title: result.title,
     metadata: result.metadata,
     truncated: result.truncated,
@@ -439,7 +524,7 @@ interface SharedFetchOptions {
   readonly forceRefresh?: boolean;
   readonly onStage?: (stage: SharedFetchStage) => void;
   readonly transform: (
-    input: { buffer: Uint8Array; encoding: string; truncated?: boolean },
+    input: FetchTransformInput,
     normalizedUrl: string
   ) => MarkdownPipelineResult | Promise<MarkdownPipelineResult>;
   readonly serialize?: (result: MarkdownPipelineResult) => string;

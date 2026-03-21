@@ -110,6 +110,87 @@ function createResultMessage(
   };
 }
 
+function createValidationErrorMessage(
+  id: string,
+  url: string,
+  message: string
+): TransformWorkerOutgoingMessage {
+  return {
+    type: 'error',
+    id,
+    error: {
+      name: 'ValidationError',
+      message,
+      url,
+    },
+  };
+}
+
+function handleCancelMessage(params: {
+  id: string;
+  controllersById: Map<string, AbortController>;
+  sendMessage: (message: TransformWorkerOutgoingMessage) => void;
+}): void {
+  const controller = params.controllersById.get(params.id);
+  if (controller) controller.abort(new Error('Canceled'));
+
+  params.sendMessage({ type: 'cancelled', id: params.id });
+}
+
+function executeTransformMessage(params: {
+  message: TransformWorkerTransformMessage;
+  controllersById: Map<string, AbortController>;
+  decoder: TextDecoder;
+  runTransform: WorkerMessageHandlerOptions['runTransform'];
+  sendMessage: WorkerMessageHandlerOptions['sendMessage'];
+}): void {
+  const { message, controllersById, decoder, runTransform, sendMessage } =
+    params;
+  const {
+    id,
+    url,
+    html,
+    htmlBuffer,
+    encoding,
+    includeMetadata,
+    inputTruncated,
+  } = message;
+
+  if (!id.trim()) {
+    sendMessage(
+      createValidationErrorMessage(
+        id,
+        url || '',
+        'Missing transform message id'
+      )
+    );
+    return;
+  }
+
+  if (!url.trim()) {
+    sendMessage(createValidationErrorMessage(id, url, 'Missing transform URL'));
+    return;
+  }
+
+  const controller = new AbortController();
+  controllersById.set(id, controller);
+
+  try {
+    const content = decodeHtml(html, htmlBuffer, encoding, decoder);
+    const result = runTransform(content, url, {
+      includeMetadata,
+      signal: controller.signal,
+      ...(inputTruncated ? { inputTruncated: true } : {}),
+    });
+
+    sendMessage(createResultMessage(id, result));
+  } catch (error: unknown) {
+    sendMessage(createErrorMessage(id, url, error));
+  } finally {
+    controllersById.delete(id);
+  }
+}
+
 export function createTransformMessageHandler(
   options: WorkerMessageHandlerOptions
 ): (raw: unknown) => void {
@@ -126,68 +207,17 @@ export function createTransformMessageHandler(
 
     if (messageType === 'cancel') {
       if (typeof messageId !== 'string') return;
-
-      const controller = controllersById.get(messageId);
-      if (controller) controller.abort(new Error('Canceled'));
-
-      sendMessage({ type: 'cancelled', id: messageId });
+      handleCancelMessage({ id: messageId, controllersById, sendMessage });
       return;
     }
 
     if (messageType !== 'transform' || !isTransformMessage(message)) return;
-
-    const {
-      id,
-      url,
-      html,
-      htmlBuffer,
-      encoding,
-      includeMetadata,
-      inputTruncated,
-    } = message;
-
-    if (!id.trim()) {
-      sendMessage({
-        type: 'error',
-        id,
-        error: {
-          name: 'ValidationError',
-          message: 'Missing transform message id',
-          url: url || '',
-        },
-      });
-      return;
-    }
-
-    if (!url.trim()) {
-      sendMessage({
-        type: 'error',
-        id,
-        error: {
-          name: 'ValidationError',
-          message: 'Missing transform URL',
-          url,
-        },
-      });
-      return;
-    }
-
-    const controller = new AbortController();
-    controllersById.set(id, controller);
-
-    try {
-      const content = decodeHtml(html, htmlBuffer, encoding, decoder);
-      const result = runTransform(content, url, {
-        includeMetadata,
-        signal: controller.signal,
-        ...(inputTruncated ? { inputTruncated: true } : {}),
-      });
-
-      sendMessage(createResultMessage(id, result));
-    } catch (error: unknown) {
-      sendMessage(createErrorMessage(id, url, error));
-    } finally {
-      controllersById.delete(id);
-    }
+    executeTransformMessage({
+      message,
+      controllersById,
+      decoder,
+      runTransform,
+      sendMessage,
+    });
   };
 }

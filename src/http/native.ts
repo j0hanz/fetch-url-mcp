@@ -67,6 +67,7 @@ import {
 } from './auth.js';
 import {
   disableEventLoopMonitoring,
+  isVerboseHealthRequest,
   resetEventLoopMonitoring,
   sendHealthRouteResponse,
   shouldHandleHealthRoute,
@@ -194,29 +195,17 @@ class McpSessionGateway {
           requestId
         )
       : undefined;
-    if (sessionId && !session) return;
-
-    if (!session && isInitNotification) {
-      sendError(ctx.res, -32600, 'Missing session ID', 400, requestId);
+    if (
+      !this.ensurePostSessionAccess({
+        ctx,
+        sessionId,
+        session,
+        requestId,
+        method,
+        isInitNotification,
+      })
+    )
       return;
-    }
-
-    if (session) {
-      if (!this.ensureSessionProtocolVersion(ctx, session)) return;
-
-      if (!session.protocolInitialized) {
-        const isPing = method !== null && isPingRequest(method);
-
-        if (!isInitNotification && !isPing) {
-          sendError(ctx.res, -32600, 'Session not initialized', 400, requestId);
-          return;
-        }
-      }
-    } else {
-      if (!ensureMcpProtocolVersion(ctx.req, ctx.res)) {
-        return;
-      }
-    }
 
     if (session && isInitNotification) {
       this.markSessionInitialized(sessionId, session);
@@ -237,17 +226,9 @@ class McpSessionGateway {
   }
 
   async handleGet(ctx: AuthenticatedContext): Promise<void> {
-    const sessionId = this.getRequiredSessionId(ctx.req, ctx.res);
-    if (!sessionId) return;
-
-    const session = this.getAuthenticatedSessionById(
-      sessionId,
-      ctx.auth,
-      ctx.res
-    );
-    if (!session) return;
-
-    if (!this.ensureSessionProtocolVersion(ctx, session)) return;
+    const sessionState = this.getRequiredAuthenticatedSession(ctx);
+    if (!sessionState) return;
+    const { sessionId, session } = sessionState;
 
     const acceptHeader = getHeaderValue(ctx.req, 'accept');
     if (!acceptsEventStream(acceptHeader)) {
@@ -262,22 +243,45 @@ class McpSessionGateway {
   }
 
   async handleDelete(ctx: AuthenticatedContext): Promise<void> {
-    const sessionId = this.getRequiredSessionId(ctx.req, ctx.res);
-    if (!sessionId) return;
-
-    const session = this.getAuthenticatedSessionById(
-      sessionId,
-      ctx.auth,
-      ctx.res
-    );
-    if (!session) return;
-
-    if (!this.ensureSessionProtocolVersion(ctx, session)) return;
+    const sessionState = this.getRequiredAuthenticatedSession(ctx);
+    if (!sessionState) return;
+    const { sessionId, session } = sessionState;
 
     await session.transport.close();
     this.cleanupSessionRecord(sessionId, 'session-delete');
 
     sendJson(ctx.res, 200, { status: 'closed' });
+  }
+
+  private ensurePostSessionAccess(params: {
+    ctx: AuthenticatedContext;
+    sessionId: string | null;
+    session: SessionRecord | undefined | null;
+    requestId: JsonRpcId;
+    method: string | null;
+    isInitNotification: boolean;
+  }): boolean {
+    const { ctx, sessionId, session, requestId, method, isInitNotification } =
+      params;
+
+    if (sessionId && !session) return false;
+
+    if (!session) {
+      if (isInitNotification) {
+        sendError(ctx.res, -32600, 'Missing session ID', 400, requestId);
+        return false;
+      }
+
+      return ensureMcpProtocolVersion(ctx.req, ctx.res);
+    }
+
+    if (!this.ensureSessionProtocolVersion(ctx, session)) return false;
+    if (session.protocolInitialized) return true;
+    if (isInitNotification) return true;
+    if (method !== null && isPingRequest(method)) return true;
+
+    sendError(ctx.res, -32600, 'Session not initialized', 400, requestId);
+    return false;
   }
 
   private async getOrCreateTransport(
@@ -347,6 +351,25 @@ class McpSessionGateway {
 
     this.store.touch(sessionId);
     return session.transport;
+  }
+
+  private getRequiredAuthenticatedSession(
+    ctx: AuthenticatedContext,
+    requestId: JsonRpcId = null
+  ): { sessionId: string; session: SessionRecord } | null {
+    const sessionId = this.getRequiredSessionId(ctx.req, ctx.res, requestId);
+    if (!sessionId) return null;
+
+    const session = this.getAuthenticatedSessionById(
+      sessionId,
+      ctx.auth,
+      ctx.res,
+      requestId
+    );
+    if (!session) return null;
+    if (!this.ensureSessionProtocolVersion(ctx, session)) return null;
+
+    return { sessionId, session };
   }
 
   private getRequiredSessionId(
@@ -655,21 +678,6 @@ class HttpDispatcher {
   }
 }
 
-// ---------------------------------------------------------------------------
-// Verbose health helper (local to dispatcher)
-// ---------------------------------------------------------------------------
-
-function isVerboseHealthRequest(ctx: RequestContext): boolean {
-  const value = ctx.url.searchParams.get('verbose');
-  if (!value) return false;
-  const normalized = value.trim().toLowerCase();
-  return normalized === '1' || normalized === 'true';
-}
-
-// ---------------------------------------------------------------------------
-// Request pipeline
-// ---------------------------------------------------------------------------
-
 class HttpRequestPipeline {
   constructor(
     private readonly rateLimiter: RateLimitManagerImpl,
@@ -689,71 +697,12 @@ class HttpRequestPipeline {
           ...(sessionId ? { sessionId } : {}),
         },
         async () => {
-          const duplicateHeader = findDuplicateSingleValueHeader(rawReq);
-          if (duplicateHeader) {
-            sendJson(rawRes, 400, {
-              error: `Duplicate ${duplicateHeader} header is not allowed`,
-            });
-            drainRequest(rawReq);
-            return;
-          }
+          if (this.rejectDuplicateHeaders(rawReq, rawRes)) return;
 
-          const ctx = buildRequestContext(rawReq, rawRes, signal);
-          if (!ctx) {
-            drainRequest(rawReq);
-            return;
-          }
-
-          if (!hostOriginPolicy.validate(ctx)) {
-            drainRequest(rawReq);
-            return;
-          }
-          if (corsPolicy.handle(ctx)) {
-            drainRequest(rawReq);
-            return;
-          }
-
-          if (!this.rateLimiter.check(ctx)) {
-            drainRequest(rawReq);
-            return;
-          }
-
-          if (ctx.method === 'POST') {
-            try {
-              ctx.body = await jsonBodyReader.read(
-                ctx.req,
-                DEFAULT_BODY_LIMIT_BYTES,
-                ctx.signal
-              );
-            } catch {
-              if (ctx.url.pathname === '/mcp') {
-                sendError(ctx.res, -32700, 'Parse error', 400, null);
-              } else {
-                sendJson(ctx.res, 400, {
-                  error: 'Invalid JSON or Payload too large',
-                });
-              }
-              drainRequest(rawReq);
-              return;
-            }
-          } else {
-            const contentLengthHeader = getHeaderValue(
-              rawReq,
-              'content-length'
-            );
-            const transferEncodingHeader = getHeaderValue(
-              rawReq,
-              'transfer-encoding'
-            );
-            const hasRequestBody =
-              (contentLengthHeader !== null &&
-                Number.parseInt(contentLengthHeader, 10) > 0) ||
-              transferEncodingHeader !== null;
-            if (hasRequestBody) {
-              drainRequest(rawReq);
-            }
-            ctx.body = undefined;
-          }
+          const ctx = this.buildContext(rawReq, rawRes, signal);
+          if (!ctx) return;
+          if (!this.applyRequestGuards(ctx, rawReq)) return;
+          if (!(await this.populateRequestBody(ctx, rawReq))) return;
 
           await this.dispatcher.dispatch(ctx);
         }
@@ -761,6 +710,97 @@ class HttpRequestPipeline {
     } finally {
       cleanup();
     }
+  }
+
+  private rejectDuplicateHeaders(
+    rawReq: IncomingMessage,
+    rawRes: ServerResponse
+  ): boolean {
+    const duplicateHeader = findDuplicateSingleValueHeader(rawReq);
+    if (!duplicateHeader) return false;
+
+    sendJson(rawRes, 400, {
+      error: `Duplicate ${duplicateHeader} header is not allowed`,
+    });
+    drainRequest(rawReq);
+    return true;
+  }
+
+  private buildContext(
+    rawReq: IncomingMessage,
+    rawRes: ServerResponse,
+    signal: AbortSignal
+  ): RequestContext | null {
+    const ctx = buildRequestContext(rawReq, rawRes, signal);
+    if (ctx) return ctx;
+
+    drainRequest(rawReq);
+    return null;
+  }
+
+  private applyRequestGuards(
+    ctx: RequestContext,
+    rawReq: IncomingMessage
+  ): boolean {
+    if (!hostOriginPolicy.validate(ctx)) {
+      drainRequest(rawReq);
+      return false;
+    }
+    if (corsPolicy.handle(ctx)) {
+      drainRequest(rawReq);
+      return false;
+    }
+    if (!this.rateLimiter.check(ctx)) {
+      drainRequest(rawReq);
+      return false;
+    }
+    return true;
+  }
+
+  private async populateRequestBody(
+    ctx: RequestContext,
+    rawReq: IncomingMessage
+  ): Promise<boolean> {
+    if (ctx.method !== 'POST') {
+      this.clearUnexpectedRequestBody(ctx, rawReq);
+      return true;
+    }
+
+    try {
+      ctx.body = await jsonBodyReader.read(
+        ctx.req,
+        DEFAULT_BODY_LIMIT_BYTES,
+        ctx.signal
+      );
+      return true;
+    } catch {
+      if (ctx.url.pathname === '/mcp') {
+        sendError(ctx.res, -32700, 'Parse error', 400, null);
+      } else {
+        sendJson(ctx.res, 400, {
+          error: 'Invalid JSON or Payload too large',
+        });
+      }
+      drainRequest(rawReq);
+      return false;
+    }
+  }
+
+  private clearUnexpectedRequestBody(
+    ctx: RequestContext,
+    rawReq: IncomingMessage
+  ): void {
+    const contentLengthHeader = getHeaderValue(rawReq, 'content-length');
+    const transferEncodingHeader = getHeaderValue(rawReq, 'transfer-encoding');
+    const hasRequestBody =
+      (contentLengthHeader !== null &&
+        Number.parseInt(contentLengthHeader, 10) > 0) ||
+      transferEncodingHeader !== null;
+
+    if (hasRequestBody) {
+      drainRequest(rawReq);
+    }
+    ctx.body = undefined;
   }
 }
 

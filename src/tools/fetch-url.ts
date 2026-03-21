@@ -8,7 +8,7 @@ import { z } from 'zod';
 
 import { config, logDebug, logError, logWarn } from '../lib/core.js';
 import {
-  appendTruncationMarker,
+  finalizeInlineMarkdown,
   type InlineContentResult,
   type MarkdownPipelineResult,
   markdownTransform,
@@ -16,7 +16,6 @@ import {
   performSharedFetch,
   type PipelineResult,
   serializeMarkdownResult,
-  TRUNCATION_MARKER,
   withSignal,
 } from '../lib/fetch-pipeline.js';
 import { handleToolError } from '../lib/mcp-tools.js';
@@ -112,15 +111,10 @@ function buildStructuredContent(
   inputUrl: string
 ): Record<string, unknown> {
   const truncated = inlineResult.truncated ?? pipeline.data.truncated;
-
-  let markdown = inlineResult.content;
-  if (pipeline.data.truncated && typeof markdown === 'string') {
-    markdown = appendTruncationMarker(markdown, TRUNCATION_MARKER);
-  }
-  const maxChars = config.constants.maxInlineContentChars;
-  if (maxChars > 0 && markdown !== undefined && markdown.length > maxChars) {
-    markdown = markdown.slice(0, maxChars);
-  }
+  const markdown = finalizeInlineMarkdown(inlineResult.content, {
+    truncated: pipeline.data.truncated,
+    maxChars: config.constants.maxInlineContentChars,
+  });
 
   const metadata = normalizeExtractedMetadata(pipeline.data.metadata);
   const title = normalizePageTitle(pipeline.data.title);
@@ -140,6 +134,31 @@ function buildStructuredContent(
   };
 }
 
+function validateStructuredContent(
+  structuredContent: Record<string, unknown>,
+  inputUrl: string
+): void {
+  const validation = fetchUrlOutputSchema.safeParse(structuredContent);
+  if (validation.success) return;
+
+  const issues = formatZodError(validation.error);
+  logWarn('Tool output schema validation failed', {
+    url: inputUrl,
+    issues,
+  });
+  throw new McpError(
+    ErrorCode.InternalError,
+    'fetch-url produced output that does not match its declared outputSchema',
+    { issues }
+  );
+}
+
+function buildContentBlocks(
+  structuredContent: Record<string, unknown>
+): ContentBlock[] {
+  return [{ type: 'text', text: JSON.stringify(structuredContent) }];
+}
+
 function buildResponse(
   pipeline: PipelineResult<MarkdownPipelineResult>,
   inlineResult: InlineContentResult,
@@ -150,25 +169,11 @@ function buildResponse(
     inlineResult,
     inputUrl
   );
-  const content: ContentBlock[] = [
-    { type: 'text', text: JSON.stringify(structuredContent) },
-  ];
-
-  const validation = fetchUrlOutputSchema.safeParse(structuredContent);
-  if (!validation.success) {
-    const issues = formatZodError(validation.error);
-    logWarn('Tool output schema validation failed', {
-      url: inputUrl,
-      issues,
-    });
-    throw new McpError(
-      ErrorCode.InternalError,
-      'fetch-url produced output that does not match its declared outputSchema',
-      { issues }
-    );
-  }
-
-  return { content, structuredContent };
+  validateStructuredContent(structuredContent, inputUrl);
+  return {
+    content: buildContentBlocks(structuredContent),
+    structuredContent,
+  };
 }
 
 /* -------------------------------------------------------------------------------------------------
@@ -215,9 +220,10 @@ async function executeFetch(
 ): Promise<ToolResponseBase> {
   const { url } = input;
   const signal = buildToolAbortSignal(extra?.signal);
-  const progress = createProgressReporter(extra);
-  const context = getUrlContext(url);
-  const progressPlan = new FetchUrlProgressPlan(progress, context);
+  const progressPlan = new FetchUrlProgressPlan(
+    createProgressReporter(extra),
+    getUrlContext(url)
+  );
 
   logDebug('Fetching URL', { url });
 
