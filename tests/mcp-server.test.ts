@@ -4,6 +4,7 @@ import { describe, it } from 'node:test';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 
 import { setTaskToolCallCapability } from '../dist/lib/sdk-interop.js';
+import { registerTaskHandlers } from '../dist/lib/task-handlers.js';
 import { createMcpServer } from '../dist/server.js';
 import { registerTools as registerFetchUrlTool } from '../dist/tools/fetch-url.js';
 
@@ -212,6 +213,7 @@ describe('MCP Server', () => {
       );
 
       const toolControls = registerFetchUrlTool(server);
+      registerTaskHandlers(server);
       toolControls.setTaskSupport('forbidden');
       setTaskToolCallCapability(server, false);
 
@@ -230,6 +232,26 @@ describe('MCP Server', () => {
       const fetchTool = result.tools?.find((tool) => tool.name === 'fetch-url');
       assert.ok(fetchTool);
       assert.equal(fetchTool.execution?.taskSupport, 'forbidden');
+
+      const callTool = requestHandlers.get('tools/call') as (
+        request: unknown
+      ) => Promise<unknown>;
+
+      await assert.rejects(
+        () =>
+          callTool({
+            method: 'tools/call',
+            params: {
+              name: 'fetch-url',
+              arguments: { url: 'https://example.com' },
+              task: { ttl: 10_000 },
+            },
+          }),
+        (error: unknown) =>
+          error instanceof Error &&
+          (error as Error & { code?: number }).code === -32601 &&
+          /Task augmentation is forbidden/.test(error.message)
+      );
 
       await server.close();
     });

@@ -27,4 +27,12 @@ describe('Server instructions content', () => {
       'Instructions should not mention maxInlineChars'
     );
   });
+
+  it('does not claim forceRefresh removes truncation limits', () => {
+    const instructions = buildServerInstructions();
+    assert.ok(
+      !instructions.includes('retry with `forceRefresh: true`'),
+      'Instructions should not promise forceRefresh as a truncation escape hatch'
+    );
+  });
 });

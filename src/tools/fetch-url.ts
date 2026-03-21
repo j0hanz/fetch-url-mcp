@@ -35,7 +35,9 @@ import {
 import { withRequestContextIfMissing } from '../tasks/owner.js';
 import {
   registerTaskCapableTool,
+  setTaskCapableToolSupport,
   type TaskCapableToolDescriptor,
+  type TaskCapableToolSupport,
   unregisterTaskCapableTool,
 } from '../tasks/tool-registry.js';
 import {
@@ -60,7 +62,7 @@ const FETCH_URL_TOOL_DESCRIPTION = `
 <constraints>
 - READ-ONLY. No JavaScript execution.
 - GitHub/GitLab/Bitbucket URLs auto-transform to raw endpoints (check resolvedUrl).
-- If truncated=true, full content is available in the next fetch with forceRefresh.
+- forceRefresh only bypasses cache; it does not bypass fetch or inline truncation limits.
 - For large pages/timeouts, use task mode (task: {}).
 - If error queue_full, retry with task mode.
 </constraints>
@@ -273,10 +275,8 @@ const TOOL_DEFINITION = {
   } satisfies ToolAnnotations,
 };
 
-type TaskSupport = 'optional' | 'forbidden';
-
 export interface ToolRegistrationControls {
-  setTaskSupport: (support: TaskSupport) => void;
+  setTaskSupport: (support: TaskCapableToolSupport) => void;
 }
 
 function createTaskCapableDescriptor(): TaskCapableToolDescriptor<FetchUrlInput> {
@@ -294,12 +294,13 @@ function createTaskCapableDescriptor(): TaskCapableToolDescriptor<FetchUrlInput>
     },
     execute: fetchUrlToolHandler,
     getCompletionStatusMessage: getFetchCompletionStatusMessage,
+    taskSupport: 'optional',
   };
 }
 
 function setRegisteredToolTaskSupport(
   registeredTool: Record<string, unknown>,
-  support: TaskSupport
+  support: TaskCapableToolSupport
 ): void {
   registeredTool.execution = { taskSupport: support };
 }
@@ -334,11 +335,7 @@ export function registerTools(server: McpServer): ToolRegistrationControls {
 
   return {
     setTaskSupport: (support) => {
-      if (support === 'optional') {
-        registerTaskCapableTool(descriptor);
-      } else {
-        unregisterTaskCapableTool(FETCH_URL_TOOL_NAME);
-      }
+      setTaskCapableToolSupport(FETCH_URL_TOOL_NAME, support);
       setRegisteredToolTaskSupport(registeredToolRecord, support);
     },
   };

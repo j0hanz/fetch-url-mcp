@@ -260,6 +260,51 @@ describe('TaskManager.updateTask terminal behavior', () => {
 });
 
 describe('TaskManager owner capacity accounting', () => {
+  it('releases owner and global capacity immediately for completed and failed tasks', () => {
+    const originalMaxPerOwner = config.tasks.maxPerOwner;
+    const originalMaxTotal = config.tasks.maxTotal;
+    const firstOwnerKey = `owner-capacity-release-a-${Date.now()}`;
+    const secondOwnerKey = `owner-capacity-release-b-${Date.now()}`;
+    const baselineActiveTaskCount = (
+      taskManager as unknown as { activeTaskCount?: number }
+    ).activeTaskCount;
+
+    config.tasks.maxPerOwner = 1;
+    config.tasks.maxTotal = (baselineActiveTaskCount ?? 0) + 1;
+
+    try {
+      const first = taskManager.createTask(undefined, 'Task 1', firstOwnerKey);
+      taskManager.updateTask(first.taskId, {
+        status: 'completed',
+        result: { ok: true },
+      });
+
+      const second = taskManager.createTask(
+        undefined,
+        'Task 2',
+        secondOwnerKey
+      );
+      assert.equal(
+        taskManager.getTask(second.taskId, secondOwnerKey)?.status,
+        'working'
+      );
+
+      taskManager.updateTask(second.taskId, {
+        status: 'failed',
+        error: { code: -32000, message: 'boom' },
+      });
+
+      const third = taskManager.createTask(undefined, 'Task 3', firstOwnerKey);
+      assert.equal(
+        taskManager.getTask(third.taskId, firstOwnerKey)?.status,
+        'working'
+      );
+    } finally {
+      config.tasks.maxPerOwner = originalMaxPerOwner;
+      config.tasks.maxTotal = originalMaxTotal;
+    }
+  });
+
   it('does not undercount after cancelled tasks expire', async () => {
     const originalMaxPerOwner = config.tasks.maxPerOwner;
     const originalMaxTotal = config.tasks.maxTotal;

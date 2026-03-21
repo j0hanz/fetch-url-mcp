@@ -28,6 +28,7 @@ import {
 } from './owner.js';
 import {
   getTaskCapableTool,
+  getTaskCapableToolSupport,
   hasTaskCapableTool,
   type TaskCapableToolDescriptor,
 } from './tool-registry.js';
@@ -179,6 +180,15 @@ function resolveTaskCapableTool(name: string): TaskCapableToolDescriptor {
 function assertKnownTool(name: string): void {
   if (!hasTaskCapableTool(name)) {
     throw new McpError(ErrorCode.MethodNotFound, `Unknown tool: '${name}'`);
+  }
+}
+
+function assertTaskAugmentationAllowed(name: string): void {
+  if (getTaskCapableToolSupport(name) === 'forbidden') {
+    throw new McpError(
+      ErrorCode.MethodNotFound,
+      `Task augmentation is forbidden for tool '${name}'`
+    );
   }
 }
 
@@ -366,6 +376,7 @@ export async function handleToolCallRequest(
   assertKnownTool(params.name);
 
   if (params.task) {
+    assertTaskAugmentationAllowed(params.name);
     return handleTaskToolCall(server, params, context);
   }
 

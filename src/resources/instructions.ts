@@ -19,7 +19,7 @@ export function buildServerInstructions(): string {
 </capabilities>
 
 <workflows>
-1. Standard: Call \`${FETCH_URL_TOOL_NAME}\` -> Read \`markdown\`. If \`truncated: true\`, retry with \`forceRefresh: true\`.
+1. Standard: Call \`${FETCH_URL_TOOL_NAME}\` -> Read \`markdown\`. If \`truncated: true\`, content hit server-enforced size limits; \`forceRefresh\` only refreshes cached content.
 2. Fresh: Set \`forceRefresh: true\` to bypass cache.
 3. Async: Add \`task: { ttl: <ms> }\` to \`tools/call\` -> Poll \`tasks/get\` -> Call \`tasks/result\`.
 </workflows>

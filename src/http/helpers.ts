@@ -337,9 +337,12 @@ export function createTransportAdapter(
 // JSON body reading
 // ---------------------------------------------------------------------------
 
-type JsonBodyErrorKind = 'payload-too-large' | 'invalid-json' | 'read-failed';
+export type JsonBodyErrorKind =
+  | 'payload-too-large'
+  | 'invalid-json'
+  | 'read-failed';
 
-class JsonBodyError extends Error {
+export class JsonBodyError extends Error {
   readonly kind: JsonBodyErrorKind;
 
   constructor(kind: JsonBodyErrorKind, message: string) {
@@ -347,6 +350,10 @@ class JsonBodyError extends Error {
     this.name = 'JsonBodyError';
     this.kind = kind;
   }
+}
+
+export function isJsonBodyError(error: unknown): error is JsonBodyError {
+  return error instanceof JsonBodyError;
 }
 
 export const DEFAULT_BODY_LIMIT_BYTES = 1024 * 1024;
@@ -368,7 +375,6 @@ class JsonBodyReader {
     if (contentLengthHeader) {
       const contentLength = Number.parseInt(contentLengthHeader, 10);
       if (Number.isFinite(contentLength) && contentLength > limit) {
-        destroyRequestBestEffort(req);
         throw new JsonBodyError('payload-too-large', 'Payload too large');
       }
     }
@@ -456,7 +462,6 @@ class JsonBodyReader {
           size += buf.length;
 
           if (size > limit) {
-            destroyRequestBestEffort(req);
             callback(
               new JsonBodyError('payload-too-large', 'Payload too large')
             );
