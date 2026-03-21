@@ -8,12 +8,12 @@
     "source": "github"
   },
   "websiteUrl": "https://github.com/j0hanz/fetch-url-mcp#readme",
-  "version": "1.10.3",
+  "version": "1.10.4",
   "packages": [
     {
       "registryType": "npm",
       "identifier": "@j0hanz/fetch-url-mcp",
-      "version": "1.10.3",
+      "version": "1.10.4",
       "transport": {
         "type": "stdio"
       },
