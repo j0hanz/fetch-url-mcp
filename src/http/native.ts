@@ -58,6 +58,7 @@ import {
   buildAuthFingerprint,
   buildProtectedResourceMetadataDocument,
   corsPolicy,
+  DEFAULT_MCP_PROTOCOL_VERSION,
   ensureMcpProtocolVersion,
   hostOriginPolicy,
   isInsufficientScopeError,
@@ -106,7 +107,6 @@ import {
 // MCP session gateway
 // ---------------------------------------------------------------------------
 
-const DEFAULT_MCP_PROTOCOL_VERSION = '2025-11-25';
 type SessionRecord = NonNullable<ReturnType<SessionStore['get']>>;
 
 function resolveRequestedProtocolVersion(body: unknown): string | null {

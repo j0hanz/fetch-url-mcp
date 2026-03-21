@@ -252,7 +252,7 @@ export function assertHttpModeConfiguration(): void {
 // MCP protocol version
 // ---------------------------------------------------------------------------
 
-const DEFAULT_MCP_PROTOCOL_VERSION = '2025-11-25';
+export const DEFAULT_MCP_PROTOCOL_VERSION = '2025-11-25';
 export const SUPPORTED_MCP_PROTOCOL_VERSIONS = new Set<string>([
   DEFAULT_MCP_PROTOCOL_VERSION,
 ]);
