@@ -47,15 +47,16 @@ const normalizedMetadataSchema = z.object({
   modifiedAt: normalizedMetadataField(METADATA_LIMITS.modifiedAt),
 });
 
-const extractedMetadataSchema = z.strictObject({
-  title: metadataTextField(METADATA_LIMITS.title).optional(),
-  description: metadataTextField(METADATA_LIMITS.description).optional(),
-  author: metadataTextField(METADATA_LIMITS.author).optional(),
-  image: metadataTextField(METADATA_LIMITS.image).optional(),
-  favicon: metadataTextField(METADATA_LIMITS.favicon).optional(),
-  publishedAt: metadataTextField(METADATA_LIMITS.publishedAt).optional(),
-  modifiedAt: metadataTextField(METADATA_LIMITS.modifiedAt).optional(),
-});
+export const extractedMetadataSchema: z.ZodType<ExtractedMetadata> =
+  z.strictObject({
+    title: metadataTextField(METADATA_LIMITS.title).optional(),
+    description: metadataTextField(METADATA_LIMITS.description).optional(),
+    author: metadataTextField(METADATA_LIMITS.author).optional(),
+    image: metadataTextField(METADATA_LIMITS.image).optional(),
+    favicon: metadataTextField(METADATA_LIMITS.favicon).optional(),
+    publishedAt: metadataTextField(METADATA_LIMITS.publishedAt).optional(),
+    modifiedAt: metadataTextField(METADATA_LIMITS.modifiedAt).optional(),
+  });
 
 function compactDefined<T extends Record<string, string | undefined>>(
   value: T
@@ -95,30 +96,58 @@ function normalizeBoolean(value: unknown): boolean | undefined {
   return typeof value === 'boolean' ? value : undefined;
 }
 
-export const cachedPayloadSchema = z
-  .object({
-    markdown: z
-      .unknown()
-      .transform((value) => normalizeString(value))
-      .optional(),
-    title: z
-      .unknown()
-      .transform((value) => normalizePageTitle(value))
-      .optional(),
-    metadata: z
-      .unknown()
-      .transform((value) => normalizeExtractedMetadata(value))
-      .optional(),
-    truncated: z
-      .unknown()
-      .transform((value) => normalizeBoolean(value))
-      .optional(),
-  })
-  .refine((value) => typeof value.markdown === 'string', {
-    error: 'Missing markdown',
+export interface CachedPayload {
+  markdown: string;
+  title?: string | undefined;
+  metadata?: ExtractedMetadata | undefined;
+  truncated?: boolean | undefined;
+}
+
+export const cachedPayloadValueSchema: z.ZodType<CachedPayload> =
+  z.strictObject({
+    markdown: z.string(),
+    title: pageTitleSchema.optional(),
+    metadata: extractedMetadataSchema.optional(),
+    truncated: z.boolean().optional(),
   });
 
-export type CachedPayload = z.infer<typeof cachedPayloadSchema>;
+const cachedPayloadCompatSchema = z.object({
+  markdown: z.unknown().transform((value) => normalizeString(value)),
+  title: z
+    .unknown()
+    .transform((value) => normalizePageTitle(value))
+    .optional(),
+  metadata: z
+    .unknown()
+    .transform((value) => normalizeExtractedMetadata(value))
+    .optional(),
+  truncated: z
+    .unknown()
+    .transform((value) => normalizeBoolean(value))
+    .optional(),
+});
+
+export const cachedPayloadSchema = cachedPayloadCompatSchema
+  .superRefine((value, ctx) => {
+    if (typeof value.markdown === 'string') return;
+
+    ctx.addIssue({
+      code: 'custom',
+      message: 'Missing markdown',
+      path: ['markdown'],
+    });
+  })
+  .transform(
+    (value): CachedPayload =>
+      cachedPayloadValueSchema.parse({
+        markdown: value.markdown,
+        ...(value.title !== undefined ? { title: value.title } : {}),
+        ...(value.metadata ? { metadata: value.metadata } : {}),
+        ...(value.truncated !== undefined
+          ? { truncated: value.truncated }
+          : {}),
+      })
+  );
 
 export const fetchUrlInputSchema = z.strictObject({
   url: z
@@ -191,8 +220,14 @@ export function parseCachedPayload(raw: string): CachedPayload | null {
   }
 }
 
+export function stringifyCachedPayload(
+  payload: z.input<typeof cachedPayloadValueSchema>
+): string {
+  return JSON.stringify(cachedPayloadValueSchema.parse(payload));
+}
+
 export function resolveCachedPayloadContent(
-  payload: CachedPayload
+  payload: Partial<CachedPayload> & { markdown?: string | null }
 ): string | null {
-  return payload.markdown ?? null;
+  return typeof payload.markdown === 'string' ? payload.markdown : null;
 }

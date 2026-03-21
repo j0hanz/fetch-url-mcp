@@ -1,7 +1,13 @@
+import { z } from 'zod';
+
 import {
   type CachedPayload,
+  cachedPayloadValueSchema,
+  extractedMetadataSchema,
   normalizeExtractedMetadata,
+  normalizePageTitle,
   parseCachedPayload,
+  stringifyCachedPayload,
 } from '../schemas.js';
 import { transformBufferToMarkdown } from '../transform/transform.js';
 import { type MarkdownTransformResult } from '../transform/types.js';
@@ -458,6 +464,14 @@ export type MarkdownPipelineResult = MarkdownTransformResult & {
   readonly content: string;
 };
 
+const markdownPipelineResultSchema = z.strictObject({
+  markdown: z.string(),
+  content: z.string(),
+  title: z.union([z.string(), z.undefined()]),
+  metadata: extractedMetadataSchema.optional(),
+  truncated: z.boolean(),
+});
+
 function createMarkdownPipelineResult(params: {
   markdown: string;
   title: string | undefined;
@@ -478,22 +492,41 @@ function createMarkdownPipelineResult(params: {
   };
 }
 
+const markdownPipelineCacheCodec = z.codec(
+  cachedPayloadValueSchema,
+  markdownPipelineResultSchema,
+  {
+    decode: (payload) =>
+      createMarkdownPipelineResult({
+        markdown: payload.markdown,
+        title: payload.title,
+        metadata: payload.metadata,
+        truncated: payload.truncated ?? false,
+      }),
+    encode: (result): CachedPayload => {
+      const title = normalizePageTitle(result.title);
+      const metadata = normalizeExtractedMetadata(result.metadata);
+
+      return {
+        markdown: normalizeMarkdownForTruncation(
+          result.markdown,
+          result.truncated
+        ),
+        ...(title !== undefined ? { title } : {}),
+        ...(metadata ? { metadata } : {}),
+        truncated: result.truncated,
+      };
+    },
+  }
+);
+
 export function parseCachedMarkdownResult(
   cached: string
 ): MarkdownPipelineResult | undefined {
   const payload = parseCachedPayload(cached);
   if (!payload) return undefined;
 
-  const { markdown } = payload;
-  if (typeof markdown !== 'string') return undefined;
-
-  const metadata = normalizeExtractedMetadata(payload.metadata);
-  return createMarkdownPipelineResult({
-    markdown,
-    title: payload.title,
-    metadata,
-    truncated: payload.truncated ?? false,
-  });
+  return z.decode(markdownPipelineCacheCodec, payload);
 }
 
 export const markdownTransform = async (
@@ -519,14 +552,7 @@ export const markdownTransform = async (
 export function serializeMarkdownResult(
   result: MarkdownPipelineResult
 ): string {
-  const payload: CachedPayload = {
-    markdown: normalizeMarkdownForTruncation(result.markdown, result.truncated),
-    title: result.title,
-    metadata: result.metadata,
-    truncated: result.truncated,
-  };
-
-  return JSON.stringify(payload);
+  return stringifyCachedPayload(z.encode(markdownPipelineCacheCodec, result));
 }
 
 interface SharedFetchOptions {

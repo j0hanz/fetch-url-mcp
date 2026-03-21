@@ -8,11 +8,9 @@ import { FetchError, isAbortError, isSystemError } from './utils.js';
  * ------------------------------------------------------------------------------------------------- */
 
 export type JsonRpcId = string | number | null;
-interface McpRequestParams {
-  _meta?: Record<string, unknown>;
-  [key: string]: unknown;
-}
-const paramsSchema = z.looseObject({}) as z.ZodType<McpRequestParams>;
+const paramsSchema = z.looseObject({
+  _meta: z.record(z.string(), z.unknown()).optional(),
+});
 const jsonRpcRequestIdSchema = z.union([z.string(), z.number()]);
 const jsonRpcRequestSchema = z.strictObject({
   jsonrpc: z.literal('2.0'),

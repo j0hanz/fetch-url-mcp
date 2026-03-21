@@ -3,7 +3,10 @@ import { describe, it } from 'node:test';
 
 import * as cache from '../src/lib/core.js';
 import { config } from '../src/lib/core.js';
-import { serializeMarkdownResult } from '../src/lib/fetch-pipeline.js';
+import {
+  parseCachedMarkdownResult,
+  serializeMarkdownResult,
+} from '../src/lib/fetch-pipeline.js';
 import { handleDownload } from '../src/lib/http.js';
 import { handleToolError } from '../src/lib/mcp-tools.js';
 import { FetchError } from '../src/lib/utils.js';
@@ -97,6 +100,33 @@ describe('zod + error-handling source regressions', () => {
     assert.equal(getStatus(), 200);
     assert.equal(getJson(), undefined);
     assert.equal(getBody(), '# Title\n\nBody...[truncated]');
+  });
+
+  it('round-trips markdown pipeline results through the cache codec', () => {
+    const serialized = serializeMarkdownResult({
+      markdown: '# Title\n\nBody',
+      content: '# Title\n\nBody',
+      title: '  Example Article  ',
+      metadata: {
+        description: '  Useful description  ',
+        image: 'https://example.com/image.png',
+      },
+      truncated: false,
+    });
+
+    const parsed = parseCachedMarkdownResult(serialized);
+
+    assert.ok(parsed);
+    assert.deepEqual(parsed, {
+      markdown: '# Title\n\nBody',
+      content: '# Title\n\nBody',
+      title: 'Example Article',
+      metadata: {
+        description: 'Useful description',
+        image: 'https://example.com/image.png',
+      },
+      truncated: false,
+    });
   });
 
   it('preserves semantic validation codes for handled tool errors', () => {

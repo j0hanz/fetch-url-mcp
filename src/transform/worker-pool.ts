@@ -20,8 +20,9 @@ import {
   FetchError,
   getErrorMessage,
 } from '../lib/utils.js';
+import { formatZodError } from '../lib/zod.js';
 
-import { normalizeExtractedMetadata } from '../schemas.js';
+import { extractedMetadataSchema } from '../schemas.js';
 import { createTransformMessageHandler } from './shared.js';
 import { transformHtmlToMarkdownInProcess } from './transform.js';
 import type {
@@ -32,13 +33,10 @@ import type {
 
 // Worker message validation
 
-const workerResultPayloadSchema = z.object({
+const workerResultPayloadSchema = z.strictObject({
   markdown: z.string(),
   title: z.string().optional(),
-  metadata: z
-    .unknown()
-    .transform((value) => normalizeExtractedMetadata(value))
-    .optional(),
+  metadata: extractedMetadataSchema.optional(),
   truncated: z.boolean(),
 });
 
@@ -46,11 +44,11 @@ const workerErrorPayloadSchema = z.strictObject({
   name: z.string(),
   message: z.string(),
   url: z.string(),
-  statusCode: z.number().optional(),
+  statusCode: z.number().int().optional(),
   details: z.record(z.string(), z.unknown()).optional(),
 });
 
-const workerResponseSchema = z.union([
+const workerResponseSchema = z.discriminatedUnion('type', [
   z.strictObject({
     type: z.literal('result'),
     id: z.string(),
@@ -66,15 +64,6 @@ const workerResponseSchema = z.union([
     id: z.string(),
   }),
 ]);
-
-function parseWorkerResponse(
-  raw: unknown
-): TransformWorkerOutgoingMessage | undefined {
-  const parsed = workerResponseSchema.safeParse(raw);
-  return parsed.success
-    ? (parsed.data as TransformWorkerOutgoingMessage)
-    : undefined;
-}
 
 // Task context (preserves async context across worker callbacks)
 
@@ -650,8 +639,16 @@ class WorkerPool implements TransformWorkerPool {
   }
 
   private onWorkerMessage(workerIndex: number, raw: unknown): void {
-    const message = parseWorkerResponse(raw);
-    if (!message) return;
+    const parsed = workerResponseSchema.safeParse(raw);
+    if (!parsed.success) {
+      this.onWorkerBroken(
+        workerIndex,
+        `Transform worker sent invalid message: ${formatZodError(parsed.error)}`
+      );
+      return;
+    }
+
+    const message: TransformWorkerOutgoingMessage = parsed.data;
 
     if (message.type === 'cancelled') {
       this.cancelAcks.resolve(message.id);

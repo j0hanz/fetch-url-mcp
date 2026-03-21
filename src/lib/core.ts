@@ -11,6 +11,7 @@ import {
 } from 'node:util';
 
 import { type McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { z } from 'zod';
 
 import {
   buildIpv4,
@@ -85,6 +86,10 @@ function loadEnvFileIfAvailable(): void {
 
 loadEnvFileIfAvailable();
 const { env } = process;
+const ENV_BOOLEAN_SCHEMA = z.stringbool({
+  truthy: ['true', '1', 'yes', 'on'],
+  falsy: ['false', '0', 'no', 'off'],
+});
 const EnvParser = {
   integerValue(
     envValue: string | undefined,
@@ -132,9 +137,27 @@ const EnvParser = {
   ): number {
     return EnvParser.integerValue(envValue, min, max, envName) ?? defaultValue;
   },
-  boolean(envValue: string | undefined, defaultValue: boolean): boolean {
+  boolean(
+    envValue: string | undefined,
+    defaultValue: boolean,
+    envName?: string
+  ): boolean {
     if (!envValue) return defaultValue;
-    return envValue.trim().toLowerCase() !== 'false';
+
+    const trimmed = envValue.trim();
+    if (!trimmed) return defaultValue;
+
+    const parsed = ENV_BOOLEAN_SCHEMA.safeParse(trimmed);
+    if (!parsed.success) {
+      if (envName) {
+        process.stderr.write(
+          `Warning: ignoring invalid ${envName} value "${envValue}" (expected true/false, 1/0, yes/no, or on/off)\n`
+        );
+      }
+      return defaultValue;
+    }
+
+    return parsed.data;
   },
   list(
     envValue: string | undefined,
@@ -447,7 +470,11 @@ const port =
     ? 0
     : EnvParser.integer(env['PORT'], 3000, 1024, 65535, 'PORT');
 const httpsConfig = buildHttpsConfig();
-const allowRemote = EnvParser.boolean(env['ALLOW_REMOTE'], false);
+const allowRemote = EnvParser.boolean(
+  env['ALLOW_REMOTE'],
+  false,
+  'ALLOW_REMOTE'
+);
 const baseUrl = new URL(
   `${httpsConfig.enabled ? 'https' : 'http'}://${EnvParser.formatHostForUrl(host)}:${port}`
 );
@@ -532,7 +559,8 @@ function buildServerConfig(): AppServerConfig {
       ),
       blockPrivateConnections: EnvParser.boolean(
         env['SERVER_BLOCK_PRIVATE_CONNECTIONS'],
-        false
+        false,
+        'SERVER_BLOCK_PRIVATE_CONNECTIONS'
       ),
       shutdownCloseIdleConnections: true,
       shutdownCloseAllConnections: false,
@@ -597,11 +625,13 @@ function buildTasksConfig(): AppTasksConfig {
     maxPerOwner: RESOLVED_TASKS_MAX_PER_OWNER,
     emitStatusNotifications: EnvParser.boolean(
       env['TASKS_STATUS_NOTIFICATIONS'],
-      false
+      false,
+      'TASKS_STATUS_NOTIFICATIONS'
     ),
     requireInterception: EnvParser.boolean(
       env['TASKS_REQUIRE_INTERCEPTION'],
-      true
+      true,
+      'TASKS_REQUIRE_INTERCEPTION'
     ),
   };
 }
@@ -615,7 +645,7 @@ interface AppCacheConfig {
 
 function buildCacheConfig(): AppCacheConfig {
   return {
-    enabled: EnvParser.boolean(env['CACHE_ENABLED'], true),
+    enabled: EnvParser.boolean(env['CACHE_ENABLED'], true, 'CACHE_ENABLED'),
     ttl: 86400,
     maxKeys: 100,
     maxSizeBytes: 50 * 1024 * 1024,
@@ -717,7 +747,11 @@ export const config = {
     allowedHosts: EnvParser.allowedHosts(env['ALLOWED_HOSTS']),
     apiKey: env['API_KEY'],
     allowRemote,
-    allowLocalFetch: EnvParser.boolean(env['ALLOW_LOCAL_FETCH'], false),
+    allowLocalFetch: EnvParser.boolean(
+      env['ALLOW_LOCAL_FETCH'],
+      false,
+      'ALLOW_LOCAL_FETCH'
+    ),
   },
   auth: buildAuthConfig(baseUrl),
   rateLimit: {

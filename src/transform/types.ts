@@ -31,13 +31,13 @@ export interface ExtractedArticle {
  * Metadata extracted from HTML meta tags.
  */
 export interface ExtractedMetadata {
-  title?: string;
-  description?: string;
-  author?: string;
-  image?: string;
-  favicon?: string;
-  publishedAt?: string;
-  modifiedAt?: string;
+  title?: string | undefined;
+  description?: string | undefined;
+  author?: string | undefined;
+  image?: string | undefined;
+  favicon?: string | undefined;
+  publishedAt?: string | undefined;
+  modifiedAt?: string | undefined;
 }
 
 /**
@@ -52,7 +52,7 @@ interface MarkdownPayload {
   markdown: string;
   title?: string | undefined;
   truncated: boolean;
-  metadata?: ExtractedMetadata;
+  metadata?: ExtractedMetadata | undefined;
 }
 
 /**
@@ -128,8 +128,8 @@ export interface TransformWorkerErrorMessage {
     name: string;
     message: string;
     url: string;
-    statusCode?: number;
-    details?: Record<string, unknown>;
+    statusCode?: number | undefined;
+    details?: Record<string, unknown> | undefined;
   };
 }
 
