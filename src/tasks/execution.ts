@@ -29,13 +29,9 @@ import {
 import {
   getTaskCapableTool,
   getTaskCapableToolSupport,
-  hasTaskCapableTool,
   type TaskCapableToolDescriptor,
 } from './tool-registry.js';
 
-// Server-defined error code for missing tasks. Uses -32002 (same range as
-// RESOURCE_NOT_FOUND_ERROR_CODE in resources/index.ts) to distinguish
-// "task not found" from parameter-validation errors (-32602).
 const TASK_NOT_FOUND_ERROR_CODE = -32002;
 
 /* -------------------------------------------------------------------------------------------------
@@ -44,18 +40,10 @@ const TASK_NOT_FOUND_ERROR_CODE = -32002;
 
 // Intentionally process-global (not session-scoped): abortAllTaskExecutions() is called
 // during SIGTERM/SIGINT shutdown to cancel every in-flight task across all sessions.
-// Keep this process-global so shutdown can cancel all in-flight tasks across sessions.
-// Per-session isolation would require a different cancellation fan-out strategy.
 const taskAbortControllers = new Map<string, AbortController>();
 
 function attachAbortController(taskId: string): AbortController {
-  const existing = taskAbortControllers.get(taskId);
-  if (existing) {
-    // Abort the previous controller before replacing it — avoids stranding
-    // a running fetch that can no longer be cancelled via abortTaskExecution().
-    existing.abort();
-    taskAbortControllers.delete(taskId);
-  }
+  taskAbortControllers.get(taskId)?.abort();
 
   if (taskAbortControllers.size >= config.tasks.maxTotal) {
     logWarn('Abort controller map reached task capacity — possible leak', {
@@ -70,13 +58,7 @@ function attachAbortController(taskId: string): AbortController {
 }
 
 export function abortTaskExecution(taskId: string): void {
-  const controller = taskAbortControllers.get(taskId);
-  if (!controller) return;
-  controller.abort();
-  taskAbortControllers.delete(taskId);
-}
-
-function clearTaskExecution(taskId: string): void {
+  taskAbortControllers.get(taskId)?.abort();
   taskAbortControllers.delete(taskId);
 }
 
@@ -85,12 +67,10 @@ export function cancelTasksForOwner(
   statusMessage = 'The task was cancelled because its owner session ended.'
 ): number {
   if (!ownerKey) return 0;
-
   const cancelled = taskManager.cancelTasksByOwner(ownerKey, statusMessage);
   for (const task of cancelled) {
     abortTaskExecution(task.taskId);
   }
-
   return cancelled.length;
 }
 
@@ -99,18 +79,8 @@ export function abortAllTaskExecutions(): void {
 }
 
 /* -------------------------------------------------------------------------------------------------
- * Task notification helpers
+ * Task notification and validation helpers
  * ------------------------------------------------------------------------------------------------- */
-
-interface TaskStatusNotificationParams extends Record<string, unknown> {
-  taskId: string;
-  status: TaskState['status'];
-  statusMessage?: string;
-  createdAt: string;
-  lastUpdatedAt: string;
-  ttl: number;
-  pollInterval: number;
-}
 
 type TaskSummary = CreateTaskResult['task'];
 type TaskLifecycleProjection = Pick<
@@ -124,9 +94,7 @@ type TaskLifecycleProjection = Pick<
   | 'pollInterval'
 >;
 
-function projectTaskLifecycleFields(
-  task: TaskLifecycleProjection
-): TaskSummary & TaskStatusNotificationParams {
+export function toTaskSummary(task: TaskLifecycleProjection): TaskSummary {
   return {
     taskId: task.taskId,
     status: task.status,
@@ -138,24 +106,16 @@ function projectTaskLifecycleFields(
   };
 }
 
-export function toTaskSummary(task: TaskLifecycleProjection): TaskSummary {
-  return projectTaskLifecycleFields(task);
-}
-
 export function emitTaskStatusNotification(
   server: McpServer,
   task: TaskState
 ): void {
-  if (!config.tasks.emitStatusNotifications) return;
-  if (!server.isConnected()) return;
+  if (!config.tasks.emitStatusNotifications || !server.isConnected()) return;
 
-  // NOTE: 'notifications/tasks/status' is a non-spec extension (not in MCP v2025-11-25).
-  // Gated by config.tasks.emitStatusNotifications (TASKS_STATUS_NOTIFICATIONS env var).
-  // Clients should NOT depend on this for interoperability — behavior may change.
   void server.server
     .notification({
       method: 'notifications/tasks/status',
-      params: buildTaskStatusNotificationParams(task),
+      params: toTaskSummary(task) as Record<string, unknown>,
     })
     .catch((error: unknown) => {
       logWarn('Failed to send task status notification', {
@@ -166,64 +126,13 @@ export function emitTaskStatusNotification(
     });
 }
 
-function buildTaskStatusNotificationParams(
-  task: TaskState
-): TaskStatusNotificationParams {
-  return projectTaskLifecycleFields(task);
-}
-
-/* -------------------------------------------------------------------------------------------------
- * Validation helpers
- * ------------------------------------------------------------------------------------------------- */
-
 export function throwTaskNotFound(): never {
   throw new McpError(TASK_NOT_FOUND_ERROR_CODE, 'Task not found');
-}
-
-function resolveTaskCapableTool(name: string): TaskCapableToolDescriptor {
-  const descriptor = getTaskCapableTool(name);
-  if (descriptor) return descriptor;
-  throw new McpError(ErrorCode.MethodNotFound, `Unknown tool: '${name}'`);
-}
-
-// Validates that the tool name is recognized before we attempt to execute it.
-// This ensures that an unknown tool produces a MethodNotFound error, rather than potentially executing and failing with an internal error if the tool handler does not properly validate its input.
-function assertKnownTool(name: string): void {
-  if (!hasTaskCapableTool(name)) {
-    throw new McpError(ErrorCode.MethodNotFound, `Unknown tool: '${name}'`);
-  }
-}
-
-function assertTaskAugmentationAllowed(name: string): void {
-  if (getTaskCapableToolSupport(name) === 'forbidden') {
-    throw new McpError(
-      ErrorCode.MethodNotFound,
-      `Task augmentation is forbidden for tool '${name}'`
-    );
-  }
-}
-
-function buildCreateTaskResult(
-  task: CreateTaskResult['task']
-): CreateTaskResult {
-  return { task };
 }
 
 /* -------------------------------------------------------------------------------------------------
  * Execution pipeline
  * ------------------------------------------------------------------------------------------------- */
-
-function updateWorkingTaskStatus(
-  server: McpServer,
-  taskId: string,
-  statusMessage: string
-): void {
-  const current = taskManager.getTask(taskId);
-  if (current?.status !== 'working') return;
-  if (current.statusMessage === statusMessage) return;
-
-  updateTaskAndEmitStatus(server, taskId, { statusMessage });
-}
 
 function updateTaskAndEmitStatus(
   server: McpServer,
@@ -245,43 +154,26 @@ function buildTaskFailureState(error: unknown): {
     return {
       status: 'failed',
       statusMessage,
-      error: {
-        code: error.code,
-        message: statusMessage,
-        data: error.data,
-      },
+      error: { code: error.code, message: statusMessage, data: error.data },
     };
   }
-
   return {
     status: 'failed',
     statusMessage,
-    error: {
-      code: ErrorCode.InternalError,
-      message: statusMessage,
-    },
+    error: { code: ErrorCode.InternalError, message: statusMessage },
   };
-}
-
-function resolveToolAndArgs(params: ExtendedCallToolRequest['params']): {
-  tool: TaskCapableToolDescriptor;
-  args: unknown;
-} {
-  const tool = resolveTaskCapableTool(params.name);
-  const args = tool.parseArguments(params.arguments);
-  return { tool, args };
 }
 
 function buildTaskCompletionUpdate(
   result: Awaited<ReturnType<TaskCapableToolDescriptor['execute']>>,
   tool: TaskCapableToolDescriptor
 ): Parameters<(typeof taskManager)['updateTask']>[1] {
-  const isToolError =
+  const isError =
     isObject(result) && 'isError' in result && result.isError === true;
 
   return {
-    status: isToolError ? 'failed' : 'completed',
-    statusMessage: isToolError
+    status: isError ? 'failed' : 'completed',
+    statusMessage: isError
       ? (tryReadToolStructuredError(result) ?? 'Tool execution failed')
       : (tool.getCompletionStatusMessage?.(result) ??
         'Task completed successfully.'),
@@ -321,7 +213,15 @@ async function runTaskToolExecution(params: {
             taskManager.getTask(taskId)?.status === 'working',
           ...compact({ sendNotification }),
           onProgress: (_progress, message) => {
-            updateWorkingTaskStatus(server, taskId, message);
+            const current = taskManager.getTask(taskId);
+            if (
+              current?.status === 'working' &&
+              current.statusMessage !== message
+            ) {
+              updateTaskAndEmitStatus(server, taskId, {
+                statusMessage: message,
+              });
+            }
           },
         });
 
@@ -333,46 +233,10 @@ async function runTaskToolExecution(params: {
       } catch (error: unknown) {
         updateTaskAndEmitStatus(server, taskId, buildTaskFailureState(error));
       } finally {
-        clearTaskExecution(taskId);
+        taskAbortControllers.delete(taskId);
       }
     }
   );
-}
-
-function handleTaskToolCall(
-  server: McpServer,
-  params: ExtendedCallToolRequest['params'],
-  context: ToolCallContext
-): CreateTaskResult {
-  const { tool, args } = resolveToolAndArgs(params);
-
-  const task = taskManager.createTask(
-    params.task?.ttl !== undefined ? { ttl: params.task.ttl } : undefined,
-    'Task started',
-    context.ownerKey
-  );
-
-  void runTaskToolExecution({
-    server,
-    taskId: task.taskId,
-    args,
-    tool,
-    ...compact({
-      meta: params._meta,
-      sessionId: context.sessionId,
-      sendNotification: context.sendNotification,
-    }),
-  });
-
-  return buildCreateTaskResult(toTaskSummary(task));
-}
-
-async function handleDirectToolCall(
-  params: ExtendedCallToolRequest['params'],
-  context: ToolCallContext
-): Promise<ServerResult> {
-  const { tool, args } = resolveToolAndArgs(params);
-  return tool.execute(args, buildToolHandlerExtra(context, params._meta));
 }
 
 export async function handleToolCallRequest(
@@ -382,14 +246,45 @@ export async function handleToolCallRequest(
 ): Promise<ServerResult> {
   const { params } = request;
 
-  // Validate the tool name first so an unknown tool always produces MethodNotFound,
-  // regardless of whether a task:{} param was supplied (H-4).
-  assertKnownTool(params.name);
-
-  if (params.task) {
-    assertTaskAugmentationAllowed(params.name);
-    return handleTaskToolCall(server, params, context);
+  // Validate the tool name first so an unknown tool always produces MethodNotFound
+  const tool = getTaskCapableTool(params.name);
+  if (!tool) {
+    throw new McpError(
+      ErrorCode.MethodNotFound,
+      `Unknown tool: '${params.name}'`
+    );
   }
 
-  return handleDirectToolCall(params, context);
+  if (params.task) {
+    if (getTaskCapableToolSupport(params.name) === 'forbidden') {
+      throw new McpError(
+        ErrorCode.MethodNotFound,
+        `Task augmentation is forbidden for tool '${params.name}'`
+      );
+    }
+
+    const args = tool.parseArguments(params.arguments);
+    const task = taskManager.createTask(
+      params.task.ttl !== undefined ? { ttl: params.task.ttl } : undefined,
+      'Task started',
+      context.ownerKey
+    );
+
+    void runTaskToolExecution({
+      server,
+      taskId: task.taskId,
+      args,
+      tool,
+      ...compact({
+        meta: params._meta,
+        sessionId: context.sessionId,
+        sendNotification: context.sendNotification,
+      }),
+    });
+
+    return { task: toTaskSummary(task) };
+  }
+
+  const args = tool.parseArguments(params.arguments);
+  return tool.execute(args, buildToolHandlerExtra(context, params._meta));
 }
