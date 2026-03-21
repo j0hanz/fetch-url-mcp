@@ -20,6 +20,7 @@ import {
   normalizeTabContent,
   prepareDocumentForMarkdown,
   removeNoiseFromHtml,
+  resolveDocumentBody,
   serializeDocumentForMarkdown,
 } from '../lib/dom-prep.js';
 import { isRawTextContentUrl } from '../lib/http.js';
@@ -1003,32 +1004,16 @@ function getTextContentSkippingHidden(node: Node, parts: string[]): void {
   }
 }
 
-function resolveBody(document: Document): Element {
-  const { body } = document;
-  if ((body.textContent || '').trim().length > 0) return body;
-  const { children } = document.documentElement;
-  for (const child of children) {
-    if (
-      child.tagName === 'BODY' &&
-      (child.textContent || '').trim().length > 0
-    ) {
-      return child;
-    }
-  }
-
-  return body;
-}
-
 function getVisibleTextLength(htmlOrDocument: string | Document): number {
   if (typeof htmlOrDocument === 'string') {
     const doc = resolveHtmlDocument(htmlOrDocument);
-    const body = resolveBody(doc);
+    const body = resolveDocumentBody(doc);
     for (const el of body.querySelectorAll('script,style,noscript')) {
       el.remove();
     }
     return (body.textContent || '').replace(/\s+/g, ' ').trim().length;
   }
-  const body = resolveBody(htmlOrDocument);
+  const body = resolveDocumentBody(htmlOrDocument);
   const parts: string[] = [];
   getTextContentSkippingHidden(body, parts);
   return parts.join('').replace(/\s+/g, ' ').trim().length;
@@ -1177,20 +1162,6 @@ function prepareContentSourceDocument(
   };
 }
 
-function createPreparedArticleDocument(
-  articleContent: string,
-  url: string,
-  signal?: AbortSignal
-): Document {
-  const { document } = parseHTML(
-    `<!DOCTYPE html><html><body>${articleContent}</body></html>`
-  );
-  // Runs on Readability output — tab/noise ops are no-ops here,
-  // but table normalization and URL resolution still apply.
-  prepareDocumentForMarkdown(document, url, signal);
-  return document;
-}
-
 function resolveContentTitle(params: {
   primaryHeading: string | undefined;
   title: string | undefined;
@@ -1324,15 +1295,15 @@ const TransformHeuristics = {
   isGithubRepositoryRootUrl,
 } as const;
 
-function shouldUseArticleContent(
+function evaluateArticleContent(
   article: ExtractedArticle,
   document: Document
-): boolean {
+): Document | null {
   // Content ratio gate
   const originalLength = getVisibleTextLength(document);
   if (originalLength >= MIN_HTML_LENGTH_FOR_GATE) {
     if (article.textContent.length / originalLength < MIN_CONTENT_RATIO)
-      return false;
+      return null;
   }
 
   const articleDoc = parseHTML(
@@ -1347,7 +1318,7 @@ function shouldUseArticleContent(
       return countMatchingElements(articleDoc, selector) / original >= ratio;
     }
   );
-  if (!passesRetention) return false;
+  if (!passesRetention) return null;
 
   // Empty section ratio
   const articleHeadings = countMatchingElements(
@@ -1359,11 +1330,11 @@ function shouldUseArticleContent(
       countEmptyHeadingSections(articleDoc) / articleHeadings >
       MAX_EMPTY_SECTION_RATIO
     ) {
-      return false;
+      return null;
     }
   }
 
-  return !hasTruncatedSentences(article.textContent);
+  return hasTruncatedSentences(article.textContent) ? null : articleDoc;
 }
 
 function buildContentSource(params: {
@@ -1372,7 +1343,7 @@ function buildContentSource(params: {
   article: ExtractedArticle | null;
   extractedMeta: ExtractedMetadata;
   includeMetadata: boolean;
-  useArticleContent: boolean;
+  evaluatedArticleDoc: Document | null;
   document?: Document;
   truncated: boolean;
   signal?: AbortSignal;
@@ -1383,12 +1354,13 @@ function buildContentSource(params: {
     article,
     extractedMeta,
     includeMetadata,
-    useArticleContent,
+    evaluatedArticleDoc,
     document,
     truncated,
     signal,
   } = params;
 
+  const useArticleContent = evaluatedArticleDoc !== null;
   const metadata = createContentMetadataBlock(
     url,
     article,
@@ -1418,12 +1390,8 @@ function buildContentSource(params: {
     originalHtml: html,
   };
 
-  if (useArticleContent && article) {
-    const articleDoc = createPreparedArticleDocument(
-      article.content,
-      url,
-      signal
-    );
+  if (evaluatedArticleDoc && article) {
+    prepareDocumentForMarkdown(evaluatedArticleDoc, url, signal);
     const articleTitle =
       article.title !== undefined
         ? normalizeDocumentTitle(article.title, url)
@@ -1438,7 +1406,7 @@ function buildContentSource(params: {
 
     return {
       ...base,
-      sourceHtml: articleDoc.body.innerHTML,
+      sourceHtml: evaluatedArticleDoc.body.innerHTML,
       ...title,
       skipNoiseRemoval: true,
     };
@@ -1491,9 +1459,9 @@ function resolveContentSource(params: {
     ...(params.inputTruncated ? { inputTruncated: true } : {}),
   });
 
-  const useArticleContent = article
-    ? shouldUseArticleContent(article, document)
-    : false;
+  const evaluatedArticleDoc = article
+    ? evaluateArticleContent(article, document)
+    : null;
 
   return buildContentSource({
     html: params.html,
@@ -1501,7 +1469,7 @@ function resolveContentSource(params: {
     article,
     extractedMeta,
     includeMetadata: params.includeMetadata,
-    useArticleContent,
+    evaluatedArticleDoc,
     document,
     truncated: truncated ?? false,
     ...(params.signal ? { signal: params.signal } : {}),

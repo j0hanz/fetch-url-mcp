@@ -864,3 +864,77 @@ describe('UTM promo link removal', () => {
     );
   });
 });
+
+describe('CSS utility class preservation', () => {
+  it('preserves content wrapper with isolate class', () => {
+    const html = `
+      <html>
+        <body>
+          <div class="isolate">
+            <h1>Page Title</h1>
+            <p>Main page content with enough text to be meaningful.</p>
+            <table>
+              <thead><tr><th>Class</th><th>Styles</th></tr></thead>
+              <tbody><tr><td>p-4</td><td>padding: 1rem;</td></tr></tbody>
+            </table>
+          </div>
+        </body>
+      </html>
+    `;
+
+    const result = removeNoiseFromHtml(html, undefined, 'https://example.com');
+
+    assert.ok(
+      result.includes('Page Title'),
+      'Content inside isolate wrapper should be preserved'
+    );
+    assert.ok(
+      result.includes('padding: 1rem'),
+      'Table content inside isolate wrapper should be preserved'
+    );
+  });
+
+  it('preserves content-heavy element with fixed class', () => {
+    const longContent = 'Important documentation content. '.repeat(20);
+    const html = `
+      <html>
+        <body>
+          <div class="fixed">
+            <p>${longContent}</p>
+          </div>
+        </body>
+      </html>
+    `;
+
+    const result = removeNoiseFromHtml(html, undefined, 'https://example.com');
+
+    assert.ok(
+      result.includes('Important documentation'),
+      'Content-heavy fixed element should be preserved'
+    );
+  });
+
+  it('removes small fixed element (UI chrome)', () => {
+    const html = `
+      <html>
+        <body>
+          <div class="fixed">
+            <button>Menu</button>
+          </div>
+          <main><p>Main content</p></main>
+        </body>
+      </html>
+    `;
+
+    const result = removeNoiseFromHtml(html, undefined, 'https://example.com');
+
+    assert.ok(
+      !result.includes('Menu'),
+      'Small fixed element should be removed as noise'
+    );
+    assert.ok(
+      result.includes('Main content'),
+      'Main content should be preserved'
+    );
+  });
+});

@@ -24,11 +24,11 @@ const NOISE_PATTERNS: readonly RegExp[] = [
   /[\s"']role\s*=\s*['"]?(?:navigation|banner|complementary|contentinfo|tree|menubar|menu)['"]?/i,
   /[\s"'](?:aria-hidden\s*=\s*['"]?true['"]?|hidden)/i,
   /[\s"'](?:banner|promo|announcement|cta|advert|newsletter|subscribe|cookie|consent|popup|modal|overlay|toast)\b/i,
-  /[\s"'](?:fixed|sticky|z-50|z-4|isolate|breadcrumbs?|pagination)\b/i,
+  /[\s"'](?:fixed|sticky|z-50|z-4|breadcrumbs?|pagination)\b/i,
 ];
 const HEADER_NOISE_PATTERN =
   /\b(site-header|masthead|topbar|navbar|nav(?:bar)?|menu|header-nav)\b/i;
-const FIXED_OR_HIGH_Z_PATTERN = /\b(?:fixed|sticky|z-(?:4\d|50)|isolate)\b/;
+const FIXED_OR_HIGH_Z_PATTERN = /\b(?:fixed|sticky|z-(?:4\d|50))\b/;
 const HEADING_PERMALINK_TEXT_PATTERN = /^(?:#|¶|§|¤|🔗)$/u;
 const HEADING_PERMALINK_CLASS_PATTERN =
   /\b(?:mark|permalink|hash-link|anchor(?:js)?-?link|header-?link|heading-anchor|deep-link)\b/i;
@@ -410,8 +410,13 @@ function isNoiseElement(element: Element, context: NoiseContext): boolean {
   // Hidden elements
   if (hidden && !interactive) return true;
 
-  // Sticky/fixed positioned elements
-  if (FIXED_OR_HIGH_Z_PATTERN.test(className)) return true;
+  // Sticky/fixed positioned elements — skip content-heavy wrappers
+  if (
+    FIXED_OR_HIGH_Z_PATTERN.test(className) &&
+    (element.textContent || '').trim().length <
+      NAV_FOOTER_MIN_CHARS_FOR_PRESERVATION
+  )
+    return true;
 
   // Promotional/noise content
   if (isPromoMatch(className, id, element, context)) return true;
@@ -602,7 +607,7 @@ function resolveUrls(document: Document, baseUrlStr: string): void {
     else if (tag === 'source') processUrlElement(el, 'srcset', base, true);
   }
 }
-function resolveDocumentBody(document: Document): Element {
+export function resolveDocumentBody(document: Document): Element {
   const { body } = document;
   if (body.innerHTML.trim().length > MIN_BODY_CONTENT_LENGTH) return body;
   const { children } = document.documentElement;
