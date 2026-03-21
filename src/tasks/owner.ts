@@ -132,10 +132,10 @@ function resolveSessionIdFromExtra(extra: unknown): string | undefined {
   const { sessionId } = extra as { sessionId?: unknown };
   if (typeof sessionId === 'string') return sessionId;
 
-  const requestInfo = extra.requestInfo;
+  const { requestInfo } = extra;
   if (!isObject(requestInfo)) return undefined;
 
-  const headers = requestInfo.headers;
+  const { headers } = requestInfo;
   if (!isObject(headers)) return undefined;
 
   const headerValue = headers['mcp-session-id'];

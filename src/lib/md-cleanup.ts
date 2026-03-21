@@ -652,12 +652,14 @@ export function processFencedContent(
 }
 
 function stripLeadingBreadcrumbNoise(text: string): string {
-  // Remove a single short plain-text line at the very start if followed
-  // (within one optional blank line) by an H1 or H2 heading.
   return text.replace(
     /^([^\n#>|`\-*+\d[\]()]{1,40})\n(\s*\n)?(?=#{1,2}\s)/,
     ''
   );
+}
+
+function stripCopyButtonText(text: string): string {
+  return text.replace(/\[Copy\]\(#copy\)\s*/gi, '');
 }
 
 export function cleanupMarkdownArtifacts(
@@ -668,9 +670,11 @@ export function cleanupMarkdownArtifacts(
 
   throwIfAborted(options?.signal, options?.url ?? '', 'markdown:cleanup:begin');
 
-  let result = processFencedContent(content, (text) =>
-    processTextBuffer(text.split('\n'), options)
-  ).trim();
+  let result = stripCopyButtonText(
+    processFencedContent(content, (text) =>
+      processTextBuffer(text.split('\n'), options)
+    ).trim()
+  );
 
   if (!options?.preserveEmptyHeadings) {
     throwIfAborted(

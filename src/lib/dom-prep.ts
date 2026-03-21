@@ -898,7 +898,30 @@ function normalizeHighlightedCodeLines(document: Document): void {
   }
 }
 
+const COPY_BUTTON_SELECTOR =
+  'button,a[href="#copy"],a[href="#"],span[class*="copy"]';
+const COPY_BUTTON_TEXT_PATTERN = /^copy(?: code)?$/i;
+
+function stripCodeBlockCopyButtons(document: Document): void {
+  for (const pre of document.querySelectorAll('pre')) {
+    const candidates = pre.querySelectorAll(COPY_BUTTON_SELECTOR);
+    for (let i = candidates.length - 1; i >= 0; i--) {
+      const el = candidates[i];
+      if (!el) continue;
+      const text = (el.textContent || '').trim();
+      if (
+        el.tagName === 'BUTTON' ||
+        COPY_BUTTON_TEXT_PATTERN.test(text) ||
+        (el.getAttribute('href') ?? '').includes('#copy')
+      ) {
+        el.remove();
+      }
+    }
+  }
+}
+
 function cleanCodeExamples(document: Document): void {
+  stripCodeBlockCopyButtons(document);
   pruneFigurePreviewPanes(document);
   pruneDemoInstructionBlocks(document);
   normalizeHighlightedCodeLines(document);
