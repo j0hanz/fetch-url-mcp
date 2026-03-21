@@ -1,33 +1,20 @@
-const ASCII_SPACE = 32;
-const ASCII_TAB = 9;
-const ASCII_DIGIT_0 = 48;
-const ASCII_DIGIT_9 = 57;
-const ASCII_UPPER_A = 65;
-const ASCII_UPPER_Z = 90;
-const ASCII_LOWER_A = 97;
-const ASCII_LOWER_Z = 122;
-const ASCII_UNDERSCORE = 95;
-
 class DetectionContext {
-  private _lower: string | undefined;
-  private _lines: readonly string[] | undefined;
-  private _trimmedStart: string | undefined;
+  private _lower?: string;
+  private _lines?: readonly string[];
+  private _trimmedStart?: string;
 
   constructor(readonly code: string) {}
 
   get lower(): string {
-    this._lower ??= this.code.toLowerCase();
-    return this._lower;
+    return (this._lower ??= this.code.toLowerCase());
   }
 
   get lines(): readonly string[] {
-    this._lines ??= this.code.split(/\r?\n/);
-    return this._lines;
+    return (this._lines ??= this.code.split(/\r?\n/));
   }
 
   get trimmedStart(): string {
-    this._trimmedStart ??= this.code.trimStart();
-    return this._trimmedStart;
+    return (this._trimmedStart ??= this.code.trimStart());
   }
 }
 const BASH_COMMANDS = new Set([
@@ -100,9 +87,8 @@ function containsJsxTag(code: string): boolean {
 }
 function isBashLine(line: string): boolean {
   const trimmed = line.trimStart();
-  if (trimmed.length === 0) return false;
+  if (!trimmed) return false;
 
-  // Shell Prefix
   if (
     trimmed.startsWith('#!') ||
     trimmed.startsWith('$ ') ||
@@ -116,27 +102,25 @@ function isBashLine(line: string): boolean {
 
   if (BASH_COMMANDS.has(firstWord)) return true;
 
-  // Package Managers
-  const isPkgMgr = BASH_PACKAGE_MANAGERS.includes(
-    firstWord as (typeof BASH_PACKAGE_MANAGERS)[number]
+  return (
+    spaceIdx !== -1 &&
+    BASH_PACKAGE_MANAGERS.includes(
+      firstWord as (typeof BASH_PACKAGE_MANAGERS)[number]
+    )
   );
-
-  if (isPkgMgr && spaceIdx !== -1) return true;
-
-  return false;
 }
 function detectBashIndicators(lines: readonly string[]): boolean {
-  return lines.some((line) => isBashLine(line));
+  return lines.some(isBashLine);
 }
 function detectCssStructure(lines: readonly string[]): boolean {
   for (const line of lines) {
     const trimmed = line.trimStart();
-    if (trimmed.length === 0) continue;
-    if (trimmed.startsWith('# ') || trimmed.startsWith('//')) continue;
+    if (!trimmed || trimmed.startsWith('# ') || trimmed.startsWith('//')) {
+      continue;
+    }
 
-    const hasSelector = /^[.#][A-Za-z_-][\w-]*\s*\{/.test(trimmed);
+    if (/^[.#][A-Za-z_-][\w-]*\s*\{/.test(trimmed)) return true;
 
-    if (hasSelector) return true;
     if (
       trimmed.includes(';') &&
       CSS_PROPERTY_REGEX.test(trimmed) &&
@@ -150,13 +134,11 @@ function detectCssStructure(lines: readonly string[]): boolean {
 function detectYamlStructure(lines: readonly string[]): boolean {
   for (const line of lines) {
     const trimmed = line.trim();
-    if (trimmed.length === 0) continue;
-
     const colonIdx = trimmed.indexOf(':');
-    if (colonIdx <= 0) continue;
-
-    const after = trimmed.charCodeAt(colonIdx + 1);
-    if (after === ASCII_SPACE || after === ASCII_TAB) return true;
+    if (colonIdx > 0) {
+      const after = trimmed[colonIdx + 1];
+      if (after === ' ' || after === '\t') return true;
+    }
   }
   return false;
 }
@@ -188,12 +170,10 @@ function matchJsx(ctx: DetectionContext): boolean {
   return containsJsxTag(ctx.code);
 }
 function matchTypeScript(ctx: DetectionContext): boolean {
-  if (/\b(?:interface|type)\b/.test(ctx.lower)) return true;
-  const l = ctx.lower;
-  for (const hint of TYPESCRIPT_HINTS) {
-    if (l.includes(hint)) return true;
-  }
-  return false;
+  return (
+    /\b(?:interface|type)\b/.test(ctx.lower) ||
+    TYPESCRIPT_HINTS.some((hint) => ctx.lower.includes(hint))
+  );
 }
 function matchSql(ctx: DetectionContext): boolean {
   return /\b(?:select\s+(?:.+?\s+from|[\d*@])|insert\s+into|update\s+.+?\s+set|delete\s+from|create\s+(?:table|database|index|view|function|procedure|trigger|user|role)|alter\s+(?:table|database|index|view))\b/.test(
@@ -212,33 +192,30 @@ function matchPython(ctx: DetectionContext): boolean {
   if (matchHtml(ctx)) return false;
 
   const l = ctx.lower;
-  if (PYTHON_REPL_PROMPT_REGEX.test(ctx.code)) return true;
-  if (PYTHON_OUTPUT_HINT_REGEX.test(ctx.code)) return true;
-  if (/^\s*[A-Za-z_][\w.]*\s*=\s*[A-Z][\w.]*\(/m.test(ctx.code)) return true;
-  if (/^\s*[A-Za-z_][\w.]*\.[A-Za-z_][\w]*\s*$/m.test(ctx.code)) return true;
-  if (l.includes('print(') || l.includes('__name__')) return true;
-  if (l.includes('self.') || l.includes('elif ')) return true;
-  // Check for Python's None/True/False using original case (they are capitalized in Python)
+  const c = ctx.code;
+
   if (
-    ctx.code.includes('None') ||
-    ctx.code.includes('True') ||
-    ctx.code.includes('False')
+    PYTHON_REPL_PROMPT_REGEX.test(c) ||
+    PYTHON_OUTPUT_HINT_REGEX.test(c) ||
+    /^\s*[A-Za-z_][\w.]*\s*=\s*[A-Z][\w.]*\(/m.test(c) ||
+    /^\s*[A-Za-z_][\w.]*\.[A-Za-z_][\w]*\s*$/m.test(c) ||
+    c.includes('None') ||
+    c.includes('True') ||
+    c.includes('False') ||
+    l.includes('print(') ||
+    l.includes('__name__') ||
+    l.includes('self.') ||
+    l.includes('elif ') ||
+    PYTHON_UNIQUE_REGEX.test(l)
   ) {
     return true;
   }
-  if (PYTHON_UNIQUE_REGEX.test(l)) return true;
+
   // Shared keywords (import, from, class) — only match if no JS signals present
-  if (/\b(?:import|from|class)\b/.test(l) && !hasJsSignals(l)) {
-    return true;
-  }
-  return false;
+  return /\b(?:import|from|class)\b/.test(l) && !hasJsSignals(l);
 }
 function matchHtml(ctx: DetectionContext): boolean {
-  const l = ctx.lower;
-  for (const tag of HTML_TAGS) {
-    if (l.includes(tag)) return true;
-  }
-  return false;
+  return HTML_TAGS.some((tag) => ctx.lower.includes(tag));
 }
 
 // Pre-sorted by weight descending — first match wins in detectLanguageFromCode
@@ -295,21 +272,7 @@ function resolveLanguageFromDataAttribute(
   dataLang: string
 ): string | undefined {
   const trimmed = dataLang.trim();
-  if (!trimmed) return undefined;
-
-  // Check if \w+
-  for (let i = 0; i < trimmed.length; i++) {
-    const c = trimmed.charCodeAt(i);
-    const isUpper = c >= ASCII_UPPER_A && c <= ASCII_UPPER_Z;
-    const isLower = c >= ASCII_LOWER_A && c <= ASCII_LOWER_Z;
-    const isDigit = c >= ASCII_DIGIT_0 && c <= ASCII_DIGIT_9;
-    const isUnder = c === ASCII_UNDERSCORE;
-
-    if (!isUpper && !isLower && !isDigit && !isUnder) {
-      return undefined;
-    }
-  }
-  return trimmed;
+  return /^\w+$/.test(trimmed) ? trimmed : undefined;
 }
 export function resolveLanguageFromAttributes(
   className: string,
@@ -321,24 +284,8 @@ export function resolveLanguageFromAttributes(
   );
 }
 export function detectLanguageFromCode(code: string): string | undefined {
-  if (!code) return undefined;
-
-  // Fast path for empty/whitespace only
-  let empty = true;
-  for (let i = 0; i < code.length; i++) {
-    if (code.charCodeAt(i) > ASCII_SPACE) {
-      empty = false;
-      break;
-    }
-  }
-  if (empty) return undefined;
+  if (!code || !/\S/.test(code)) return undefined;
 
   const ctx = new DetectionContext(code);
-
-  // LANGUAGES is pre-sorted by weight descending — first match is highest confidence
-  for (const def of LANGUAGES) {
-    if (def.match(ctx)) return def.lang;
-  }
-
-  return undefined;
+  return LANGUAGES.find((def) => def.match(ctx))?.lang;
 }
