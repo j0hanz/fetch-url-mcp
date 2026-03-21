@@ -82,7 +82,7 @@ export class FetchUrlProgressPlan {
       case 'prepare_output':
         return {
           step: this.path === 'cache_miss' ? 7 : 6,
-          message: 'Preparing output',
+          message: 'Completed',
         };
       case 'finalize_output':
         if (this.path === 'cache_miss') return undefined;
