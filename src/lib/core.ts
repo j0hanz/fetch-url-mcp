@@ -100,22 +100,20 @@ const EnvParser = {
     if (!envValue) return null;
     const parsed = Number.parseInt(envValue, 10);
     if (Number.isNaN(parsed)) {
-      if (envName) {
+      if (envName)
         process.stderr.write(
           `Warning: ignoring invalid ${envName} value "${envValue}" (not an integer)\n`
         );
-      }
       return null;
     }
     if (
       (min !== undefined && parsed < min) ||
       (max !== undefined && parsed > max)
     ) {
-      if (envName) {
+      if (envName)
         process.stderr.write(
           `Warning: ignoring out-of-range ${envName} value ${parsed} (allowed: ${min ?? '-∞'}..${max ?? '∞'})\n`
         );
-      }
       return null;
     }
     return parsed;
@@ -142,21 +140,16 @@ const EnvParser = {
     defaultValue: boolean,
     envName?: string
   ): boolean {
-    if (!envValue) return defaultValue;
-
-    const trimmed = envValue.trim();
+    const trimmed = envValue?.trim();
     if (!trimmed) return defaultValue;
-
     const parsed = ENV_BOOLEAN_SCHEMA.safeParse(trimmed);
     if (!parsed.success) {
-      if (envName) {
+      if (envName)
         process.stderr.write(
-          `Warning: ignoring invalid ${envName} value "${envValue}" (expected true/false, 1/0, yes/no, or on/off)\n`
+          `Warning: ignoring invalid ${envName} value "${envValue ?? ''}" (expected true/false, 1/0, yes/no, or on/off)\n`
         );
-      }
       return defaultValue;
     }
-
     return parsed.data;
   },
   list(
@@ -166,41 +159,37 @@ const EnvParser = {
     if (!envValue) return defaultValue ? [...defaultValue] : [];
     const parsed = envValue
       .split(/[\s,]+/)
-      .map((entry) => entry.trim())
+      .map((e) => e.trim())
       .filter(Boolean);
     return parsed.length > 0 || !defaultValue ? parsed : [...defaultValue];
   },
   locale(value: string | undefined): string | undefined {
-    if (!value) return undefined;
-    const trimmed = value.trim();
-    if (!trimmed) return undefined;
-    const lowered = trimmed.toLowerCase();
-    if (lowered === 'system' || lowered === 'default') return undefined;
-    return trimmed;
+    const lowered = value?.trim().toLowerCase();
+    return !lowered || lowered === 'system' || lowered === 'default'
+      ? undefined
+      : lowered;
   },
   logLevel(envValue: string | undefined): LogLevel {
-    if (!envValue) return 'info';
-    const level = envValue.toLowerCase();
-    if (!ALLOWED_LOG_LEVELS.has(level)) {
-      process.stderr.write(
-        `Warning: ignoring invalid LOG_LEVEL value "${envValue}", using default "info"\n`
-      );
+    const level = envValue?.toLowerCase();
+    if (!level || !ALLOWED_LOG_LEVELS.has(level)) {
+      if (envValue)
+        process.stderr.write(
+          `Warning: ignoring invalid LOG_LEVEL value "${envValue}", using default "info"\n`
+        );
       return 'info';
     }
     return level as LogLevel;
   },
   transformWorkerMode(envValue: string | undefined): TransformWorkerMode {
-    if (!envValue) return 'threads';
-    const normalized = envValue.trim().toLowerCase();
-    if (normalized === 'process' || normalized === 'fork') return 'process';
-    return 'threads';
+    const normalized = envValue?.trim().toLowerCase();
+    return normalized === 'process' || normalized === 'fork'
+      ? 'process'
+      : 'threads';
   },
   url(value: string | undefined, name: string): URL | undefined {
     if (!value) return undefined;
     const parsed = URL.parse(value);
-    if (!parsed) {
-      throw new ConfigError(`Invalid ${name} value: ${value}`);
-    }
+    if (!parsed) throw new ConfigError(`Invalid ${name} value: ${value}`);
     return parsed;
   },
   allowedHosts(envValue: string | undefined): Set<string> {
@@ -211,9 +200,8 @@ const EnvParser = {
     );
   },
   optionalFilePath(value: string | undefined): string | undefined {
-    if (!value) return undefined;
-    const trimmed = value.trim();
-    return trimmed.length > 0 ? trimmed : undefined;
+    const trimmed = value?.trim();
+    return trimmed === '' ? undefined : trimmed;
   },
   normalizeHostValue(value: string): string | null {
     const raw = value.trim();
@@ -312,48 +300,24 @@ interface WorkerResourceLimits {
 }
 
 function resolveWorkerResourceLimits(): WorkerResourceLimits | undefined {
-  const maxOldGenerationSizeMb = EnvParser.optionalInteger(
-    env['TRANSFORM_WORKER_MAX_OLD_GENERATION_MB'],
-    1,
-    undefined,
-    'TRANSFORM_WORKER_MAX_OLD_GENERATION_MB'
-  );
-  const maxYoungGenerationSizeMb = EnvParser.optionalInteger(
-    env['TRANSFORM_WORKER_MAX_YOUNG_GENERATION_MB'],
-    1,
-    undefined,
-    'TRANSFORM_WORKER_MAX_YOUNG_GENERATION_MB'
-  );
-  const codeRangeSizeMb = EnvParser.optionalInteger(
-    env['TRANSFORM_WORKER_CODE_RANGE_MB'],
-    1,
-    undefined,
-    'TRANSFORM_WORKER_CODE_RANGE_MB'
-  );
-  const stackSizeMb = EnvParser.optionalInteger(
-    env['TRANSFORM_WORKER_STACK_MB'],
-    1,
-    undefined,
-    'TRANSFORM_WORKER_STACK_MB'
-  );
+  const limits: WorkerResourceLimits = {};
+  const keys: Record<keyof WorkerResourceLimits, string> = {
+    maxOldGenerationSizeMb: 'TRANSFORM_WORKER_MAX_OLD_GENERATION_MB',
+    maxYoungGenerationSizeMb: 'TRANSFORM_WORKER_MAX_YOUNG_GENERATION_MB',
+    codeRangeSizeMb: 'TRANSFORM_WORKER_CODE_RANGE_MB',
+    stackSizeMb: 'TRANSFORM_WORKER_STACK_MB',
+  };
 
-  if (
-    maxOldGenerationSizeMb === undefined &&
-    maxYoungGenerationSizeMb === undefined &&
-    codeRangeSizeMb === undefined &&
-    stackSizeMb === undefined
-  ) {
-    return undefined;
+  let hasLimits = false;
+  for (const [prop, envKey] of Object.entries(keys)) {
+    const val = EnvParser.optionalInteger(env[envKey], 1, undefined, envKey);
+    if (val !== undefined) {
+      limits[prop as keyof WorkerResourceLimits] = val;
+      hasLimits = true;
+    }
   }
 
-  const limits: WorkerResourceLimits = {};
-  if (maxOldGenerationSizeMb !== undefined)
-    limits.maxOldGenerationSizeMb = maxOldGenerationSizeMb;
-  if (maxYoungGenerationSizeMb !== undefined)
-    limits.maxYoungGenerationSizeMb = maxYoungGenerationSizeMb;
-  if (codeRangeSizeMb !== undefined) limits.codeRangeSizeMb = codeRangeSizeMb;
-  if (stackSizeMb !== undefined) limits.stackSizeMb = stackSizeMb;
-  return limits;
+  return hasLimits ? limits : undefined;
 }
 
 interface AuthConfig {
@@ -380,24 +344,15 @@ interface HttpsConfig {
 }
 
 function buildAuthConfig(baseUrl: URL): AuthConfig {
-  const issuerUrl = EnvParser.url(env['OAUTH_ISSUER_URL'], 'OAUTH_ISSUER_URL');
-  const authorizationUrl = EnvParser.url(
-    env['OAUTH_AUTHORIZATION_URL'],
-    'OAUTH_AUTHORIZATION_URL'
-  );
-  const tokenUrl = EnvParser.url(env['OAUTH_TOKEN_URL'], 'OAUTH_TOKEN_URL');
-  const revocationUrl = EnvParser.url(
-    env['OAUTH_REVOCATION_URL'],
-    'OAUTH_REVOCATION_URL'
-  );
-  const registrationUrl = EnvParser.url(
-    env['OAUTH_REGISTRATION_URL'],
-    'OAUTH_REGISTRATION_URL'
-  );
-  const introspectionUrl = EnvParser.url(
-    env['OAUTH_INTROSPECTION_URL'],
-    'OAUTH_INTROSPECTION_URL'
-  );
+  const parseUrl = (key: string): URL | undefined =>
+    EnvParser.url(env[key], key);
+
+  const issuerUrl = parseUrl('OAUTH_ISSUER_URL');
+  const authorizationUrl = parseUrl('OAUTH_AUTHORIZATION_URL');
+  const tokenUrl = parseUrl('OAUTH_TOKEN_URL');
+  const revocationUrl = parseUrl('OAUTH_REVOCATION_URL');
+  const registrationUrl = parseUrl('OAUTH_REGISTRATION_URL');
+  const introspectionUrl = parseUrl('OAUTH_INTROSPECTION_URL');
   const resourceUrl = new URL('/mcp', baseUrl);
 
   const oauthConfigured =
@@ -510,6 +465,9 @@ interface AppServerConfig {
 }
 
 function buildServerConfig(): AppServerConfig {
+  const parseOptInt = (key: string, min = 1): number | undefined =>
+    EnvParser.optionalInteger(env[key], min, undefined, key);
+
   return {
     name: 'fetch-url-mcp',
     version: serverVersion,
@@ -520,36 +478,14 @@ function buildServerConfig(): AppServerConfig {
     sessionInitTimeoutMs: DEFAULT_SESSION_INIT_TIMEOUT_MS,
     maxSessions: DEFAULT_MAX_SESSIONS,
     http: {
-      headersTimeoutMs: EnvParser.optionalInteger(
-        env['SERVER_HEADERS_TIMEOUT_MS'],
-        1,
-        undefined,
-        'SERVER_HEADERS_TIMEOUT_MS'
+      headersTimeoutMs: parseOptInt('SERVER_HEADERS_TIMEOUT_MS'),
+      requestTimeoutMs: parseOptInt('SERVER_REQUEST_TIMEOUT_MS', 0),
+      keepAliveTimeoutMs: parseOptInt('SERVER_KEEP_ALIVE_TIMEOUT_MS'),
+      keepAliveTimeoutBufferMs: parseOptInt(
+        'SERVER_KEEP_ALIVE_TIMEOUT_BUFFER_MS',
+        0
       ),
-      requestTimeoutMs: EnvParser.optionalInteger(
-        env['SERVER_REQUEST_TIMEOUT_MS'],
-        0,
-        undefined,
-        'SERVER_REQUEST_TIMEOUT_MS'
-      ),
-      keepAliveTimeoutMs: EnvParser.optionalInteger(
-        env['SERVER_KEEP_ALIVE_TIMEOUT_MS'],
-        1,
-        undefined,
-        'SERVER_KEEP_ALIVE_TIMEOUT_MS'
-      ),
-      keepAliveTimeoutBufferMs: EnvParser.optionalInteger(
-        env['SERVER_KEEP_ALIVE_TIMEOUT_BUFFER_MS'],
-        0,
-        undefined,
-        'SERVER_KEEP_ALIVE_TIMEOUT_BUFFER_MS'
-      ),
-      maxHeadersCount: EnvParser.optionalInteger(
-        env['SERVER_MAX_HEADERS_COUNT'],
-        1,
-        undefined,
-        'SERVER_MAX_HEADERS_COUNT'
-      ),
+      maxHeadersCount: parseOptInt('SERVER_MAX_HEADERS_COUNT'),
       maxConnections: EnvParser.integer(
         env['SERVER_MAX_CONNECTIONS'],
         0,
