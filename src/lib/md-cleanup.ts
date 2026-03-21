@@ -110,10 +110,8 @@ interface CleanupOptions {
   url?: string;
 }
 function createAbortChecker(options?: CleanupOptions): (stage: string) => void {
-  const signal = options?.signal;
-  const url = options?.url ?? '';
-  return (stage: string): void => {
-    throwIfAborted(signal, url, stage);
+  return (stage: string) => {
+    throwIfAborted(options?.signal, options?.url ?? '', stage);
   };
 }
 function isBlank(line: string | undefined): boolean {

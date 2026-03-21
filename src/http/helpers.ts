@@ -240,10 +240,8 @@ export function buildRequestContext(
   res: ServerResponse,
   signal?: AbortSignal
 ): RequestContext | null {
-  let url: URL;
-  try {
-    url = new URL(req.url ?? '', 'http://localhost');
-  } catch {
+  const url = URL.parse(req.url ?? '', 'http://localhost');
+  if (!url) {
     sendJson(res, 400, { error: 'Invalid request URL' });
     return null;
   }

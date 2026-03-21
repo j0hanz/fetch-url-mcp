@@ -245,11 +245,10 @@ function listCacheResources(): {
 }
 
 function normalizeSubscriptionUri(uri: string): string {
-  if (!URL.canParse(uri)) {
+  const parsedUri = URL.parse(uri);
+  if (!parsedUri) {
     throw new McpError(ErrorCode.InvalidParams, 'Invalid resource URI');
   }
-
-  const parsedUri = new URL(uri);
   const cacheParts = parseCacheResourceFromUri(parsedUri);
   if (cacheParts) return toCacheResourceUri(cacheParts);
 

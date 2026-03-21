@@ -207,17 +207,12 @@ function deriveAltFromImageUrl(src: string): string {
   if (!src) return '';
 
   try {
-    const isAbsolute = URL.canParse(src);
-    let parsed: URL | null = null;
-    if (isAbsolute) {
-      parsed = new URL(src);
-    } else if (URL.canParse(src, 'http://localhost')) {
-      parsed = new URL(src, 'http://localhost');
-    }
+    const absoluteParsed = URL.parse(src);
+    const parsed = absoluteParsed ?? URL.parse(src, 'http://localhost');
 
     if (!parsed) return '';
     if (
-      isAbsolute &&
+      absoluteParsed &&
       parsed.protocol !== 'http:' &&
       parsed.protocol !== 'https:'
     ) {

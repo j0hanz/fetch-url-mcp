@@ -28,28 +28,9 @@ export function composeAbortSignal(
 }
 
 export function parseUrlOrNull(input: string, base?: string): URL | null {
-  const urlCtor = URL as typeof URL & {
-    parse?: (input: string, base?: string) => URL | null;
-  };
-
-  if (typeof urlCtor.parse === 'function') {
-    return urlCtor.parse(input, base);
-  }
-
-  try {
-    return new URL(input, base);
-  } catch {
-    return null;
-  }
+  return URL.parse(input, base);
 }
 
-function getAbortReason(signal: AbortSignal): unknown {
-  const record = isObject(signal) ? (signal as Record<string, unknown>) : null;
-  return record && 'reason' in record ? record['reason'] : undefined;
-}
-function isTimeoutAbortReason(reason: unknown): boolean {
-  return reason instanceof Error && reason.name === 'TimeoutError';
-}
 export function throwIfAborted(
   signal: AbortSignal | undefined,
   url: string,
@@ -57,8 +38,7 @@ export function throwIfAborted(
 ): void {
   if (!signal?.aborted) return;
 
-  const reason = getAbortReason(signal);
-  if (isTimeoutAbortReason(reason)) {
+  if (signal.reason instanceof Error && signal.reason.name === 'TimeoutError') {
     throw new FetchError('Request timeout', url, 504, {
       reason: 'timeout',
       stage,
@@ -371,12 +351,10 @@ export function isObject(
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 export function isError(value: unknown): value is Error {
-  const { isError: isErrorFn } = Error as {
-    isError?: (err: unknown) => boolean;
-  };
-  return typeof isErrorFn === 'function'
-    ? isErrorFn(value)
-    : value instanceof Error;
+  return (
+    (Error as { isError?: (v: unknown) => boolean }).isError?.(value) ??
+    value instanceof Error
+  );
 }
 interface LikeNode {
   readonly tagName?: string | undefined;

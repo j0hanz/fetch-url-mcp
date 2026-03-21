@@ -4,7 +4,6 @@ import diagnosticsChannel from 'node:diagnostics_channel';
 import { type ServerResponse } from 'node:http';
 import { isIP } from 'node:net';
 import { posix as pathPosix } from 'node:path';
-import { performance } from 'node:perf_hooks';
 import { PassThrough, Readable, Transform } from 'node:stream';
 import { buffer as consumeBuffer } from 'node:stream/consumers';
 import { finished, pipeline } from 'node:stream/promises';
@@ -700,10 +699,8 @@ class RedirectFollower {
   }
 
   private resolveRedirectTarget(baseUrl: string, location: string): string {
-    let resolved: URL;
-    try {
-      resolved = new URL(location, baseUrl);
-    } catch {
+    const resolved = URL.parse(location, baseUrl);
+    if (!resolved) {
       throw createErrorWithCode('Invalid redirect target', 'EBADREDIRECT');
     }
     if (resolved.username || resolved.password) {

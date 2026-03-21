@@ -197,10 +197,11 @@ const EnvParser = {
   },
   url(value: string | undefined, name: string): URL | undefined {
     if (!value) return undefined;
-    if (!URL.canParse(value)) {
+    const parsed = URL.parse(value);
+    if (!parsed) {
       throw new ConfigError(`Invalid ${name} value: ${value}`);
     }
-    return new URL(value);
+    return parsed;
   },
   allowedHosts(envValue: string | undefined): Set<string> {
     return new Set(
@@ -218,14 +219,13 @@ const EnvParser = {
     const raw = value.trim();
     if (!raw) return null;
 
-    if (raw.includes('://') && URL.canParse(raw)) {
-      return normalizeHostname(new URL(raw).hostname);
+    if (raw.includes('://')) {
+      const hostname = URL.parse(raw)?.hostname;
+      if (hostname) return normalizeHostname(hostname);
     }
 
-    const candidateUrl = `http://${raw}`;
-    if (URL.canParse(candidateUrl)) {
-      return normalizeHostname(new URL(candidateUrl).hostname);
-    }
+    const candidateHostname = URL.parse(`http://${raw}`)?.hostname;
+    if (candidateHostname) return normalizeHostname(candidateHostname);
 
     const lowered = raw.toLowerCase();
 
@@ -1425,16 +1425,13 @@ export function setLogLevel(level: string, sessionId?: string): void {
   stdioMcpLogLevel = normalized;
 }
 export function redactUrl(rawUrl: string): string {
-  try {
-    const url = new URL(rawUrl);
-    url.username = '';
-    url.password = '';
-    url.hash = '';
-    url.search = '';
-    return url.toString();
-  } catch {
-    return rawUrl;
-  }
+  const url = URL.parse(rawUrl);
+  if (!url) return rawUrl;
+  url.username = '';
+  url.password = '';
+  url.hash = '';
+  url.search = '';
+  return url.toString();
 }
 export type { SessionEntry, SessionStore } from './session.js';
 export {

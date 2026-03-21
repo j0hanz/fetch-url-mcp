@@ -566,11 +566,7 @@ function processUrlElement(
         .map((entry) => {
           const parts = entry.trim().split(/\s+/);
           if (!parts[0]) return entry;
-          try {
-            parts[0] = new URL(parts[0], base).href;
-          } catch {
-            /* ignore */
-          }
+          parts[0] = URL.parse(parts[0], base)?.href ?? parts[0];
           return parts.join(' ');
         })
         .join(', ');
@@ -584,20 +580,13 @@ function processUrlElement(
     val &&
     !SKIP_URL_PREFIXES.some((p) => val.trim().toLowerCase().startsWith(p))
   ) {
-    try {
-      el.setAttribute(attr, new URL(val, base).href);
-    } catch {
-      /* ignore */
-    }
+    const resolved = URL.parse(val, base);
+    if (resolved) el.setAttribute(attr, resolved.href);
   }
 }
 function resolveUrls(document: Document, baseUrlStr: string): void {
-  let base: URL;
-  try {
-    base = new URL(baseUrlStr);
-  } catch {
-    return;
-  }
+  const base = URL.parse(baseUrlStr);
+  if (!base) return;
 
   const elements = document.querySelectorAll('a[href],img[src],source[srcset]');
   for (const el of elements) {

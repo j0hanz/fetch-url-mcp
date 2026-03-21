@@ -1,6 +1,5 @@
 import { Buffer } from 'node:buffer';
 import diagnosticsChannel from 'node:diagnostics_channel';
-import { performance } from 'node:perf_hooks';
 
 import { isProbablyReaderable, Readability } from '@mozilla/readability';
 import { parseHTML } from 'linkedom';
@@ -681,12 +680,10 @@ function resolveRelativeHref(
   }
   if (isAbsoluteOrSpecialUrl(trimmedHref)) return trimmedHref;
 
-  try {
-    return new URL(trimmedHref, baseUrl).href;
-  } catch {
-    if (trimmedHref.startsWith('/')) return `${origin}${trimmedHref}`;
-    return trimmedHref;
-  }
+  const resolved = URL.parse(trimmedHref, baseUrl);
+  if (resolved) return resolved.href;
+  if (trimmedHref.startsWith('/')) return `${origin}${trimmedHref}`;
+  return trimmedHref;
 }
 
 function findBalancedCloseParen(text: string, start: number): number {
@@ -782,12 +779,9 @@ function resolveRelativeUrls(
   baseUrl: string,
   signal?: AbortSignal
 ): string {
-  let origin: string;
-  try {
-    ({ origin } = new URL(baseUrl));
-  } catch {
-    return markdown;
-  }
+  const parsedBase = URL.parse(baseUrl);
+  if (!parsedBase) return markdown;
+  const { origin } = parsedBase;
 
   if (!markdown) return markdown;
 
