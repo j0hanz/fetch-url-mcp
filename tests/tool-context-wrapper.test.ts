@@ -146,7 +146,7 @@ describe('Progress notification timeout', () => {
     });
 
     reporter.report(6, 'Parsing HTML -> Markdown');
-    reporter.report(6, 'Preparing output');
+    reporter.report(6, 'Fetch completed');
 
     assert.equal(onProgressMock.mock.calls.length, 2);
     assert.deepEqual(onProgressMock.mock.calls[0]?.arguments, [
@@ -155,7 +155,7 @@ describe('Progress notification timeout', () => {
     ]);
     assert.deepEqual(onProgressMock.mock.calls[1]?.arguments, [
       6,
-      'Preparing output',
+      'Fetch completed',
     ]);
   });
 });

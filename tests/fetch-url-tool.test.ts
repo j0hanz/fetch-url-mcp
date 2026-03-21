@@ -169,7 +169,7 @@ describe('fetchUrlToolHandler', () => {
       { progress: 4, message: 'Fetching example.com/progress-miss' },
       { progress: 5, message: 'Received response' },
       { progress: 6, message: 'Parsing HTML -> Markdown' },
-      { progress: 7, message: 'Preparing output' },
+      { progress: 7, message: 'Fetch completed' },
     ]);
     assert.deepEqual(progressEvents.at(-1)?.progress, 8);
     assert.match(String(progressEvents.at(-1)?.message), /^Done — .+/);
@@ -202,7 +202,7 @@ describe('fetchUrlToolHandler', () => {
       { progress: 3, message: 'Checking cache' },
       { progress: 4, message: 'Loaded from cache' },
       { progress: 5, message: 'Restoring cached content' },
-      { progress: 6, message: 'Preparing output' },
+      { progress: 6, message: 'Fetch completed' },
       { progress: 7, message: 'Finalizing output' },
     ]);
     assert.deepEqual(progressEvents.at(-1)?.progress, 8);
