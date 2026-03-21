@@ -7,41 +7,35 @@ export function buildServerInstructions(): string {
   const cacheSizeMb = config.cache.maxSizeBytes / 1024 / 1024;
   const cacheTtlHours = config.cache.ttl / 3600;
 
-  return `<role>Web Content Extractor</role>
-<task>Fetch public webpages and convert HTML to clean Markdown.</task>
+  return `# Fetch public webpages and return clean, readable Markdown.
 
-<capabilities>
-- Tools: \`${FETCH_URL_TOOL_NAME}\` (READ-ONLY).
-- Resources: \`internal://instructions\` (server usage guidance).
-- Resource templates: \`internal://cache/{namespace}/{hash}\` (cached markdown entries).
-- Prompts: \`get-help\` (returns these instructions).
-- Completions: resource-template argument completion for cache entries.
-</capabilities>
+# Capabilities
+- Tool: \`${FETCH_URL_TOOL_NAME}\` (fetch URL, return Markdown)
+- Resource: \`internal://instructions\` (this document)
+- Resource template: \`internal://cache/{namespace}/{hash}\` (cached Markdown)
+- Prompt: \`get-help\` (returns these instructions)
+- Completions: resource-template argument completion for cache entries
 
-<workflows>
-1. Standard: Call \`${FETCH_URL_TOOL_NAME}\` -> Read \`markdown\`. If \`truncated: true\`, content hit server-enforced size limits; \`forceRefresh\` only refreshes cached content.
-2. Fresh: Set \`forceRefresh: true\` to bypass cache.
-3. Async: Add \`task: { ttl: <ms> }\` to \`tools/call\` -> Poll \`tasks/get\` -> Call \`tasks/result\`.
-</workflows>
+# Workflows
+1. Standard: Call \`${FETCH_URL_TOOL_NAME}\` → read \`markdown\`. \`truncated: true\` means content was cut at server size limit.
+2. Fresh: \`forceRefresh: true\` bypasses cache (does not fix truncation).
+3. Async: \`task: { ttl: <ms> }\` in \`tools/call\` → poll \`tasks/get\` → \`tasks/result\`.
 
-<constraints>
-- Blocked: localhost, private IPs (10.x, 172.16-31.x, 192.168.x), metadata endpoints (169.254.169.254), .local/.internal.
-- Limits: Max HTML ${maxHtmlSizeMb}MB. Max ${config.fetcher.maxRedirects} redirects.
-- Cache: ${config.cache.maxKeys} entries, ${cacheSizeMb}MB, ${cacheTtlHours}h TTL.
-- Cache scope: process-local and ephemeral.
-- No JS: Client-side rendered pages may be incomplete.
-- Binary: Not supported.
-- Batch JSON-RPC: Array requests (\`[{...}]\`) are rejected with HTTP 400.
-- Tasks API: Experimental (SDK v1.26). \`tasks/get\`, \`tasks/result\`, \`tasks/list\`, \`tasks/cancel\` may change.
-- Notifications: Optional non-spec extension. Set \`TASKS_STATUS_NOTIFICATIONS=true\` to emit \`notifications/tasks/status\`.
-- URI scheme: \`internal://\` is a server-scoped custom scheme for cache resources. Not IANA-registered; valid only within this server's session lifetime.
-</constraints>
+# Constraints
+- Blocked URLs: localhost, private IPs (10.x, 172.16-31.x, 192.168.x), metadata (169.254.169.254), .local/.internal.
+- Max HTML: ${maxHtmlSizeMb}MB. Max redirects: ${config.fetcher.maxRedirects}.
+- Cache: ${config.cache.maxKeys} entries, ${cacheSizeMb}MB, ${cacheTtlHours}h TTL. Process-local, ephemeral.
+- No JS rendering — client-side pages may be incomplete.
+- Binary: not supported.
+- Batch JSON-RPC (\`[{...}]\`): rejected with HTTP 400.
+- \`internal://\` URIs are server-scoped, valid only within current session.
+- Tasks API (SDK v1.26): experimental. \`tasks/get\`, \`tasks/result\`, \`tasks/list\`, \`tasks/cancel\` may change.
+- Notifications: opt-in. Set \`TASKS_STATUS_NOTIFICATIONS=true\`.
 
-<error_handling>
-- VALIDATION_ERROR: Invalid/blocked URL. Do not retry.
-- FETCH_ERROR: Network failure. Retry once with backoff.
-- HTTP_xxx: Upstream error. Retry only for 5xx.
-- ABORTED: Cancelled. Retry if needed.
-- queue_full: Worker pool busy. Wait and retry, or use task mode.
-</error_handling>`;
+# Errors
+- VALIDATION_ERROR: invalid/blocked URL. Do not retry.
+- FETCH_ERROR: network failure. Retry once with backoff.
+- HTTP_xxx: upstream error. Retry only for 5xx.
+- ABORTED: cancelled. Retry if needed.
+- queue_full: worker pool busy. Wait and retry, or use task mode.`;
 }
