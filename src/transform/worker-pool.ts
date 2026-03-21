@@ -624,10 +624,14 @@ class WorkerPool implements TransformWorkerPool {
     });
 
     if (slot.busy && slot.currentTaskId) {
-      this.failTask(
-        slot.currentTaskId,
-        new FetchError(message, '', 503, { reason: 'worker_exit' })
-      );
+      try {
+        this.failTask(
+          slot.currentTaskId,
+          new FetchError(message, '', 503, { reason: 'worker_exit' })
+        );
+      } catch {
+        this.markIdle(workerIndex);
+      }
     }
 
     this.restartWorker(workerIndex, slot);

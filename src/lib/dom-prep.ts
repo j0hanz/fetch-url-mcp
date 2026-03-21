@@ -34,6 +34,8 @@ const HEADING_PERMALINK_CLASS_PATTERN =
   /\b(?:mark|permalink|hash-link|anchor(?:js)?-?link|header-?link|heading-anchor|deep-link)\b/i;
 const HIDDEN_STYLE_REGEX =
   /\b(?:display\s*:\s*none|visibility\s*:\s*hidden)\b/i;
+const DISPLAY_NONE_REGEX = /display\s*:\s*none/i;
+const DISPLAY_NONE_STRIP_REGEX = /display\s*:\s*none\s*;?/gi;
 const UTM_PARAM_REGEX = /[?&]utm_(?:source|medium|campaign)=/i;
 const NO_MATCH_REGEX = /a^/i;
 
@@ -612,10 +614,10 @@ function surfaceHiddenTabPanels(document: Document): void {
   );
   for (const panel of panels) {
     const style = panel.getAttribute('style') ?? '';
-    if (/display\s*:\s*none/i.test(style)) {
+    if (DISPLAY_NONE_REGEX.test(style)) {
       panel.setAttribute(
         'style',
-        style.replace(/display\s*:\s*none\s*;?/gi, '').trim()
+        style.replace(DISPLAY_NONE_STRIP_REGEX, '').trim()
       );
     }
     panel.removeAttribute('hidden');

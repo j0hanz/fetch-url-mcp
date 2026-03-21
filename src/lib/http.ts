@@ -463,6 +463,10 @@ function createFetchError(input: FetchErrorInput, url: string): FetchError {
       );
     case 'unknown':
       return new FetchError(input.message ?? 'Unexpected error', url);
+    default: {
+      const _exhaustive: never = input;
+      return _exhaustive;
+    }
   }
 }
 function isTimeoutError(error: unknown): boolean {

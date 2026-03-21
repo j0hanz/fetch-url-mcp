@@ -235,8 +235,11 @@ class StageTracker {
     if (!this.channel.hasSubscribers) return;
     try {
       this.channel.publish(event);
-    } catch {
-      // Intentionally swallow publish errors to prevent cascading failures
+    } catch (error: unknown) {
+      logDebug('Diagnostic channel publish failed', {
+        stage: event.stage,
+        error: getErrorMessage(error),
+      });
     }
   }
 }
