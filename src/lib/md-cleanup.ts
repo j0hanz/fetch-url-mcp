@@ -2,21 +2,33 @@ import { config } from './core.js';
 import { throwIfAborted } from './utils.js';
 
 // ── ASCII code constants ────────────────────────────────────────────
-const ASCII_HASH = 35;
-const ASCII_ASTERISK = 42;
-const ASCII_PLUS = 43;
-const ASCII_DASH = 45;
-const ASCII_PERIOD = 46;
-const ASCII_DIGIT_0 = 48;
-const ASCII_DIGIT_9 = 57;
-const ASCII_EXCLAMATION = 33;
-const ASCII_QUESTION = 63;
-const ASCII_BRACKET_OPEN = 91;
+const ASCII_MARKERS = {
+  HASH: 35,
+  ASTERISK: 42,
+  PLUS: 43,
+  DASH: 45,
+  PERIOD: 46,
+  DIGIT_0: 48,
+  DIGIT_9: 57,
+  EXCLAMATION: 33,
+  QUESTION: 63,
+  BRACKET_OPEN: 91,
+} as const;
 
 // ── Title heuristic thresholds ──────────────────────────────────────
 const TITLE_MIN_WORDS = 2;
 const TITLE_MAX_WORDS = 10;
 const TITLE_MIN_CAPITALIZED = 2;
+const TITLE_EXCLUSION_WORDS = new Set([
+  'and',
+  'or',
+  'the',
+  'of',
+  'in',
+  'for',
+  'to',
+  'a',
+]);
 
 // ── Processing limits ───────────────────────────────────────────────
 const HAS_FOLLOWING_LOOKAHEAD = 10;
@@ -56,8 +68,6 @@ const REGEX = {
   HEADING_CODE_BLOCK: /(^#{1,6}\s+\w+)```/gm,
   SPACING_LINK_FIX: /\]\(([^)]+)\)\[/g,
   SPACING_ADJ_COMBINED: /(?:\]\([^)]+\)|`[^`]+`)(?=[A-Za-z0-9])/g,
-  SPACING_CODE_PAD_BEFORE: /(\S)[ \t]{2,}(?=`[^`\n]+`)/g,
-  SPACING_CODE_PAD_AFTER: /(`[^`\n]+`)[ \t]{2,}(?=\S)/g,
   SPACING_CODE_DASH: /(`[^`]+`)\s*\\-\s*/g,
   SPACING_ESCAPED_DASH: /(?<=[\w)\]`])\s*\\-\s*(?=[A-Za-z0-9([])/g,
   SPACING_ESCAPES: /\\([[\].])/g,
@@ -166,7 +176,7 @@ function isTitleCaseOrKeyword(trimmed: string): boolean {
     if (!w) continue;
     const isCap = /^[A-Z][a-z]*$/.test(w);
     if (isCap) capitalizedCount++;
-    else if (!/^(?:and|or|the|of|in|for|to|a)$/i.test(w)) return false;
+    else if (!TITLE_EXCLUSION_WORDS.has(w.toLowerCase())) return false;
   }
 
   return capitalizedCount >= TITLE_MIN_CAPITALIZED;
@@ -178,12 +188,12 @@ function getHeadingPrefix(trimmed: string): string | null {
   // Fast path: Check common markdown markers first
   const firstChar = trimmed.charCodeAt(0);
   if (
-    firstChar === ASCII_HASH ||
-    firstChar === ASCII_DASH ||
-    firstChar === ASCII_ASTERISK ||
-    firstChar === ASCII_PLUS ||
-    firstChar === ASCII_BRACKET_OPEN ||
-    (firstChar >= ASCII_DIGIT_0 && firstChar <= ASCII_DIGIT_9)
+    firstChar === ASCII_MARKERS.HASH ||
+    firstChar === ASCII_MARKERS.DASH ||
+    firstChar === ASCII_MARKERS.ASTERISK ||
+    firstChar === ASCII_MARKERS.PLUS ||
+    firstChar === ASCII_MARKERS.BRACKET_OPEN ||
+    (firstChar >= ASCII_MARKERS.DIGIT_0 && firstChar <= ASCII_MARKERS.DIGIT_9)
   ) {
     if (
       REGEX.HEADING_MARKER.test(trimmed) ||
@@ -201,9 +211,9 @@ function getHeadingPrefix(trimmed: string): string | null {
 
   const lastChar = trimmed.charCodeAt(trimmed.length - 1);
   if (
-    lastChar === ASCII_PERIOD ||
-    lastChar === ASCII_EXCLAMATION ||
-    lastChar === ASCII_QUESTION
+    lastChar === ASCII_MARKERS.PERIOD ||
+    lastChar === ASCII_MARKERS.EXCLAMATION ||
+    lastChar === ASCII_MARKERS.QUESTION
   )
     return null;
 
@@ -337,41 +347,40 @@ function maybePromoteOrphanHeading(
   return tryPromoteOrphan(lines, i, trimmed);
 }
 function preprocessLines(lines: string[], options?: CleanupOptions): string {
-  const processedLines: string[] = [];
   const checkAbort = createAbortChecker(options);
-  let skipUntil = -1;
 
-  for (let i = 0; i < lines.length; i++) {
-    if (i < skipUntil) continue;
+  return lines
+    .reduce<{ result: string[]; skipUntil: number }>(
+      (acc, currentLine, i) => {
+        if (i < acc.skipUntil) return acc;
+        const trimmed = currentLine.trim();
+        const normalizedLine = normalizePreprocessLine(
+          lines,
+          i,
+          trimmed,
+          currentLine,
+          options
+        );
+        if (normalizedLine === null) return acc;
 
-    const currentLine = lines[i];
-    if (currentLine === undefined) continue;
+        const tocSkip = maybeSkipTocBlock(lines, i, trimmed, options);
+        if (tocSkip !== null) {
+          acc.skipUntil = tocSkip;
+          return acc;
+        }
 
-    const trimmed = currentLine.trim();
-    const normalizedLine = normalizePreprocessLine(
-      lines,
-      i,
-      trimmed,
-      currentLine,
-      options
-    );
-    if (normalizedLine === null) continue;
-
-    const tocSkip = maybeSkipTocBlock(lines, i, trimmed, options);
-    if (tocSkip !== null) {
-      skipUntil = tocSkip;
-      continue;
-    }
-
-    const promotedLine = maybePromoteOrphanHeading(
-      lines,
-      i,
-      trimmed,
-      checkAbort
-    );
-    processedLines.push(promotedLine ?? normalizedLine);
-  }
-  return processedLines.join('\n');
+        const promotedLine = maybePromoteOrphanHeading(
+          lines,
+          i,
+          trimmed,
+          checkAbort
+        );
+        acc.result.push(promotedLine ?? normalizedLine);
+        return acc;
+      },
+      { result: [], skipUntil: -1 }
+    )
+    .result.join('\n');
 }
 function processTextBuffer(lines: string[], options?: CleanupOptions): string {
   if (lines.length === 0) return '';
@@ -436,10 +445,13 @@ function normalizeMarkdownLinkLabels(text: string): string {
   );
 }
 
+const INLINE_CODE_PAD_BEFORE = /(\S)[ \t]{2,}(?=`[^`\n]+`)/g;
+const INLINE_CODE_PAD_AFTER = /(`[^`\n]+`)[ \t]{2,}(?=\S)/g;
+
 function collapseInlineCodePadding(text: string): string {
   return text
-    .replace(/(\S)[ \t]{2,}(?=`[^`\n]+`)/g, '$1 ')
-    .replace(/(`[^`\n]+`)[ \t]{2,}(?=\S)/g, '$1 ');
+    .replace(INLINE_CODE_PAD_BEFORE, '$1 ')
+    .replace(INLINE_CODE_PAD_AFTER, '$1 ');
 }
 
 function escapeAngleBracketsInMarkdownTables(text: string): string {
@@ -501,8 +513,6 @@ function normalizeMarkdownSpacing(text: string): string {
   let result = text
     .replace(REGEX.SPACING_LINK_FIX, ']($1) [')
     .replace(REGEX.SPACING_ADJ_COMBINED, '$& ')
-    .replace(REGEX.SPACING_CODE_PAD_BEFORE, '$1 ')
-    .replace(REGEX.SPACING_CODE_PAD_AFTER, '$1 ')
     .replace(REGEX.SPACING_CODE_DASH, '$1 - ')
     .replace(REGEX.SPACING_ESCAPED_DASH, ' - ')
     .replace(REGEX.SPACING_ESCAPES, '$1')
@@ -600,53 +610,35 @@ function normalizeNestedListIndentation(text: string): string {
     }
   );
 }
-/**
- * Iterate over markdown content, splitting it into fenced (code) and
- * non-fenced segments.  Fenced lines pass through unchanged; non-fenced
- * segments are joined and handed to `processTextSegment` for transformation.
- */
+
 export function processFencedContent(
   content: string,
   processTextSegment: (text: string) => string
 ): string {
-  const lines = content.split(/\r?\n/);
-  let fenceMarker: string | null = null;
-  const segments: string[] = [];
-  let buffer: string[] = [];
+  // Normalize line endings to \n
+  const normalizedContent = content.replace(/\r\n/g, '\n');
+  const FENCE_BLOCK_REGEX =
+    /^[ \t]*(`{3,}|~{3,})[^\n]*(?:\n[\s\S]*?)?(?:^[ \t]*\1[ \t]*$|$(?!\n))/gm;
 
-  const flushBuffer = (): void => {
-    if (buffer.length > 0) {
-      segments.push(processTextSegment(buffer.join('\n')));
-      buffer = [];
+  const parts: string[] = [];
+  let lastIndex = 0;
+
+  for (const match of normalizedContent.matchAll(FENCE_BLOCK_REGEX)) {
+    const matchStart = match.index;
+    if (matchStart > lastIndex) {
+      parts.push(
+        processTextSegment(normalizedContent.slice(lastIndex, matchStart))
+      );
     }
-  };
-
-  for (const line of lines) {
-    const trimmed = line.trimStart();
-
-    if (fenceMarker) {
-      segments.push(line);
-      if (
-        trimmed.startsWith(fenceMarker) &&
-        trimmed.slice(fenceMarker.length).trim() === ''
-      ) {
-        fenceMarker = null;
-      }
-    } else {
-      const match = FENCE_PATTERN.exec(line);
-      const newMarker = match?.[1] ?? null;
-      if (!newMarker) {
-        buffer.push(line);
-      } else {
-        flushBuffer();
-        segments.push(line);
-        fenceMarker = newMarker;
-      }
-    }
+    parts.push(match[0]);
+    lastIndex = matchStart + match[0].length;
   }
 
-  flushBuffer();
-  return segments.join('\n');
+  if (lastIndex < normalizedContent.length) {
+    parts.push(processTextSegment(normalizedContent.slice(lastIndex)));
+  }
+
+  return parts.join('');
 }
 
 function stripLeadingBreadcrumbNoise(text: string): string {
