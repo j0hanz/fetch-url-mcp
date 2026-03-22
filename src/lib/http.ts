@@ -187,7 +187,6 @@ export function handleDownload(
 // ENCODING DETECTION
 // ═══════════════════════════════════════════════════════════════════
 
-const UTF8_ENCODING = 'utf-8';
 function getCharsetFromContentType(
   contentType: string | null
 ): string | undefined {
@@ -203,7 +202,7 @@ function getCharsetFromContentType(
   return charset.trim();
 }
 function createDecoder(encoding: string | undefined): TextDecoder {
-  const fallback = (): TextDecoder => new TextDecoder(UTF8_ENCODING);
+  const fallback = (): TextDecoder => new TextDecoder('utf-8');
   if (!encoding) return fallback();
 
   try {
@@ -339,6 +338,12 @@ function resolveEncoding(
 
   return detectHtmlDeclaredEncoding(sample);
 }
+function resolveEffectiveEncoding(
+  declared: string | undefined,
+  sample: Uint8Array
+): string {
+  return resolveEncoding(declared, sample) ?? declared ?? 'utf-8';
+}
 
 // ═══════════════════════════════════════════════════════════════════
 // BINARY DETECTION
@@ -391,6 +396,14 @@ function isBinaryContent(buffer: Uint8Array, encoding?: string): boolean {
   if (hasBinarySignature(buffer)) return true;
 
   return !isUnicodeWideEncoding(encoding) && hasNullByte(buffer, 1000);
+}
+function createBinaryContentError(url: string): FetchError {
+  return new FetchError(
+    'Detailed content type check failed: binary content detected',
+    url,
+    500,
+    { reason: 'binary_content_detected' }
+  );
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -558,6 +571,27 @@ type FetchLike = (
 ) => Promise<Response>;
 type NormalizeUrl = (urlString: string) => string;
 type RedirectPreflight = (url: string, signal?: AbortSignal) => Promise<string>;
+function createPinnedAgent(ipAddress: string): Agent {
+  const ca = tls.rootCertificates.length > 0 ? tls.rootCertificates : undefined;
+  return new Agent({
+    connect: {
+      lookup: (hostname, options, callback) => {
+        const family = isIP(ipAddress) === 6 ? 6 : 4;
+        if (options.all) {
+          callback(null, [{ address: ipAddress, family }]);
+        } else {
+          callback(null, ipAddress, family);
+        }
+      },
+      timeout: config.fetcher.timeout,
+      ...(ca ? { ca } : {}),
+    },
+    pipelining: 1,
+    connections: 1,
+    keepAliveTimeout: 1000,
+    keepAliveMaxTimeout: 1000,
+  });
+}
 class RedirectFollower {
   constructor(
     private readonly fetchFn: FetchLike,
@@ -631,26 +665,7 @@ class RedirectFollower {
     };
     let agent: Agent | undefined;
     if (ipAddress) {
-      const ca =
-        tls.rootCertificates.length > 0 ? tls.rootCertificates : undefined;
-      agent = new Agent({
-        connect: {
-          lookup: (hostname, options, callback) => {
-            const family = isIP(ipAddress) === 6 ? 6 : 4;
-            if (options.all) {
-              callback(null, [{ address: ipAddress, family }]);
-            } else {
-              callback(null, ipAddress, family);
-            }
-          },
-          timeout: config.fetcher.timeout,
-          ...(ca ? { ca } : {}),
-        },
-        pipelining: 1,
-        connections: 1,
-        keepAliveTimeout: 1000,
-        keepAliveMaxTimeout: 1000,
-      });
+      agent = createPinnedAgent(ipAddress);
       fetchInit.dispatcher = agent;
     }
 
@@ -810,29 +825,10 @@ function assertSupportedContentType(
   }
 }
 function extractEncodingTokens(value: string): string[] {
-  const tokens: string[] = [];
-  let i = 0;
-  const len = value.length;
-
-  while (i < len) {
-    while (
-      i < len &&
-      (value.charCodeAt(i) === 44 || value.charCodeAt(i) <= 32)
-    ) {
-      i += 1;
-    }
-    if (i >= len) break;
-
-    const start = i;
-    while (i < len && value.charCodeAt(i) !== 44) i += 1;
-
-    const token = value.slice(start, i).trim().toLowerCase();
-    if (token) tokens.push(token);
-
-    if (i < len && value.charCodeAt(i) === 44) i += 1;
-  }
-
-  return tokens;
+  return value
+    .split(',')
+    .map((token) => token.trim().toLowerCase())
+    .filter(Boolean);
 }
 type ContentEncoding = 'gzip' | 'deflate' | 'br';
 function parseContentEncodings(value: string | null): string[] | null {
@@ -974,23 +970,26 @@ async function decodeResponseIfNeeded(
   const parsedEncodings = parseContentEncodings(encodingHeader);
   if (!parsedEncodings) return response;
 
-  const encodings = parsedEncodings.filter((token) => token !== 'identity');
-  if (encodings.length === 0) return response;
+  const encodings = parsedEncodings.filter(
+    (token): token is ContentEncoding =>
+      token !== 'identity' && isSupportedContentEncoding(token)
+  );
 
-  for (const encoding of encodings) {
-    if (!isSupportedContentEncoding(encoding)) {
-      throw createUnsupportedContentEncodingError(
-        url,
-        encodingHeader ?? encoding
-      );
-    }
+  const unsupported = parsedEncodings.filter(
+    (token) => token !== 'identity' && !isSupportedContentEncoding(token)
+  );
+  if (unsupported.length > 0) {
+    throw createUnsupportedContentEncodingError(
+      url,
+      encodingHeader ?? unsupported.join(', ')
+    );
   }
 
-  if (!response.body) return response;
+  if (encodings.length === 0 || !response.body) return response;
 
   const pipe = buildDecodePipeline(
     response.body,
-    encodings.filter(isSupportedContentEncoding),
+    encodings,
     url,
     response,
     signal
@@ -1080,10 +1079,10 @@ class BoundedBufferTransform extends Transform {
 
       if (!this.encodingResolved) {
         this.encodingResolved = true;
-        this.effectiveEncoding =
-          resolveEncoding(this.declaredEncoding, buf) ??
-          this.declaredEncoding ??
-          'utf-8';
+        this.effectiveEncoding = resolveEffectiveEncoding(
+          this.declaredEncoding,
+          buf
+        );
       }
 
       const isFirstChunk = this.firstChunk;
@@ -1093,14 +1092,7 @@ class BoundedBufferTransform extends Transform {
         (!isUnicodeWideEncoding(this.effectiveEncoding) &&
           hasNullByte(buf, 1000))
       ) {
-        callback(
-          new FetchError(
-            'Detailed content type check failed: binary content detected',
-            this.url,
-            500,
-            { reason: 'binary_content_detected' }
-          )
-        );
+        callback(createBinaryContentError(this.url));
         return;
       }
 
@@ -1200,16 +1192,10 @@ class ResponseTextReader {
     const length = truncated ? limit : arrayBuffer.byteLength;
     const buffer = new Uint8Array(arrayBuffer, 0, length);
 
-    const effectiveEncoding =
-      resolveEncoding(encoding, buffer) ?? encoding ?? 'utf-8';
+    const effectiveEncoding = resolveEffectiveEncoding(encoding, buffer);
 
     if (isBinaryContent(buffer, effectiveEncoding)) {
-      throw new FetchError(
-        'Detailed content type check failed: binary content detected',
-        url,
-        500,
-        { reason: 'binary_content_detected' }
-      );
+      throw createBinaryContentError(url);
     }
 
     return {
@@ -1448,6 +1434,17 @@ class FetchTelemetry {
     return this.redactor.redact(url);
   }
 
+  private contextFields(
+    ctx: FetchTelemetryContext
+  ): Record<string, string | undefined> {
+    return {
+      ...(ctx.contextRequestId
+        ? { contextRequestId: ctx.contextRequestId }
+        : {}),
+      ...(ctx.operationId ? { operationId: ctx.operationId } : {}),
+    };
+  }
+
   start(url: string, method: string): FetchTelemetryContext {
     const safeUrl = this.redactor.redact(url);
     const contextRequestId = this.context.getRequestId();
@@ -1462,26 +1459,21 @@ class FetchTelemetry {
     if (contextRequestId) ctx.contextRequestId = contextRequestId;
     if (operationId) ctx.operationId = operationId;
 
-    const ctxFields = {
-      ...(ctx.contextRequestId
-        ? { contextRequestId: ctx.contextRequestId }
-        : {}),
-      ...(ctx.operationId ? { operationId: ctx.operationId } : {}),
-    };
+    const fields = this.contextFields(ctx);
     this.publish({
       v: 1,
       type: 'start',
       requestId: ctx.requestId,
       method: ctx.method,
       url: ctx.url,
-      ...ctxFields,
+      ...fields,
     });
 
     this.logger.debug('HTTP Request', {
       requestId: ctx.requestId,
       method: ctx.method,
       url: ctx.url,
-      ...ctxFields,
+      ...fields,
     });
 
     return ctx;
@@ -1494,12 +1486,7 @@ class FetchTelemetry {
   ): void {
     const duration = performance.now() - context.startTime;
     const durationLabel = `${Math.round(duration)}ms`;
-    const ctxFields = {
-      ...(context.contextRequestId
-        ? { contextRequestId: context.contextRequestId }
-        : {}),
-      ...(context.operationId ? { operationId: context.operationId } : {}),
-    };
+    const fields = this.contextFields(context);
 
     this.publish({
       v: 1,
@@ -1507,7 +1494,7 @@ class FetchTelemetry {
       requestId: context.requestId,
       status: response.status,
       duration,
-      ...ctxFields,
+      ...fields,
     });
 
     const contentType = response.headers.get('content-type') ?? undefined;
@@ -1521,7 +1508,7 @@ class FetchTelemetry {
       status: response.status,
       url: context.url,
       duration: durationLabel,
-      ...ctxFields,
+      ...fields,
       ...(contentType ? { contentType } : {}),
       ...(size ? { size } : {}),
     });
@@ -1531,7 +1518,7 @@ class FetchTelemetry {
         requestId: context.requestId,
         url: context.url,
         duration: durationLabel,
-        ...ctxFields,
+        ...fields,
       });
     }
   }
@@ -1544,12 +1531,7 @@ class FetchTelemetry {
     const duration = performance.now() - context.startTime;
     const err = toError(error);
     const code = isSystemError(err) ? err.code : undefined;
-    const ctxFields = {
-      ...(context.contextRequestId
-        ? { contextRequestId: context.contextRequestId }
-        : {}),
-      ...(context.operationId ? { operationId: context.operationId } : {}),
-    };
+    const fields = this.contextFields(context);
 
     this.publish({
       v: 1,
@@ -1560,7 +1542,7 @@ class FetchTelemetry {
       duration,
       ...(code !== undefined ? { code } : {}),
       ...(status !== undefined ? { status } : {}),
-      ...ctxFields,
+      ...fields,
     });
 
     const logData: Record<string, unknown> = {
@@ -1569,7 +1551,7 @@ class FetchTelemetry {
       status,
       code,
       error: err.message,
-      ...ctxFields,
+      ...fields,
     };
 
     if (status === 429) {
