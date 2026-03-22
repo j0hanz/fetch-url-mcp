@@ -156,6 +156,12 @@ describe('health endpoint', () => {
         version: string;
         uptime: number;
         timestamp: string;
+        process?: {
+          pid: number;
+          availableMemory?: number;
+          constrainedMemory?: number;
+        };
+        activeResources?: string[];
         stats: {
           activeSessions: number;
           cacheKeys: number;
@@ -177,5 +183,13 @@ describe('health endpoint', () => {
     assert.equal(typeof result.body.stats.workerPool.queueDepth, 'number');
     assert.equal(typeof result.body.stats.workerPool.activeWorkers, 'number');
     assert.equal(typeof result.body.stats.workerPool.capacity, 'number');
+
+    // Container-aware memory APIs (Node.js >= 22)
+    assert.equal(typeof result.body.process, 'object');
+    assert.equal(typeof result.body.process?.availableMemory, 'number');
+    assert.equal(typeof result.body.process?.constrainedMemory, 'number');
+
+    // Active resource tracking
+    assert.ok(Array.isArray(result.body.activeResources));
   });
 });

@@ -69,7 +69,6 @@ const workerResponseSchema = z.discriminatedUnion('type', [
 
 interface TaskContext {
   run: (fn: () => void) => void;
-  dispose: () => void;
 }
 
 function createTaskContext(): TaskContext {
@@ -78,7 +77,6 @@ function createTaskContext(): TaskContext {
     run: (fn) => {
       runWithStore(fn);
     },
-    dispose: () => {},
   };
 }
 
@@ -211,19 +209,21 @@ class TaskQueue<T extends { id: string }> {
   }
 
   dequeue(): T | null {
+    let found: T | null = null;
+
     while (this.head < this.items.length) {
       const item = this.items[this.head];
       this.head += 1;
 
       if (item) {
         this.activeCount -= 1;
-        this.compact();
-        return item;
+        found = item;
+        break;
       }
     }
 
     this.compact();
-    return null;
+    return found;
   }
 
   removeById(id: string): T | undefined {
@@ -882,11 +882,7 @@ class WorkerPool implements TransformWorkerPool {
   }
 
   private finalizeTask(context: TaskContext, fn: () => void): void {
-    try {
-      context.run(fn);
-    } finally {
-      context.dispose();
-    }
+    context.run(fn);
   }
 }
 

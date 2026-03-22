@@ -114,8 +114,11 @@ interface HealthResponse {
     memory: NodeJS.MemoryUsage;
     cpu: NodeJS.CpuUsage;
     resource: NodeJS.ResourceUsage;
+    availableMemory?: number;
+    constrainedMemory?: number;
   };
   perf?: ReturnType<typeof getEventLoopStats>;
+  activeResources?: string[];
   stats?: {
     activeSessions: number;
     cacheKeys: number;
@@ -156,8 +159,17 @@ function buildHealthResponse(
       memory: process.memoryUsage(),
       cpu: process.cpuUsage(),
       resource: process.resourceUsage(),
+      ...(typeof process.availableMemory === 'function'
+        ? { availableMemory: process.availableMemory() }
+        : {}),
+      ...(typeof process.constrainedMemory === 'function'
+        ? { constrainedMemory: process.constrainedMemory() }
+        : {}),
     },
     perf: getEventLoopStats(),
+    ...(typeof process.getActiveResourcesInfo === 'function'
+      ? { activeResources: process.getActiveResourcesInfo() }
+      : {}),
     stats: {
       activeSessions: store.size(),
       cacheKeys: cacheKeys().length,
