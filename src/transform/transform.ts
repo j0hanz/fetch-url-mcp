@@ -429,6 +429,24 @@ function resolveCollapsedTextLengthUpTo(text: string, max: number): number {
   return length;
 }
 
+function preserveGalleryImages(doc: Document): void {
+  const galleries = doc.querySelectorAll(
+    '[class*="gallery"],[class*="slideshow"],[class*="carousel"]'
+  );
+  for (const gallery of galleries) {
+    const images = gallery.querySelectorAll('img');
+    if (images.length === 0) continue;
+
+    const fragment = doc.createDocumentFragment();
+    for (const img of images) {
+      const figure = doc.createElement('figure');
+      figure.appendChild(img.cloneNode(true));
+      fragment.appendChild(figure);
+    }
+    gallery.replaceWith(fragment);
+  }
+}
+
 function preserveAlertElements(doc: Document): void {
   const alerts = doc.querySelectorAll(
     '[role="alert"], .admonition, [class*="callout"]'
@@ -451,6 +469,7 @@ function preserveCodeLanguageAttributes(doc: Document): void {
 const STRUCTURAL_SKIP_TAGS = new Set(['HTML', 'BODY']);
 
 function prepareReadabilityDocument(readabilityDoc: Document): void {
+  preserveGalleryImages(readabilityDoc);
   preserveAlertElements(readabilityDoc);
   preserveCodeLanguageAttributes(readabilityDoc);
   normalizeTabContent(readabilityDoc);
