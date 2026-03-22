@@ -1,4 +1,4 @@
-import { AsyncLocalStorage, AsyncResource } from 'node:async_hooks';
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { availableParallelism } from 'node:os';
 import process from 'node:process';
 import { isSharedArrayBuffer } from 'node:util/types';
@@ -74,20 +74,11 @@ interface TaskContext {
 
 function createTaskContext(): TaskContext {
   const runWithStore = AsyncLocalStorage.snapshot();
-  const asyncResource = new AsyncResource('fetch-url-mcp.transform.task');
-  let disposed = false;
-
   return {
     run: (fn) => {
-      runWithStore(() => {
-        asyncResource.runInAsyncScope(fn);
-      });
+      runWithStore(fn);
     },
-    dispose: () => {
-      if (disposed) return;
-      disposed = true;
-      asyncResource.emitDestroy();
-    },
+    dispose: () => {},
   };
 }
 
