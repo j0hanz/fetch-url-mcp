@@ -10,9 +10,7 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import type { Transport } from '@modelcontextprotocol/sdk/shared/transport.js';
 
-import { config } from '../lib/core.js';
-import { logWarn } from '../lib/core.js';
-import { composeCloseHandlers } from '../lib/core.js';
+import { composeCloseHandlers, config, logWarn } from '../lib/core.js';
 import type { JsonRpcId } from '../lib/mcp-tools.js';
 import { createDefaultBlockList, normalizeIpForBlockList } from '../lib/url.js';
 import { getErrorMessage, toError } from '../lib/utils.js';
@@ -170,7 +168,6 @@ export function createRequestAbortSignal(req: IncomingMessage): {
     };
   }
 
-  const onAborted = abortRequest;
   const onClose = (): void => {
     // A normal close after a complete body should not be treated as cancellation.
     if (req.complete) return;
@@ -180,7 +177,6 @@ export function createRequestAbortSignal(req: IncomingMessage): {
     abortRequest();
   };
 
-  req.once('aborted', onAborted);
   req.once('close', onClose);
   req.once('error', onError);
 
@@ -188,7 +184,6 @@ export function createRequestAbortSignal(req: IncomingMessage): {
     signal: controller.signal,
     cleanup: () => {
       cleanedUp = true;
-      req.removeListener('aborted', onAborted);
       req.removeListener('close', onClose);
       req.removeListener('error', onError);
     },
@@ -215,10 +210,10 @@ export function registerInboundBlockList(server: NetworkServer): void {
   const blockList = createDefaultBlockList();
 
   server.on('connection', (socket: Socket) => {
-    const remoteAddress = normalizeRemoteAddress(socket.remoteAddress);
-    if (!remoteAddress) return;
+    const raw = socket.remoteAddress?.trim();
+    if (!raw) return;
 
-    const normalized = normalizeIpForBlockList(remoteAddress);
+    const normalized = normalizeIpForBlockList(raw);
     if (!normalized) return;
 
     if (blockList.check(normalized.ip, normalized.family)) {
@@ -393,45 +388,33 @@ class JsonBodyReader {
     limit: number,
     signal?: AbortSignal
   ): Promise<string | undefined> {
-    const abortListener = this.attachAbortListener(req, signal);
+    const abortListener =
+      signal != null
+        ? (): void => {
+            destroyRequestBestEffort(req);
+          }
+        : null;
+
+    if (signal != null && abortListener) {
+      if (signal.aborted) {
+        abortListener();
+      } else {
+        signal.addEventListener('abort', abortListener, { once: true });
+      }
+    }
 
     try {
       const { chunks, size } = await this.collectChunks(req, limit, signal);
       if (chunks.length === 0) return undefined;
       return Buffer.concat(chunks, size).toString('utf8');
     } finally {
-      this.detachAbortListener(signal, abortListener);
-    }
-  }
-
-  private attachAbortListener(
-    req: IncomingMessage,
-    signal?: AbortSignal
-  ): (() => void) | null {
-    if (!signal) return null;
-
-    const listener = (): void => {
-      destroyRequestBestEffort(req);
-    };
-
-    if (signal.aborted) {
-      listener();
-    } else {
-      signal.addEventListener('abort', listener, { once: true });
-    }
-
-    return listener;
-  }
-
-  private detachAbortListener(
-    signal: AbortSignal | undefined,
-    listener: (() => void) | null
-  ): void {
-    if (!signal || !listener) return;
-    try {
-      signal.removeEventListener('abort', listener);
-    } catch {
-      // Best-effort cleanup.
+      if (signal && abortListener) {
+        try {
+          signal.removeEventListener('abort', abortListener);
+        } catch {
+          // Best-effort cleanup.
+        }
+      }
     }
   }
 
