@@ -1,4 +1,3 @@
-import { Buffer } from 'node:buffer';
 import type { IncomingMessage, Server, ServerResponse } from 'node:http';
 import type { Server as HttpsServer } from 'node:https';
 import type { Socket } from 'node:net';
@@ -406,7 +405,13 @@ class JsonBodyReader {
     try {
       const { chunks, size } = await this.collectChunks(req, limit, signal);
       if (chunks.length === 0) return undefined;
-      return Buffer.concat(chunks, size).toString('utf8');
+      const combined = new Uint8Array(size);
+      let offset = 0;
+      for (const chunk of chunks) {
+        combined.set(chunk, offset);
+        offset += chunk.byteLength;
+      }
+      return new TextDecoder().decode(combined);
     } finally {
       if (signal && abortListener) {
         try {
@@ -422,9 +427,9 @@ class JsonBodyReader {
     req: IncomingMessage,
     limit: number,
     signal?: AbortSignal
-  ): Promise<{ chunks: Buffer[]; size: number }> {
+  ): Promise<{ chunks: Uint8Array[]; size: number }> {
     let size = 0;
-    const chunks: Buffer[] = [];
+    const chunks: Uint8Array[] = [];
 
     const sink = new Writable({
       write: (chunk, _encoding, callback): void => {
@@ -434,10 +439,8 @@ class JsonBodyReader {
             return;
           }
 
-          const buf = this.normalizeChunk(
-            chunk as Buffer | Uint8Array | string
-          );
-          size += buf.length;
+          const buf = this.normalizeChunk(chunk as Uint8Array | string);
+          size += buf.byteLength;
 
           if (size > limit) {
             callback(
@@ -470,10 +473,9 @@ class JsonBodyReader {
     }
   }
 
-  private normalizeChunk(chunk: Buffer | Uint8Array | string): Buffer {
-    if (Buffer.isBuffer(chunk)) return chunk;
-    if (typeof chunk === 'string') return Buffer.from(chunk, 'utf8');
-    return Buffer.from(chunk.buffer, chunk.byteOffset, chunk.byteLength);
+  private normalizeChunk(chunk: Uint8Array | string): Uint8Array {
+    if (typeof chunk === 'string') return new TextEncoder().encode(chunk);
+    return chunk;
   }
 }
 

@@ -1,4 +1,3 @@
-import { Buffer } from 'node:buffer';
 import { createHmac, hash as oneShotHash, timingSafeEqual } from 'node:crypto';
 import {
   setInterval as setIntervalPromise,
@@ -8,6 +7,7 @@ import { inspect } from 'node:util';
 
 import { config, logDebug, logWarn } from './core.js';
 
+const textEncoder = new TextEncoder();
 const UNKNOWN_ERROR_MESSAGE = 'Unknown error';
 
 export function composeAbortSignal(
@@ -52,9 +52,9 @@ export function createAbortError(url: string, stage: string): FetchError {
   });
 }
 export function timingSafeEqualUtf8(a: string, b: string): boolean {
-  const aBuf = Buffer.from(a, 'utf8');
-  const bBuf = Buffer.from(b, 'utf8');
-  if (aBuf.length !== bBuf.length) return false;
+  const aBuf = textEncoder.encode(a);
+  const bBuf = textEncoder.encode(b);
+  if (aBuf.byteLength !== bBuf.byteLength) return false;
   return timingSafeEqual(aBuf, bBuf);
 }
 export function sha256Hex(input: string | Uint8Array): string {

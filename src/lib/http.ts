@@ -1,4 +1,4 @@
-import { Buffer, isUtf8 } from 'node:buffer';
+import { isUtf8 } from 'node:buffer';
 import { hash, randomUUID } from 'node:crypto';
 import diagnosticsChannel from 'node:diagnostics_channel';
 import { type ServerResponse } from 'node:http';
@@ -1060,6 +1060,19 @@ async function decodeResponseIfNeeded(
 // RESPONSE READING
 // ═══════════════════════════════════════════════════════════════════
 
+function concatUint8Arrays(
+  chunks: Uint8Array[],
+  totalLength: number
+): Uint8Array {
+  const result = new Uint8Array(totalLength);
+  let offset = 0;
+  for (const chunk of chunks) {
+    result.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return result;
+}
+
 class BoundedBufferTransform extends Transform {
   total = 0;
   readonly chunks: Uint8Array[] = [];
@@ -1265,7 +1278,7 @@ class ResponseTextReader {
         source.destroy();
         guard.destroy();
         return {
-          buffer: Buffer.concat(guard.chunks, guard.total),
+          buffer: concatUint8Arrays(guard.chunks, guard.total),
           encoding: guard.effectiveEncoding,
           size: guard.total,
           truncated: true,
