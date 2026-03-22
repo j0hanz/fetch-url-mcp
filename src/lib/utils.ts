@@ -1,11 +1,5 @@
 import { Buffer } from 'node:buffer';
-import {
-  createHash,
-  createHmac,
-  hash as oneShotHash,
-  randomBytes,
-  timingSafeEqual,
-} from 'node:crypto';
+import { createHmac, hash as oneShotHash, timingSafeEqual } from 'node:crypto';
 import {
   setInterval as setIntervalPromise,
   setTimeout as setTimeoutPromise,
@@ -57,50 +51,14 @@ export function createAbortError(url: string, stage: string): FetchError {
     stage,
   });
 }
-const MAX_HASH_INPUT_BYTES = 5 * 1024 * 1024;
-type AllowedHashAlgorithm = 'sha256' | 'sha512';
-const ALLOWED_HASH_ALGORITHMS: ReadonlySet<AllowedHashAlgorithm> = new Set([
-  'sha256',
-  'sha512',
-]);
-function byteLengthUtf8(input: string): number {
-  // Avoid allocating (unlike TextEncoder().encode()).
-  return Buffer.byteLength(input, 'utf8');
-}
-function byteLength(input: string | Uint8Array): number {
-  return typeof input === 'string' ? byteLengthUtf8(input) : input.byteLength;
-}
-function assertAllowedAlgorithm(
-  algorithm: AllowedHashAlgorithm
-): asserts algorithm is AllowedHashAlgorithm {
-  // Defensive: protects against `any` / unchecked external inputs.
-  if (!ALLOWED_HASH_ALGORITHMS.has(algorithm)) {
-    throw new Error(`Hash algorithm not allowed: ${algorithm}`);
-  }
-}
-const TIMING_SAFE_HMAC_KEY = randomBytes(32);
-
 export function timingSafeEqualUtf8(a: string, b: string): boolean {
-  const aHash = createHmac('sha256', TIMING_SAFE_HMAC_KEY).update(a).digest();
-  const bHash = createHmac('sha256', TIMING_SAFE_HMAC_KEY).update(b).digest();
-  return timingSafeEqual(aHash, bHash);
-}
-function hashHex(
-  algorithm: AllowedHashAlgorithm,
-  input: string | Uint8Array
-): string {
-  assertAllowedAlgorithm(algorithm);
-
-  if (byteLength(input) <= MAX_HASH_INPUT_BYTES) {
-    return oneShotHash(algorithm, input, 'hex');
-  }
-
-  const hasher = createHash(algorithm);
-  hasher.update(input);
-  return hasher.digest('hex');
+  const aBuf = Buffer.from(a, 'utf8');
+  const bBuf = Buffer.from(b, 'utf8');
+  if (aBuf.length !== bBuf.length) return false;
+  return timingSafeEqual(aBuf, bBuf);
 }
 export function sha256Hex(input: string | Uint8Array): string {
-  return hashHex('sha256', input);
+  return oneShotHash('sha256', input, 'hex');
 }
 export function hmacSha256Hex(
   key: string | Uint8Array,

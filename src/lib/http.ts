@@ -1,5 +1,5 @@
 import { Buffer, isUtf8 } from 'node:buffer';
-import { hash } from 'node:crypto';
+import { hash, randomUUID } from 'node:crypto';
 import diagnosticsChannel from 'node:diagnostics_channel';
 import { type ServerResponse } from 'node:http';
 import { isIP } from 'node:net';
@@ -1459,7 +1459,7 @@ class FetchTelemetry {
     const operationId = this.context.getOperationId();
 
     const ctx: FetchTelemetryContext = {
-      requestId: crypto.randomUUID(),
+      requestId: randomUUID(),
       startTime: performance.now(),
       url: safeUrl,
       method: method.toUpperCase(),

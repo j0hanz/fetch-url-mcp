@@ -1,4 +1,6 @@
-import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
+import { createHmac, randomBytes } from 'node:crypto';
+
+import { timingSafeEqualUtf8 } from '../lib/utils.js';
 
 const MAX_CURSOR_LENGTH = 256;
 const CURSOR_SECRET = randomBytes(32);
@@ -7,13 +9,6 @@ function signPayload(payload: string): string {
   return createHmac('sha256', CURSOR_SECRET)
     .update(payload)
     .digest('base64url');
-}
-
-function safeCompare(left: string, right: string): boolean {
-  const leftBuffer = Buffer.from(left);
-  const rightBuffer = Buffer.from(right);
-  if (leftBuffer.length !== rightBuffer.length) return false;
-  return timingSafeEqual(leftBuffer, rightBuffer);
 }
 
 export function encodeTaskCursor(anchorTaskId: string): string {
@@ -32,7 +27,7 @@ export function decodeTaskCursor(
 
   const [payload, signature, ...rest] = cursor.split('.');
   if (!payload || !signature || rest.length > 0) return null;
-  if (!safeCompare(signPayload(payload), signature)) return null;
+  if (!timingSafeEqualUtf8(signPayload(payload), signature)) return null;
 
   try {
     const decoded = JSON.parse(

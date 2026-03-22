@@ -26,7 +26,7 @@ describe('sha256Hex', () => {
     assert.equal(sha256Hex(input), expected);
   });
 
-  it('matches createHash output for large inputs', () => {
+  it('matches createHash output for large inputs (one-shot path)', () => {
     const fiveMb = 5 * 1024 * 1024;
     const input = 'a'.repeat(fiveMb + 1);
     const expected = createHash('sha256').update(input).digest('hex');
