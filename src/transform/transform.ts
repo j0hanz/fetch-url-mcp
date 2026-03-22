@@ -446,6 +446,8 @@ function preserveCodeLanguageAttributes(doc: Document): void {
   }
 }
 
+const STRUCTURAL_SKIP_TAGS = new Set(['HTML', 'BODY']);
+
 function prepareReadabilityDocument(readabilityDoc: Document): void {
   preserveAlertElements(readabilityDoc);
   preserveCodeLanguageAttributes(readabilityDoc);
@@ -454,6 +456,7 @@ function prepareReadabilityDocument(readabilityDoc: Document): void {
   for (const el of readabilityDoc.querySelectorAll(
     '[class*="breadcrumb"],[class*="pagination"]'
   )) {
+    if (STRUCTURAL_SKIP_TAGS.has(el.tagName)) continue;
     el.remove();
   }
 }
