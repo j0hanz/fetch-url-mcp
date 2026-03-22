@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { once } from 'node:events';
 import { readFileSync } from 'node:fs';
 import {
   createServer,
@@ -975,8 +976,9 @@ function createNetworkServer(
   listener: (req: IncomingMessage, res: ServerResponse) => void
 ): NetworkServer {
   const { https } = config.server;
+
   if (!https.enabled) {
-    return createServer(listener);
+    return createServer({ keepAlive: true, noDelay: true }, listener);
   }
 
   const { keyFile, certFile, caFile } = https;
@@ -1003,7 +1005,10 @@ function createNetworkServer(
     );
   }
 
-  return createHttpsServer(tlsOptions, listener);
+  return createHttpsServer(
+    { ...tlsOptions, keepAlive: true, noDelay: true },
+    listener
+  );
 }
 
 async function listen(
@@ -1011,18 +1016,8 @@ async function listen(
   host: string,
   port: number
 ): Promise<void> {
-  const { promise, resolve, reject } = Promise.withResolvers<undefined>();
-  function onError(err: Error): void {
-    server.off('error', onError);
-    reject(err);
-  }
-
-  server.once('error', onError);
-  server.listen(port, host, (): void => {
-    server.off('error', onError);
-    resolve(undefined);
-  });
-  await promise;
+  server.listen(port, host);
+  await once(server, 'listening');
 }
 
 function resolveListeningPort(server: NetworkServer, fallback: number): number {
@@ -1050,7 +1045,7 @@ function createShutdownHandler(options: {
     const sessions = options.sessionStore.clear();
     for (let i = 0; i < sessions.length; i += closeBatchSize) {
       const batch = sessions.slice(i, i + closeBatchSize);
-      await Promise.all(
+      const results = await Promise.allSettled(
         batch.map(async (session) => {
           await teardownSessionResources(
             session,
@@ -1058,14 +1053,18 @@ function createShutdownHandler(options: {
           );
         })
       );
+
+      for (const r of results) {
+        if (r.status === 'rejected') {
+          logError(
+            'Session teardown failed during shutdown',
+            r.reason instanceof Error ? r.reason : undefined
+          );
+        }
+      }
     }
 
-    const { promise, resolve, reject } = Promise.withResolvers<undefined>();
-    options.server.close((err): void => {
-      if (err) reject(err);
-      else resolve(undefined);
-    });
-    await promise;
+    await options.server[Symbol.asyncDispose]();
   };
 }
 

@@ -217,6 +217,7 @@ interface HttpServerTuningTarget {
   keepAliveTimeoutBuffer?: number;
   maxHeadersCount?: number | null;
   maxConnections?: number;
+  dropMaxConnection?: boolean;
   on?: (event: string, listener: (...args: unknown[]) => void) => void;
   closeIdleConnections?: () => void;
   closeAllConnections?: () => void;
@@ -242,6 +243,7 @@ export function applyHttpServerTuning(server: HttpServerTuningTarget): void {
 
   if (typeof maxConnections === 'number' && maxConnections > 0) {
     server.maxConnections = maxConnections;
+    server.dropMaxConnection = true;
 
     if (typeof server.on === 'function') {
       let lastLoggedAt = 0;
