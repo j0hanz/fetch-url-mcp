@@ -2,7 +2,6 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import { EventEmitter } from 'node:events';
 import { accessSync, constants as fsConstants, readFileSync } from 'node:fs';
 import { findPackageJSON } from 'node:module';
-import { isIP } from 'node:net';
 import process from 'node:process';
 import {
   getSystemErrorMessage,
@@ -15,6 +14,7 @@ import { z } from 'zod';
 
 import {
   buildIpv4,
+  isIP,
   normalizeHostname,
   stripTrailingDots,
 } from './net-utils.js';

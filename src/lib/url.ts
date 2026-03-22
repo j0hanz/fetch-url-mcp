@@ -1,8 +1,13 @@
 import dns from 'node:dns';
-import { BlockList, isIP, SocketAddress } from 'node:net';
+import { BlockList, SocketAddress } from 'node:net';
 
 import { config, logDebug } from './core.js';
-import { buildIpv4, normalizeHostname } from './net-utils.js';
+import {
+  buildIpv4,
+  isIP,
+  normalizeHostname,
+  stripTrailingDots,
+} from './net-utils.js';
 import {
   composeAbortSignal,
   createErrorWithCode,
@@ -13,8 +18,7 @@ import {
 const DNS_LOOKUP_TIMEOUT_MS = 5000;
 const CNAME_LOOKUP_MAX_DEPTH = 5;
 function normalizeDnsName(value: string): string {
-  const normalized = value.trim().toLowerCase().replace(/\.+$/, '');
-  return normalized;
+  return stripTrailingDots(value.trim().toLowerCase());
 }
 async function withTimeout<T>(
   promise: Promise<T>,
@@ -56,6 +60,7 @@ function createAbortSignalError(): Error {
 export class SafeDnsResolver {
   private readonly cnameResolver = new dns.promises.Resolver({
     timeout: DNS_LOOKUP_TIMEOUT_MS,
+    tries: 2,
   });
 
   constructor(

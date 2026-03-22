@@ -2,7 +2,6 @@ import { Buffer, isUtf8 } from 'node:buffer';
 import { hash, randomUUID } from 'node:crypto';
 import diagnosticsChannel from 'node:diagnostics_channel';
 import { type ServerResponse } from 'node:http';
-import { isIP } from 'node:net';
 import { posix as pathPosix } from 'node:path';
 import { PassThrough, Readable, Transform } from 'node:stream';
 import { buffer as consumeBuffer } from 'node:stream/consumers';
@@ -25,6 +24,7 @@ import {
   logWarn,
   redactUrl,
 } from './core.js';
+import { isIP } from './net-utils.js';
 import {
   BLOCKED_HOST_SUFFIXES,
   createDnsPreflight,

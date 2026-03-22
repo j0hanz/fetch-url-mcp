@@ -1,6 +1,8 @@
 import { isIP } from 'node:net';
 import { domainToASCII } from 'node:url';
 
+export { isIP };
+
 export function buildIpv4(
   parts: readonly [number, number, number, number]
 ): string {
