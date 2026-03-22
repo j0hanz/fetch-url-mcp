@@ -381,10 +381,14 @@ function hasNullByte(buffer: Uint8Array, limit: number): boolean {
   const checkLen = Math.min(buffer.length, limit);
   return buffer.subarray(0, checkLen).includes(0x00);
 }
-function isBinaryContent(buffer: Uint8Array, encoding?: string): boolean {
+function hasBinarySignature(buffer: Uint8Array): boolean {
   for (const signature of BINARY_SIGNATURES) {
     if (startsWithBytes(buffer, signature)) return true;
   }
+  return false;
+}
+function isBinaryContent(buffer: Uint8Array, encoding?: string): boolean {
+  if (hasBinarySignature(buffer)) return true;
 
   return !isUnicodeWideEncoding(encoding) && hasNullByte(buffer, 1000);
 }
@@ -1048,6 +1052,7 @@ class BoundedBufferTransform extends Transform {
   readonly chunks: Buffer[] = [];
   effectiveEncoding: string;
   private encodingResolved = false;
+  private firstChunk = true;
 
   constructor(
     private readonly byteLimit: number,
@@ -1081,7 +1086,13 @@ class BoundedBufferTransform extends Transform {
           'utf-8';
       }
 
-      if (isBinaryContent(buf, this.effectiveEncoding)) {
+      const isFirstChunk = this.firstChunk;
+      this.firstChunk = false;
+      if (
+        (isFirstChunk && hasBinarySignature(buf)) ||
+        (!isUnicodeWideEncoding(this.effectiveEncoding) &&
+          hasNullByte(buf, 1000))
+      ) {
         callback(
           new FetchError(
             'Detailed content type check failed: binary content detected',

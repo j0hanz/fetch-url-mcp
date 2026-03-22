@@ -345,15 +345,32 @@ describe('readResponseText', () => {
     );
   });
 
-  it('rejects binary content detected in later stream chunks', async () => {
+  it('ignores binary signatures in later stream chunks (only first chunk)', async () => {
     const firstChunk = new Uint8Array([0x68, 0x65, 0x6c, 0x6c, 0x6f]); // hello
     const secondChunk = new Uint8Array([0xff, 0xd8, 0xff, 0xe0]); // JPEG signature
     const response = createChunkedBufferResponse([firstChunk, secondChunk], {
       'content-type': 'text/plain',
     });
 
+    // Binary signatures are file magic bytes — only meaningful at position 0.
+    // Later chunks matching a signature should not trigger rejection.
+    const result = await readResponseText(
+      response,
+      'https://example.com/late-binary',
+      1024
+    );
+    assert.ok(result.text.length > 0);
+  });
+
+  it('rejects null bytes in later stream chunks', async () => {
+    const firstChunk = new Uint8Array([0x68, 0x65, 0x6c, 0x6c, 0x6f]); // hello
+    const secondChunk = new Uint8Array([0x74, 0x65, 0x00, 0x73, 0x74]); // te\0st
+    const response = createChunkedBufferResponse([firstChunk, secondChunk], {
+      'content-type': 'text/plain',
+    });
+
     await assert.rejects(
-      () => readResponseText(response, 'https://example.com/late-binary', 1024),
+      () => readResponseText(response, 'https://example.com/null-binary', 1024),
       (error) => {
         assert.ok(error instanceof FetchError);
         assert.equal(error.statusCode, 500);
