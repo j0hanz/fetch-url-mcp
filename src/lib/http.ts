@@ -1,5 +1,5 @@
-import { Buffer, isAscii, isUtf8 } from 'node:buffer';
-import { hash, randomUUID } from 'node:crypto';
+import { Buffer, isUtf8 } from 'node:buffer';
+import { hash } from 'node:crypto';
 import diagnosticsChannel from 'node:diagnostics_channel';
 import { type ServerResponse } from 'node:http';
 import { isIP } from 'node:net';
@@ -201,14 +201,20 @@ function getCharsetFromContentType(
   }
   return charset.trim();
 }
+const decoderCache = new Map<string, TextDecoder>();
 function createDecoder(encoding: string | undefined): TextDecoder {
-  const fallback = (): TextDecoder => new TextDecoder('utf-8');
-  if (!encoding) return fallback();
+  const label = normalizeEncodingLabel(encoding) || 'utf-8';
+  const cached = decoderCache.get(label);
+  if (cached) return cached;
 
   try {
-    return new TextDecoder(encoding);
+    const decoder = new TextDecoder(label);
+    decoderCache.set(label, decoder);
+    return decoder;
   } catch {
-    return fallback();
+    const fallback = decoderCache.get('utf-8') ?? new TextDecoder('utf-8');
+    decoderCache.set('utf-8', fallback);
+    return fallback;
   }
 }
 function decodeBuffer(buffer: Uint8Array, encoding: string): string {
@@ -319,30 +325,22 @@ function detectHtmlDeclaredEncoding(buffer: Uint8Array): string | undefined {
   const scanSize = Math.min(buffer.length, 8_192);
   if (scanSize === 0) return undefined;
 
-  const headSnippet = Buffer.from(
-    buffer.buffer,
-    buffer.byteOffset,
-    scanSize
-  ).toString('latin1');
+  const headSnippet = createDecoder('latin1').decode(
+    buffer.subarray(0, scanSize)
+  );
 
   return extractHtmlCharset(headSnippet) ?? extractXmlEncoding(headSnippet);
 }
 function resolveEncoding(
-  declaredEncoding: string | undefined,
-  sample: Uint8Array
-): string | undefined {
-  const bomEncoding = detectBomEncoding(sample);
-  if (bomEncoding) return bomEncoding;
-
-  if (declaredEncoding) return declaredEncoding;
-
-  return detectHtmlDeclaredEncoding(sample);
-}
-function resolveEffectiveEncoding(
   declared: string | undefined,
   sample: Uint8Array
 ): string {
-  return resolveEncoding(declared, sample) ?? declared ?? 'utf-8';
+  const bomEncoding = detectBomEncoding(sample);
+  if (bomEncoding) return bomEncoding;
+
+  if (declared) return declared;
+
+  return detectHtmlDeclaredEncoding(sample) ?? 'utf-8';
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -398,7 +396,7 @@ function isBinaryContent(buffer: Uint8Array, encoding?: string): boolean {
   if (isUnicodeWideEncoding(encoding)) return false;
 
   const sample = buffer.length > 8192 ? buffer.subarray(0, 8192) : buffer;
-  if (isAscii(sample) || isUtf8(sample)) return false;
+  if (isUtf8(sample)) return false;
 
   return hasNullByte(buffer, 8192);
 }
@@ -1053,7 +1051,7 @@ async function decodeResponseIfNeeded(
 
 class BoundedBufferTransform extends Transform {
   total = 0;
-  readonly chunks: Buffer[] = [];
+  readonly chunks: Uint8Array[] = [];
   effectiveEncoding: string;
   private encodingResolved = false;
   private firstChunk = true;
@@ -1071,23 +1069,17 @@ class BoundedBufferTransform extends Transform {
   override _transform(
     chunk: unknown,
     _encoding: string,
-    callback: (error?: Error | null, data?: Buffer) => void
+    callback: (error?: Error | null, data?: Uint8Array) => void
   ): void {
     try {
-      const buf = Buffer.isBuffer(chunk)
-        ? chunk
-        : Buffer.from(
-            (chunk as Uint8Array).buffer,
-            (chunk as Uint8Array).byteOffset,
-            (chunk as Uint8Array).byteLength
-          );
+      const buf: Uint8Array =
+        chunk instanceof Uint8Array
+          ? chunk
+          : new Uint8Array(chunk as ArrayBuffer);
 
       if (!this.encodingResolved) {
         this.encodingResolved = true;
-        this.effectiveEncoding = resolveEffectiveEncoding(
-          this.declaredEncoding,
-          buf
-        );
+        this.effectiveEncoding = resolveEncoding(this.declaredEncoding, buf);
       }
 
       const isFirstChunk = this.firstChunk;
@@ -1197,7 +1189,7 @@ class ResponseTextReader {
     const length = truncated ? limit : arrayBuffer.byteLength;
     const buffer = new Uint8Array(arrayBuffer, 0, length);
 
-    const effectiveEncoding = resolveEffectiveEncoding(encoding, buffer);
+    const effectiveEncoding = resolveEncoding(encoding, buffer);
 
     if (isBinaryContent(buffer, effectiveEncoding)) {
       throw createBinaryContentError(url);
@@ -1456,7 +1448,7 @@ class FetchTelemetry {
     const operationId = this.context.getOperationId();
 
     const ctx: FetchTelemetryContext = {
-      requestId: randomUUID(),
+      requestId: crypto.randomUUID(),
       startTime: performance.now(),
       url: safeUrl,
       method: method.toUpperCase(),
