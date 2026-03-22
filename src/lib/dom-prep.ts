@@ -584,9 +584,58 @@ function processUrlElement(
     if (resolved) el.setAttribute(attr, resolved.href);
   }
 }
+
+// Rewrite WordPress Photon CDN image URLs to point to the original host, since srcset URLs are often preserved with the updated domain while src is not.
+// This ensures images are correctly resolved when the page is migrated to a new domain but still references the old domain in img src attributes.
+const WP_PHOTON_HOST_PATTERN = /^i\d\.wp\.com$/;
+
+function rewritePhotonSrc(document: Document, pageHost: string): void {
+  for (const img of document.querySelectorAll('img[src]')) {
+    const src = img.getAttribute('src');
+    if (!src) continue;
+    const parsed = URL.parse(src);
+    if (!parsed || !WP_PHOTON_HOST_PATTERN.test(parsed.hostname)) continue;
+    if (img.getAttribute('srcset')) continue;
+    const segments = parsed.pathname.split('/').filter(Boolean);
+    if (segments.length < 2) continue;
+    const originHost = segments[0];
+    if (!originHost?.includes('.')) continue;
+    const resourcePath = `/${segments.slice(1).join('/')}`;
+    const rewritten = `https://${pageHost}${resourcePath}`;
+    img.setAttribute('src', rewritten);
+  }
+}
+
+// For images with src URLs pointing to a different domain than the page, check if their srcset contains a same-domain URL and prefer that for the src attribute.
+// This can help preserve image loading when migrating content that references an old domain, as srcset entries are often left unchanged while src attributes are updated or removed.
+function preferSameDomainSrc(document: Document, base: URL): void {
+  const pageHost = base.hostname;
+  for (const img of document.querySelectorAll('img[src][srcset]')) {
+    const src = img.getAttribute('src');
+    if (!src) continue;
+    const srcParsed = URL.parse(src);
+    if (!srcParsed || srcParsed.hostname === pageHost) continue;
+
+    const srcset = img.getAttribute('srcset') ?? '';
+    const entries = srcset.split(',');
+    for (const entry of entries) {
+      const url = entry.trim().split(/\s+/)[0];
+      if (!url) continue;
+      const parsed = URL.parse(url);
+      if (parsed?.hostname === pageHost) {
+        img.setAttribute('src', url);
+        break;
+      }
+    }
+  }
+}
+
 function resolveUrls(document: Document, baseUrlStr: string): void {
   const base = URL.parse(baseUrlStr);
   if (!base) return;
+
+  rewritePhotonSrc(document, base.hostname);
+  preferSameDomainSrc(document, base);
 
   const elements = document.querySelectorAll('a[href],img[src],source[srcset]');
   for (const el of elements) {

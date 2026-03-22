@@ -164,12 +164,32 @@ function resolveLazySrc(
   return undefined;
 }
 
+// Some sites (notably WordPress with Photon CDN) use a CDN proxy URL in img src while keeping the original same-domain URL in srcset.
+// Since the converter prefers srcset URLs for CDN-hosted images, we need to detect this pattern and extract the canonical URL from srcset to ensure images are correctly resolved, especially when migrating content to a new domain.
+const WP_PHOTON_HOST_PATTERN = /^i\d\.wp\.com$/;
+
+function isWpPhotonUrl(src: string): boolean {
+  const parsed = URL.parse(src);
+  return parsed !== null && WP_PHOTON_HOST_PATTERN.test(parsed.hostname);
+}
+
 function resolveImageSrc(
   getAttribute: ((name: string) => string | null) | undefined
 ): string {
   if (!getAttribute) return '';
 
   const srcRaw = getAttribute('src') ?? '';
+
+  // When src is a CDN proxy URL, prefer srcset which usually has the
+  // canonical same-domain URL that survives domain migrations.
+  if (srcRaw && isWpPhotonUrl(srcRaw)) {
+    const srcset = getAttribute('srcset');
+    if (srcset) {
+      const url = extractNonDataSrcsetUrl(srcset);
+      if (url) return url;
+    }
+  }
+
   if (srcRaw && !isDataUri(srcRaw)) return srcRaw;
 
   // First check common lazy-loading attributes that may contain non-data URLs before falling back to the native srcset, as some sites use data URIs in lazy attributes while still providing valid URLs in srcset.
