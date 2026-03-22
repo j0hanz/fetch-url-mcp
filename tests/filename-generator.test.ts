@@ -120,10 +120,10 @@ describe('generateSafeFilename', () => {
   });
 
   describe('timestamp fallback', () => {
-    it('handles timestamp fallback', () => {
+    it('handles hash fallback', () => {
       assertRegexCase({
         url: 'https://example.com/',
-        pattern: /^download-\d+\.md$/,
+        pattern: /^download-[a-f0-9]{16}\.md$/,
       });
     });
   });

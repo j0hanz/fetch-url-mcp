@@ -1,5 +1,5 @@
-import { Buffer } from 'node:buffer';
-import { randomUUID } from 'node:crypto';
+import { Buffer, isAscii, isUtf8 } from 'node:buffer';
+import { hash, randomUUID } from 'node:crypto';
 import diagnosticsChannel from 'node:diagnostics_channel';
 import { type ServerResponse } from 'node:http';
 import { isIP } from 'node:net';
@@ -103,7 +103,7 @@ function resolveFilenameBase(
   if (fromTitle) return fromTitle;
 
   if (hashFallback) return hashFallback.substring(0, 16);
-  return `download-${Date.now()}`;
+  return `download-${hash('sha256', url, 'hex').substring(0, 16)}`;
 }
 export function generateSafeFilename(
   url: string,
@@ -395,7 +395,12 @@ function hasBinarySignature(buffer: Uint8Array): boolean {
 function isBinaryContent(buffer: Uint8Array, encoding?: string): boolean {
   if (hasBinarySignature(buffer)) return true;
 
-  return !isUnicodeWideEncoding(encoding) && hasNullByte(buffer, 1000);
+  if (isUnicodeWideEncoding(encoding)) return false;
+
+  const sample = buffer.length > 8192 ? buffer.subarray(0, 8192) : buffer;
+  if (isAscii(sample) || isUtf8(sample)) return false;
+
+  return hasNullByte(buffer, 8192);
 }
 function createBinaryContentError(url: string): FetchError {
   return new FetchError(
