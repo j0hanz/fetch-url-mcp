@@ -201,6 +201,7 @@ function getCharsetFromContentType(
   }
   return charset.trim();
 }
+const MAX_CACHED_DECODERS = 50;
 const decoderCache = new Map<string, TextDecoder>();
 function createDecoder(encoding: string | undefined): TextDecoder {
   const label = normalizeEncodingLabel(encoding) || 'utf-8';
@@ -209,11 +210,15 @@ function createDecoder(encoding: string | undefined): TextDecoder {
 
   try {
     const decoder = new TextDecoder(label);
-    decoderCache.set(label, decoder);
+    if (decoderCache.size < MAX_CACHED_DECODERS) {
+      decoderCache.set(label, decoder);
+    }
     return decoder;
   } catch {
     const fallback = decoderCache.get('utf-8') ?? new TextDecoder('utf-8');
-    decoderCache.set('utf-8', fallback);
+    if (decoderCache.size < MAX_CACHED_DECODERS) {
+      decoderCache.set('utf-8', fallback);
+    }
     return fallback;
   }
 }
@@ -380,12 +385,26 @@ const BINARY_SIGNATURES = [
   [0x4f, 0x54, 0x54, 0x4f],
   [0x53, 0x51, 0x4c, 0x69],
 ] as const;
+const BINARY_SIG_BY_FIRST_BYTE = new Map<
+  number,
+  readonly (readonly number[])[]
+>();
+for (const sig of BINARY_SIGNATURES) {
+  const key = sig[0];
+  const existing = BINARY_SIG_BY_FIRST_BYTE.get(key);
+  BINARY_SIG_BY_FIRST_BYTE.set(key, existing ? [...existing, sig] : [sig]);
+}
 function hasNullByte(buffer: Uint8Array, limit: number): boolean {
   const checkLen = Math.min(buffer.length, limit);
   return buffer.subarray(0, checkLen).includes(0x00);
 }
 function hasBinarySignature(buffer: Uint8Array): boolean {
-  for (const signature of BINARY_SIGNATURES) {
+  if (buffer.length === 0) return false;
+  const first = buffer[0];
+  if (first === undefined) return false;
+  const candidates = BINARY_SIG_BY_FIRST_BYTE.get(first);
+  if (!candidates) return false;
+  for (const signature of candidates) {
     if (startsWithBytes(buffer, signature)) return true;
   }
   return false;
@@ -903,7 +922,6 @@ function createPumpedStream(
 }
 interface DecodePipeline {
   decodedReader: ReadableStreamDefaultReader<Uint8Array>;
-  passthroughBranch: ReadableStream<Uint8Array>;
   decodedNodeStream: PassThrough;
   headers: Headers;
   cleanup: () => void;
@@ -915,12 +933,10 @@ function buildDecodePipeline(
   response: Response,
   signal?: AbortSignal
 ): DecodePipeline {
-  const [decodeBranch, passthroughBranch] = body.tee();
-
   const decodeOrder = encodings.slice().reverse();
   const decompressors = decodeOrder.map((enc) => createDecompressor(enc));
   const decodeSource = Readable.fromWeb(
-    toNodeReadableStream(decodeBranch, url, 'response:decode-content-encoding')
+    toNodeReadableStream(body, url, 'response:decode-content-encoding')
   );
   const decodedNodeStream = new PassThrough();
   const decodedPipeline = pipeline([
@@ -958,7 +974,6 @@ function buildDecodePipeline(
 
   return {
     decodedReader,
-    passthroughBranch,
     decodedNodeStream,
     headers,
     cleanup,
@@ -1007,7 +1022,6 @@ async function decodeResponseIfNeeded(
     const first = await pipe.decodedReader.read();
     if (first.done) {
       clearAbortListener();
-      void pipe.passthroughBranch.cancel().catch(() => undefined);
       return new Response(null, {
         status: response.status,
         statusText: response.statusText,
@@ -1015,7 +1029,6 @@ async function decodeResponseIfNeeded(
       });
     }
 
-    void pipe.passthroughBranch.cancel().catch(() => undefined);
     const body = createPumpedStream(first.value, pipe.decodedReader);
 
     if (signal) {
@@ -1035,8 +1048,6 @@ async function decodeResponseIfNeeded(
     clearAbortListener();
     pipe.cleanup();
     void pipe.decodedReader.cancel(error).catch(() => undefined);
-
-    void pipe.passthroughBranch.cancel().catch(() => undefined);
 
     throw new FetchError(
       `Content-Encoding decode failed for ${redactUrl(url)}: ${isError(error) ? error.message : String(error)}`,
