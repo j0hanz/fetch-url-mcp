@@ -343,6 +343,14 @@ function trimDanglingTagFragment(content: string): string {
   return result;
 }
 
+function isAsciiOnly(s: string, sampleSize = 512): boolean {
+  const len = Math.min(s.length, sampleSize);
+  for (let i = 0; i < len; i++) {
+    if (s.charCodeAt(i) > 127) return false;
+  }
+  return true;
+}
+
 function truncateHtml(
   html: string,
   inputTruncated = false
@@ -351,6 +359,7 @@ function truncateHtml(
   if (maxSize <= 0) return { html, truncated: false };
 
   if (html.length <= maxSize) {
+    if (isAsciiOnly(html) && !inputTruncated) return { html, truncated: false };
     const byteLength = getUtf8ByteLength(html);
     if (byteLength <= maxSize && !inputTruncated)
       return { html, truncated: false };
@@ -372,13 +381,6 @@ function truncateHtml(
     truncatedSize: getUtf8ByteLength(content),
   });
   return { html: content, truncated: true };
-}
-
-function willTruncate(html: string): boolean {
-  const maxSize = config.constants.maxHtmlSize;
-  return (
-    maxSize > 0 && (html.length > maxSize || getUtf8ByteLength(html) > maxSize)
-  );
 }
 
 const MIN_SPA_CONTENT_LENGTH = 100;
@@ -523,6 +525,7 @@ function extractArticle(
     checkAbort('extract:article:parse');
 
     const reader = new Readability(readabilityDoc, {
+      charThreshold: 140,
       maxElemsToParse: MAX_READABILITY_ELEMENTS,
       classesToPreserve: [
         'admonition',
@@ -588,7 +591,11 @@ function extractEarlyMetadataIfNeeded(
   html: string,
   url: string
 ): ExtractedMetadata | null {
-  if (!willTruncate(html)) return null;
+  const maxSize = config.constants.maxHtmlSize;
+  if (maxSize <= 0 || html.length <= maxSize) {
+    if (maxSize <= 0 || isAsciiOnly(html) || getUtf8ByteLength(html) <= maxSize)
+      return null;
+  }
   return stageTracker.run(url, 'extract:early-metadata', () =>
     extractMetadataFromHead(html, url)
   );
@@ -776,26 +783,24 @@ function resolveRelativeUrlsInSegment(
   origin: string
 ): string {
   let cursor = 0;
-  let output = '';
+  const parts: string[] = [];
 
   while (cursor < markdown.length) {
     const link = findInlineLink(markdown, cursor);
     if (!link) {
-      output += markdown.slice(cursor);
+      parts.push(markdown.slice(cursor));
       break;
     }
 
-    output += markdown.slice(cursor, link.prefixStart);
-    output += `${link.prefix}(${resolveRelativeHref(
-      link.href,
-      baseUrl,
-      origin
-    )})`;
+    parts.push(markdown.slice(cursor, link.prefixStart));
+    parts.push(
+      `${link.prefix}(${resolveRelativeHref(link.href, baseUrl, origin)})`
+    );
 
     cursor = link.closeParen + 1;
   }
 
-  return output;
+  return parts.join('');
 }
 
 function resolveRelativeUrls(
@@ -1013,13 +1018,8 @@ function getTextContentSkippingHidden(node: Node, parts: string[]): void {
   if (tagName === 'SCRIPT' || tagName === 'STYLE' || tagName === 'NOSCRIPT')
     return;
 
-  const { childNodes } = node;
-  const { length } = childNodes;
-  for (let i = 0; i < length; i++) {
-    const child = childNodes[i];
-    if (child) {
-      getTextContentSkippingHidden(child, parts);
-    }
+  for (const child of node.childNodes) {
+    getTextContentSkippingHidden(child, parts);
   }
 }
 
@@ -1341,14 +1341,28 @@ function passesContentRatioGate(
   return true;
 }
 
-function passesRetentionRules(
+const RETENTION_TAG_PATTERNS: ReadonlyMap<string, RegExp> = new Map([
+  ['h1,h2,h3,h4,h5,h6', /<h[1-6]\b/gi],
+  ['pre', /<pre\b/gi],
+  ['table', /<table\b/gi],
+  ['img', /<img\b/gi],
+]);
+
+function countHtmlTagOccurrences(html: string, pattern: RegExp): number {
+  const matches = html.match(pattern);
+  return matches ? matches.length : 0;
+}
+
+function passesRetentionRulesFromHtml(
   originalDoc: Document,
-  articleDoc: Document
+  articleHtml: string
 ): boolean {
   return RETENTION_RULES.every(({ selector, minOriginal, ratio }) => {
     const original = countMatchingElements(originalDoc, selector);
     if (original < minOriginal) return true;
-    return countMatchingElements(articleDoc, selector) / original >= ratio;
+    const pattern = RETENTION_TAG_PATTERNS.get(selector);
+    if (!pattern) return true;
+    return countHtmlTagOccurrences(articleHtml, pattern) / original >= ratio;
   });
 }
 
@@ -1376,19 +1390,23 @@ function evaluateArticleContent(
     return null;
   }
 
+  if (!passesRetentionRulesFromHtml(document, article.content)) {
+    return null;
+  }
+
+  if (hasTruncatedSentences(article.textContent)) {
+    return null;
+  }
+
   const articleDoc = parseHTML(
     `<!DOCTYPE html><html><body>${article.content}</body></html>`
   ).document;
-
-  if (!passesRetentionRules(document, articleDoc)) {
-    return null;
-  }
 
   if (!passesEmptySectionRatio(articleDoc)) {
     return null;
   }
 
-  return hasTruncatedSentences(article.textContent) ? null : articleDoc;
+  return articleDoc;
 }
 
 type BaseContentSource = Pick<
