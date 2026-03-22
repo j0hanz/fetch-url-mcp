@@ -1,6 +1,6 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { EventEmitter } from 'node:events';
-import { accessSync, constants as fsConstants, readFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { findPackageJSON } from 'node:module';
 import process from 'node:process';
 import {
@@ -239,16 +239,6 @@ const EnvParser = {
   },
 };
 
-function assertFileReadable(filePath: string, envVar: string): void {
-  try {
-    accessSync(filePath, fsConstants.R_OK);
-  } catch {
-    throw new ConfigError(
-      `${envVar} points to "${filePath}" which does not exist or is not readable`
-    );
-  }
-}
-
 const MAX_HTML_BYTES = 10 * 1024 * 1024;
 const MAX_INLINE_CONTENT_CHARS = EnvParser.integer(
   env['MAX_INLINE_CONTENT_CHARS'],
@@ -385,10 +375,6 @@ function buildHttpsConfig(): HttpsConfig {
   const keyFile = EnvParser.optionalFilePath(env['SERVER_TLS_KEY_FILE']);
   const certFile = EnvParser.optionalFilePath(env['SERVER_TLS_CERT_FILE']);
   const caFile = EnvParser.optionalFilePath(env['SERVER_TLS_CA_FILE']);
-
-  if (keyFile) assertFileReadable(keyFile, 'SERVER_TLS_KEY_FILE');
-  if (certFile) assertFileReadable(certFile, 'SERVER_TLS_CERT_FILE');
-  if (caFile) assertFileReadable(caFile, 'SERVER_TLS_CA_FILE');
 
   if ((keyFile && !certFile) || (!keyFile && certFile)) {
     throw new ConfigError(
