@@ -491,7 +491,11 @@ function prepareReadabilityDocument(readabilityDoc: Document): void {
   }
 }
 
-function validateReaderability(doc: Document, url: string, signal?: AbortSignal): boolean {
+function validateReaderability(
+  doc: Document,
+  url: string,
+  signal?: AbortSignal
+): boolean {
   throwIfAborted(signal, url, 'extract:article:textCheck');
 
   const rawText =
@@ -514,16 +518,17 @@ function validateReaderability(doc: Document, url: string, signal?: AbortSignal)
 
   throwIfAborted(signal, url, 'extract:article:readabilityCheck');
 
-  if (
-    textLength >= MIN_READERABLE_TEXT_LENGTH &&
-    !isProbablyReaderable(doc)
-  ) {
+  if (textLength >= MIN_READERABLE_TEXT_LENGTH && !isProbablyReaderable(doc)) {
     return false;
   }
   return true;
 }
 
-function invokeReadability(doc: Document, url: string, signal?: AbortSignal): ReturnType<InstanceType<typeof Readability>['parse']> {
+function invokeReadability(
+  doc: Document,
+  url: string,
+  signal?: AbortSignal
+): ReturnType<InstanceType<typeof Readability>['parse']> {
   throwIfAborted(signal, url, 'extract:article:clone');
 
   const readabilityDoc =
@@ -556,7 +561,9 @@ function invokeReadability(doc: Document, url: string, signal?: AbortSignal): Re
   return reader.parse();
 }
 
-function mapReadabilityResult(parsed: NonNullable<ReturnType<InstanceType<typeof Readability>['parse']>>): ExtractedArticle {
+function mapReadabilityResult(
+  parsed: NonNullable<ReturnType<InstanceType<typeof Readability>['parse']>>
+): ExtractedArticle {
   return {
     content: (parsed.content as string | undefined) ?? '',
     textContent: (parsed.textContent as string | undefined) ?? '',
@@ -1004,7 +1011,12 @@ interface RetentionRule {
 }
 
 const RETENTION_RULES: readonly RetentionRule[] = [
-  { selector: 'h1,h2,h3,h4,h5,h6', pattern: /<h[1-6]\b/gi, minOriginal: 1, ratio: 0.3 },
+  {
+    selector: 'h1,h2,h3,h4,h5,h6',
+    pattern: /<h[1-6]\b/gi,
+    minOriginal: 1,
+    ratio: 0.3,
+  },
   { selector: 'pre', pattern: /<pre\b/gi, minOriginal: 1, ratio: 0.15 },
   { selector: 'table', pattern: /<table\b/gi, minOriginal: 1, ratio: 0.5 },
   { selector: 'img', pattern: /<img\b/gi, minOriginal: 4, ratio: 0.2 },
