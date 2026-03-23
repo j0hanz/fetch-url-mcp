@@ -414,6 +414,49 @@ function preserveAlertElements(doc: Document): void {
   }
 }
 
+function preserveHeadingLayouts(doc: Document): void {
+  // Readability aggressively drops elements matching /header/i in their class/id.
+  // Many technical docs use `<div class="layout__header">` to wrap their title and intro text,
+  // causing the ENTIRE intro and H1 to be dropped.
+  for (const heading of doc.querySelectorAll('h1, h2')) {
+    let p = heading.parentNode as Element | null;
+    while (p && p.tagName !== 'BODY' && p.tagName !== 'HTML') {
+      const cls = p.getAttribute('class');
+      if (cls && /header/i.test(cls)) {
+        p.setAttribute('class', cls.replace(/header/gi, 'hdr-preserved'));
+      }
+      const id = p.getAttribute('id');
+      if (id && /header/i.test(id)) {
+        p.setAttribute('id', id.replace(/header/gi, 'hdr-preserved'));
+      }
+      p = p.parentNode as Element | null;
+    }
+  }
+
+  // To prevent Readability from penalizing sibling document sections
+  // (e.g. intro vs reference tables) and picking only one, we unwrap structural wrappers inside main boundaries.
+  for (const main of doc.querySelectorAll('main, [role="main"], article')) {
+    for (const child of Array.from(main.children)) {
+      // Don't unwrap nav, aside, or blockquotes (alerts are already converted to blockquotes here)
+      if (
+        child.tagName === 'DIV' ||
+        child.tagName === 'HEADER' ||
+        child.tagName === 'SECTION'
+      ) {
+        // preserve specific structural features Readability might want to keep
+        const cls = child.getAttribute('class') ?? '';
+        if (cls.includes('mermaid')) continue;
+
+        const frag = doc.createDocumentFragment();
+        while (child.firstChild) {
+          frag.appendChild(child.firstChild);
+        }
+        child.replaceWith(frag);
+      }
+    }
+  }
+}
+
 function preserveCodeLanguageAttributes(doc: Document): void {
   for (const el of doc.querySelectorAll('pre, code')) {
     if (el.getAttribute('data-language')) continue;
@@ -426,6 +469,7 @@ function prepareReadabilityDocument(readabilityDoc: Document): void {
   extractNoscriptImages(readabilityDoc);
   preserveGalleryImages(readabilityDoc);
   preserveAlertElements(readabilityDoc);
+  preserveHeadingLayouts(readabilityDoc);
   preserveCodeLanguageAttributes(readabilityDoc);
   normalizeTabContent(readabilityDoc);
   surfaceCodeEditorContent(readabilityDoc);
