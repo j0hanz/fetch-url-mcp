@@ -24,7 +24,7 @@ import {
   logWarn,
   redactUrl,
 } from './core.js';
-import { isIP } from './net-utils.js';
+import { isIP } from './url.js';
 import {
   BLOCKED_HOST_SUFFIXES,
   createDnsPreflight,

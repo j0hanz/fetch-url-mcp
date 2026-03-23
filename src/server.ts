@@ -18,7 +18,7 @@ import {
   abortAllTaskExecutions,
   registerTaskHandlers,
 } from './lib/task-handlers.js';
-import type { IconInfo } from './lib/types.js';
+import type { IconInfo } from './lib/utils.js';
 import { toError } from './lib/utils.js';
 
 import { registerGetHelpPrompt } from './prompts/index.js';

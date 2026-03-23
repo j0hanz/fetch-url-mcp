@@ -447,3 +447,21 @@ export function truncateToUtf8Boundary(html: string, maxBytes: number): string {
     new TextDecoder('utf-8').decode(trimUtf8Buffer(htmlBuffer, maxBytes))
   );
 }
+export interface IconInfo {
+  src: string;
+  mimeType: string;
+}
+
+export function buildOptionalIcons(
+  iconInfo?: IconInfo
+): { icons: IconInfo[] } | Record<string, never> {
+  if (!iconInfo) return {};
+  return {
+    icons: [
+      {
+        src: iconInfo.src,
+        mimeType: iconInfo.mimeType,
+      },
+    ],
+  };
+}

@@ -12,14 +12,14 @@ import {
 import { type McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 
+import type { SessionEntry } from './session.js';
+import type { SessionStore } from './session.js';
 import {
   buildIpv4,
   isIP,
   normalizeHostname,
   stripTrailingDots,
-} from './net-utils.js';
-import type { SessionEntry } from './session.js';
-import type { SessionStore } from './session.js';
+} from './url.js';
 import {
   getErrorMessage,
   isAbortError,

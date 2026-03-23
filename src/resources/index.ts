@@ -19,7 +19,7 @@ import {
 } from '../lib/core.js';
 import { logWarn } from '../lib/core.js';
 import { registerServerLifecycleCleanup } from '../lib/sdk-interop.js';
-import { buildOptionalIcons, type IconInfo } from '../lib/types.js';
+import { buildOptionalIcons, type IconInfo } from '../lib/utils.js';
 import { isObject } from '../lib/utils.js';
 
 import { parseCachedPayload, resolveCachedPayloadContent } from '../schemas.js';

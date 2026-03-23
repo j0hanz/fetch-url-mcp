@@ -1,13 +1,8 @@
 import dns from 'node:dns';
-import { BlockList, SocketAddress } from 'node:net';
+import { BlockList, isIP, SocketAddress } from 'node:net';
+import { domainToASCII } from 'node:url';
 
 import { config, logDebug } from './core.js';
-import {
-  buildIpv4,
-  isIP,
-  normalizeHostname,
-  stripTrailingDots,
-} from './net-utils.js';
 import {
   composeAbortSignal,
   createErrorWithCode,
@@ -739,4 +734,28 @@ export class UrlNormalizer {
 
     throw createValidationError(messages[result.reason]);
   }
+}
+export { isIP };
+
+export function buildIpv4(
+  parts: readonly [number, number, number, number]
+): string {
+  return parts.join('.');
+}
+
+export function stripTrailingDots(value: string): string {
+  let result = value;
+  while (result.endsWith('.')) result = result.slice(0, -1);
+  return result;
+}
+
+export function normalizeHostname(value: string): string | null {
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+
+  const lowered = trimmed.toLowerCase();
+  if (isIP(lowered)) return stripTrailingDots(lowered);
+
+  const ascii = domainToASCII(lowered);
+  return ascii ? stripTrailingDots(ascii) : null;
 }
