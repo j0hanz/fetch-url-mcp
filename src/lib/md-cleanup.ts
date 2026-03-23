@@ -40,6 +40,9 @@ const TOC_SCAN_LIMIT = 20;
 const TOC_MAX_NON_EMPTY = 12;
 const TOC_LINK_RATIO_THRESHOLD = 0.8;
 
+// ── Docs-chrome scan depth ───────────────────────────────────────────
+const CHROME_SCAN_LINE_LIMIT = 12;
+
 // ── Fence pattern ───────────────────────────────────────────────────
 const FENCE_PATTERN = /^\s*(`{3,}|~{3,})/;
 
@@ -56,14 +59,12 @@ const REGEX = {
   TOC_LINK: /^- \[[^\]]+\]\(#[^)]+\)\s*$/,
   TOC_HEADING:
     /^(?:#{1,6}\s+)?(?:table of contents|contents|on this page)\s*$/i,
-  HTML_DOC_START: /^(<!doctype|<html)/i,
   COMBINED_LINE_REMOVALS:
     /^(?:\[Skip to (?:main )?(?:content|navigation)\]\(#[^)]*\)|\[Skip link\]\(#[^)]*\)|Was this page helpful\??|\[Back to top\]\(#[^)]*\)|\[\s*\]\(https?:\/\/[^)]*\))\s*$/gim,
   ZERO_WIDTH_ANCHOR: /\[(?:\s|\u200B)*\]\(#[^)]*\)[ \t]*/g,
   CONCATENATED_PROPS:
     /([a-z_][a-z0-9_]{0,30}\??:\s+)([\u0022\u201C][^\u0022\u201C\u201D]*[\u0022\u201D])([a-z_][a-z0-9_]{0,30}\??:)/g,
   DOUBLE_NEWLINE_REDUCER: /\n{3,}/g,
-  SOURCE_KEY: /^source:\s/im,
   HEADING_SPACING: /(^#{1,6}\s[^\n]*)\n([^\n])/gm,
   HEADING_CODE_BLOCK: /(^#{1,6}\s+\w+)```/gm,
   SPACING_LINK_FIX: /\]\(([^)]+)\)\[/g,
@@ -111,7 +112,7 @@ const TYPEDOC_PREFIXES = [
 interface TextPass {
   readonly stage: string;
   readonly enabled?: () => boolean;
-  readonly apply: (text: string) => string;
+  readonly transform: (text: string) => string;
 }
 
 interface CleanupOptions {
@@ -348,39 +349,39 @@ function maybePromoteOrphanHeading(
 }
 function preprocessLines(lines: string[], options?: CleanupOptions): string {
   const checkAbort = createAbortChecker(options);
+  const result: string[] = [];
+  let skipUntil = -1;
 
-  return lines
-    .reduce<{ result: string[]; skipUntil: number }>(
-      (acc, currentLine, i) => {
-        if (i < acc.skipUntil) return acc;
-        const trimmed = currentLine.trim();
-        const normalizedLine = normalizePreprocessLine(
-          lines,
-          i,
-          trimmed,
-          currentLine,
-          options
-        );
-        if (normalizedLine === null) return acc;
+  for (let i = 0; i < lines.length; i++) {
+    if (i < skipUntil) continue;
 
-        const tocSkip = maybeSkipTocBlock(lines, i, trimmed, options);
-        if (tocSkip !== null) {
-          acc.skipUntil = tocSkip;
-          return acc;
-        }
+    const currentLine = lines[i] ?? '';
+    const trimmed = currentLine.trim();
+    const normalizedLine = normalizePreprocessLine(
+      lines,
+      i,
+      trimmed,
+      currentLine,
+      options
+    );
+    if (normalizedLine === null) continue;
 
-        const promotedLine = maybePromoteOrphanHeading(
-          lines,
-          i,
-          trimmed,
-          checkAbort
-        );
-        acc.result.push(promotedLine ?? normalizedLine);
-        return acc;
-      },
-      { result: [], skipUntil: -1 }
-    )
-    .result.join('\n');
+    const tocSkip = maybeSkipTocBlock(lines, i, trimmed, options);
+    if (tocSkip !== null) {
+      skipUntil = tocSkip;
+      continue;
+    }
+
+    const promotedLine = maybePromoteOrphanHeading(
+      lines,
+      i,
+      trimmed,
+      checkAbort
+    );
+    result.push(promotedLine ?? normalizedLine);
+  }
+
+  return result.join('\n');
 }
 function processTextBuffer(lines: string[], options?: CleanupOptions): string {
   if (lines.length === 0) return '';
@@ -415,19 +416,27 @@ function normalizeInlineCodeTokens(text: string): string {
   });
 }
 
-function collapseQualifiedIdentifierSpacing(text: string): string {
+function applyUntilStable(
+  text: string,
+  pattern: RegExp,
+  replacement: string,
+  maxPasses = PROPERTY_FIX_MAX_PASSES
+): string {
   let result = text;
-
-  for (let i = 0; i < PROPERTY_FIX_MAX_PASSES; i++) {
-    const next = result.replace(
-      /\b([A-Za-z_$][\w$]*)\.\s+(?=[A-Za-z_$<])/g,
-      '$1.'
-    );
+  for (let i = 0; i < maxPasses; i++) {
+    const next = result.replace(pattern, replacement);
     if (next === result) break;
     result = next;
   }
-
   return result;
+}
+
+function collapseQualifiedIdentifierSpacing(text: string): string {
+  return applyUntilStable(
+    text,
+    /\b([A-Za-z_$][\w$]*)\.\s+(?=[A-Za-z_$<])/g,
+    '$1.'
+  );
 }
 
 function normalizeMarkdownLinkText(text: string): string {
@@ -475,6 +484,14 @@ function getHeadingInfo(line: string): { level: number } | null {
   return { level: match[1]?.length ?? 0 };
 }
 
+function findNextNonBlankIndex(lines: string[], startIndex: number): number {
+  let idx = startIndex;
+  while (idx < lines.length && isBlank(lines[idx])) {
+    idx += 1;
+  }
+  return idx;
+}
+
 function removeEmptyHeadingSections(text: string): string {
   const lines = text.split('\n');
   const kept: string[] = [];
@@ -487,10 +504,7 @@ function removeEmptyHeadingSections(text: string): string {
       continue;
     }
 
-    let nextIndex = i + 1;
-    while (nextIndex < lines.length && isBlank(lines[nextIndex])) {
-      nextIndex += 1;
-    }
+    const nextIndex = findNextNonBlankIndex(lines, i + 1);
 
     const nextLine = lines[nextIndex];
     if (nextLine === undefined) {
@@ -535,7 +549,7 @@ function normalizeMarkdownSpacing(text: string): string {
 function stripLeadingDocsChrome(text: string): string {
   const lines = text.split('\n');
   const cleaned = lines.map((line, index) => {
-    if (index >= 12) return line;
+    if (index >= CHROME_SCAN_LINE_LIMIT) return line;
     const trimmed = line.trim();
     return LEADING_DOCS_CHROME_PATTERNS.some((pattern) => pattern.test(trimmed))
       ? ''
@@ -544,13 +558,7 @@ function stripLeadingDocsChrome(text: string): string {
   return cleaned.join('\n').replace(REGEX.DOUBLE_NEWLINE_REDUCER, '\n\n');
 }
 function fixConcatenatedProperties(text: string): string {
-  let result = text;
-  for (let k = 0; k < PROPERTY_FIX_MAX_PASSES; k++) {
-    const next = result.replace(REGEX.CONCATENATED_PROPS, '$1$2\n\n$3');
-    if (next === result) break;
-    result = next;
-  }
-  return result;
+  return applyUntilStable(text, REGEX.CONCATENATED_PROPS, '$1$2\n\n$3');
 }
 function applyGlobalRegexes(text: string, options?: CleanupOptions): string {
   const checkAbort = createAbortChecker(options);
@@ -558,11 +566,11 @@ function applyGlobalRegexes(text: string, options?: CleanupOptions): string {
   const passes: readonly TextPass[] = [
     {
       stage: 'markdown:cleanup:nbsp',
-      apply: (t) => t.replace(/\u00A0/g, ' '),
+      transform: (t) => t.replace(/\u00A0/g, ' '),
     },
     {
       stage: 'markdown:cleanup:headings',
-      apply: (t) =>
+      transform: (t) =>
         t
           .replace(REGEX.HEADING_SPACING, '$1\n\n$2')
           .replace(REGEX.HEADING_CODE_BLOCK, '$1\n\n```'),
@@ -570,24 +578,24 @@ function applyGlobalRegexes(text: string, options?: CleanupOptions): string {
     {
       stage: 'markdown:cleanup:typedoc',
       enabled: () => config.markdownCleanup.removeTypeDocComments,
-      apply: removeTypeDocArtifacts,
+      transform: removeTypeDocArtifacts,
     },
     {
       stage: 'markdown:cleanup:skip-links',
       enabled: () => config.markdownCleanup.removeSkipLinks,
-      apply: removeSkipLinks,
+      transform: removeSkipLinks,
     },
     {
       stage: 'markdown:cleanup:spacing',
-      apply: normalizeMarkdownSpacing,
+      transform: normalizeMarkdownSpacing,
     },
     {
       stage: 'markdown:cleanup:properties',
-      apply: fixConcatenatedProperties,
+      transform: fixConcatenatedProperties,
     },
     {
       stage: 'markdown:cleanup:permalinks',
-      apply: stripTrailingHeadingPermalinks,
+      transform: stripTrailingHeadingPermalinks,
     },
   ];
 
@@ -595,7 +603,7 @@ function applyGlobalRegexes(text: string, options?: CleanupOptions): string {
   for (const pass of passes) {
     if (pass.enabled !== undefined && !pass.enabled()) continue;
     checkAbort(pass.stage);
-    result = pass.apply(result);
+    result = pass.transform(result);
   }
   return result;
 }
