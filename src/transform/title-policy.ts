@@ -90,7 +90,7 @@ export function maybePrependSyntheticTitle(
   markdown: string,
   context: SyntheticTitleContext
 ): string {
-  if (!context.title || /^(#{1,6})\s/.test(markdown.trimStart())) {
+  if (!context.title || /^#\s/.test(markdown.trimStart())) {
     return markdown;
   }
 

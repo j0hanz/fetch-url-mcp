@@ -1152,10 +1152,31 @@ export function runDocsControlPass(document: Document): void {
   separateAdjacentInlineElements(document);
 }
 
+const PHRASING_PARENTS = new Set([
+  'P',
+  'LI',
+  'TD',
+  'TH',
+  'DD',
+  'SPAN',
+  'LABEL',
+  'FIGCAPTION',
+  'BLOCKQUOTE',
+]);
+
+function unwrapInlineButtons(document: Document): void {
+  for (const btn of document.querySelectorAll('button')) {
+    const parent = btn.parentElement;
+    if (!parent || !PHRASING_PARENTS.has(parent.tagName)) continue;
+    btn.replaceWith(...Array.from(btn.childNodes));
+  }
+}
+
 function runStructuralNoisePass(
   document: Document,
   signal?: AbortSignal
 ): void {
+  unwrapInlineButtons(document);
   stripNoise(document, signal);
 }
 
