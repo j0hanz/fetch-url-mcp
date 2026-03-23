@@ -44,15 +44,11 @@ export function isGithubRepositoryRootUrl(url: string): boolean {
   return parsed.pathname.split('/').filter(Boolean).length === 2;
 }
 
-function normalizeHeadingText(value: string): string {
-  return value.replace(/\s+/g, ' ').trim().toLowerCase();
-}
-
 function stripLeadingHeading(markdown: string, headingText: string): string {
   if (!markdown) return markdown;
 
   const lines = markdown.split('\n');
-  const target = normalizeHeadingText(headingText);
+  const target = normalizeSyntheticTitleToken(headingText);
   let nonEmptySeen = 0;
 
   for (
@@ -67,7 +63,7 @@ function stripLeadingHeading(markdown: string, headingText: string): string {
     const match = LEADING_HEADING_PATTERN.exec(trimmed);
     if (!match) continue;
 
-    const current = normalizeHeadingText(match[2] ?? '');
+    const current = normalizeSyntheticTitleToken(match[2] ?? '');
     if (current !== target) return markdown;
 
     lines.splice(index, 1);
@@ -92,18 +88,6 @@ export function maybeStripGithubPrimaryHeading(
   return stripLeadingHeading(markdown, primaryHeading);
 }
 
-function buildSyntheticTitlePrefix(
-  url: string,
-  favicon?: string,
-  suppressFavicon?: boolean
-): string {
-  if (!favicon || suppressFavicon) return ' ';
-
-  const alt = parseUrlOrNull(url)?.hostname ?? '';
-
-  return ` ![${alt}](${favicon}) `;
-}
-
 export function maybePrependSyntheticTitle(
   markdown: string,
   context: SyntheticTitleContext,
@@ -113,9 +97,11 @@ export function maybePrependSyntheticTitle(
     return markdown;
   }
 
-  return `#${buildSyntheticTitlePrefix(
-    url,
-    context.favicon,
-    context.suppressSyntheticFavicon
-  )}${context.title}\n\n${markdown}`;
+  let prefix = ' ';
+  if (context.favicon && !context.suppressSyntheticFavicon) {
+    const alt = parseUrlOrNull(url)?.hostname ?? '';
+    prefix = ` ![${alt}](${context.favicon}) `;
+  }
+
+  return `#${prefix}${context.title}\n\n${markdown}`;
 }

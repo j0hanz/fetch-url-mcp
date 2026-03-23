@@ -62,10 +62,9 @@ export function normalizeDocumentTitle(
   return `${owner}/${repo}`;
 }
 
-const META_PROPERTY_HANDLERS = new Map<
-  string,
-  (ctx: MetaContext, content: string) => void
->([
+type MetaHandler = (ctx: MetaContext, content: string) => void;
+
+const META_PROPERTY_HANDLERS = new Map<string, MetaHandler>([
   [
     'og:title',
     (ctx, c) => {
@@ -98,10 +97,7 @@ const META_PROPERTY_HANDLERS = new Map<
   ],
 ]);
 
-const META_NAME_HANDLERS = new Map<
-  string,
-  (ctx: MetaContext, content: string) => void
->([
+const META_NAME_HANDLERS = new Map<string, MetaHandler>([
   [
     'twitter:title',
     (ctx, c) => {
@@ -185,15 +181,10 @@ const FAVICON_SELECTORS = [
 
 function resolveFaviconUrl(href: string, baseUrl: string): string | undefined {
   const trimmed = href.trim();
-  if (!trimmed) return undefined;
-  if (trimmed.toLowerCase().startsWith('data:')) return undefined;
+  if (!trimmed || trimmed.toLowerCase().startsWith('data:')) return undefined;
 
   const resolved = parseUrlOrNull(trimmed, baseUrl);
-  if (!resolved) {
-    return undefined;
-  }
-
-  if (resolved.protocol !== 'http:' && resolved.protocol !== 'https:') {
+  if (resolved?.protocol !== 'http:' && resolved?.protocol !== 'https:') {
     return undefined;
   }
 
