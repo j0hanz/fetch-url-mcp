@@ -30,26 +30,27 @@ async function withTimeout<T>(
   const raceSignal = composeAbortSignal(signal, timeoutMs);
   if (!raceSignal) return promise;
 
-  if (raceSignal.aborted) {
-    throw signal?.aborted
+  const classifyError = (): Error =>
+    signal?.aborted
       ? (onAbort?.() ?? new Error('Request was canceled'))
       : onTimeout();
-  }
 
-  return new Promise<T>((resolve, reject) => {
-    const onAborted = (): void => {
-      reject(
-        signal?.aborted
-          ? (onAbort?.() ?? new Error('Request was canceled'))
-          : onTimeout()
-      );
-    };
-
-    raceSignal.addEventListener('abort', onAborted, { once: true });
-    promise.then(resolve, reject).finally(() => {
-      raceSignal.removeEventListener('abort', onAborted);
-    });
-  });
+  return Promise.race([
+    promise,
+    new Promise<never>((_, reject) => {
+      if (raceSignal.aborted) {
+        reject(classifyError());
+      } else {
+        raceSignal.addEventListener(
+          'abort',
+          () => {
+            reject(classifyError());
+          },
+          { once: true }
+        );
+      }
+    }),
+  ]);
 }
 function createAbortSignalError(): Error {
   const err = new Error('Request was canceled');
@@ -70,19 +71,16 @@ export class SafeDnsResolver {
   ) {}
 
   private assertIpAllowed(ip: string, context?: string): void {
+    const result = this.ipBlocker.checkTarget(ip, []);
+    if (!result) return;
+
     const errorTarget = context ?? ip;
-    if (isCloudMetadataHost(ip)) {
-      throw createErrorWithCode(
-        `Blocked IP range: ${errorTarget}. Cloud metadata endpoints are not allowed`,
-        'EBLOCKED'
-      );
-    }
-    if (!isLocalFetchAllowed() && this.ipBlocker.isBlockedIp(ip)) {
-      throw createErrorWithCode(
-        `Blocked IP range: ${errorTarget}. Private IPs are not allowed`,
-        'EBLOCKED'
-      );
-    }
+    throw createErrorWithCode(
+      result.reason === 'cloud-metadata'
+        ? `Blocked IP range: ${errorTarget}. Cloud metadata endpoints are not allowed`
+        : `Blocked IP range: ${errorTarget}. Private IPs are not allowed`,
+      'EBLOCKED'
+    );
   }
 
   async resolveAndValidate(
@@ -504,36 +502,21 @@ export class RawUrlTransformer {
     url: string,
     hash: string
   ): { url: string; platform: string } | null {
-    return (
-      this.transformGithubGistRaw(url) ??
-      this.transformGithubGistStandard(url, hash)
-    );
-  }
-
-  private transformGithubGistRaw(
-    url: string
-  ): { url: string; platform: string } | null {
     const rawMatch = GITHUB_GIST_RAW_PATTERN.exec(url);
-    if (!rawMatch) return null;
+    if (rawMatch) {
+      const groups = rawMatch.pathname.groups as UrlPatternGroups;
+      const user = getPatternGroup(groups, 'user');
+      const gistId = getPatternGroup(groups, 'gistId');
+      const rawFilePath = getPatternGroup(groups, 'filePath');
+      if (!user || !gistId) return null;
 
-    const groups = rawMatch.pathname.groups as UrlPatternGroups;
-    const user = getPatternGroup(groups, 'user');
-    const gistId = getPatternGroup(groups, 'gistId');
-    const filePath = getPatternGroup(groups, 'filePath');
+      const resolvedFilePath = rawFilePath ? `/${rawFilePath}` : '';
+      return {
+        url: `https://gist.githubusercontent.com/${user}/${gistId}/raw${resolvedFilePath}`,
+        platform: 'github-gist',
+      };
+    }
 
-    if (!user || !gistId) return null;
-
-    const resolvedFilePath = filePath ? `/${filePath}` : '';
-    return {
-      url: `https://gist.githubusercontent.com/${user}/${gistId}/raw${resolvedFilePath}`,
-      platform: 'github-gist',
-    };
-  }
-
-  private transformGithubGistStandard(
-    url: string,
-    hash: string
-  ): { url: string; platform: string } | null {
     const match = GITHUB_GIST_PATTERN.exec(url);
     if (!match) return null;
 
@@ -607,45 +590,72 @@ function createValidationError(message: string): Error {
   return createErrorWithCode(message, VALIDATION_ERROR_CODE);
 }
 export const BLOCKED_HOST_SUFFIXES: readonly string[] = ['.local', '.internal'];
-const CLOUD_METADATA_HOSTS: ReadonlySet<string> = new Set([
-  '169.254.169.254', // AWS / GCP / Azure
-  'metadata.google.internal', // GCP
-  '100.100.100.200', // Alibaba Cloud
-  'fd00:ec2::254', // AWS IPv6
-]);
-function isCloudMetadataHost(hostname: string): boolean {
-  const lowered = hostname.toLowerCase();
-  if (CLOUD_METADATA_HOSTS.has(lowered)) return true;
-  const normalized = normalizeIpForBlockList(lowered);
-  return normalized !== null && CLOUD_METADATA_HOSTS.has(normalized.ip);
-}
 function isLocalFetchAllowed(): boolean {
   return config.security.allowLocalFetch;
 }
 type SecurityConfig = typeof config.security;
+type BlockReason =
+  | 'cloud-metadata'
+  | 'blocked-host'
+  | 'blocked-ip'
+  | 'blocked-suffix';
+type BlockCheckResult = Readonly<{ reason: BlockReason }>;
 export class IpBlocker {
+  private static readonly CLOUD_METADATA_HOSTS: ReadonlySet<string> = new Set([
+    '169.254.169.254', // AWS / GCP / Azure
+    'metadata.google.internal', // GCP
+    '100.100.100.200', // Alibaba Cloud
+    'fd00:ec2::254', // AWS IPv6
+  ]);
+
   private readonly blockList = createDefaultBlockList();
 
   constructor(private readonly security: SecurityConfig) {}
 
-  isBlockedIp(candidate: string): boolean {
-    const normalized = candidate.trim().toLowerCase();
-    if (isCloudMetadataHost(normalized)) return true;
-    if (isLocalFetchAllowed()) return false;
-    if (!normalized) return false;
-    if (this.security.blockedHosts.has(normalized)) return true;
+  static isCloudMetadata(hostname: string): boolean {
+    const lowered = hostname.toLowerCase();
+    if (IpBlocker.CLOUD_METADATA_HOSTS.has(lowered)) return true;
+    const normalized = normalizeIpForBlockList(lowered);
+    return (
+      normalized !== null && IpBlocker.CLOUD_METADATA_HOSTS.has(normalized.ip)
+    );
+  }
 
-    const normalizedIp = normalizeIpForBlockList(normalized);
-    return normalizedIp
-      ? this.blockList.check(normalizedIp.ip, normalizedIp.family)
-      : false;
+  checkTarget(
+    target: string,
+    suffixes: readonly string[]
+  ): BlockCheckResult | null {
+    if (IpBlocker.isCloudMetadata(target)) return { reason: 'cloud-metadata' };
+    if (isLocalFetchAllowed()) return null;
+    if (!target) return null;
+    if (this.security.blockedHosts.has(target)) {
+      return { reason: 'blocked-host' };
+    }
+
+    const normalizedIp = normalizeIpForBlockList(target);
+    if (
+      normalizedIp &&
+      this.blockList.check(normalizedIp.ip, normalizedIp.family)
+    ) {
+      return { reason: 'blocked-ip' };
+    }
+
+    if (suffixes.some((suffix) => target.endsWith(suffix))) {
+      return { reason: 'blocked-suffix' };
+    }
+
+    return null;
+  }
+
+  isBlockedIp(candidate: string): boolean {
+    return this.checkTarget(candidate.trim().toLowerCase(), []) !== null;
   }
 
   isHostBlocked(
     hostname: string,
     blockedHostSuffixes: readonly string[]
   ): boolean {
-    if (isCloudMetadataHost(hostname)) return true;
+    if (IpBlocker.isCloudMetadata(hostname)) return true;
     if (isLocalFetchAllowed()) return false;
     if (this.security.blockedHosts.has(hostname)) return true;
     return blockedHostSuffixes.some((suffix) => hostname.endsWith(suffix));
@@ -714,30 +724,19 @@ export class UrlNormalizer {
   }
 
   private assertHostnameAllowed(hostname: string): void {
-    if (isCloudMetadataHost(hostname)) {
-      throw createValidationError(
-        `Blocked host: ${hostname}. Cloud metadata endpoints are not allowed`
-      );
-    }
+    const result = this.ipBlocker.checkTarget(
+      hostname,
+      this.blockedHostSuffixes
+    );
+    if (!result) return;
 
-    if (!isLocalFetchAllowed()) {
-      if (this.security.blockedHosts.has(hostname)) {
-        throw createValidationError(
-          `Blocked host: ${hostname}. Internal hosts are not allowed`
-        );
-      }
+    const messages: Record<BlockReason, string> = {
+      'cloud-metadata': `Blocked host: ${hostname}. Cloud metadata endpoints are not allowed`,
+      'blocked-host': `Blocked host: ${hostname}. Internal hosts are not allowed`,
+      'blocked-ip': `Blocked IP range: ${hostname}. Private IPs are not allowed`,
+      'blocked-suffix': `Blocked hostname pattern: ${hostname}. Internal domain suffixes are not allowed`,
+    };
 
-      if (this.ipBlocker.isBlockedIp(hostname)) {
-        throw createValidationError(
-          `Blocked IP range: ${hostname}. Private IPs are not allowed`
-        );
-      }
-    }
-
-    if (this.ipBlocker.isHostBlocked(hostname, this.blockedHostSuffixes)) {
-      throw createValidationError(
-        `Blocked hostname pattern: ${hostname}. Internal domain suffixes are not allowed`
-      );
-    }
+    throw createValidationError(messages[result.reason]);
   }
 }
