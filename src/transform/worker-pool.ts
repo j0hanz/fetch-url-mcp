@@ -342,6 +342,8 @@ class WorkerPool implements TransformWorkerPool {
   private closed = false;
   private taskIdSeq = 0;
   private busyCount = 0;
+  private draining = false;
+  private readonly restartBackoff = new Map<number, number>();
 
   constructor(size: number, timeoutMs: number) {
     this.capacity =
@@ -660,6 +662,19 @@ class WorkerPool implements TransformWorkerPool {
       target.worker.terminate().catch(() => undefined);
     }
 
+    const attempts = this.restartBackoff.get(workerIndex) ?? 0;
+    this.restartBackoff.set(workerIndex, attempts + 1);
+
+    if (attempts > 0) {
+      const delayMs = Math.min(1000 * 2 ** (attempts - 1), 30_000);
+      setTimeout(() => {
+        if (this.closed) return;
+        this.workers[workerIndex] = this.spawnWorker(workerIndex);
+        this.drainQueue();
+      }, delayMs).unref();
+      return;
+    }
+
     this.workers[workerIndex] = this.spawnWorker(workerIndex);
     this.drainQueue();
   }
@@ -690,6 +705,7 @@ class WorkerPool implements TransformWorkerPool {
     const inflight = this.takeInflight(message.id);
     if (!inflight) return;
 
+    this.restartBackoff.delete(workerIndex);
     this.markIdle(workerIndex);
     this.resolveWorkerResult(inflight, message);
     this.drainQueue();
@@ -767,29 +783,34 @@ class WorkerPool implements TransformWorkerPool {
   }
 
   private drainQueue(): void {
-    if (this.closed || this.queue.depth === 0) return;
+    if (this.closed || this.queue.depth === 0 || this.draining) return;
+    this.draining = true;
 
-    this.maybeScaleUp();
+    try {
+      this.maybeScaleUp();
 
-    for (let i = 0; i < this.workers.length; i += 1) {
-      const slot = this.workers[i];
-      if (slot && !slot.busy) {
-        this.dispatchFromQueue(i, slot);
-        if (this.queue.depth === 0) return;
+      for (let i = 0; i < this.workers.length; i += 1) {
+        const slot = this.workers[i];
+        if (slot && !slot.busy) {
+          this.dispatchFromQueue(i, slot);
+          if (this.queue.depth === 0) return;
+        }
       }
-    }
-
-    if (this.workers.length < this.capacity && this.queue.depth > 0) {
-      const workerIndex = this.workers.length;
-      const slot = this.spawnWorker(workerIndex);
-      this.workers.push(slot);
-      this.dispatchFromQueue(workerIndex, slot);
 
       if (this.workers.length < this.capacity && this.queue.depth > 0) {
-        setImmediate(() => {
-          this.drainQueue();
-        });
+        const workerIndex = this.workers.length;
+        const slot = this.spawnWorker(workerIndex);
+        this.workers.push(slot);
+        this.dispatchFromQueue(workerIndex, slot);
+
+        if (this.workers.length < this.capacity && this.queue.depth > 0) {
+          setImmediate(() => {
+            this.drainQueue();
+          });
+        }
       }
+    } finally {
+      this.draining = false;
     }
   }
 

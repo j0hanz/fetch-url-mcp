@@ -580,6 +580,8 @@ class AuthService {
     const cacheKey = hmacSha256Hex(STATIC_TOKEN_HMAC_KEY, token);
     const cached = this.introspectionCache.get(cacheKey);
     if (cached && cached.expiresAt > Date.now()) {
+      this.introspectionCache.delete(cacheKey);
+      this.introspectionCache.set(cacheKey, cached);
       return cached.info;
     }
 
