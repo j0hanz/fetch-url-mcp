@@ -331,7 +331,7 @@ function extractXmlEncoding(headSnippet: string): string | undefined {
   return encoding ? encoding.toLowerCase() : undefined;
 }
 function detectHtmlDeclaredEncoding(buffer: Uint8Array): string | undefined {
-  const scanSize = Math.min(buffer.length, 8_192);
+  const scanSize = Math.min(buffer.length, ENCODING_SCAN_LIMIT);
   if (scanSize === 0) return undefined;
 
   const headSnippet = createDecoder('latin1').decode(
@@ -356,38 +356,42 @@ function resolveEncoding(
 // BINARY DETECTION
 // ═══════════════════════════════════════════════════════════════════
 
+const ENCODING_SCAN_LIMIT = 8_192;
+const BINARY_SCAN_LIMIT = 8_192;
+const BINARY_NULL_CHECK_LIMIT = 1_000;
+
 const BINARY_SIGNATURES = [
-  [0x25, 0x50, 0x44, 0x46],
-  [0x89, 0x50, 0x4e, 0x47],
-  [0x47, 0x49, 0x46, 0x38],
-  [0xff, 0xd8, 0xff],
-  [0x52, 0x49, 0x46, 0x46],
-  [0x42, 0x4d],
-  [0x49, 0x49, 0x2a, 0x00],
-  [0x4d, 0x4d, 0x00, 0x2a],
-  [0x00, 0x00, 0x01, 0x00],
-  [0x50, 0x4b, 0x03, 0x04],
-  [0x1f, 0x8b],
-  [0x42, 0x5a, 0x68],
-  [0x52, 0x61, 0x72, 0x21],
-  [0x37, 0x7a, 0xbc, 0xaf],
-  [0x7f, 0x45, 0x4c, 0x46],
-  [0x4d, 0x5a],
-  [0xcf, 0xfa, 0xed, 0xfe],
-  [0x00, 0x61, 0x73, 0x6d],
-  [0x1a, 0x45, 0xdf, 0xa3],
-  [0x66, 0x74, 0x79, 0x70],
-  [0x46, 0x4c, 0x56],
-  [0x49, 0x44, 0x33],
-  [0xff, 0xfb],
-  [0xff, 0xfa],
-  [0x4f, 0x67, 0x67, 0x53],
-  [0x66, 0x4c, 0x61, 0x43],
-  [0x4d, 0x54, 0x68, 0x64],
-  [0x77, 0x4f, 0x46, 0x46],
-  [0x00, 0x01, 0x00, 0x00],
-  [0x4f, 0x54, 0x54, 0x4f],
-  [0x53, 0x51, 0x4c, 0x69],
+  [0x25, 0x50, 0x44, 0x46], // PDF
+  [0x89, 0x50, 0x4e, 0x47], // PNG
+  [0x47, 0x49, 0x46, 0x38], // GIF
+  [0xff, 0xd8, 0xff], // JPEG
+  [0x52, 0x49, 0x46, 0x46], // RIFF (WebP/AVI/WAV)
+  [0x42, 0x4d], // BMP
+  [0x49, 0x49, 0x2a, 0x00], // TIFF (little-endian)
+  [0x4d, 0x4d, 0x00, 0x2a], // TIFF (big-endian)
+  [0x00, 0x00, 0x01, 0x00], // ICO
+  [0x50, 0x4b, 0x03, 0x04], // ZIP/XLSX/DOCX
+  [0x1f, 0x8b], // GZIP
+  [0x42, 0x5a, 0x68], // BZIP2
+  [0x52, 0x61, 0x72, 0x21], // RAR
+  [0x37, 0x7a, 0xbc, 0xaf], // 7-Zip
+  [0x7f, 0x45, 0x4c, 0x46], // ELF
+  [0x4d, 0x5a], // PE/MZ (Windows executable)
+  [0xcf, 0xfa, 0xed, 0xfe], // Mach-O
+  [0x00, 0x61, 0x73, 0x6d], // WebAssembly
+  [0x1a, 0x45, 0xdf, 0xa3], // MKV/WebM (EBML)
+  [0x66, 0x74, 0x79, 0x70], // MP4/MOV (ftyp)
+  [0x46, 0x4c, 0x56], // FLV
+  [0x49, 0x44, 0x33], // MP3 (ID3 tag)
+  [0xff, 0xfb], // MP3 (sync frame)
+  [0xff, 0xfa], // MP3 (sync frame, alt)
+  [0x4f, 0x67, 0x67, 0x53], // OGG
+  [0x66, 0x4c, 0x61, 0x43], // FLAC
+  [0x4d, 0x54, 0x68, 0x64], // MIDI
+  [0x77, 0x4f, 0x46, 0x46], // WOFF
+  [0x00, 0x01, 0x00, 0x00], // TrueType font
+  [0x4f, 0x54, 0x54, 0x4f], // OpenType font
+  [0x53, 0x51, 0x4c, 0x69], // SQLite
 ] as const;
 const BINARY_SIG_BY_FIRST_BYTE = createSignatureMap(
   BINARY_SIGNATURES,
@@ -413,10 +417,13 @@ function isBinaryContent(buffer: Uint8Array, encoding?: string): boolean {
 
   if (isUnicodeWideEncoding(encoding)) return false;
 
-  const sample = buffer.length > 8192 ? buffer.subarray(0, 8192) : buffer;
+  const sample =
+    buffer.length > BINARY_SCAN_LIMIT
+      ? buffer.subarray(0, BINARY_SCAN_LIMIT)
+      : buffer;
   if (isUtf8(sample)) return false;
 
-  return hasNullByte(buffer, 8192);
+  return hasNullByte(buffer, BINARY_SCAN_LIMIT);
 }
 function createBinaryContentError(url: string): FetchError {
   return new FetchError(
@@ -517,6 +524,13 @@ function resolveErrorUrl(error: unknown, fallback: string): string {
   const { requestUrl } = error as Record<string, unknown>;
   return typeof requestUrl === 'string' ? requestUrl : fallback;
 }
+const CLIENT_ERROR_CODES = new Set([
+  VALIDATION_ERROR_CODE,
+  'EBADREDIRECT',
+  'EBLOCKED',
+  'ENODATA',
+  'EINVAL',
+]);
 function mapFetchError(
   error: unknown,
   fallbackUrl: string,
@@ -554,13 +568,7 @@ function mapFetchError(
     return new FetchError(error.message, url, 504, { code });
   }
 
-  if (
-    code === VALIDATION_ERROR_CODE ||
-    code === 'EBADREDIRECT' ||
-    code === 'EBLOCKED' ||
-    code === 'ENODATA' ||
-    code === 'EINVAL'
-  ) {
+  if (code && CLIENT_ERROR_CODES.has(code)) {
     return new FetchError(error.message, url, 400, { code });
   }
 
@@ -708,16 +716,7 @@ class RedirectFollower {
       cancelResponseBody(response);
 
       const nextUrl = this.resolveRedirectTarget(currentUrl, location);
-      const parsedNextUrl = new URL(nextUrl);
-      if (
-        parsedNextUrl.protocol !== 'http:' &&
-        parsedNextUrl.protocol !== 'https:'
-      ) {
-        throw createErrorWithCode(
-          `Unsupported redirect protocol: ${parsedNextUrl.protocol}`,
-          'EUNSUPPORTEDPROTOCOL'
-        );
-      }
+      this.assertHttpProtocol(nextUrl);
 
       return {
         response,
@@ -756,6 +755,16 @@ class RedirectFollower {
   private annotateRedirectError(error: unknown, url: string): void {
     if (!isObject(error)) return;
     (error as Record<string, unknown>)['requestUrl'] = url;
+  }
+
+  private assertHttpProtocol(url: string): void {
+    const parsed = new URL(url);
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+      throw createErrorWithCode(
+        `Unsupported redirect protocol: ${parsed.protocol}`,
+        'EUNSUPPORTEDPROTOCOL'
+      );
+    }
   }
 
   private async withRedirectErrorContext<T>(
@@ -1146,7 +1155,8 @@ class BoundedBufferTransform extends Transform {
     this.firstChunk = false;
     if (
       (isFirst && hasBinarySignature(buf)) ||
-      (!isUnicodeWideEncoding(this.effectiveEncoding) && hasNullByte(buf, 1000))
+      (!isUnicodeWideEncoding(this.effectiveEncoding) &&
+        hasNullByte(buf, BINARY_NULL_CHECK_LIMIT))
     ) {
       return createBinaryContentError(this.url);
     }
@@ -1184,19 +1194,22 @@ function assertNonBinaryContent(
     throw createBinaryContentError(url);
   }
 }
+interface ReaderOptions {
+  url: string;
+  maxBytes: number;
+  signal?: AbortSignal | undefined;
+  encoding?: string | undefined;
+}
 class ResponseTextReader {
   async read(
     response: Response,
-    url: string,
-    maxBytes: number,
-    signal?: AbortSignal,
-    encoding?: string
+    opts: ReaderOptions
   ): Promise<{ text: string; size: number; truncated: boolean }> {
     const {
       buffer,
       encoding: effectiveEncoding,
       truncated,
-    } = await this.readBuffer(response, url, maxBytes, signal, encoding);
+    } = await this.readBuffer(response, opts);
 
     const text = decodeBuffer(buffer, effectiveEncoding);
     return { text, size: buffer.byteLength, truncated };
@@ -1204,52 +1217,36 @@ class ResponseTextReader {
 
   async readBuffer(
     response: Response,
-    url: string,
-    maxBytes: number,
-    signal?: AbortSignal,
-    encoding?: string
+    opts: ReaderOptions
   ): Promise<{
     buffer: Uint8Array;
     encoding: string;
     size: number;
     truncated: boolean;
   }> {
+    const { url, signal } = opts;
     if (signal?.aborted) {
       cancelResponseBody(response);
       throw createFetchError({ kind: 'aborted' }, url);
     }
 
     if (!response.body) {
-      return this.readNonStreamBuffer(
-        response,
-        url,
-        maxBytes,
-        signal,
-        encoding
-      );
+      return this.readNonStreamBuffer(response, opts);
     }
 
-    return this.readStreamToBuffer(
-      response.body,
-      url,
-      maxBytes,
-      signal,
-      encoding
-    );
+    return this.readStreamToBuffer(response.body, opts);
   }
 
   private async readNonStreamBuffer(
     response: Response,
-    url: string,
-    maxBytes: number,
-    signal?: AbortSignal,
-    encoding?: string
+    opts: ReaderOptions
   ): Promise<{
     buffer: Uint8Array;
     encoding: string;
     size: number;
     truncated: boolean;
   }> {
+    const { url, maxBytes, signal, encoding } = opts;
     if (signal?.aborted) throw createFetchError({ kind: 'canceled' }, url);
 
     const limit = maxBytes <= 0 ? Number.POSITIVE_INFINITY : maxBytes;
@@ -1273,16 +1270,14 @@ class ResponseTextReader {
 
   private async readStreamToBuffer(
     stream: ReadableStream<Uint8Array>,
-    url: string,
-    maxBytes: number,
-    signal?: AbortSignal,
-    encoding?: string
+    opts: ReaderOptions
   ): Promise<{
     buffer: Uint8Array;
     encoding: string;
     size: number;
     truncated: boolean;
   }> {
+    const { url, maxBytes, signal, encoding } = opts;
     const byteLimit = maxBytes <= 0 ? Number.POSITIVE_INFINITY : maxBytes;
     const captureChunks = byteLimit !== Number.POSITIVE_INFINITY;
 
@@ -1377,23 +1372,24 @@ async function readAndRecordDecodedResponse(
   const declaredEncoding = getCharsetFromContentType(contentType ?? null);
 
   if (mode === 'text') {
-    const { text, size, truncated } = await reader.read(
-      response,
-      finalUrl,
+    const { text, size, truncated } = await reader.read(response, {
+      url: finalUrl,
       maxBytes,
       signal,
-      declaredEncoding
-    );
+      encoding: declaredEncoding,
+    });
     telemetry.recordResponse(ctx, response, size);
     return { kind: 'text', text, size, truncated };
   }
 
   const { buffer, encoding, size, truncated } = await reader.readBuffer(
     response,
-    finalUrl,
-    maxBytes,
-    signal,
-    declaredEncoding
+    {
+      url: finalUrl,
+      maxBytes,
+      signal,
+      encoding: declaredEncoding,
+    }
   );
   telemetry.recordResponse(ctx, response, size);
   return { kind: 'buffer', buffer, encoding, size, truncated };
@@ -1923,13 +1919,12 @@ export async function readResponseText(
   encoding?: string
 ): Promise<{ text: string; size: number }> {
   const decodedResponse = await decodeResponseIfNeeded(response, url, signal);
-  const { text, size } = await responseReader.read(
-    decodedResponse,
+  const { text, size } = await responseReader.read(decodedResponse, {
     url,
     maxBytes,
     signal,
-    encoding
-  );
+    encoding,
+  });
   return { text, size };
 }
 export async function fetchNormalizedUrl(
