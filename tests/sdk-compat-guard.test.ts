@@ -68,4 +68,24 @@ describe('SDK compatibility guard', () => {
     );
     await server.close();
   });
+
+  it('server.server._capabilities exposes tasks.requests', async () => {
+    const server = await createMcpServer();
+    const capabilities: unknown = Reflect.get(server.server, '_capabilities');
+    assert.ok(
+      typeof capabilities === 'object' && capabilities !== null,
+      '_capabilities must be an object (setTaskToolCallCapability depends on this)'
+    );
+    const tasks = (capabilities as Record<string, unknown>)['tasks'];
+    assert.ok(
+      typeof tasks === 'object' && tasks !== null,
+      '_capabilities.tasks must be an object'
+    );
+    const requests = (tasks as Record<string, unknown>)['requests'];
+    assert.ok(
+      typeof requests === 'object' && requests !== null,
+      '_capabilities.tasks.requests must be an object'
+    );
+    await server.close();
+  });
 });

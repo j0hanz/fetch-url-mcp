@@ -173,6 +173,29 @@ describe('MCP Server', () => {
       assert.ok(prompt, 'get-help prompt should be registered');
       assert.equal(typeof prompt.callback, 'function');
     });
+
+    it('get-help prompt returns messages with role user', async () => {
+      const server = await createMcpServer();
+      const prompts = getPrivateObject<
+        Record<
+          string,
+          {
+            callback?: (...args: unknown[]) => {
+              messages?: { role?: string }[];
+            };
+          }
+        >
+      >(server, '_registeredPrompts');
+      const result = prompts?.['get-help']?.callback?.({});
+
+      assert.ok(result?.messages?.length, 'Prompt should return messages');
+      assert.equal(
+        result?.messages?.[0]?.role,
+        'user',
+        'Prompt message role must be user per MCP spec'
+      );
+      await server.close();
+    });
   });
 
   describe('Tools listing', () => {

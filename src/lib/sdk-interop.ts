@@ -58,6 +58,12 @@ export function registerServerLifecycleCleanup(
   getServerCleanupCallbackSet(server).add(callback);
 }
 
+/**
+ * Retrieves the SDK's internal request-handler map.
+ *
+ * Depends on SDK private API `_requestHandlers` (verified against ^1.27.1).
+ * If the SDK changes this internal, the sdk-compat-guard.test.ts tests will fail.
+ */
 export function getSdkCallToolHandler(
   server: McpServer
 ): RequestHandlerFn | null {
@@ -68,6 +74,12 @@ export function getSdkCallToolHandler(
   return typeof handler === 'function' ? (handler as RequestHandlerFn) : null;
 }
 
+/**
+ * Patches the SDK's internal capabilities to enable/disable task-mode tool calls.
+ *
+ * Depends on SDK private API `_capabilities.tasks.requests` (verified against ^1.27.1).
+ * If the SDK changes this internal, the sdk-compat-guard.test.ts tests will fail.
+ */
 export function setTaskToolCallCapability(
   server: McpServer,
   enabled: boolean

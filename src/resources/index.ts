@@ -513,7 +513,7 @@ export function registerGetHelpPrompt(
       description,
       messages: [
         {
-          role: 'assistant',
+          role: 'user',
           content: {
             type: 'text',
             text: instructions,

@@ -331,10 +331,20 @@ export function buildAuthFingerprint(
 const STATIC_TOKEN_TTL_SECONDS = 60 * 60 * 24;
 const STATIC_TOKEN_HMAC_KEY = randomBytes(32);
 
+const INTROSPECTION_CACHE_TTL_MS = 30_000;
+const INTROSPECTION_CACHE_MAX_ENTRIES = 1_000;
+
+interface CachedIntrospection {
+  readonly info: AuthInfo;
+  readonly expiresAt: number;
+}
+
 class AuthService {
   private readonly staticTokenDigests = config.auth.staticTokens.map((token) =>
     hmacSha256Hex(STATIC_TOKEN_HMAC_KEY, token)
   );
+
+  private readonly introspectionCache = new Map<string, CachedIntrospection>();
 
   async authenticate(
     req: IncomingMessage,
@@ -567,6 +577,12 @@ class AuthService {
       throw new ServerError('Introspection not configured');
     }
 
+    const cacheKey = hmacSha256Hex(STATIC_TOKEN_HMAC_KEY, token);
+    const cached = this.introspectionCache.get(cacheKey);
+    if (cached && cached.expiresAt > Date.now()) {
+      return cached.info;
+    }
+
     const req = this.buildIntrospectionRequest(
       token,
       config.auth.resourceUrl,
@@ -582,6 +598,7 @@ class AuthService {
     );
 
     if (!isObject(payload) || payload['active'] !== true) {
+      this.introspectionCache.delete(cacheKey);
       throw new InvalidTokenError('Token is inactive');
     }
 
@@ -589,7 +606,28 @@ class AuthService {
 
     const info = this.buildIntrospectionAuthInfo(token, payload);
     this.assertRequiredScopes(info.scopes);
+
+    this.evictStaleEntries();
+    this.introspectionCache.set(cacheKey, {
+      info,
+      expiresAt: Date.now() + INTROSPECTION_CACHE_TTL_MS,
+    });
+
     return info;
+  }
+
+  private evictStaleEntries(): void {
+    if (this.introspectionCache.size < INTROSPECTION_CACHE_MAX_ENTRIES) return;
+
+    const now = Date.now();
+    for (const [key, entry] of this.introspectionCache) {
+      if (entry.expiresAt <= now) this.introspectionCache.delete(key);
+    }
+
+    if (this.introspectionCache.size >= INTROSPECTION_CACHE_MAX_ENTRIES) {
+      const oldest = this.introspectionCache.keys().next();
+      if (!oldest.done) this.introspectionCache.delete(oldest.value);
+    }
   }
 }
 
