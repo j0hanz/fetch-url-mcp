@@ -194,7 +194,7 @@ export const fetchUrlOutputSchema = z.strictObject({
     .number()
     .int()
     .min(0)
-    .max(config.constants.maxHtmlSize * 4)
+    .max(config.constants.maxHtmlBytes * 4)
     .optional()
     .describe('Full markdown size before truncation.'),
   truncated: z.boolean().optional().describe('True if markdown was truncated.'),

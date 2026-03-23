@@ -457,7 +457,7 @@ export function registerCacheResourceTemplate(
 }
 
 export function buildServerInstructions(): string {
-  const maxHtmlSizeMb = config.constants.maxHtmlSize / 1024 / 1024;
+  const maxHtmlSizeMb = config.constants.maxHtmlBytes / 1024 / 1024;
   const cacheSizeMb = config.cache.maxSizeBytes / 1024 / 1024;
   const cacheTtlHours = config.cache.ttl / 3600;
 

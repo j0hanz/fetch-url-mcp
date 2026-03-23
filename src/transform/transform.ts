@@ -270,7 +270,7 @@ function truncateHtml(
   html: string,
   inputTruncated = false
 ): { html: string; truncated: boolean } {
-  const maxSize = config.constants.maxHtmlSize;
+  const maxSize = config.constants.maxHtmlBytes;
   if (maxSize <= 0) return { html, truncated: false };
 
   if (html.length <= maxSize) {
@@ -541,7 +541,7 @@ function extractEarlyMetadataIfNeeded(
   html: string,
   url: string
 ): ExtractedMetadata | null {
-  const maxSize = config.constants.maxHtmlSize;
+  const maxSize = config.constants.maxHtmlBytes;
   if (maxSize <= 0) return null;
 
   if (

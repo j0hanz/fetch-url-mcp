@@ -25,7 +25,7 @@ export interface SessionStore {
   incrementInFlight: () => void;
   decrementInFlight: () => void;
   clear: () => SessionEntry[];
-  evictExpired: () => SessionEntry[];
+  evictExpired: () => { id: string; entry: SessionEntry }[];
   evictOldest: () => SessionEntry | undefined;
 }
 
@@ -119,14 +119,14 @@ class InMemorySessionStore implements SessionStore {
     return entries;
   }
 
-  evictExpired(): SessionEntry[] {
+  evictExpired(): { id: string; entry: SessionEntry }[] {
     const now = Date.now();
-    const evicted: SessionEntry[] = [];
+    const evicted: { id: string; entry: SessionEntry }[] = [];
 
     for (const [id, session] of this.sessions.entries()) {
       if (this.sessionTtlMs > 0 && now - session.lastSeen > this.sessionTtlMs) {
         this.sessions.delete(id);
-        evicted.push(session);
+        evicted.push({ id, entry: session });
       } else {
         break;
       }

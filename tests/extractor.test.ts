@@ -195,8 +195,8 @@ describe('extractContent', () => {
         <body><p>Content</p></body>
       </html>
     `;
-    const originalMaxHtmlSize = config.constants.maxHtmlSize;
-    config.constants.maxHtmlSize = html.indexOf('<link rel="icon"');
+    const originalMaxHtmlSize = config.constants.maxHtmlBytes;
+    config.constants.maxHtmlBytes = html.indexOf('<link rel="icon"');
 
     try {
       const result = extractContent(html, 'https://example.com', {
@@ -206,7 +206,7 @@ describe('extractContent', () => {
       assert.equal(result.metadata.title, 'Truncated Head');
       assert.equal(result.metadata.favicon, 'https://example.com/icon-32.png');
     } finally {
-      config.constants.maxHtmlSize = originalMaxHtmlSize;
+      config.constants.maxHtmlBytes = originalMaxHtmlSize;
     }
   });
 

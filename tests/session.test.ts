@@ -212,6 +212,7 @@ describe('http session utilities', () => {
 
       const evicted = store.evictExpired();
       assert.equal(evicted.length, 1, 'Should evict 1 expired session');
+      assert.equal(evicted[0]!.id, 'expired', 'Should include session ID');
       assert.equal(store.size(), 1, 'Should have 1 session remaining');
       assert.equal(
         store.get('expired'),

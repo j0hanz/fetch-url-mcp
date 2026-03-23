@@ -95,6 +95,31 @@ interface IntegerParseOptions {
   max?: number;
   envName?: string;
 }
+
+function tryParseUrlHost(raw: string): string | null | undefined {
+  if (raw.includes('://')) {
+    const hostname = URL.parse(raw)?.hostname;
+    if (hostname) return normalizeHostname(hostname);
+  }
+  const candidateHostname = URL.parse(`http://${raw}`)?.hostname;
+  if (candidateHostname) return normalizeHostname(candidateHostname);
+  return undefined;
+}
+
+function tryParseIpv6Bracket(lowered: string): string | null | undefined {
+  if (!lowered.startsWith('[')) return undefined;
+  const end = lowered.indexOf(']');
+  return end === -1 ? null : normalizeHostname(lowered.slice(1, end));
+}
+
+function tryParseHostPort(lowered: string): string | null {
+  const firstColon = lowered.indexOf(':');
+  if (firstColon === -1) return normalizeHostname(lowered);
+  if (lowered.includes(':', firstColon + 1)) return null;
+  const host = lowered.slice(0, firstColon);
+  return host ? normalizeHostname(host) : null;
+}
+
 const EnvParser = {
   integerValue(
     envValue: string | undefined,
@@ -206,30 +231,17 @@ const EnvParser = {
     const raw = value.trim();
     if (!raw) return null;
 
-    if (raw.includes('://')) {
-      const hostname = URL.parse(raw)?.hostname;
-      if (hostname) return normalizeHostname(hostname);
-    }
-
-    const candidateHostname = URL.parse(`http://${raw}`)?.hostname;
-    if (candidateHostname) return normalizeHostname(candidateHostname);
+    const fromUrl = tryParseUrlHost(raw);
+    if (fromUrl !== undefined) return fromUrl;
 
     const lowered = raw.toLowerCase();
 
-    if (lowered.startsWith('[')) {
-      const end = lowered.indexOf(']');
-      if (end === -1) return null;
-      return normalizeHostname(lowered.slice(1, end));
-    }
+    const fromBracket = tryParseIpv6Bracket(lowered);
+    if (fromBracket !== undefined) return fromBracket;
 
     if (isIP(lowered) === 6) return stripTrailingDots(lowered);
 
-    const firstColon = lowered.indexOf(':');
-    if (firstColon === -1) return normalizeHostname(lowered);
-    if (lowered.includes(':', firstColon + 1)) return null;
-
-    const host = lowered.slice(0, firstColon);
-    return host ? normalizeHostname(host) : null;
+    return tryParseHostPort(lowered);
   },
   formatHostForUrl(hostname: string): string {
     if (hostname.includes(':') && !hostname.startsWith('['))
@@ -655,7 +667,7 @@ export const config = {
     format: env['LOG_FORMAT']?.toLowerCase() === 'json' ? 'json' : 'text',
   },
   constants: {
-    maxHtmlSize: MAX_HTML_BYTES,
+    maxHtmlBytes: MAX_HTML_BYTES,
     maxUrlLength: 2048,
     maxInlineContentChars: MAX_INLINE_CONTENT_CHARS,
   },
@@ -1271,15 +1283,22 @@ function writeLog(level: LogLevel, message: string, meta?: LogMetadata): void {
 
   forwardMcpLog(level, message, meta, sessionId);
 }
+function resolveLogServer(
+  sessionId: string | undefined
+): McpServer | undefined {
+  const server = sessionId ? sessionServers.get(sessionId) : mcpServer;
+  if (!server) return undefined;
+  return server.isConnected() ? server : undefined;
+}
+
 function forwardMcpLog(
   level: LogLevel,
   message: string,
   meta: LogMetadata | undefined,
   sessionId: string | undefined
 ): void {
-  const server = sessionId ? sessionServers.get(sessionId) : mcpServer;
+  const server = resolveLogServer(sessionId);
   if (!server) return;
-  if (!server.isConnected()) return;
   if (!shouldForwardMcpLog(level, sessionId)) return;
 
   try {
@@ -1431,7 +1450,7 @@ class SessionCleanupLoop {
     for (let i = 0; i < evicted.length; i += SESSION_CLOSE_BATCH_SIZE) {
       const batch = evicted.slice(i, i + SESSION_CLOSE_BATCH_SIZE);
       const results = await Promise.allSettled(
-        batch.map((session) => this.closeExpiredSession(session))
+        batch.map(({ id, entry }) => this.closeExpiredSession(id, entry))
       );
 
       logRejectedSettledResults(
@@ -1450,7 +1469,10 @@ class SessionCleanupLoop {
     }
   }
 
-  private async closeExpiredSession(session: SessionEntry): Promise<void> {
+  private async closeExpiredSession(
+    sessionId: string,
+    session: SessionEntry
+  ): Promise<void> {
     if (this.onEvictSession) {
       try {
         await this.onEvictSession(session);
@@ -1462,7 +1484,7 @@ class SessionCleanupLoop {
     }
 
     try {
-      unregisterMcpSessionServerByServer(session.server);
+      unregisterMcpSessionServer(sessionId);
     } catch (error) {
       logWarn('Failed to unregister session server', {
         error: getErrorMessage(error),

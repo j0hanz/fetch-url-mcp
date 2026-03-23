@@ -353,11 +353,11 @@ describe('fetchUrlToolHandler', () => {
   it('adds truncation marker when HTML size truncation occurs', async (t) => {
     const originalCacheEnabled = config.cache.enabled;
     const originalInlineLimit = config.constants.maxInlineContentChars;
-    const originalMaxHtmlSize = config.constants.maxHtmlSize;
+    const originalMaxHtmlSize = config.constants.maxHtmlBytes;
     const originalMaxWorkerScale = config.transform.maxWorkerScale;
     config.cache.enabled = false;
     config.constants.maxInlineContentChars = 10000;
-    config.constants.maxHtmlSize = 200;
+    config.constants.maxHtmlBytes = 200;
     config.transform.maxWorkerScale = 0;
 
     await shutdownTransformWorkerPool();
@@ -384,7 +384,7 @@ describe('fetchUrlToolHandler', () => {
       await shutdownTransformWorkerPool();
       config.cache.enabled = originalCacheEnabled;
       config.constants.maxInlineContentChars = originalInlineLimit;
-      config.constants.maxHtmlSize = originalMaxHtmlSize;
+      config.constants.maxHtmlBytes = originalMaxHtmlSize;
       config.transform.maxWorkerScale = originalMaxWorkerScale;
     }
   });
@@ -392,11 +392,11 @@ describe('fetchUrlToolHandler', () => {
   it('includes truncation marker when fetch stage truncates', async (t) => {
     const originalCacheEnabled = config.cache.enabled;
     const originalInlineLimit = config.constants.maxInlineContentChars;
-    const originalMaxHtmlSize = config.constants.maxHtmlSize;
+    const originalMaxHtmlSize = config.constants.maxHtmlBytes;
     const originalFetchMax = config.fetcher.maxContentLength;
     config.cache.enabled = false;
     config.constants.maxInlineContentChars = 10000;
-    config.constants.maxHtmlSize = 1000;
+    config.constants.maxHtmlBytes = 1000;
     config.fetcher.maxContentLength = 200;
 
     const html = `<html><body><p>${'a'.repeat(2000)}</p></body></html>`;
@@ -420,7 +420,7 @@ describe('fetchUrlToolHandler', () => {
     } finally {
       config.cache.enabled = originalCacheEnabled;
       config.constants.maxInlineContentChars = originalInlineLimit;
-      config.constants.maxHtmlSize = originalMaxHtmlSize;
+      config.constants.maxHtmlBytes = originalMaxHtmlSize;
       config.fetcher.maxContentLength = originalFetchMax;
     }
   });
@@ -428,11 +428,11 @@ describe('fetchUrlToolHandler', () => {
   it('persists truncation marker in cached markdown payloads', async (t) => {
     const originalCacheEnabled = config.cache.enabled;
     const originalInlineLimit = config.constants.maxInlineContentChars;
-    const originalMaxHtmlSize = config.constants.maxHtmlSize;
+    const originalMaxHtmlSize = config.constants.maxHtmlBytes;
     const originalFetchMax = config.fetcher.maxContentLength;
     config.cache.enabled = true;
     config.constants.maxInlineContentChars = 10000;
-    config.constants.maxHtmlSize = 1000;
+    config.constants.maxHtmlBytes = 1000;
     config.fetcher.maxContentLength = 200;
 
     const url = 'https://example.com/fetch-size-truncate-cache';
@@ -466,7 +466,7 @@ describe('fetchUrlToolHandler', () => {
     } finally {
       config.cache.enabled = originalCacheEnabled;
       config.constants.maxInlineContentChars = originalInlineLimit;
-      config.constants.maxHtmlSize = originalMaxHtmlSize;
+      config.constants.maxHtmlBytes = originalMaxHtmlSize;
       config.fetcher.maxContentLength = originalFetchMax;
     }
   });
