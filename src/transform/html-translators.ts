@@ -777,6 +777,39 @@ const LANGUAGES: LanguageDef[] = [
       ctx.trimmedStart.startsWith('{') || ctx.trimmedStart.startsWith('['),
   },
 ];
+
+const KNOWN_LANG_PREFIXES = new Set([
+  'css',
+  'javascript',
+  'js',
+  'typescript',
+  'ts',
+  'python',
+  'py',
+  'html',
+  'xml',
+  'sql',
+  'bash',
+  'sh',
+  'yaml',
+  'json',
+  'ruby',
+  'go',
+  'rust',
+  'java',
+  'php',
+  'c',
+  'cpp',
+  'swift',
+  'kotlin',
+  'scss',
+  'sass',
+  'less',
+  'graphql',
+  'markdown',
+  'md',
+]);
+
 export function extractLanguageFromClassName(
   className: string
 ): string | undefined {
@@ -794,14 +827,25 @@ export function extractLanguageFromClassName(
     if (lower.startsWith('highlight-')) return token.slice(10);
   }
 
-  // Fallback: check for hljs context
-  if (!tokens.includes('hljs')) return undefined;
+  // Special handling for hljs which often appears with a separate language class
+  if (tokens.includes('hljs')) {
+    const langClass = tokens.find((t) => {
+      const l = t.toLowerCase();
+      return l !== 'hljs' && !l.startsWith('hljs-');
+    });
+    if (langClass) return langClass;
+  }
 
-  const langClass = tokens.find((t) => {
-    const l = t.toLowerCase();
-    return l !== 'hljs' && !l.startsWith('hljs-');
-  });
-  return langClass;
+  // Last resort: look for any known language prefix followed by a dash
+  for (const token of tokens) {
+    const dashIdx = token.indexOf('-');
+    if (dashIdx > 0) {
+      const prefix = token.slice(0, dashIdx).toLowerCase();
+      if (KNOWN_LANG_PREFIXES.has(prefix)) return prefix;
+    }
+  }
+
+  return undefined;
 }
 function resolveLanguageFromDataAttribute(
   dataLang: string

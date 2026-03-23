@@ -155,6 +155,11 @@ const DOCS_CONTROL_SELECTORS = [
   '.backtotop',
   '.headerlink',
   '[title="Edit this page"]',
+  '.article-footer',
+  '.baseline-indicator',
+  'baseline-indicator',
+  'mdn-content-feedback',
+  'interactive-example',
 ] as const;
 
 // ── Types ───────────────────────────────────────────────────────────
