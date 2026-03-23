@@ -90,29 +90,32 @@ const ENV_BOOLEAN_SCHEMA = z.stringbool({
   truthy: ['true', '1', 'yes', 'on'],
   falsy: ['false', '0', 'no', 'off'],
 });
+interface IntegerParseOptions {
+  min?: number;
+  max?: number;
+  envName?: string;
+}
 const EnvParser = {
   integerValue(
     envValue: string | undefined,
-    min?: number,
-    max?: number,
-    envName?: string
+    opts?: IntegerParseOptions
   ): number | null {
     if (!envValue) return null;
     const parsed = Number.parseInt(envValue, 10);
     if (Number.isNaN(parsed)) {
-      if (envName)
+      if (opts?.envName)
         process.stderr.write(
-          `Warning: ignoring invalid ${envName} value "${envValue}" (not an integer)\n`
+          `Warning: ignoring invalid ${opts.envName} value "${envValue}" (not an integer)\n`
         );
       return null;
     }
     if (
-      (min !== undefined && parsed < min) ||
-      (max !== undefined && parsed > max)
+      (opts?.min !== undefined && parsed < opts.min) ||
+      (opts?.max !== undefined && parsed > opts.max)
     ) {
-      if (envName)
+      if (opts.envName)
         process.stderr.write(
-          `Warning: ignoring out-of-range ${envName} value ${parsed} (allowed: ${min ?? '-∞'}..${max ?? '∞'})\n`
+          `Warning: ignoring out-of-range ${opts.envName} value ${parsed} (allowed: ${opts.min ?? '-∞'}..${opts.max ?? '∞'})\n`
         );
       return null;
     }
@@ -120,20 +123,16 @@ const EnvParser = {
   },
   optionalInteger(
     envValue: string | undefined,
-    min?: number,
-    max?: number,
-    envName?: string
+    opts?: IntegerParseOptions
   ): number | undefined {
-    return EnvParser.integerValue(envValue, min, max, envName) ?? undefined;
+    return EnvParser.integerValue(envValue, opts) ?? undefined;
   },
   integer(
     envValue: string | undefined,
     defaultValue: number,
-    min?: number,
-    max?: number,
-    envName?: string
+    opts?: IntegerParseOptions
   ): number {
-    return EnvParser.integerValue(envValue, min, max, envName) ?? defaultValue;
+    return EnvParser.integerValue(envValue, opts) ?? defaultValue;
   },
   boolean(
     envValue: string | undefined,
@@ -239,13 +238,13 @@ const EnvParser = {
   },
 };
 
+const PRIMARY_HASH_LENGTH = 32;
+const VARY_HASH_LENGTH = 16;
 const MAX_HTML_BYTES = 10 * 1024 * 1024;
 const MAX_INLINE_CONTENT_CHARS = EnvParser.integer(
   env['MAX_INLINE_CONTENT_CHARS'],
   0,
-  0,
-  MAX_HTML_BYTES,
-  'MAX_INLINE_CONTENT_CHARS'
+  { min: 0, max: MAX_HTML_BYTES, envName: 'MAX_INLINE_CONTENT_CHARS' }
 );
 const DEFAULT_SESSION_TTL_MS = 30 * 60 * 1000;
 const DEFAULT_SESSION_INIT_TIMEOUT_MS = 10000;
@@ -256,9 +255,7 @@ const DEFAULT_TRANSFORM_TIMEOUT_MS = 30000;
 const DEFAULT_FETCH_TIMEOUT_MS = EnvParser.integer(
   env['FETCH_TIMEOUT_MS'],
   15000,
-  1000,
-  60000,
-  'FETCH_TIMEOUT_MS'
+  { min: 1000, max: 60000, envName: 'FETCH_TIMEOUT_MS' }
 );
 const DEFAULT_TOOL_TIMEOUT_MS =
   DEFAULT_FETCH_TIMEOUT_MS +
@@ -267,16 +264,12 @@ const DEFAULT_TOOL_TIMEOUT_MS =
 const DEFAULT_TASKS_MAX_TOTAL = EnvParser.integer(
   env['TASKS_MAX_TOTAL'],
   5000,
-  1,
-  undefined,
-  'TASKS_MAX_TOTAL'
+  { min: 1, envName: 'TASKS_MAX_TOTAL' }
 );
 const DEFAULT_TASKS_MAX_PER_OWNER = EnvParser.integer(
   env['TASKS_MAX_PER_OWNER'],
   1000,
-  1,
-  undefined,
-  'TASKS_MAX_PER_OWNER'
+  { min: 1, envName: 'TASKS_MAX_PER_OWNER' }
 );
 const RESOLVED_TASKS_MAX_PER_OWNER = Math.min(
   DEFAULT_TASKS_MAX_PER_OWNER,
@@ -300,7 +293,10 @@ function resolveWorkerResourceLimits(): WorkerResourceLimits | undefined {
 
   let hasLimits = false;
   for (const [prop, envKey] of Object.entries(keys)) {
-    const val = EnvParser.optionalInteger(env[envKey], 1, undefined, envKey);
+    const val = EnvParser.optionalInteger(env[envKey], {
+      min: 1,
+      envName: envKey,
+    });
     if (val !== undefined) {
       limits[prop as keyof WorkerResourceLimits] = val;
       hasLimits = true;
@@ -409,7 +405,11 @@ const host = (env['HOST'] ?? LOOPBACK_V4).trim();
 const port =
   env['PORT']?.trim() === '0'
     ? 0
-    : EnvParser.integer(env['PORT'], 3000, 1024, 65535, 'PORT');
+    : EnvParser.integer(env['PORT'], 3000, {
+        min: 1024,
+        max: 65535,
+        envName: 'PORT',
+      });
 const httpsConfig = buildHttpsConfig();
 const allowRemote = EnvParser.boolean(
   env['ALLOW_REMOTE'],
@@ -452,7 +452,7 @@ interface AppServerConfig {
 
 function buildServerConfig(): AppServerConfig {
   const parseOptInt = (key: string, min = 1): number | undefined =>
-    EnvParser.optionalInteger(env[key], min, undefined, key);
+    EnvParser.optionalInteger(env[key], { min, envName: key });
 
   return {
     name: 'fetch-url-mcp',
@@ -472,13 +472,10 @@ function buildServerConfig(): AppServerConfig {
         0
       ),
       maxHeadersCount: parseOptInt('SERVER_MAX_HEADERS_COUNT'),
-      maxConnections: EnvParser.integer(
-        env['SERVER_MAX_CONNECTIONS'],
-        0,
-        0,
-        undefined,
-        'SERVER_MAX_CONNECTIONS'
-      ),
+      maxConnections: EnvParser.integer(env['SERVER_MAX_CONNECTIONS'], 0, {
+        min: 0,
+        envName: 'SERVER_MAX_CONNECTIONS',
+      }),
       blockPrivateConnections: EnvParser.boolean(
         env['SERVER_BLOCK_PRIVATE_CONNECTIONS'],
         false,
@@ -525,9 +522,7 @@ function buildTransformConfig(): AppTransformConfig {
     cancelAckTimeoutMs: EnvParser.integer(
       env['TRANSFORM_CANCEL_ACK_TIMEOUT_MS'],
       200,
-      50,
-      5000,
-      'TRANSFORM_CANCEL_ACK_TIMEOUT_MS'
+      { min: 50, max: 5000, envName: 'TRANSFORM_CANCEL_ACK_TIMEOUT_MS' }
     ),
     workerMode: EnvParser.transformWorkerMode(env['TRANSFORM_WORKER_MODE']),
     workerResourceLimits: resolveWorkerResourceLimits(),
@@ -726,7 +721,7 @@ export function createCacheKey(
 ): string | null {
   if (!namespace || !url) return null;
 
-  const urlHash = sha256Hex(url).substring(0, 32);
+  const urlHash = sha256Hex(url).substring(0, PRIMARY_HASH_LENGTH);
 
   if (!vary) return `${namespace}:${urlHash}`;
 
@@ -743,7 +738,7 @@ export function createCacheKey(
   if (varyString === null) return null;
 
   const varyHash = varyString
-    ? sha256Hex(varyString).substring(0, 16)
+    ? sha256Hex(varyString).substring(0, VARY_HASH_LENGTH)
     : undefined;
   return varyHash
     ? `${namespace}:${urlHash}.${varyHash}`
@@ -852,6 +847,30 @@ class InMemoryCacheStore {
     return !firstKey.done && this.delete(firstKey.value);
   }
 
+  private ensureCapacity(
+    cacheKey: string,
+    entrySize: number
+  ): { ok: boolean; listChanged: boolean } {
+    if (entrySize > this.maxBytes) {
+      logWarn('Cache entry exceeds max size', {
+        key: cacheKey,
+        size: entrySize,
+        max: this.maxBytes,
+      });
+      return { ok: false, listChanged: false };
+    }
+
+    let listChanged = false;
+    while (this.currentBytes + entrySize > this.maxBytes) {
+      if (this.evictOldestEntry()) {
+        listChanged = true;
+      } else {
+        break;
+      }
+    }
+    return { ok: true, listChanged };
+  }
+
   set(
     cacheKey: string | null,
     content: string,
@@ -863,28 +882,12 @@ class InMemoryCacheStore {
 
     const now = Date.now();
     const expiresAtMs = now + this.ttlMs;
-
-    // Check size limit before insertion
     const entrySize = content.length;
-    if (entrySize > this.maxBytes) {
-      logWarn('Cache entry exceeds max size', {
-        key: cacheKey,
-        size: entrySize,
-        max: this.maxBytes,
-      });
-      return;
-    }
 
-    let listChanged = !this.entries.has(cacheKey);
+    const capacity = this.ensureCapacity(cacheKey, entrySize);
+    if (!capacity.ok) return;
 
-    // Evict if needed (size-based)
-    while (this.currentBytes + entrySize > this.maxBytes) {
-      if (this.evictOldestEntry()) {
-        listChanged = true;
-      } else {
-        break;
-      }
-    }
+    let listChanged = !this.entries.has(cacheKey) || capacity.listChanged;
 
     const entry: StoredCacheEntry = {
       url: metadata.url,
@@ -1266,6 +1269,14 @@ function writeLog(level: LogLevel, message: string, meta?: LogMetadata): void {
     safeWriteStderr(`${stripVTControlCharacters(line)}\n`);
   }
 
+  forwardMcpLog(level, message, meta, sessionId);
+}
+function forwardMcpLog(
+  level: LogLevel,
+  message: string,
+  meta: LogMetadata | undefined,
+  sessionId: string | undefined
+): void {
   const server = sessionId ? sessionServers.get(sessionId) : mcpServer;
   if (!server) return;
   if (!server.isConnected()) return;
