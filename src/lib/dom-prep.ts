@@ -105,8 +105,6 @@ const PROMO_TOKENS_ALWAYS = [
   'recommend',
   'breadcrumb',
   'breadcrumbs',
-  'pagination',
-  'pager',
   'taglist',
   'twitter-tweet',
   'fb-post',
@@ -624,7 +622,7 @@ function processUrlElement(
 
 // Rewrite WordPress Photon CDN image URLs to point to the original host, since srcset URLs are often preserved with the updated domain while src is not.
 // This ensures images are correctly resolved when the page is migrated to a new domain but still references the old domain in img src attributes.
-const WP_PHOTON_HOST_PATTERN = /^i\d\.wp\.com$/;
+export const WP_PHOTON_HOST_PATTERN = /^i\d\.wp\.com$/;
 
 function rewritePhotonSrc(document: Document, pageHost: string): void {
   for (const img of document.querySelectorAll('img[src]')) {
@@ -1071,10 +1069,20 @@ function stripDocsControls(document: Document): void {
   removeNodes(document.querySelectorAll(DOCS_CONTROL_SELECTORS.join(',')));
 }
 
+function stripAriaLiveInstructions(document: Document): void {
+  for (const el of document.querySelectorAll('[aria-live]')) {
+    const text = (el.textContent || '').trim();
+    if (text.length > 0 && text.length <= INLINE_DEMO_INSTRUCTION_MAX_CHARS) {
+      el.remove();
+    }
+  }
+}
+
 function runDocsControlPass(document: Document): void {
   normalizeTabContent(document);
   cleanHeadings(document);
   stripDocsControls(document);
+  stripAriaLiveInstructions(document);
   stripPromoLinks(document);
   separateAdjacentInlineElements(document);
 }

@@ -4,6 +4,7 @@ import {
   type TranslatorConfigObject,
 } from 'node-html-markdown';
 
+import { WP_PHOTON_HOST_PATTERN } from '../lib/dom-prep.js';
 import { isLikeNode, isObject } from '../lib/utils.js';
 
 // ---------------------------------------------------------------------------
@@ -180,8 +181,6 @@ function resolveLazySrc(
 
 // Some sites (notably WordPress with Photon CDN) use a CDN proxy URL in img src while keeping the original same-domain URL in srcset.
 // Since the converter prefers srcset URLs for CDN-hosted images, we need to detect this pattern and extract the canonical URL from srcset to ensure images are correctly resolved, especially when migrating content to a new domain.
-const WP_PHOTON_HOST_PATTERN = /^i\d\.wp\.com$/;
-
 function isWpPhotonUrl(src: string): boolean {
   const parsed = URL.parse(src);
   return parsed !== null && WP_PHOTON_HOST_PATTERN.test(parsed.hostname);
