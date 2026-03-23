@@ -27,7 +27,9 @@ import { createTransformMessageHandler } from './shared.js';
 import { transformHtmlToMarkdownInProcess } from './transform.js';
 import type {
   MarkdownTransformResult,
+  TransformWorkerErrorMessage,
   TransformWorkerOutgoingMessage,
+  TransformWorkerResultMessage,
   TransformWorkerTransformMessage,
 } from './types.js';
 
@@ -192,6 +194,11 @@ const WORKER_NAME_PREFIX = 'fetch-url-mcp-transform';
 const DEFAULT_TIMEOUT_MS = config.transform.timeoutMs;
 const TRANSFORM_WORKER_PATH = new URL(import.meta.url);
 
+const COMPACTION_HEAD_THRESHOLD = 1024;
+const QUEUE_CAPACITY_MULTIPLIER = 4;
+const HTTP_SERVICE_UNAVAILABLE = 503;
+const HTTP_GATEWAY_TIMEOUT = 504;
+
 // TaskQueue — array-deque with auto-compaction
 
 class TaskQueue<T extends { id: string }> {
@@ -254,7 +261,8 @@ class TaskQueue<T extends { id: string }> {
 
     if (
       this.head >= this.items.length ||
-      (this.head > 1024 && this.head > this.items.length / 2)
+      (this.head > COMPACTION_HEAD_THRESHOLD &&
+        this.head > this.items.length / 2)
     ) {
       this.items.splice(0, this.head);
       this.head = 0;
@@ -341,7 +349,7 @@ class WorkerPool implements TransformWorkerPool {
         ? 0
         : Math.max(this.minCapacity, Math.min(size, this.maxCapacity));
     this.timeoutMs = timeoutMs;
-    this.queueMax = this.maxCapacity * 4;
+    this.queueMax = this.maxCapacity * QUEUE_CAPACITY_MULTIPLIER;
   }
 
   async transform(
@@ -378,10 +386,15 @@ class WorkerPool implements TransformWorkerPool {
       throw createAbortError(url, 'transform:enqueue');
 
     if (this.queue.depth >= this.queueMax) {
-      throw new FetchError('Transform worker queue is full', url, 503, {
-        reason: 'queue_full',
-        stage: 'transform:enqueue',
-      });
+      throw new FetchError(
+        'Transform worker queue is full',
+        url,
+        HTTP_SERVICE_UNAVAILABLE,
+        {
+          reason: 'queue_full',
+          stage: 'transform:enqueue',
+        }
+      );
     }
 
     const { promise, resolve, reject } =
@@ -627,7 +640,9 @@ class WorkerPool implements TransformWorkerPool {
       try {
         this.failTask(
           slot.currentTaskId,
-          new FetchError(message, '', 503, { reason: 'worker_exit' })
+          new FetchError(message, '', HTTP_SERVICE_UNAVAILABLE, {
+            reason: 'worker_exit',
+          })
         );
       } catch {
         this.markIdle(workerIndex);
@@ -676,7 +691,14 @@ class WorkerPool implements TransformWorkerPool {
     if (!inflight) return;
 
     this.markIdle(workerIndex);
+    this.resolveWorkerResult(inflight, message);
+    this.drainQueue();
+  }
 
+  private resolveWorkerResult(
+    inflight: InflightTask,
+    message: TransformWorkerResultMessage | TransformWorkerErrorMessage
+  ): void {
     this.finalizeTask(inflight.context, () => {
       if (message.type === 'result') {
         inflight.resolve({
@@ -701,8 +723,6 @@ class WorkerPool implements TransformWorkerPool {
         );
       }
     });
-
-    this.drainQueue();
   }
 
   private takeInflight(id: string): InflightTask | null {
@@ -828,7 +848,7 @@ class WorkerPool implements TransformWorkerPool {
 
         this.finalizeTask(inflight.context, () => {
           inflight.reject(
-            new FetchError('Request timeout', task.url, 504, {
+            new FetchError('Request timeout', task.url, HTTP_GATEWAY_TIMEOUT, {
               reason: 'timeout',
               stage: 'transform:worker-timeout',
             })
