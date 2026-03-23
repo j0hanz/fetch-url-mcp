@@ -4,7 +4,18 @@ import type { SharedFetchStage } from '../lib/fetch-pipeline.js';
 import type { ProgressReporter } from '../lib/progress.js';
 import { isObject } from '../lib/utils.js';
 
-type FetchPath = 'unknown' | 'cache_hit' | 'cache_miss';
+type CacheStatus = 'unknown' | 'cache_hit' | 'cache_miss';
+
+const Step = {
+  START: 1,
+  RESOLVE_URL: 2,
+  CHECK_CACHE: 3,
+  CACHE_OR_FETCH: 4,
+  RESTORE_OR_RESPONSE: 5,
+  TRANSFORM: 6,
+  PREPARE: 7,
+  DONE: 8,
+} as const;
 
 function formatContentSize(contentSize: number): string {
   if (contentSize < 1000) return `${contentSize} chars`;
@@ -31,7 +42,7 @@ export function getFetchCompletionStatusMessage(
 }
 
 export class FetchUrlProgressPlan {
-  private path: FetchPath = 'unknown';
+  private cacheStatus: CacheStatus = 'unknown';
 
   constructor(
     private readonly reporter: ProgressReporter,
@@ -39,7 +50,7 @@ export class FetchUrlProgressPlan {
   ) {}
 
   reportStart(): void {
-    this.reporter.report(1, 'Preparing request');
+    this.reporter.report(Step.START, 'Preparing request');
   }
 
   reportStage(stage: SharedFetchStage): void {
@@ -49,11 +60,11 @@ export class FetchUrlProgressPlan {
   }
 
   reportSuccess(contentSize: number): void {
-    this.reporter.report(8, buildFetchSuccessSummary(contentSize));
+    this.reporter.report(Step.DONE, buildFetchSuccessSummary(contentSize));
   }
 
   reportFailure(cancelled: boolean): void {
-    this.reporter.report(8, cancelled ? 'Cancelled' : 'Failed');
+    this.reporter.report(Step.DONE, cancelled ? 'Cancelled' : 'Failed');
   }
 
   private mapStage(
@@ -61,32 +72,39 @@ export class FetchUrlProgressPlan {
   ): { step: number; message: string } | undefined {
     switch (stage) {
       case 'resolve_url':
-        return { step: 2, message: 'Resolving URL' };
+        return { step: Step.RESOLVE_URL, message: 'Resolving URL' };
       case 'check_cache':
-        return { step: 3, message: 'Checking cache' };
+        return { step: Step.CHECK_CACHE, message: 'Checking cache' };
       case 'cache_hit':
-        this.path = 'cache_hit';
-        return { step: 4, message: 'Loaded from cache' };
+        this.cacheStatus = 'cache_hit';
+        return { step: Step.CACHE_OR_FETCH, message: 'Loaded from cache' };
       case 'cache_restore':
-        this.path = 'cache_hit';
-        return { step: 5, message: 'Restoring cached content' };
+        this.cacheStatus = 'cache_hit';
+        return {
+          step: Step.RESTORE_OR_RESPONSE,
+          message: 'Restoring cached content',
+        };
       case 'fetch_remote':
-        this.path = 'cache_miss';
-        return { step: 4, message: `Fetching ${this.context}` };
+        this.cacheStatus = 'cache_miss';
+        return {
+          step: Step.CACHE_OR_FETCH,
+          message: `Fetching ${this.context}`,
+        };
       case 'response_ready':
-        this.path = 'cache_miss';
-        return { step: 5, message: 'Received response' };
+        this.cacheStatus = 'cache_miss';
+        return { step: Step.RESTORE_OR_RESPONSE, message: 'Received response' };
       case 'transform_start':
-        this.path = 'cache_miss';
-        return { step: 6, message: 'Parsing HTML -> Markdown' };
+        this.cacheStatus = 'cache_miss';
+        return { step: Step.TRANSFORM, message: 'Parsing HTML -> Markdown' };
       case 'prepare_output':
         return {
-          step: this.path === 'cache_miss' ? 7 : 6,
+          step:
+            this.cacheStatus === 'cache_miss' ? Step.PREPARE : Step.TRANSFORM,
           message: 'Fetch completed',
         };
       case 'finalize_output':
-        if (this.path === 'cache_miss') return undefined;
-        return { step: 7, message: 'Finalizing output' };
+        if (this.cacheStatus === 'cache_miss') return undefined;
+        return { step: Step.PREPARE, message: 'Finalizing output' };
     }
   }
 }

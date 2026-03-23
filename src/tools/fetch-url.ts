@@ -276,18 +276,18 @@ export interface ToolRegistrationControls {
 
 function createTaskCapableDescriptor(): TaskCapableToolDescriptor<FetchUrlInput> {
   return {
-    name: FETCH_URL_TOOL_NAME,
+    name: TOOL_DEFINITION.name,
     parseArguments: (args: unknown) => {
-      const parsed = fetchUrlInputSchema.safeParse(args);
+      const parsed = TOOL_DEFINITION.inputSchema.safeParse(args);
       if (!parsed.success) {
         throw new McpError(
           ErrorCode.InvalidParams,
-          `Invalid arguments for ${FETCH_URL_TOOL_NAME}: ${formatZodError(parsed.error)}`
+          `Invalid arguments for ${TOOL_DEFINITION.name}: ${formatZodError(parsed.error)}`
         );
       }
       return parsed.data;
     },
-    execute: fetchUrlToolHandler,
+    execute: TOOL_DEFINITION.handler,
     getCompletionStatusMessage: getFetchCompletionStatusMessage,
     taskSupport: 'optional',
   };

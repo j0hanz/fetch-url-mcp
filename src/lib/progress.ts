@@ -42,7 +42,7 @@ export interface ProgressReporter {
   report: (progress: number, message: string) => void;
 }
 
-const FETCH_PROGRESS_TOTAL = 8;
+const DEFAULT_PROGRESS_TOTAL = 8;
 const PROGRESS_NOTIFICATION_TIMEOUT_MS = 5000;
 
 function resolveRelatedTaskMeta(
@@ -106,7 +106,7 @@ class ToolProgressReporter implements ProgressReporter {
     this.lastProgress = effectiveProgress;
     this.lastMessage = message;
 
-    if (effectiveProgress >= FETCH_PROGRESS_TOTAL) {
+    if (effectiveProgress >= DEFAULT_PROGRESS_TOTAL) {
       this.isTerminal = true;
     }
 
@@ -150,9 +150,6 @@ class ToolProgressReporter implements ProgressReporter {
         }
       } finally {
         this.isDispatching = false;
-        if (this.pendingNotification) {
-          this.flushNotifications();
-        }
       }
     })();
   }
@@ -206,7 +203,7 @@ class ToolProgressReporter implements ProgressReporter {
       params: {
         progressToken: token,
         progress,
-        total: FETCH_PROGRESS_TOTAL,
+        total: DEFAULT_PROGRESS_TOTAL,
         message,
         ...(this.taskMeta && {
           _meta: {
