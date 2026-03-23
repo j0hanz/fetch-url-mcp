@@ -246,16 +246,20 @@ const BOM_ENTRIES: readonly { bytes: readonly number[]; encoding: string }[] = [
   { bytes: [0xff, 0xfe], encoding: 'utf-16le' },
   { bytes: [0xfe, 0xff], encoding: 'utf-16be' },
 ];
-const BOM_BY_FIRST_BYTE = new Map<
-  number,
-  readonly { bytes: readonly number[]; encoding: string }[]
->();
-for (const entry of BOM_ENTRIES) {
-  const key = entry.bytes[0];
-  if (key === undefined) continue;
-  const existing = BOM_BY_FIRST_BYTE.get(key);
-  BOM_BY_FIRST_BYTE.set(key, existing ? [...existing, entry] : [entry]);
+function createSignatureMap<T>(
+  entries: readonly T[],
+  getKey: (entry: T) => number | undefined
+): Map<number, readonly T[]> {
+  const map = new Map<number, readonly T[]>();
+  for (const entry of entries) {
+    const key = getKey(entry);
+    if (key === undefined) continue;
+    const existing = map.get(key);
+    map.set(key, existing ? [...existing, entry] : [entry]);
+  }
+  return map;
 }
+const BOM_BY_FIRST_BYTE = createSignatureMap(BOM_ENTRIES, (e) => e.bytes[0]);
 function startsWithBytes(
   buffer: Uint8Array,
   signature: readonly number[]
@@ -385,15 +389,10 @@ const BINARY_SIGNATURES = [
   [0x4f, 0x54, 0x54, 0x4f],
   [0x53, 0x51, 0x4c, 0x69],
 ] as const;
-const BINARY_SIG_BY_FIRST_BYTE = new Map<
-  number,
-  readonly (readonly number[])[]
->();
-for (const sig of BINARY_SIGNATURES) {
-  const key = sig[0];
-  const existing = BINARY_SIG_BY_FIRST_BYTE.get(key);
-  BINARY_SIG_BY_FIRST_BYTE.set(key, existing ? [...existing, sig] : [sig]);
-}
+const BINARY_SIG_BY_FIRST_BYTE = createSignatureMap(
+  BINARY_SIGNATURES,
+  (sig) => sig[0]
+);
 function hasNullByte(buffer: Uint8Array, limit: number): boolean {
   const checkLen = Math.min(buffer.length, limit);
   return buffer.subarray(0, checkLen).includes(0x00);
@@ -979,15 +978,11 @@ function buildDecodePipeline(
     cleanup,
   };
 }
-async function decodeResponseIfNeeded(
-  response: Response,
-  url: string,
-  signal?: AbortSignal
-): Promise<Response> {
-  const encodingHeader = response.headers.get('content-encoding');
-  const parsedEncodings = parseContentEncodings(encodingHeader);
-  if (!parsedEncodings) return response;
-
+function validateContentEncodings(
+  parsedEncodings: string[],
+  encodingHeader: string | null,
+  url: string
+): ContentEncoding[] {
   const encodings = parsedEncodings.filter(
     (token): token is ContentEncoding =>
       token !== 'identity' && isSupportedContentEncoding(token)
@@ -1003,16 +998,14 @@ async function decodeResponseIfNeeded(
     );
   }
 
-  if (encodings.length === 0 || !response.body) return response;
-
-  const pipe = buildDecodePipeline(
-    response.body,
-    encodings,
-    url,
-    response,
-    signal
-  );
-
+  return encodings;
+}
+async function primeDecodedResponse(
+  pipe: DecodePipeline,
+  response: Response,
+  url: string,
+  signal: AbortSignal | undefined
+): Promise<Response> {
   const clearAbortListener = (): void => {
     if (!signal) return;
     signal.removeEventListener('abort', pipe.cleanup);
@@ -1054,6 +1047,33 @@ async function decodeResponseIfNeeded(
       url
     );
   }
+}
+async function decodeResponseIfNeeded(
+  response: Response,
+  url: string,
+  signal?: AbortSignal
+): Promise<Response> {
+  const encodingHeader = response.headers.get('content-encoding');
+  const parsedEncodings = parseContentEncodings(encodingHeader);
+  if (!parsedEncodings) return response;
+
+  const encodings = validateContentEncodings(
+    parsedEncodings,
+    encodingHeader,
+    url
+  );
+
+  if (encodings.length === 0 || !response.body) return response;
+
+  const pipe = buildDecodePipeline(
+    response.body,
+    encodings,
+    url,
+    response,
+    signal
+  );
+
+  return primeDecodedResponse(pipe, response, url, signal);
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -1101,41 +1121,67 @@ class BoundedBufferTransform extends Transform {
           ? chunk
           : new Uint8Array(chunk as ArrayBuffer);
 
-      if (!this.encodingResolved) {
-        this.encodingResolved = true;
-        this.effectiveEncoding = resolveEncoding(this.declaredEncoding, buf);
-      }
+      this.resolveChunkEncoding(buf);
 
-      const isFirstChunk = this.firstChunk;
-      this.firstChunk = false;
-      if (
-        (isFirstChunk && hasBinarySignature(buf)) ||
-        (!isUnicodeWideEncoding(this.effectiveEncoding) &&
-          hasNullByte(buf, 1000))
-      ) {
-        callback(createBinaryContentError(this.url));
+      const binaryError = this.detectBinaryContent(buf);
+      if (binaryError) {
+        callback(binaryError);
         return;
       }
 
-      const newTotal = this.total + buf.length;
-      if (newTotal > this.byteLimit) {
-        const remaining = this.byteLimit - this.total;
-        if (remaining > 0) {
-          const slice = buf.subarray(0, remaining);
-          this.total += remaining;
-          if (this.captureChunks) this.chunks.push(slice);
-          this.push(slice);
-        }
-        callback(new MaxBytesError());
-        return;
-      }
-
-      this.total = newTotal;
-      if (this.captureChunks) this.chunks.push(buf);
-      callback(null, buf);
+      this.enforceByteLimit(buf, callback);
     } catch (error: unknown) {
       callback(toError(error));
     }
+  }
+
+  private resolveChunkEncoding(buf: Uint8Array): void {
+    if (this.encodingResolved) return;
+    this.encodingResolved = true;
+    this.effectiveEncoding = resolveEncoding(this.declaredEncoding, buf);
+  }
+
+  private detectBinaryContent(buf: Uint8Array): FetchError | null {
+    const isFirst = this.firstChunk;
+    this.firstChunk = false;
+    if (
+      (isFirst && hasBinarySignature(buf)) ||
+      (!isUnicodeWideEncoding(this.effectiveEncoding) && hasNullByte(buf, 1000))
+    ) {
+      return createBinaryContentError(this.url);
+    }
+    return null;
+  }
+
+  private enforceByteLimit(
+    buf: Uint8Array,
+    callback: (error?: Error | null, data?: Uint8Array) => void
+  ): void {
+    const newTotal = this.total + buf.length;
+    if (newTotal > this.byteLimit) {
+      const remaining = this.byteLimit - this.total;
+      if (remaining > 0) {
+        const slice = buf.subarray(0, remaining);
+        this.total += remaining;
+        if (this.captureChunks) this.chunks.push(slice);
+        this.push(slice);
+      }
+      callback(new MaxBytesError());
+      return;
+    }
+
+    this.total = newTotal;
+    if (this.captureChunks) this.chunks.push(buf);
+    callback(null, buf);
+  }
+}
+function assertNonBinaryContent(
+  buffer: Uint8Array,
+  encoding: string,
+  url: string
+): void {
+  if (isBinaryContent(buffer, encoding)) {
+    throw createBinaryContentError(url);
   }
 }
 class ResponseTextReader {
@@ -1215,9 +1261,7 @@ class ResponseTextReader {
 
     const effectiveEncoding = resolveEncoding(encoding, buffer);
 
-    if (isBinaryContent(buffer, effectiveEncoding)) {
-      throw createBinaryContentError(url);
-    }
+    assertNonBinaryContent(buffer, effectiveEncoding, url);
 
     return {
       buffer,
@@ -1306,16 +1350,21 @@ type ReadDecodedResponseResult =
       size: number;
       truncated: boolean;
     };
+interface ReadDecodedOptions {
+  response: Response;
+  finalUrl: string;
+  ctx: FetchTelemetryContext;
+  telemetry: FetchTelemetry;
+  reader: ResponseTextReader;
+  maxBytes: number;
+  mode: 'text' | 'buffer';
+  signal?: AbortSignal;
+}
 async function readAndRecordDecodedResponse(
-  response: Response,
-  finalUrl: string,
-  ctx: FetchTelemetryContext,
-  telemetry: FetchTelemetry,
-  reader: ResponseTextReader,
-  maxBytes: number,
-  mode: 'text' | 'buffer',
-  signal?: AbortSignal
+  opts: ReadDecodedOptions
 ): Promise<ReadDecodedResponseResult> {
+  const { response, finalUrl, ctx, telemetry, reader, maxBytes, mode, signal } =
+    opts;
   const responseError = resolveResponseError(response, finalUrl);
   if (responseError) {
     cancelResponseBody(response);
@@ -1709,16 +1758,16 @@ class HttpFetcher {
     signal?: AbortSignal
   ): Promise<FetchReadResult> {
     try {
-      const payload = await readAndRecordDecodedResponse(
+      const payload = await readAndRecordDecodedResponse({
         response,
         finalUrl,
         ctx,
-        this.telemetry,
-        this.reader,
-        this.fetcherConfig.maxContentLength,
+        telemetry: this.telemetry,
+        reader: this.reader,
+        maxBytes: this.fetcherConfig.maxContentLength,
         mode,
-        signal
-      );
+        ...(signal ? { signal } : {}),
+      });
 
       if (payload.kind === 'text') return payload.text;
 
