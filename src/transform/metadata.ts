@@ -175,6 +175,14 @@ function resolveMetadataFromContext(ctx: MetaContext): ExtractedMetadata {
 // Favicon resolution
 // ---------------------------------------------------------------------------
 
+/** Ordered by preference: exact 32×32, SVG, any generic icon, legacy shortcut. */
+const FAVICON_SELECTORS = [
+  'link[rel="icon"][sizes="32x32"]',
+  'link[rel="icon"][type="image/svg+xml"]',
+  'link[rel="icon"]',
+  'link[rel="shortcut icon"]',
+] as const;
+
 function resolveFaviconUrl(href: string, baseUrl: string): string | undefined {
   const trimmed = href.trim();
   if (!trimmed) return undefined;
@@ -192,6 +200,22 @@ function resolveFaviconUrl(href: string, baseUrl: string): string | undefined {
   return resolved.toString();
 }
 
+function extractFavicon(
+  document: Document,
+  baseUrl: string
+): string | undefined {
+  for (const selector of FAVICON_SELECTORS) {
+    for (const el of document.querySelectorAll<HTMLLinkElement>(selector)) {
+      const href = el.getAttribute('href');
+      if (href) {
+        const resolved = resolveFaviconUrl(href, baseUrl);
+        if (resolved) return resolved;
+      }
+    }
+  }
+  return undefined;
+}
+
 // ---------------------------------------------------------------------------
 // Public interface
 // ---------------------------------------------------------------------------
@@ -206,14 +230,8 @@ export function extractMetadata(
     metadata.title = normalizeDocumentTitle(metadata.title, baseUrl);
   }
   if (baseUrl) {
-    const icon32 = document.querySelector<HTMLLinkElement>(
-      'link[rel="icon"][sizes="32x32"]'
-    );
-    const href = icon32?.getAttribute('href');
-    if (href) {
-      const resolved = resolveFaviconUrl(href, baseUrl);
-      if (resolved) metadata.favicon = resolved;
-    }
+    const favicon = extractFavicon(document, baseUrl);
+    if (favicon) metadata.favicon = favicon;
   }
 
   return metadata;

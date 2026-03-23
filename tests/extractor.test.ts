@@ -210,11 +210,11 @@ describe('extractContent', () => {
     }
   });
 
-  it('returns undefined favicon when no 32x32 icon is present', () => {
+  it('falls back to generic icon when no 32x32 icon is present', () => {
     const html = `
       <html>
         <head>
-          <title>No Favicon</title>
+          <title>Generic Favicon</title>
           <link rel="icon" href="/icon.png" />
           <link rel="apple-touch-icon" href="/apple.png" />
         </head>
@@ -226,7 +226,81 @@ describe('extractContent', () => {
       extractArticle: false,
     });
 
+    assert.equal(result.metadata.favicon, 'https://example.com/icon.png');
+  });
+
+  it('falls back to shortcut icon when no rel="icon" is present', () => {
+    const html = `
+      <html>
+        <head>
+          <title>Shortcut Icon</title>
+          <link rel="shortcut icon" href="/favicon.ico" />
+        </head>
+        <body><p>Content</p></body>
+      </html>
+    `;
+
+    const result = extractContent(html, 'https://example.com', {
+      extractArticle: false,
+    });
+
+    assert.equal(result.metadata.favicon, 'https://example.com/favicon.ico');
+  });
+
+  it('prefers SVG icon over generic icon', () => {
+    const html = `
+      <html>
+        <head>
+          <title>SVG Icon</title>
+          <link rel="icon" href="/icon-16.png" />
+          <link rel="icon" type="image/svg+xml" href="/icon.svg" />
+        </head>
+        <body><p>Content</p></body>
+      </html>
+    `;
+
+    const result = extractContent(html, 'https://example.com', {
+      extractArticle: false,
+    });
+
+    assert.equal(result.metadata.favicon, 'https://example.com/icon.svg');
+  });
+
+  it('returns undefined favicon when no icon links are present', () => {
+    const html = `
+      <html>
+        <head>
+          <title>No Icons</title>
+          <link rel="apple-touch-icon" href="/apple.png" />
+        </head>
+        <body><p>Content</p></body>
+      </html>
+    `;
+
+    const result = extractContent(html, 'https://example.com', {
+      extractArticle: false,
+    });
+
     assert.equal(result.metadata.favicon, undefined);
+  });
+
+  it('skips data: URI favicon and falls back to next match', () => {
+    const html = `
+      <html>
+        <head>
+          <title>Data URI</title>
+          <link rel="icon" sizes="32x32" href="data:image/png;base64,abc" />
+          <link rel="icon" href="/fallback.png" />
+        </head>
+        <body><p>Content</p></body>
+      </html>
+    `;
+
+    const result = extractContent(html, 'https://example.com', {
+      extractArticle: false,
+    });
+
+    assert.equal(result.metadata.favicon, 'https://example.com/fallback.png');
   });
 
   it('handles missing favicon gracefully without baseUrl', () => {
