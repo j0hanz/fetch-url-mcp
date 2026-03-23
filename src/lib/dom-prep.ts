@@ -361,6 +361,14 @@ function removeNodes(nodes: ArrayLike<Element>): void {
   }
 }
 
+// Checks if the element itself or any of its ancestors contain primary content indicators (article, main, role=main).
+function containsPrimaryContent(element: Element): boolean {
+  const tag = element.tagName.toLowerCase();
+  if (tag === 'article' || tag === 'main') return true;
+  if (element.getAttribute('role') === 'main') return true;
+  return element.querySelector('article,main,[role="main"]') !== null;
+}
+
 function isPromoMatch(
   className: string,
   id: string,
@@ -372,10 +380,13 @@ function isPromoMatch(
     context.promoMatchers.aggressive.test(className) ||
     context.promoMatchers.aggressive.test(id);
   if (aggTest) return !isWithinPrimaryContent(element);
-  return (
-    context.promoMatchers.base.test(className) ||
-    context.promoMatchers.base.test(id)
-  );
+  // Base test must match and be outside primary content to be considered noise
+  if (
+    !context.promoMatchers.base.test(className) &&
+    !context.promoMatchers.base.test(id)
+  )
+    return false;
+  return !containsPrimaryContent(element);
 }
 
 function isStructuralNoise(
@@ -1427,12 +1438,27 @@ function passesContentRatioGate(
   );
 }
 
+function countRealImages(doc: Document): number {
+  let count = 0;
+  for (const img of doc.querySelectorAll('img')) {
+    const src = img.getAttribute('src') ?? '';
+    if (!src.startsWith('data:')) count++;
+  }
+  return count;
+}
+
 function passesRetentionRulesFromHtml(
   originalDoc: Document,
   articleHtml: string
 ): boolean {
   return RETENTION_RULES.every(({ selector, pattern, minThreshold, ratio }) => {
-    const original = countMatchingElements(originalDoc, selector);
+    // Exclude lazy-loaded placeholder images (data: URI src) from the
+    // original count so they don't inflate the denominator and cause
+    // false retention failures.
+    const original =
+      selector === 'img'
+        ? countRealImages(originalDoc)
+        : countMatchingElements(originalDoc, selector);
     if (original < minThreshold) return true;
     return (articleHtml.match(pattern)?.length ?? 0) / original >= ratio;
   });
