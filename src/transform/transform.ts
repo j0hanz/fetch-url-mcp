@@ -16,6 +16,7 @@ import {
   redactUrl,
 } from '../lib/core.js';
 import {
+  extractNoscriptImages,
   normalizeTabContent,
   prepareDocumentForMarkdown,
   removeNoiseFromHtml,
@@ -469,6 +470,7 @@ function preserveCodeLanguageAttributes(doc: Document): void {
 const STRUCTURAL_SKIP_TAGS = new Set(['HTML', 'BODY']);
 
 function prepareReadabilityDocument(readabilityDoc: Document): void {
+  extractNoscriptImages(readabilityDoc);
   preserveGalleryImages(readabilityDoc);
   preserveAlertElements(readabilityDoc);
   preserveCodeLanguageAttributes(readabilityDoc);

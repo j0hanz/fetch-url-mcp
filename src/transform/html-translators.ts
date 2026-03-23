@@ -133,12 +133,24 @@ function extractFirstSrcsetUrl(srcset: string): string {
 const LAZY_SRC_ATTRIBUTES = [
   'data-src',
   'data-lazy-src',
+  'data-lazy',
   'data-original',
+  'data-echo',
   'data-srcset',
 ] as const;
 
 function isDataUri(value: string): boolean {
   return value.startsWith('data:');
+}
+
+const PLACEHOLDER_FILENAME_PATTERN =
+  /(?:^|\/)(?:blank|spacer|placeholder|grey|gray|pixel|loading|lazy|transparent|empty|dummy)\.[a-z]{3,4}$/i;
+
+function isPlaceholderSrc(value: string): boolean {
+  if (isDataUri(value)) return true;
+  const parsed = URL.parse(value) ?? URL.parse(value, 'http://localhost');
+  if (!parsed) return false;
+  return PLACEHOLDER_FILENAME_PATTERN.test(parsed.pathname);
 }
 
 function extractNonDataSrcsetUrl(value: string): string | undefined {
@@ -190,7 +202,7 @@ function resolveImageSrc(
     }
   }
 
-  if (srcRaw && !isDataUri(srcRaw)) return srcRaw;
+  if (srcRaw && !isPlaceholderSrc(srcRaw)) return srcRaw;
 
   // First check common lazy-loading attributes that may contain non-data URLs before falling back to the native srcset, as some sites use data URIs in lazy attributes while still providing valid URLs in srcset.
   const lazySrc = resolveLazySrc(getAttribute);

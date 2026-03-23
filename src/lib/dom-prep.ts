@@ -630,6 +630,37 @@ function preferSameDomainSrc(document: Document, base: URL): void {
   }
 }
 
+export function extractNoscriptImages(document: Document): void {
+  for (const noscript of document.querySelectorAll('noscript')) {
+    // linkedom may parse noscript children as DOM or raw text — handle both.
+    let imgs = Array.from(noscript.querySelectorAll('img'));
+    if (imgs.length === 0) {
+      const html = noscript.innerHTML || noscript.textContent || '';
+      if (!/<img\b/i.test(html)) continue;
+      const { document: fragDoc } = parseHTML(`<body>${html}</body>`);
+      imgs = Array.from(fragDoc.querySelectorAll('img'));
+    }
+    if (imgs.length === 0) continue;
+
+    // Skip when the previous sibling is (or contains) an <img> — the
+    // lazy-loaded placeholder is already in the DOM and the translators
+    // handle data-src / placeholder detection.
+    const prev = noscript.previousElementSibling;
+    if (prev?.tagName === 'IMG' || prev?.querySelector('img')) continue;
+
+    for (const img of imgs) {
+      // Skip tracking pixels (commonly 1×1 images placed in noscript by
+      // analytics providers).
+      if (
+        img.getAttribute('width') === '1' ||
+        img.getAttribute('height') === '1'
+      )
+        continue;
+      noscript.before(img.cloneNode(true));
+    }
+  }
+}
+
 function resolveUrls(document: Document, baseUrlStr: string): void {
   const base = URL.parse(baseUrlStr);
   if (!base) return;
@@ -1041,6 +1072,7 @@ export function prepareDocumentForMarkdown(
   baseUrl?: string,
   signal?: AbortSignal
 ): void {
+  extractNoscriptImages(document);
   runDocsControlPass(document);
   runStructuralNoisePass(document, signal);
   runCodeExamplePass(document);
