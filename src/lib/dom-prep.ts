@@ -151,6 +151,7 @@ const DOCS_CONTROL_SELECTORS = [
   '.mobile-header',
   '.overlay.sidebar-overlay',
   '.overlay.toc-overlay',
+  '.baseline-indicator',
   '.back-to-top',
   '.backtotop',
   '.headerlink',
@@ -1128,7 +1129,7 @@ export function surfaceCodeEditorContent(document: Document): void {
   }
 }
 
-function stripDocsControls(document: Document): void {
+export function stripDocsControls(document: Document): void {
   removeNodes(document.querySelectorAll(DOCS_CONTROL_SELECTORS.join(',')));
 }
 
@@ -1141,7 +1142,7 @@ function stripAriaLiveInstructions(document: Document): void {
   }
 }
 
-function runDocsControlPass(document: Document): void {
+export function runDocsControlPass(document: Document): void {
   normalizeTabContent(document);
   surfaceCodeEditorContent(document);
   cleanHeadings(document);
