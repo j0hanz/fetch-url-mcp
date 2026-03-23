@@ -40,6 +40,10 @@ const TOC_SCAN_LIMIT = 20;
 const TOC_MAX_NON_EMPTY = 12;
 const TOC_LINK_RATIO_THRESHOLD = 0.8;
 
+// ── List indentation normalization ───────────────────────────────────
+const SOURCE_INDENT_STEP = 2;
+const TARGET_INDENT_STEP = 4;
+
 // ── Docs-chrome scan depth ───────────────────────────────────────────
 const CHROME_SCAN_LINE_LIMIT = 12;
 
@@ -62,6 +66,9 @@ const REGEX = {
   COMBINED_LINE_REMOVALS:
     /^(?:\[Skip to (?:main )?(?:content|navigation)\]\(#[^)]*\)|\[Skip link\]\(#[^)]*\)|Was this page helpful\??|\[Back to top\]\(#[^)]*\)|\[\s*\]\(https?:\/\/[^)]*\))\s*$/gim,
   ZERO_WIDTH_ANCHOR: /\[(?:\s|\u200B)*\]\(#[^)]*\)[ \t]*/g,
+  // ReDoS-safe: {0,30} bounds identifier backtracking, negated char class
+  // [^\u0022\u201C\u201D]* has no overlap with delimiters, and \s+ is anchored
+  // between ':' and a quote. Multi-pass capped at PROPERTY_FIX_MAX_PASSES.
   CONCATENATED_PROPS:
     /([a-z_][a-z0-9_]{0,30}\??:\s+)([\u0022\u201C][^\u0022\u201C\u201D]*[\u0022\u201D])([a-z_][a-z0-9_]{0,30}\??:)/g,
   DOUBLE_NEWLINE_REDUCER: /\n{3,}/g,
@@ -120,6 +127,13 @@ interface CleanupOptions {
   signal?: AbortSignal;
   url?: string;
 }
+
+interface LineContext {
+  readonly lines: string[];
+  readonly index: number;
+  readonly trimmed: string;
+  readonly line: string;
+}
 function createAbortChecker(options?: CleanupOptions): (stage: string) => void {
   return (stage: string) => {
     throwIfAborted(options?.signal, options?.url ?? '', stage);
@@ -139,19 +153,19 @@ function hasFollowingContent(lines: string[], startIndex: number): boolean {
   }
   return false;
 }
-function findNextNonBlankLine(
+function findNextNonBlank(
   lines: string[],
-  startIndex: number
-): string | undefined {
-  for (
-    let i = startIndex + 1;
-    i < Math.min(lines.length, startIndex + HAS_FOLLOWING_LOOKAHEAD);
-    i++
-  ) {
-    const line = lines[i];
-    if (!isBlank(line)) return line?.trim();
+  startIndex: number,
+  maxLookahead?: number
+): number {
+  const limit =
+    maxLookahead !== undefined
+      ? Math.min(lines.length, startIndex + maxLookahead)
+      : lines.length;
+  for (let i = startIndex; i < limit; i++) {
+    if (!isBlank(lines[i])) return i;
   }
-  return undefined;
+  return -1;
 }
 function stripAnchorOnlyHeading(line: string): string {
   return line.replace(/^(#{1,6})\s+\[([^\]]+)\]\(#[^)]+\)\s*$/, '$1 $2');
@@ -182,40 +196,43 @@ function isTitleCaseOrKeyword(trimmed: string): boolean {
 
   return capitalizedCount >= TITLE_MIN_CAPITALIZED;
 }
+function isMarkdownStructuralLine(trimmed: string): boolean {
+  const firstChar = trimmed.charCodeAt(0);
+  if (
+    firstChar !== ASCII_MARKERS.HASH &&
+    firstChar !== ASCII_MARKERS.DASH &&
+    firstChar !== ASCII_MARKERS.ASTERISK &&
+    firstChar !== ASCII_MARKERS.PLUS &&
+    firstChar !== ASCII_MARKERS.BRACKET_OPEN &&
+    (firstChar < ASCII_MARKERS.DIGIT_0 || firstChar > ASCII_MARKERS.DIGIT_9)
+  ) {
+    return false;
+  }
+  return (
+    REGEX.HEADING_MARKER.test(trimmed) ||
+    REGEX.LIST_MARKER.test(trimmed) ||
+    /^\d+\.\s/.test(trimmed) ||
+    /^\[.*\]\(.*\)$/.test(trimmed)
+  );
+}
+function isTerminalPunctuation(charCode: number): boolean {
+  return (
+    charCode === ASCII_MARKERS.PERIOD ||
+    charCode === ASCII_MARKERS.EXCLAMATION ||
+    charCode === ASCII_MARKERS.QUESTION
+  );
+}
 function getHeadingPrefix(trimmed: string): string | null {
   if (trimmed.length > MAX_LINE_LENGTH) return null;
   if (REPL_PROMPT_LINE.test(trimmed)) return null;
 
-  // Fast path: Check common markdown markers first
-  const firstChar = trimmed.charCodeAt(0);
-  if (
-    firstChar === ASCII_MARKERS.HASH ||
-    firstChar === ASCII_MARKERS.DASH ||
-    firstChar === ASCII_MARKERS.ASTERISK ||
-    firstChar === ASCII_MARKERS.PLUS ||
-    firstChar === ASCII_MARKERS.BRACKET_OPEN ||
-    (firstChar >= ASCII_MARKERS.DIGIT_0 && firstChar <= ASCII_MARKERS.DIGIT_9)
-  ) {
-    if (
-      REGEX.HEADING_MARKER.test(trimmed) ||
-      REGEX.LIST_MARKER.test(trimmed) ||
-      /^\d+\.\s/.test(trimmed) ||
-      /^\[.*\]\(.*\)$/.test(trimmed)
-    ) {
-      return null;
-    }
-  }
+  if (isMarkdownStructuralLine(trimmed)) return null;
 
   if (SPECIAL_PREFIXES.test(trimmed)) {
     return /^example:\s/i.test(trimmed) ? '### ' : '## ';
   }
 
-  const lastChar = trimmed.charCodeAt(trimmed.length - 1);
-  if (
-    lastChar === ASCII_MARKERS.PERIOD ||
-    lastChar === ASCII_MARKERS.EXCLAMATION ||
-    lastChar === ASCII_MARKERS.QUESTION
-  )
+  if (isTerminalPunctuation(trimmed.charCodeAt(trimmed.length - 1)))
     return null;
 
   return isTitleCaseOrKeyword(trimmed) ? '## ' : null;
@@ -265,87 +282,80 @@ function isTypeDocArtifactLine(line: string): boolean {
   }
   return false;
 }
-function tryPromoteOrphan(
-  lines: string[],
-  i: number,
-  trimmed: string
-): string | null {
-  const prevLine = lines[i - 1];
-  const isOrphan = i === 0 || !prevLine || prevLine.trim().length === 0;
+function tryPromoteOrphan(ctx: LineContext): string | null {
+  const prevLine = ctx.lines[ctx.index - 1];
+  const isOrphan = ctx.index === 0 || !prevLine || prevLine.trim().length === 0;
   if (!isOrphan) return null;
 
-  const prefix = getHeadingPrefix(trimmed);
+  const prefix = getHeadingPrefix(ctx.trimmed);
   if (!prefix) return null;
 
-  const isSpecialPrefix = SPECIAL_PREFIXES.test(trimmed);
-  if (!isSpecialPrefix && !hasFollowingContent(lines, i)) return null;
+  const isSpecialPrefix = SPECIAL_PREFIXES.test(ctx.trimmed);
+  if (!isSpecialPrefix && !hasFollowingContent(ctx.lines, ctx.index))
+    return null;
   if (!isSpecialPrefix) {
-    const nextLine = findNextNonBlankLine(lines, i);
+    const nextIdx = findNextNonBlank(
+      ctx.lines,
+      ctx.index + 1,
+      HAS_FOLLOWING_LOOKAHEAD
+    );
+    const nextLine = nextIdx >= 0 ? ctx.lines[nextIdx]?.trim() : undefined;
     if (nextLine && REGEX.HEADING_MARKER.test(nextLine)) return null;
   }
 
-  return `${prefix}${trimmed}`;
+  return `${prefix}${ctx.trimmed}`;
 }
 function shouldSkipAsToc(
-  lines: string[],
-  i: number,
-  trimmed: string,
+  ctx: LineContext,
   removeToc: boolean,
   options?: CleanupOptions
 ): number | null {
-  if (!removeToc || !REGEX.TOC_HEADING.test(trimmed)) return null;
+  if (!removeToc || !REGEX.TOC_HEADING.test(ctx.trimmed)) return null;
 
-  const { total, linkCount, nonLinkCount } = getTocBlockStats(lines, i);
+  const { total, linkCount, nonLinkCount } = getTocBlockStats(
+    ctx.lines,
+    ctx.index
+  );
   if (total === 0 || nonLinkCount > 0) return null;
 
   const ratio = linkCount / total;
   if (ratio <= TOC_LINK_RATIO_THRESHOLD) return null;
 
   throwIfAborted(options?.signal, options?.url ?? '', 'markdown:cleanup:toc');
-  return skipTocLines(lines, i + 1);
+  return skipTocLines(ctx.lines, ctx.index + 1);
 }
 function normalizePreprocessLine(
-  lines: string[],
-  i: number,
-  trimmed: string,
-  line: string,
+  ctx: LineContext,
   options?: CleanupOptions
 ): string | null {
-  if (REGEX.EMPTY_HEADING_LINE.test(trimmed)) return null;
-  if (!REGEX.ANCHOR_ONLY_HEADING.test(trimmed)) return line;
-  if (!hasFollowingContent(lines, i)) {
+  if (REGEX.EMPTY_HEADING_LINE.test(ctx.trimmed)) return null;
+  if (!REGEX.ANCHOR_ONLY_HEADING.test(ctx.trimmed)) return ctx.line;
+  if (!hasFollowingContent(ctx.lines, ctx.index)) {
     return options?.preserveEmptyHeadings
-      ? stripAnchorOnlyHeading(trimmed)
+      ? stripAnchorOnlyHeading(ctx.trimmed)
       : null;
   }
-  return stripAnchorOnlyHeading(trimmed);
+  return stripAnchorOnlyHeading(ctx.trimmed);
 }
 function maybeSkipTocBlock(
-  lines: string[],
-  i: number,
-  trimmed: string,
+  ctx: LineContext,
   options?: CleanupOptions
 ): number | null {
-  return shouldSkipAsToc(
-    lines,
-    i,
-    trimmed,
-    config.markdownCleanup.removeTocBlocks,
-    options
-  );
+  return shouldSkipAsToc(ctx, config.markdownCleanup.removeTocBlocks, options);
 }
 function maybePromoteOrphanHeading(
-  lines: string[],
-  i: number,
-  trimmed: string,
+  ctx: LineContext,
   checkAbort: (stage: string) => void
 ): string | null {
-  if (!config.markdownCleanup.promoteOrphanHeadings || trimmed.length === 0) {
+  if (
+    !config.markdownCleanup.promoteOrphanHeadings ||
+    ctx.trimmed.length === 0
+  ) {
     return null;
   }
 
   checkAbort('markdown:cleanup:promote');
-  return tryPromoteOrphan(lines, i, trimmed);
+  return tryPromoteOrphan(ctx);
 }
 function preprocessLines(lines: string[], options?: CleanupOptions): string {
   const checkAbort = createAbortChecker(options);
@@ -357,27 +367,18 @@ function preprocessLines(lines: string[], options?: CleanupOptions): string {
 
     const currentLine = lines[i] ?? '';
     const trimmed = currentLine.trim();
-    const normalizedLine = normalizePreprocessLine(
-      lines,
-      i,
-      trimmed,
-      currentLine,
-      options
-    );
+    const ctx: LineContext = { lines, index: i, trimmed, line: currentLine };
+
+    const normalizedLine = normalizePreprocessLine(ctx, options);
     if (normalizedLine === null) continue;
 
-    const tocSkip = maybeSkipTocBlock(lines, i, trimmed, options);
+    const tocSkip = maybeSkipTocBlock(ctx, options);
     if (tocSkip !== null) {
       skipUntil = tocSkip;
       continue;
     }
 
-    const promotedLine = maybePromoteOrphanHeading(
-      lines,
-      i,
-      trimmed,
-      checkAbort
-    );
+    const promotedLine = maybePromoteOrphanHeading(ctx, checkAbort);
     result.push(promotedLine ?? normalizedLine);
   }
 
@@ -484,14 +485,6 @@ function getHeadingInfo(line: string): { level: number } | null {
   return { level: match[1]?.length ?? 0 };
 }
 
-function findNextNonBlankIndex(lines: string[], startIndex: number): number {
-  let idx = startIndex;
-  while (idx < lines.length && isBlank(lines[idx])) {
-    idx += 1;
-  }
-  return idx;
-}
-
 function removeEmptyHeadingSections(text: string): string {
   const lines = text.split('\n');
   const kept: string[] = [];
@@ -504,9 +497,9 @@ function removeEmptyHeadingSections(text: string): string {
       continue;
     }
 
-    const nextIndex = findNextNonBlankIndex(lines, i + 1);
+    const nextIndex = findNextNonBlank(lines, i + 1);
 
-    const nextLine = lines[nextIndex];
+    const nextLine = nextIndex >= 0 ? lines[nextIndex] : undefined;
     if (nextLine === undefined) {
       kept.push(line);
       continue;
@@ -612,8 +605,11 @@ function normalizeNestedListIndentation(text: string): string {
     REGEX.NESTED_LIST_INDENT,
     (match: string, spaces: string, marker: string): string => {
       const count = spaces.length;
-      if (count < 2 || count % 2 !== 0) return match;
-      const normalized = ' '.repeat((count / 2) * 4);
+      if (count < SOURCE_INDENT_STEP || count % SOURCE_INDENT_STEP !== 0)
+        return match;
+      const normalized = ' '.repeat(
+        (count / SOURCE_INDENT_STEP) * TARGET_INDENT_STEP
+      );
       return `${normalized}${marker} `;
     }
   );
