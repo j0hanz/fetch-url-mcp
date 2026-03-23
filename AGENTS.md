@@ -34,7 +34,9 @@ Intelligent web content fetcher MCP server that converts HTML to clean, AI-reada
 - **Dev**: `npm run dev`
 - **Test**: `npm run test`
 - **Lint**: `npm run lint`
-- **Deploy**: `npm run prepublishOnly`
+- **Build**: `npm run build`
+- **Format**: `npm run format`
+- **Type Check**: `npm run type-check`
 
 ## Safety Boundaries
 
