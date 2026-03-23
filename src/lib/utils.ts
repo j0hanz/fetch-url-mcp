@@ -1,3 +1,4 @@
+import { Buffer } from 'node:buffer';
 import { createHmac, hash as oneShotHash, timingSafeEqual } from 'node:crypto';
 import {
   setInterval as setIntervalPromise,
@@ -323,4 +324,126 @@ export function withSignal(
   signal?: AbortSignal
 ): { signal: AbortSignal } | Record<string, never> {
   return signal === undefined ? {} : { signal };
+}
+
+export const CharCode = {
+  TAB: 9,
+  LF: 10,
+  FF: 12,
+  CR: 13,
+  SPACE: 32,
+  EXCLAMATION: 33,
+  SLASH: 47,
+  PERIOD: 46,
+  QUESTION: 63,
+  COLON: 58,
+  SEMICOLON: 59,
+  A_UPPER: 65,
+  Z_UPPER: 90,
+  A_LOWER: 97,
+  Z_LOWER: 122,
+} as const;
+
+export function isWhitespaceChar(code: number): boolean {
+  return (
+    code === CharCode.TAB ||
+    code === CharCode.LF ||
+    code === CharCode.FF ||
+    code === CharCode.CR ||
+    code === CharCode.SPACE
+  );
+}
+
+export function getUtf8ByteLength(html: string): number {
+  return Buffer.byteLength(html, 'utf8');
+}
+
+const UTF8_MASK = 0xc0;
+const UTF8_CONTINUATION = 0x80;
+const UTF8_2_BYTE = 0xc0;
+const UTF8_3_BYTE = 0xe0;
+const UTF8_4_BYTE = 0xf0;
+const UTF8_5_BYTE = 0xf8; // Limits 4-byte validity check
+
+export function trimUtf8Buffer(
+  buffer: Uint8Array,
+  maxBytes: number
+): Uint8Array {
+  if (buffer.length <= maxBytes) return buffer;
+  if (maxBytes <= 0) return buffer.subarray(0, 0);
+
+  let end = maxBytes;
+  let cursor = end - 1;
+
+  while (
+    cursor >= 0 &&
+    ((buffer[cursor] ?? 0) & UTF8_MASK) === UTF8_CONTINUATION
+  ) {
+    cursor -= 1;
+  }
+
+  if (cursor < 0) return buffer.subarray(0, maxBytes);
+
+  const lead = buffer[cursor] ?? 0;
+  let sequenceLength = 1;
+
+  if (lead >= UTF8_2_BYTE && lead < UTF8_3_BYTE) sequenceLength = 2;
+  else if (lead >= UTF8_3_BYTE && lead < UTF8_4_BYTE) sequenceLength = 3;
+  else if (lead >= UTF8_4_BYTE && lead < UTF8_5_BYTE) sequenceLength = 4;
+
+  if (cursor + sequenceLength > end) {
+    end = cursor;
+  }
+
+  return buffer.subarray(0, end);
+}
+
+const MAX_ENTITY_LENGTH = 10;
+
+export function trimDanglingTagFragment(content: string): string {
+  let result = content;
+
+  // Trim dangling HTML entity (e.g. "&amp" cut before ";")
+  const lastAmp = result.lastIndexOf('&');
+  if (lastAmp !== -1 && lastAmp > result.length - MAX_ENTITY_LENGTH) {
+    const tail = result.slice(lastAmp + 1);
+    if (!tail.includes(';') && /^[#a-zA-Z][a-zA-Z0-9]*$/.test(tail)) {
+      result = result.substring(0, lastAmp);
+    }
+  }
+
+  const lastOpen = result.lastIndexOf('<');
+  const lastClose = result.lastIndexOf('>');
+  if (lastOpen > lastClose) {
+    if (lastOpen === result.length - 1) {
+      return result.substring(0, lastOpen);
+    }
+    const code = result.codePointAt(lastOpen + 1);
+    if (
+      code !== undefined &&
+      (code === CharCode.SLASH ||
+        code === CharCode.EXCLAMATION ||
+        code === CharCode.QUESTION ||
+        (code >= CharCode.A_UPPER && code <= CharCode.Z_UPPER) ||
+        (code >= CharCode.A_LOWER && code <= CharCode.Z_LOWER))
+    ) {
+      return result.substring(0, lastOpen);
+    }
+  }
+  return result;
+}
+
+export function isAsciiOnly(s: string, sampleSize = 512): boolean {
+  const len = Math.min(s.length, sampleSize);
+  for (let i = 0; i < len; i++) {
+    if (s.charCodeAt(i) > 127) return false;
+  }
+  return true;
+}
+
+export function truncateToUtf8Boundary(html: string, maxBytes: number): string {
+  const htmlBuffer = new TextEncoder().encode(html.slice(0, maxBytes));
+  return trimDanglingTagFragment(
+    new TextDecoder('utf-8').decode(trimUtf8Buffer(htmlBuffer, maxBytes))
+  );
 }

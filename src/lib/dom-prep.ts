@@ -1,6 +1,8 @@
 import { parseHTML } from 'linkedom';
 
+import type { ExtractedArticle } from '../transform/types.js';
 import { config, logDebug } from './core.js';
+import { CharCode, isWhitespaceChar } from './utils.js';
 
 // ── Thresholds ──────────────────────────────────────────────────────
 const NOISE_SCAN_LIMIT = 50_000;
@@ -1158,4 +1160,259 @@ export function removeNoiseFromHtml(
   } catch {
     return html;
   }
+}
+
+// ── Content evaluation heuristics ───────────────────────────────────
+
+const MIN_CONTENT_RATIO = 0.15;
+const MIN_HTML_LENGTH_FOR_GATE = 100;
+
+interface RetentionRule {
+  selector: string;
+  pattern: RegExp;
+  minThreshold: number;
+  ratio: number;
+}
+
+const RETENTION_RULES: readonly RetentionRule[] = [
+  {
+    selector: 'h1,h2,h3,h4,h5,h6',
+    pattern: /<h[1-6]\b/gi,
+    minThreshold: 1,
+    ratio: 0.3,
+  },
+  { selector: 'pre', pattern: /<pre\b/gi, minThreshold: 1, ratio: 0.15 },
+  { selector: 'table', pattern: /<table\b/gi, minThreshold: 1, ratio: 0.5 },
+  { selector: 'img', pattern: /<img\b/gi, minThreshold: 4, ratio: 0.2 },
+];
+
+const MIN_HEADINGS_FOR_EMPTY_SECTION_GATE = 5;
+const MAX_EMPTY_SECTION_RATIO = 0.15;
+
+const MIN_LINE_LENGTH_FOR_TRUNCATION_CHECK = 20;
+const MAX_TRUNCATED_LINE_RATIO = 0.95;
+
+function resolveHtmlDocument(htmlOrDocument: string | Document): Document {
+  if (typeof htmlOrDocument !== 'string') return htmlOrDocument;
+
+  const needsWrapper = !/^\s*<(?:!doctype|html|body)\b/i.test(htmlOrDocument);
+  const htmlToParse = needsWrapper
+    ? `<!DOCTYPE html><html><body>${htmlOrDocument}</body></html>`
+    : htmlOrDocument;
+
+  try {
+    return parseHTML(htmlToParse).document;
+  } catch {
+    // Don't crash on parse failures.
+    return parseHTML('<!DOCTYPE html><html><body></body></html>').document;
+  }
+}
+
+function getTextContentSkippingHidden(node: Node, parts: string[]): void {
+  const { nodeType } = node;
+  if (nodeType === 3) {
+    const { textContent } = node;
+    if (textContent) parts.push(textContent);
+    return;
+  }
+  if (nodeType !== 1) return;
+
+  const element = node as Element;
+  if (
+    element.hasAttribute('hidden') ||
+    element.getAttribute('aria-hidden') === 'true'
+  ) {
+    return;
+  }
+
+  const { tagName } = element;
+  if (tagName === 'SCRIPT' || tagName === 'STYLE' || tagName === 'NOSCRIPT')
+    return;
+
+  for (const child of node.childNodes) {
+    getTextContentSkippingHidden(child, parts);
+  }
+}
+
+export function getVisibleTextLength(
+  htmlOrDocument: string | Document
+): number {
+  if (typeof htmlOrDocument === 'string') {
+    const doc = resolveHtmlDocument(htmlOrDocument);
+    const body = resolveDocumentBody(doc);
+    for (const el of body.querySelectorAll('script,style,noscript')) {
+      el.remove();
+    }
+    return (body.textContent || '').replace(/\s+/g, ' ').trim().length;
+  }
+  const body = resolveDocumentBody(htmlOrDocument);
+  const parts: string[] = [];
+  getTextContentSkippingHidden(body, parts);
+  return parts.join('').replace(/\s+/g, ' ').trim().length;
+}
+
+function countMatchingElements(root: ParentNode, selector: string): number {
+  return root.querySelectorAll(selector).length;
+}
+
+function getHeadingLevel(heading: Element): number | null {
+  const match = /^H([1-6])$/.exec(heading.tagName);
+  if (!match) return null;
+
+  return Number.parseInt(match[1] ?? '', 10);
+}
+
+function hasSectionContent(heading: Element): boolean {
+  const level = getHeadingLevel(heading);
+  if (level === null) return false;
+
+  let current = heading.nextElementSibling;
+  while (current) {
+    const currentLevel = getHeadingLevel(current);
+    if (currentLevel !== null && currentLevel <= level) return false;
+
+    const text = current.textContent.trim();
+    if (text.length > 0) return true;
+    if (current.querySelector('img,table,pre,code,ul,ol,figure,blockquote')) {
+      return true;
+    }
+
+    current = current.nextElementSibling;
+  }
+
+  return false;
+}
+
+function countEmptyHeadingSections(root: ParentNode): number {
+  let emptyCount = 0;
+  const headings = root.querySelectorAll('h1,h2,h3,h4,h5,h6');
+
+  for (const heading of headings) {
+    if (!hasSectionContent(heading)) emptyCount += 1;
+  }
+
+  return emptyCount;
+}
+
+// Heuristic to detect if the content was truncated due to length limits by checking for incomplete sentences.
+const SENTENCE_ENDING_CODES = new Set<number>([
+  CharCode.PERIOD,
+  CharCode.EXCLAMATION,
+  CharCode.QUESTION,
+  CharCode.COLON,
+  CharCode.SEMICOLON,
+]);
+
+function trimLineOffsets(
+  text: string,
+  lineStart: number,
+  lineEnd: number
+): { start: number; end: number } | null {
+  let start = lineStart;
+  while (start < lineEnd && isWhitespaceChar(text.charCodeAt(start))) start++;
+  let end = lineEnd - 1;
+  while (end >= start && isWhitespaceChar(text.charCodeAt(end))) end--;
+  if (end < start) return null;
+  const trimmedLen = end - start + 1;
+  return trimmedLen > MIN_LINE_LENGTH_FOR_TRUNCATION_CHECK
+    ? { start, end }
+    : null;
+}
+
+function classifyLine(
+  text: string,
+  lineStart: number,
+  lineEnd: number
+): { counted: boolean; incomplete: boolean } {
+  const lineLength = lineEnd - lineStart;
+  if (lineLength <= MIN_LINE_LENGTH_FOR_TRUNCATION_CHECK)
+    return { counted: false, incomplete: false };
+
+  const trimmed = trimLineOffsets(text, lineStart, lineEnd);
+  if (!trimmed) return { counted: false, incomplete: false };
+
+  const lastChar = text.charCodeAt(trimmed.end);
+  return { counted: true, incomplete: !SENTENCE_ENDING_CODES.has(lastChar) };
+}
+
+function hasTruncatedSentences(text: string): boolean {
+  let lineStart = 0;
+  let linesFound = 0;
+  let incompleteFound = 0;
+  const len = text.length;
+
+  for (let i = 0; i <= len; i++) {
+    const isEnd = i === len;
+    const isNewline = !isEnd && text.charCodeAt(i) === CharCode.LF;
+
+    if (isNewline || isEnd) {
+      const { counted, incomplete } = classifyLine(text, lineStart, i);
+      if (counted) {
+        linesFound++;
+        if (incomplete) incompleteFound++;
+      }
+      lineStart = i + 1;
+    }
+  }
+
+  if (linesFound < 3) return false;
+  return incompleteFound / linesFound > MAX_TRUNCATED_LINE_RATIO;
+}
+
+function passesContentRatioGate(
+  articleTextLength: number,
+  document: Document
+): boolean {
+  const originalLength = getVisibleTextLength(document);
+  return (
+    originalLength < MIN_HTML_LENGTH_FOR_GATE ||
+    articleTextLength / originalLength >= MIN_CONTENT_RATIO
+  );
+}
+
+function passesRetentionRulesFromHtml(
+  originalDoc: Document,
+  articleHtml: string
+): boolean {
+  return RETENTION_RULES.every(({ selector, pattern, minThreshold, ratio }) => {
+    const original = countMatchingElements(originalDoc, selector);
+    if (original < minThreshold) return true;
+    return (articleHtml.match(pattern)?.length ?? 0) / original >= ratio;
+  });
+}
+
+function passesEmptySectionRatio(articleDoc: Document): boolean {
+  const headingCount = countMatchingElements(articleDoc, 'h1,h2,h3,h4,h5,h6');
+  return (
+    headingCount < MIN_HEADINGS_FOR_EMPTY_SECTION_GATE ||
+    countEmptyHeadingSections(articleDoc) / headingCount <=
+      MAX_EMPTY_SECTION_RATIO
+  );
+}
+
+export function evaluateArticleContent(
+  article: ExtractedArticle,
+  document: Document
+): Document | null {
+  if (!passesContentRatioGate(article.textContent.length, document)) {
+    return null;
+  }
+
+  if (!passesRetentionRulesFromHtml(document, article.content)) {
+    return null;
+  }
+
+  if (hasTruncatedSentences(article.textContent)) {
+    return null;
+  }
+
+  const articleDoc = parseHTML(
+    `<!DOCTYPE html><html><body>${article.content}</body></html>`
+  ).document;
+
+  if (!passesEmptySectionRatio(articleDoc)) {
+    return null;
+  }
+
+  return articleDoc;
 }

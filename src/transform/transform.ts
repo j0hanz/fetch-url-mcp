@@ -1,4 +1,3 @@
-import { Buffer } from 'node:buffer';
 import diagnosticsChannel from 'node:diagnostics_channel';
 
 import { isProbablyReaderable, Readability } from '@mozilla/readability';
@@ -16,11 +15,12 @@ import {
   redactUrl,
 } from '../lib/core.js';
 import {
+  evaluateArticleContent,
   extractNoscriptImages,
+  getVisibleTextLength,
   normalizeTabContent,
   prepareDocumentForMarkdown,
   removeNoiseFromHtml,
-  resolveDocumentBody,
   serializeDocumentForMarkdown,
 } from '../lib/dom-prep.js';
 import { isRawTextContentUrl } from '../lib/http.js';
@@ -38,9 +38,13 @@ import {
   composeAbortSignal,
   FetchError,
   getErrorMessage,
+  getUtf8ByteLength,
+  isAsciiOnly,
   isObject,
   throwIfAborted,
   toError,
+  trimDanglingTagFragment,
+  truncateToUtf8Boundary,
 } from '../lib/utils.js';
 
 import { translateHtmlFragmentToMarkdown } from './html-translators.js';
@@ -101,34 +105,6 @@ interface ExtractionContext extends ExtractionResult {
 interface StageBudget {
   totalBudgetMs: number;
   elapsedMs: number;
-}
-
-const CharCode = {
-  TAB: 9,
-  LF: 10,
-  FF: 12,
-  CR: 13,
-  SPACE: 32,
-  EXCLAMATION: 33,
-  SLASH: 47,
-  PERIOD: 46,
-  QUESTION: 63,
-  COLON: 58,
-  SEMICOLON: 59,
-  A_UPPER: 65,
-  Z_UPPER: 90,
-  A_LOWER: 97,
-  Z_LOWER: 122,
-} as const;
-
-function isWhitespaceChar(code: number): boolean {
-  return (
-    code === CharCode.TAB ||
-    code === CharCode.LF ||
-    code === CharCode.FF ||
-    code === CharCode.CR ||
-    code === CharCode.SPACE
-  );
 }
 
 function buildTransformSignal(signal?: AbortSignal): AbortSignal | undefined {
@@ -286,97 +262,6 @@ export function endTransformStage(
   options?: { truncated?: boolean }
 ): number {
   return stageTracker.end(context, options);
-}
-
-function getUtf8ByteLength(html: string): number {
-  return Buffer.byteLength(html, 'utf8');
-}
-
-const UTF8_MASK = 0xc0;
-const UTF8_CONTINUATION = 0x80;
-const UTF8_2_BYTE = 0xc0;
-const UTF8_3_BYTE = 0xe0;
-const UTF8_4_BYTE = 0xf0;
-const UTF8_5_BYTE = 0xf8; // Limits 4-byte validity check
-
-function trimUtf8Buffer(buffer: Uint8Array, maxBytes: number): Uint8Array {
-  if (buffer.length <= maxBytes) return buffer;
-  if (maxBytes <= 0) return buffer.subarray(0, 0);
-
-  let end = maxBytes;
-  let cursor = end - 1;
-
-  while (
-    cursor >= 0 &&
-    ((buffer[cursor] ?? 0) & UTF8_MASK) === UTF8_CONTINUATION
-  ) {
-    cursor -= 1;
-  }
-
-  if (cursor < 0) return buffer.subarray(0, maxBytes);
-
-  const lead = buffer[cursor] ?? 0;
-  let sequenceLength = 1;
-
-  if (lead >= UTF8_2_BYTE && lead < UTF8_3_BYTE) sequenceLength = 2;
-  else if (lead >= UTF8_3_BYTE && lead < UTF8_4_BYTE) sequenceLength = 3;
-  else if (lead >= UTF8_4_BYTE && lead < UTF8_5_BYTE) sequenceLength = 4;
-
-  if (cursor + sequenceLength > end) {
-    end = cursor;
-  }
-
-  return buffer.subarray(0, end);
-}
-
-const MAX_ENTITY_LENGTH = 10;
-
-function trimDanglingTagFragment(content: string): string {
-  let result = content;
-
-  // Trim dangling HTML entity (e.g. "&amp" cut before ";")
-  const lastAmp = result.lastIndexOf('&');
-  if (lastAmp !== -1 && lastAmp > result.length - MAX_ENTITY_LENGTH) {
-    const tail = result.slice(lastAmp + 1);
-    if (!tail.includes(';') && /^[#a-zA-Z][a-zA-Z0-9]*$/.test(tail)) {
-      result = result.substring(0, lastAmp);
-    }
-  }
-
-  const lastOpen = result.lastIndexOf('<');
-  const lastClose = result.lastIndexOf('>');
-  if (lastOpen > lastClose) {
-    if (lastOpen === result.length - 1) {
-      return result.substring(0, lastOpen);
-    }
-    const code = result.codePointAt(lastOpen + 1);
-    if (
-      code !== undefined &&
-      (code === CharCode.SLASH ||
-        code === CharCode.EXCLAMATION ||
-        code === CharCode.QUESTION ||
-        (code >= CharCode.A_UPPER && code <= CharCode.Z_UPPER) ||
-        (code >= CharCode.A_LOWER && code <= CharCode.Z_LOWER))
-    ) {
-      return result.substring(0, lastOpen);
-    }
-  }
-  return result;
-}
-
-function isAsciiOnly(s: string, sampleSize = 512): boolean {
-  const len = Math.min(s.length, sampleSize);
-  for (let i = 0; i < len; i++) {
-    if (s.charCodeAt(i) > 127) return false;
-  }
-  return true;
-}
-
-function truncateToUtf8Boundary(html: string, maxBytes: number): string {
-  const htmlBuffer = new TextEncoder().encode(html.slice(0, maxBytes));
-  return trimDanglingTagFragment(
-    new TextDecoder('utf-8').decode(trimUtf8Buffer(htmlBuffer, maxBytes))
-  );
 }
 
 function truncateHtml(
@@ -1028,87 +913,6 @@ function tryTransformRawContent(params: {
 
 const MIN_CONTENT_RATIO = 0.15;
 const MIN_HTML_LENGTH_FOR_GATE = 100;
-interface RetentionRule {
-  selector: string;
-  pattern: RegExp;
-  minThreshold: number;
-  ratio: number;
-}
-
-const RETENTION_RULES: readonly RetentionRule[] = [
-  {
-    selector: 'h1,h2,h3,h4,h5,h6',
-    pattern: /<h[1-6]\b/gi,
-    minThreshold: 1,
-    ratio: 0.3,
-  },
-  { selector: 'pre', pattern: /<pre\b/gi, minThreshold: 1, ratio: 0.15 },
-  { selector: 'table', pattern: /<table\b/gi, minThreshold: 1, ratio: 0.5 },
-  { selector: 'img', pattern: /<img\b/gi, minThreshold: 4, ratio: 0.2 },
-];
-
-const MIN_HEADINGS_FOR_EMPTY_SECTION_GATE = 5;
-const MAX_EMPTY_SECTION_RATIO = 0.15;
-
-const MIN_LINE_LENGTH_FOR_TRUNCATION_CHECK = 20;
-const MAX_TRUNCATED_LINE_RATIO = 0.95;
-
-function resolveHtmlDocument(htmlOrDocument: string | Document): Document {
-  if (typeof htmlOrDocument !== 'string') return htmlOrDocument;
-
-  const needsWrapper = !/^\s*<(?:!doctype|html|body)\b/i.test(htmlOrDocument);
-  const htmlToParse = needsWrapper
-    ? `<!DOCTYPE html><html><body>${htmlOrDocument}</body></html>`
-    : htmlOrDocument;
-
-  try {
-    return parseHTML(htmlToParse).document;
-  } catch {
-    // Don't crash on parse failures.
-    return parseHTML('<!DOCTYPE html><html><body></body></html>').document;
-  }
-}
-
-function getTextContentSkippingHidden(node: Node, parts: string[]): void {
-  const { nodeType } = node;
-  if (nodeType === 3) {
-    const { textContent } = node;
-    if (textContent) parts.push(textContent);
-    return;
-  }
-  if (nodeType !== 1) return;
-
-  const element = node as Element;
-  if (
-    element.hasAttribute('hidden') ||
-    element.getAttribute('aria-hidden') === 'true'
-  ) {
-    return;
-  }
-
-  const { tagName } = element;
-  if (tagName === 'SCRIPT' || tagName === 'STYLE' || tagName === 'NOSCRIPT')
-    return;
-
-  for (const child of node.childNodes) {
-    getTextContentSkippingHidden(child, parts);
-  }
-}
-
-function getVisibleTextLength(htmlOrDocument: string | Document): number {
-  if (typeof htmlOrDocument === 'string') {
-    const doc = resolveHtmlDocument(htmlOrDocument);
-    const body = resolveDocumentBody(doc);
-    for (const el of body.querySelectorAll('script,style,noscript')) {
-      el.remove();
-    }
-    return (body.textContent || '').replace(/\s+/g, ' ').trim().length;
-  }
-  const body = resolveDocumentBody(htmlOrDocument);
-  const parts: string[] = [];
-  getTextContentSkippingHidden(body, parts);
-  return parts.join('').replace(/\s+/g, ' ').trim().length;
-}
 
 export function isExtractionSufficient(
   article: ExtractedArticle | null,
@@ -1121,71 +925,6 @@ export function isExtractionSufficient(
 
   if (originalLength < MIN_HTML_LENGTH_FOR_GATE) return true;
   return articleLength / originalLength >= MIN_CONTENT_RATIO;
-}
-
-// Heuristic to detect if the content was truncated due to length limits by checking for incomplete sentences.
-const SENTENCE_ENDING_CODES = new Set<number>([
-  CharCode.PERIOD,
-  CharCode.EXCLAMATION,
-  CharCode.QUESTION,
-  CharCode.COLON,
-  CharCode.SEMICOLON,
-]);
-
-function trimLineOffsets(
-  text: string,
-  lineStart: number,
-  lineEnd: number
-): { start: number; end: number } | null {
-  let start = lineStart;
-  while (start < lineEnd && isWhitespaceChar(text.charCodeAt(start))) start++;
-  let end = lineEnd - 1;
-  while (end >= start && isWhitespaceChar(text.charCodeAt(end))) end--;
-  if (end < start) return null;
-  const trimmedLen = end - start + 1;
-  return trimmedLen > MIN_LINE_LENGTH_FOR_TRUNCATION_CHECK
-    ? { start, end }
-    : null;
-}
-
-function classifyLine(
-  text: string,
-  lineStart: number,
-  lineEnd: number
-): { counted: boolean; incomplete: boolean } {
-  const lineLength = lineEnd - lineStart;
-  if (lineLength <= MIN_LINE_LENGTH_FOR_TRUNCATION_CHECK)
-    return { counted: false, incomplete: false };
-
-  const trimmed = trimLineOffsets(text, lineStart, lineEnd);
-  if (!trimmed) return { counted: false, incomplete: false };
-
-  const lastChar = text.charCodeAt(trimmed.end);
-  return { counted: true, incomplete: !SENTENCE_ENDING_CODES.has(lastChar) };
-}
-
-function hasTruncatedSentences(text: string): boolean {
-  let lineStart = 0;
-  let linesFound = 0;
-  let incompleteFound = 0;
-  const len = text.length;
-
-  for (let i = 0; i <= len; i++) {
-    const isEnd = i === len;
-    const isNewline = !isEnd && text.charCodeAt(i) === CharCode.LF;
-
-    if (isNewline || isEnd) {
-      const { counted, incomplete } = classifyLine(text, lineStart, i);
-      if (counted) {
-        linesFound++;
-        if (incomplete) incompleteFound++;
-      }
-      lineStart = i + 1;
-    }
-  }
-
-  if (linesFound < 3) return false;
-  return incompleteFound / linesFound > MAX_TRUNCATED_LINE_RATIO;
 }
 
 const MIN_CONTENT_ROOT_LENGTH = 100;
@@ -1357,112 +1096,11 @@ function findPrimaryHeading(document: Document): string | undefined {
   return undefined;
 }
 
-function countMatchingElements(root: ParentNode, selector: string): number {
-  return root.querySelectorAll(selector).length;
-}
-
-function getHeadingLevel(heading: Element): number | null {
-  const match = /^H([1-6])$/.exec(heading.tagName);
-  if (!match) return null;
-
-  return Number.parseInt(match[1] ?? '', 10);
-}
-
-function hasSectionContent(heading: Element): boolean {
-  const level = getHeadingLevel(heading);
-  if (level === null) return false;
-
-  let current = heading.nextElementSibling;
-  while (current) {
-    const currentLevel = getHeadingLevel(current);
-    if (currentLevel !== null && currentLevel <= level) return false;
-
-    const text = current.textContent.trim();
-    if (text.length > 0) return true;
-    if (current.querySelector('img,table,pre,code,ul,ol,figure,blockquote')) {
-      return true;
-    }
-
-    current = current.nextElementSibling;
-  }
-
-  return false;
-}
-
-function countEmptyHeadingSections(root: ParentNode): number {
-  let emptyCount = 0;
-  const headings = root.querySelectorAll('h1,h2,h3,h4,h5,h6');
-
-  for (const heading of headings) {
-    if (!hasSectionContent(heading)) emptyCount += 1;
-  }
-
-  return emptyCount;
-}
-
 const TransformHeuristics = {
   findContentRoot,
   findPrimaryHeading,
   isGithubRepositoryRootUrl,
 } as const;
-
-function passesContentRatioGate(
-  articleTextLength: number,
-  document: Document
-): boolean {
-  const originalLength = getVisibleTextLength(document);
-  return (
-    originalLength < MIN_HTML_LENGTH_FOR_GATE ||
-    articleTextLength / originalLength >= MIN_CONTENT_RATIO
-  );
-}
-
-function passesRetentionRulesFromHtml(
-  originalDoc: Document,
-  articleHtml: string
-): boolean {
-  return RETENTION_RULES.every(({ selector, pattern, minThreshold, ratio }) => {
-    const original = countMatchingElements(originalDoc, selector);
-    if (original < minThreshold) return true;
-    return (articleHtml.match(pattern)?.length ?? 0) / original >= ratio;
-  });
-}
-
-function passesEmptySectionRatio(articleDoc: Document): boolean {
-  const headingCount = countMatchingElements(articleDoc, 'h1,h2,h3,h4,h5,h6');
-  return (
-    headingCount < MIN_HEADINGS_FOR_EMPTY_SECTION_GATE ||
-    countEmptyHeadingSections(articleDoc) / headingCount <=
-      MAX_EMPTY_SECTION_RATIO
-  );
-}
-
-function evaluateArticleContent(
-  article: ExtractedArticle,
-  document: Document
-): Document | null {
-  if (!passesContentRatioGate(article.textContent.length, document)) {
-    return null;
-  }
-
-  if (!passesRetentionRulesFromHtml(document, article.content)) {
-    return null;
-  }
-
-  if (hasTruncatedSentences(article.textContent)) {
-    return null;
-  }
-
-  const articleDoc = parseHTML(
-    `<!DOCTYPE html><html><body>${article.content}</body></html>`
-  ).document;
-
-  if (!passesEmptySectionRatio(articleDoc)) {
-    return null;
-  }
-
-  return articleDoc;
-}
 
 type BaseContentSource = Pick<
   ContentSource,
