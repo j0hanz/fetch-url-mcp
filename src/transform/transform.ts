@@ -188,11 +188,7 @@ class StageTracker {
     return durationMs;
   }
 
-  run<T>(url: string, stage: string, fn: () => T, budget?: StageBudget): T {
-    if (this.shouldSkipTracking(budget)) {
-      return fn();
-    }
-
+  private checkBudget(url: string, stage: string, budget?: StageBudget): void {
     if (budget && budget.elapsedMs >= budget.totalBudgetMs) {
       throw new FetchError('Transform budget exhausted', url, 504, {
         reason: 'timeout',
@@ -201,6 +197,14 @@ class StageTracker {
         totalBudgetMs: budget.totalBudgetMs,
       });
     }
+  }
+
+  run<T>(url: string, stage: string, fn: () => T, budget?: StageBudget): T {
+    if (this.shouldSkipTracking(budget)) {
+      return fn();
+    }
+
+    this.checkBudget(url, stage, budget);
 
     const ctx = this.start(url, stage, budget);
     try {
@@ -213,13 +217,16 @@ class StageTracker {
   async runAsync<T>(
     url: string,
     stage: string,
-    fn: () => Promise<T>
+    fn: () => Promise<T>,
+    budget?: StageBudget
   ): Promise<T> {
-    if (this.shouldSkipTracking()) {
+    if (this.shouldSkipTracking(budget)) {
       return fn();
     }
 
-    const ctx = this.start(url, stage);
+    this.checkBudget(url, stage, budget);
+
+    const ctx = this.start(url, stage, budget);
     try {
       return await fn();
     } finally {
@@ -484,6 +491,82 @@ function prepareReadabilityDocument(readabilityDoc: Document): void {
   }
 }
 
+function validateReaderability(doc: Document, url: string, signal?: AbortSignal): boolean {
+  throwIfAborted(signal, url, 'extract:article:textCheck');
+
+  const rawText =
+    doc.querySelector('body')?.textContent ??
+    (doc.documentElement.textContent as string | null | undefined) ??
+    '';
+  const textLength = resolveCollapsedTextLengthUpTo(
+    rawText,
+    MIN_READERABLE_TEXT_LENGTH + 1
+  );
+
+  if (textLength < MIN_SPA_CONTENT_LENGTH) {
+    logWarn(
+      'Very minimal server-rendered content detected (< 100 chars). ' +
+        'This might be a client-side rendered (SPA) application. ' +
+        'Content extraction may be incomplete.',
+      { textLength }
+    );
+  }
+
+  throwIfAborted(signal, url, 'extract:article:readabilityCheck');
+
+  if (
+    textLength >= MIN_READERABLE_TEXT_LENGTH &&
+    !isProbablyReaderable(doc)
+  ) {
+    return false;
+  }
+  return true;
+}
+
+function invokeReadability(doc: Document, url: string, signal?: AbortSignal): ReturnType<InstanceType<typeof Readability>['parse']> {
+  throwIfAborted(signal, url, 'extract:article:clone');
+
+  const readabilityDoc =
+    typeof doc.cloneNode === 'function'
+      ? (doc.cloneNode(true) as Document)
+      : doc;
+
+  prepareReadabilityDocument(readabilityDoc);
+
+  throwIfAborted(signal, url, 'extract:article:parse');
+
+  const reader = new Readability(readabilityDoc, {
+    charThreshold: 140,
+    maxElemsToParse: MAX_READABILITY_ELEMENTS,
+    classesToPreserve: [
+      'admonition',
+      'callout',
+      'custom-block',
+      'alert',
+      'note',
+      'tip',
+      'info',
+      'warning',
+      'danger',
+      'caution',
+      'important',
+      'mermaid',
+    ],
+  });
+  return reader.parse();
+}
+
+function mapReadabilityResult(parsed: NonNullable<ReturnType<InstanceType<typeof Readability>['parse']>>): ExtractedArticle {
+  return {
+    content: (parsed.content as string | undefined) ?? '',
+    textContent: (parsed.textContent as string | undefined) ?? '',
+    ...(parsed.title != null && { title: parsed.title }),
+    ...(parsed.byline != null && { byline: parsed.byline }),
+    ...(parsed.excerpt != null && { excerpt: parsed.excerpt }),
+    ...(parsed.siteName != null && { siteName: parsed.siteName }),
+  };
+}
+
 // Pre-Readability cleanup on a cloned document.
 // Must strip tabs/breadcrumbs before Readability mangles role attributes.
 // The original document is NOT yet prepared (prepareDocumentForMarkdown
@@ -498,82 +581,16 @@ function extractArticle(
     return null;
   }
 
-  const checkAbort = (stage: string): void => {
-    throwIfAborted(signal, url, stage);
-  };
-
   try {
     const doc = document;
-
-    checkAbort('extract:article:textCheck');
-
-    const rawText =
-      doc.querySelector('body')?.textContent ??
-      (doc.documentElement.textContent as string | null | undefined) ??
-      '';
-    const textLength = resolveCollapsedTextLengthUpTo(
-      rawText,
-      MIN_READERABLE_TEXT_LENGTH + 1
-    );
-
-    if (textLength < MIN_SPA_CONTENT_LENGTH) {
-      logWarn(
-        'Very minimal server-rendered content detected (< 100 chars). ' +
-          'This might be a client-side rendered (SPA) application. ' +
-          'Content extraction may be incomplete.',
-        { textLength }
-      );
-    }
-
-    checkAbort('extract:article:readabilityCheck');
-
-    if (
-      textLength >= MIN_READERABLE_TEXT_LENGTH &&
-      !isProbablyReaderable(doc)
-    ) {
+    if (!validateReaderability(doc, url, signal)) {
       return null;
     }
 
-    checkAbort('extract:article:clone');
-
-    const readabilityDoc =
-      typeof doc.cloneNode === 'function'
-        ? (doc.cloneNode(true) as Document)
-        : doc;
-
-    prepareReadabilityDocument(readabilityDoc);
-
-    checkAbort('extract:article:parse');
-
-    const reader = new Readability(readabilityDoc, {
-      charThreshold: 140,
-      maxElemsToParse: MAX_READABILITY_ELEMENTS,
-      classesToPreserve: [
-        'admonition',
-        'callout',
-        'custom-block',
-        'alert',
-        'note',
-        'tip',
-        'info',
-        'warning',
-        'danger',
-        'caution',
-        'important',
-        'mermaid',
-      ],
-    });
-    const parsed = reader.parse();
+    const parsed = invokeReadability(doc, url, signal);
     if (!parsed) return null;
 
-    return {
-      content: parsed.content ?? '',
-      textContent: parsed.textContent ?? '',
-      ...(parsed.title != null && { title: parsed.title }),
-      ...(parsed.byline != null && { byline: parsed.byline }),
-      ...(parsed.excerpt != null && { excerpt: parsed.excerpt }),
-      ...(parsed.siteName != null && { siteName: parsed.siteName }),
-    };
+    return mapReadabilityResult(parsed);
   } catch (error: unknown) {
     logError('Failed to extract article with Readability', asError(error));
     return null;
@@ -981,15 +998,16 @@ const MIN_CONTENT_RATIO = 0.15;
 const MIN_HTML_LENGTH_FOR_GATE = 100;
 interface RetentionRule {
   selector: string;
+  pattern: RegExp;
   minOriginal: number;
   ratio: number;
 }
 
 const RETENTION_RULES: readonly RetentionRule[] = [
-  { selector: 'h1,h2,h3,h4,h5,h6', minOriginal: 1, ratio: 0.3 },
-  { selector: 'pre', minOriginal: 1, ratio: 0.15 },
-  { selector: 'table', minOriginal: 1, ratio: 0.5 },
-  { selector: 'img', minOriginal: 4, ratio: 0.2 },
+  { selector: 'h1,h2,h3,h4,h5,h6', pattern: /<h[1-6]\b/gi, minOriginal: 1, ratio: 0.3 },
+  { selector: 'pre', pattern: /<pre\b/gi, minOriginal: 1, ratio: 0.15 },
+  { selector: 'table', pattern: /<table\b/gi, minOriginal: 1, ratio: 0.5 },
+  { selector: 'img', pattern: /<img\b/gi, minOriginal: 4, ratio: 0.2 },
 ];
 
 const MIN_HEADINGS_FOR_EMPTY_SECTION_GATE = 5;
@@ -1362,13 +1380,6 @@ function passesContentRatioGate(
   return true;
 }
 
-const RETENTION_TAG_PATTERNS: ReadonlyMap<string, RegExp> = new Map([
-  ['h1,h2,h3,h4,h5,h6', /<h[1-6]\b/gi],
-  ['pre', /<pre\b/gi],
-  ['table', /<table\b/gi],
-  ['img', /<img\b/gi],
-]);
-
 function countHtmlTagOccurrences(html: string, pattern: RegExp): number {
   const matches = html.match(pattern);
   return matches ? matches.length : 0;
@@ -1378,11 +1389,9 @@ function passesRetentionRulesFromHtml(
   originalDoc: Document,
   articleHtml: string
 ): boolean {
-  return RETENTION_RULES.every(({ selector, minOriginal, ratio }) => {
+  return RETENTION_RULES.every(({ selector, pattern, minOriginal, ratio }) => {
     const original = countMatchingElements(originalDoc, selector);
     if (original < minOriginal) return true;
-    const pattern = RETENTION_TAG_PATTERNS.get(selector);
-    if (!pattern) return true;
     return countHtmlTagOccurrences(articleHtml, pattern) / original >= ratio;
   });
 }
