@@ -23,6 +23,12 @@ const CODE_BLOCK = {
 const MERMAID_POSTPROCESS = ({ content }: { content: string }): string =>
   `\n\n\`\`\`mermaid\n${content.trim()}\n\`\`\`\n\n`;
 
+const MERMAID_TRANSLATOR_CONFIG: TranslatorConfig = {
+  noEscape: true,
+  preserveWhitespace: true,
+  postprocess: MERMAID_POSTPROCESS,
+};
+
 // ---------------------------------------------------------------------------
 // DOM helpers (translator-only)
 // ---------------------------------------------------------------------------
@@ -191,16 +197,11 @@ function resolveImageSrc(
   if (!getAttribute) return '';
 
   const srcRaw = getAttribute('src') ?? '';
+  const srcsetUrl = extractNonDataSrcsetUrl(getAttribute('srcset') ?? '');
 
   // When src is a CDN proxy URL, prefer srcset which usually has the
   // canonical same-domain URL that survives domain migrations.
-  if (srcRaw && isWpPhotonUrl(srcRaw)) {
-    const srcset = getAttribute('srcset');
-    if (srcset) {
-      const url = extractNonDataSrcsetUrl(srcset);
-      if (url) return url;
-    }
-  }
+  if (srcRaw && isWpPhotonUrl(srcRaw) && srcsetUrl) return srcsetUrl;
 
   if (srcRaw && !isPlaceholderSrc(srcRaw)) return srcRaw;
 
@@ -209,11 +210,7 @@ function resolveImageSrc(
   if (lazySrc) return lazySrc;
 
   // If the src is a data URI or missing, check srcset for a valid URL. Some sites use srcset with data URIs in src and actual URLs in srcset for responsive images.
-  const srcset = getAttribute('srcset');
-  if (srcset) {
-    const url = extractNonDataSrcsetUrl(srcset);
-    if (url) return url;
-  }
+  if (srcsetUrl) return srcsetUrl;
 
   return '';
 }
@@ -284,13 +281,7 @@ function buildMermaidPreTranslator(ctx: unknown): TranslatorConfig {
   const getAttribute = getNodeAttr(node);
 
   const className = getAttribute?.('class') ?? '';
-  if (className.includes('mermaid')) {
-    return {
-      noEscape: true,
-      preserveWhitespace: true,
-      postprocess: MERMAID_POSTPROCESS,
-    };
-  }
+  if (className.includes('mermaid')) return MERMAID_TRANSLATOR_CONFIG;
 
   return buildPreTranslator(ctx);
 }
@@ -320,20 +311,11 @@ function resolveGfmAlertType(className: string): string | undefined {
   return undefined;
 }
 
-function buildDivTranslator(ctx: unknown): Record<string, unknown> {
-  const getAttribute = getNodeAttr(getNode(ctx));
-  if (!getAttribute) return {};
-
-  const className = getAttribute('class') ?? '';
-  if (className.includes('mermaid')) {
-    return {
-      noEscape: true,
-      preserveWhitespace: true,
-      postprocess: MERMAID_POSTPROCESS,
-    };
-  }
-
-  const alertType = resolveGfmAlertType(className);
+function buildAdmonitionConfig(
+  className: string,
+  alertType: string | undefined,
+  getAttribute: (name: string) => string | null
+): Record<string, unknown> | undefined {
   const isAdmonition =
     className.includes('admonition') ||
     className.includes('callout') ||
@@ -341,18 +323,18 @@ function buildDivTranslator(ctx: unknown): Record<string, unknown> {
     getAttribute('role') === 'alert' ||
     alertType !== undefined;
 
-  if (isAdmonition) {
-    return {
-      postprocess: ({ content }: { content: string }) => {
-        const lines = content.trim().split('\n');
-        const header = alertType ? `> [!${alertType}]\n` : '';
-        return `\n\n${header}> ${lines.join('\n> ')}\n\n`;
-      },
-    };
-  }
+  if (!isAdmonition) return undefined;
 
-  if (!className.includes('type')) return {};
+  return {
+    postprocess: ({ content }: { content: string }) => {
+      const lines = content.trim().split('\n');
+      const header = alertType ? `> [!${alertType}]\n` : '';
+      return `\n\n${header}> ${lines.join('\n> ')}\n\n`;
+    },
+  };
+}
 
+function buildTypeSpacingConfig(): Record<string, unknown> {
   return {
     postprocess: ({ content }: { content: string }) => {
       const lines = content.split('\n');
@@ -379,6 +361,23 @@ function buildDivTranslator(ctx: unknown): Record<string, unknown> {
       return separated.join('\n');
     },
   };
+}
+
+function buildDivTranslator(
+  ctx: unknown
+): Record<string, unknown> | TranslatorConfig {
+  const getAttribute = getNodeAttr(getNode(ctx));
+  if (!getAttribute) return {};
+
+  const className = getAttribute('class') ?? '';
+  if (className.includes('mermaid')) return MERMAID_TRANSLATOR_CONFIG;
+
+  const alertType = resolveGfmAlertType(className);
+  const admonition = buildAdmonitionConfig(className, alertType, getAttribute);
+  if (admonition) return admonition;
+
+  if (!className.includes('type')) return {};
+  return buildTypeSpacingConfig();
 }
 
 function buildSectionTranslator(ctx: unknown): Record<string, unknown> {
@@ -436,6 +435,72 @@ function normalizeDefinitionListContent(content: string): string {
 }
 
 // ---------------------------------------------------------------------------
+// Simple tag translators
+// ---------------------------------------------------------------------------
+
+function buildDlTranslator(): Record<string, unknown> {
+  return {
+    postprocess: ({ content }: { content: string }) => {
+      const normalized = normalizeDefinitionListContent(content);
+      return normalized ? `\n\n${normalized}\n\n` : '';
+    },
+  };
+}
+
+function buildDtTranslator(): Record<string, unknown> {
+  return {
+    postprocess: ({ content }: { content: string }) => `${content.trim()}\n`,
+  };
+}
+
+function buildDdTranslator(): Record<string, unknown> {
+  return {
+    postprocess: ({ content }: { content: string }) =>
+      content.trim() ? `: ${content.trim()}\n` : '',
+  };
+}
+
+function buildKbdTranslator(): Record<string, unknown> {
+  return {
+    postprocess: ({ content }: { content: string }) => `\`${content}\``,
+  };
+}
+
+function buildMarkTranslator(): Record<string, unknown> {
+  return {
+    postprocess: ({ content }: { content: string }) => `==${content}==`,
+  };
+}
+
+function buildSubTranslator(): Record<string, unknown> {
+  return {
+    postprocess: ({ content }: { content: string }) => `~${content}~`,
+  };
+}
+
+function buildSupTranslator(): Record<string, unknown> {
+  return {
+    postprocess: ({ content }: { content: string }) => `^${content}^`,
+  };
+}
+
+function buildDetailsTranslator(): Record<string, unknown> {
+  return {
+    postprocess: ({ content }: { content: string }) => {
+      const trimmed = content.trim();
+      if (!trimmed) return '';
+      return `\n\n${trimmed}\n\n`;
+    },
+  };
+}
+
+function buildSummaryTranslator(): Record<string, unknown> {
+  return {
+    postprocess: ({ content }: { content: string }) => `${content.trim()}\n\n`,
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Translator registry + converter singleton
 // ---------------------------------------------------------------------------
 
@@ -443,44 +508,17 @@ function createCustomTranslators(): TranslatorConfigObject {
   return {
     code: buildCodeTranslator,
     img: buildImageTranslator,
-    dl: () => ({
-      postprocess: ({ content }: { content: string }) => {
-        const normalized = normalizeDefinitionListContent(content);
-        return normalized ? `\n\n${normalized}\n\n` : '';
-      },
-    }),
-    dt: () => ({
-      postprocess: ({ content }: { content: string }) => `${content.trim()}\n`,
-    }),
-    dd: () => ({
-      postprocess: ({ content }: { content: string }) =>
-        content.trim() ? `: ${content.trim()}\n` : '',
-    }),
+    dl: buildDlTranslator,
+    dt: buildDtTranslator,
+    dd: buildDdTranslator,
     div: buildDivTranslator,
-    kbd: () => ({
-      postprocess: ({ content }: { content: string }) => `\`${content}\``,
-    }),
-    mark: () => ({
-      postprocess: ({ content }: { content: string }) => `==${content}==`,
-    }),
-    sub: () => ({
-      postprocess: ({ content }: { content: string }) => `~${content}~`,
-    }),
-    sup: () => ({
-      postprocess: ({ content }: { content: string }) => `^${content}^`,
-    }),
+    kbd: buildKbdTranslator,
+    mark: buildMarkTranslator,
+    sub: buildSubTranslator,
+    sup: buildSupTranslator,
     section: buildSectionTranslator,
-    details: () => ({
-      postprocess: ({ content }: { content: string }) => {
-        const trimmed = content.trim();
-        if (!trimmed) return '';
-        return `\n\n${trimmed}\n\n`;
-      },
-    }),
-    summary: () => ({
-      postprocess: ({ content }: { content: string }) =>
-        `${content.trim()}\n\n`,
-    }),
+    details: buildDetailsTranslator,
+    summary: buildSummaryTranslator,
     span: buildSpanTranslator,
     pre: buildMermaidPreTranslator,
   };
