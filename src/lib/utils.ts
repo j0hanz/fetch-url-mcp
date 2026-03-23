@@ -40,10 +40,7 @@ export function throwIfAborted(
     });
   }
 
-  throw new FetchError('Request was canceled', url, 499, {
-    reason: 'aborted',
-    stage,
-  });
+  throw createAbortError(url, stage);
 }
 export function createAbortError(url: string, stage: string): FetchError {
   return new FetchError('Request was canceled', url, 499, {
@@ -168,7 +165,7 @@ export function stableStringify(obj: unknown): string {
 
   return JSON.stringify(process(obj, 0));
 }
-interface HttpServerTuningTarget {
+interface TunableHttpServer {
   headersTimeout?: number;
   requestTimeout?: number;
   keepAliveTimeout?: number;
@@ -181,7 +178,7 @@ interface HttpServerTuningTarget {
   closeAllConnections?: () => void;
 }
 const DROP_LOG_INTERVAL_MS = 10_000;
-export function applyHttpServerTuning(server: HttpServerTuningTarget): void {
+export function applyHttpServerTuning(server: TunableHttpServer): void {
   const {
     headersTimeoutMs,
     requestTimeoutMs,
@@ -226,9 +223,7 @@ export function applyHttpServerTuning(server: HttpServerTuningTarget): void {
     }
   }
 }
-export function drainConnectionsOnShutdown(
-  server: HttpServerTuningTarget
-): void {
+export function drainConnectionsOnShutdown(server: TunableHttpServer): void {
   if (typeof server.closeIdleConnections === 'function') {
     server.closeIdleConnections();
     logDebug('Closed idle HTTP connections during shutdown');
