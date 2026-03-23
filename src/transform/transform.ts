@@ -103,8 +103,32 @@ interface StageBudget {
   elapsedMs: number;
 }
 
+const CharCode = {
+  TAB: 9,
+  LF: 10,
+  FF: 12,
+  CR: 13,
+  SPACE: 32,
+  EXCLAMATION: 33,
+  SLASH: 47,
+  PERIOD: 46,
+  QUESTION: 63,
+  COLON: 58,
+  SEMICOLON: 59,
+  A_UPPER: 65,
+  Z_UPPER: 90,
+  A_LOWER: 97,
+  Z_LOWER: 122,
+} as const;
+
 function isWhitespaceChar(code: number): boolean {
-  return code === 9 || code === 10 || code === 12 || code === 13 || code === 32;
+  return (
+    code === CharCode.TAB ||
+    code === CharCode.LF ||
+    code === CharCode.FF ||
+    code === CharCode.CR ||
+    code === CharCode.SPACE
+  );
 }
 
 function buildTransformSignal(signal?: AbortSignal): AbortSignal | undefined {
@@ -328,11 +352,11 @@ function trimDanglingTagFragment(content: string): string {
     const code = result.codePointAt(lastOpen + 1);
     if (
       code !== undefined &&
-      (code === 47 /* / */ ||
-        code === 33 /* ! */ ||
-        code === 63 /* ? */ ||
-        (code >= 65 && code <= 90) /* A-Z */ ||
-        (code >= 97 && code <= 122)) /* a-z */
+      (code === CharCode.SLASH ||
+        code === CharCode.EXCLAMATION ||
+        code === CharCode.QUESTION ||
+        (code >= CharCode.A_UPPER && code <= CharCode.Z_UPPER) ||
+        (code >= CharCode.A_LOWER && code <= CharCode.Z_LOWER))
     ) {
       return result.substring(0, lastOpen);
     }
@@ -346,6 +370,13 @@ function isAsciiOnly(s: string, sampleSize = 512): boolean {
     if (s.charCodeAt(i) > 127) return false;
   }
   return true;
+}
+
+function truncateToUtf8Boundary(html: string, maxBytes: number): string {
+  const htmlBuffer = new TextEncoder().encode(html.slice(0, maxBytes));
+  return trimDanglingTagFragment(
+    new TextDecoder('utf-8').decode(trimUtf8Buffer(htmlBuffer, maxBytes))
+  );
 }
 
 function truncateHtml(
@@ -367,10 +398,7 @@ function truncateHtml(
     return { html: trimDanglingTagFragment(sliced), truncated: true };
   }
 
-  const htmlBuffer = new TextEncoder().encode(sliced);
-  const content = trimDanglingTagFragment(
-    new TextDecoder('utf-8').decode(trimUtf8Buffer(htmlBuffer, maxSize))
-  );
+  const content = truncateToUtf8Boundary(sliced, maxSize);
 
   logWarn('HTML content exceeds maximum size, truncating', {
     size: getUtf8ByteLength(html),
@@ -747,10 +775,7 @@ function resolveRelativeHref(
   origin: string
 ): string {
   const trimmedHref = href.trim();
-  if (!trimmedHref) return href;
-  for (let i = 0; i < trimmedHref.length; i += 1) {
-    if (isWhitespaceChar(trimmedHref.charCodeAt(i))) return href;
-  }
+  if (!trimmedHref || /[\t\n\f\r ]/.test(trimmedHref)) return href;
   if (isAbsoluteOrSpecialUrl(trimmedHref)) return trimmedHref;
 
   const resolved = URL.parse(trimmedHref, baseUrl);
@@ -1006,7 +1031,7 @@ const MIN_HTML_LENGTH_FOR_GATE = 100;
 interface RetentionRule {
   selector: string;
   pattern: RegExp;
-  minOriginal: number;
+  minThreshold: number;
   ratio: number;
 }
 
@@ -1014,12 +1039,12 @@ const RETENTION_RULES: readonly RetentionRule[] = [
   {
     selector: 'h1,h2,h3,h4,h5,h6',
     pattern: /<h[1-6]\b/gi,
-    minOriginal: 1,
+    minThreshold: 1,
     ratio: 0.3,
   },
-  { selector: 'pre', pattern: /<pre\b/gi, minOriginal: 1, ratio: 0.15 },
-  { selector: 'table', pattern: /<table\b/gi, minOriginal: 1, ratio: 0.5 },
-  { selector: 'img', pattern: /<img\b/gi, minOriginal: 4, ratio: 0.2 },
+  { selector: 'pre', pattern: /<pre\b/gi, minThreshold: 1, ratio: 0.15 },
+  { selector: 'table', pattern: /<table\b/gi, minThreshold: 1, ratio: 0.5 },
+  { selector: 'img', pattern: /<img\b/gi, minThreshold: 4, ratio: 0.2 },
 ];
 
 const MIN_HEADINGS_FOR_EMPTY_SECTION_GATE = 5;
@@ -1099,7 +1124,13 @@ export function isExtractionSufficient(
 }
 
 // Heuristic to detect if the content was truncated due to length limits by checking for incomplete sentences.
-const SENTENCE_ENDING_CODES = new Set([46, 33, 63, 58, 59]);
+const SENTENCE_ENDING_CODES = new Set<number>([
+  CharCode.PERIOD,
+  CharCode.EXCLAMATION,
+  CharCode.QUESTION,
+  CharCode.COLON,
+  CharCode.SEMICOLON,
+]);
 
 function trimLineOffsets(
   text: string,
@@ -1141,7 +1172,7 @@ function hasTruncatedSentences(text: string): boolean {
 
   for (let i = 0; i <= len; i++) {
     const isEnd = i === len;
-    const isNewline = !isEnd && text.charCodeAt(i) === 10;
+    const isNewline = !isEnd && text.charCodeAt(i) === CharCode.LF;
 
     if (isNewline || isEnd) {
       const { counted, incomplete } = classifyLine(text, lineStart, i);
@@ -1390,9 +1421,9 @@ function passesRetentionRulesFromHtml(
   originalDoc: Document,
   articleHtml: string
 ): boolean {
-  return RETENTION_RULES.every(({ selector, pattern, minOriginal, ratio }) => {
+  return RETENTION_RULES.every(({ selector, pattern, minThreshold, ratio }) => {
     const original = countMatchingElements(originalDoc, selector);
-    if (original < minOriginal) return true;
+    if (original < minThreshold) return true;
     return (articleHtml.match(pattern)?.length ?? 0) / original >= ratio;
   });
 }
@@ -1871,14 +1902,13 @@ async function runWorkerTransformWithFallback(
   url: string,
   options: TransformExecutionOptions
 ): Promise<MarkdownTransformResult> {
-  const workerStage = stageTracker.start(url, 'transform:worker');
-  try {
-    return await transformWithWorkerPool(htmlOrBuffer, url, options);
-  } catch (error: unknown) {
-    return resolveWorkerFallback(error, htmlOrBuffer, url, options);
-  } finally {
-    stageTracker.end(workerStage);
-  }
+  return stageTracker.runAsync(url, 'transform:worker', async () => {
+    try {
+      return await transformWithWorkerPool(htmlOrBuffer, url, options);
+    } catch (error: unknown) {
+      return resolveWorkerFallback(error, htmlOrBuffer, url, options);
+    }
+  });
 }
 
 async function transformInputToMarkdown(
