@@ -285,7 +285,7 @@ describe('transformHtmlToMarkdown raw content detection', () => {
 });
 
 describe('transformHtmlToMarkdown favicon rendering', () => {
-  it('renders 32x32 favicon before title when declared', async () => {
+  it('does not render favicon in title heading even when declared', async () => {
     const html = `
       <html>
         <head>
@@ -305,10 +305,10 @@ describe('transformHtmlToMarkdown favicon rendering', () => {
     );
 
     assert.ok(
-      result.markdown.includes(
+      !result.markdown.includes(
         '![example.com](https://example.com/favicon-32x32.png)'
       ),
-      'Expected 32x32 favicon img tag in markdown'
+      'Favicon should not appear in title heading'
     );
     assert.ok(result.markdown.includes('Example Page'));
   });
@@ -397,9 +397,10 @@ describe('transformHtmlToMarkdown favicon rendering', () => {
     );
 
     assert.ok(
-      result.markdown.includes(
+      !result.markdown.includes(
         '![modelcontextprotocol.io](https://modelcontextprotocol.io/favicon-32x32.png)'
-      )
+      ),
+      'Favicon should not appear in title heading'
     );
     assert.ok(
       result.markdown.includes('Architecture overview - Model Context Protocol')

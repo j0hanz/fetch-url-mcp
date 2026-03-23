@@ -62,7 +62,6 @@ import {
   isGithubRepositoryRootUrl,
   maybePrependSyntheticTitle,
   maybeStripGithubPrimaryHeading,
-  normalizeSyntheticTitleToken,
   shouldPreferPrimaryHeadingTitle,
 } from './title-policy.js';
 import type {
@@ -1063,7 +1062,6 @@ interface ContentSource {
   readonly originalHtml: string;
   readonly title: string | undefined;
   readonly primaryHeading: string | undefined;
-  readonly suppressSyntheticFavicon?: boolean;
   readonly favicon: string | undefined;
   readonly metadata: ReturnType<typeof createContentMetadataBlock>;
   readonly extractedMetadata: ExtractedMetadata;
@@ -1093,16 +1091,13 @@ function resolveContentTitle(params: {
   primaryHeading: string | undefined;
   title: string | undefined;
   preferPrimaryHeading: boolean;
-}): Pick<ContentSource, 'title' | 'suppressSyntheticFavicon'> {
+}): Pick<ContentSource, 'title'> {
   const resolvedTitle =
     (params.preferPrimaryHeading ? params.primaryHeading : undefined) ??
     params.title;
 
   return {
     title: resolvedTitle,
-    suppressSyntheticFavicon:
-      normalizeSyntheticTitleToken(resolvedTitle) ===
-      normalizeSyntheticTitleToken(params.primaryHeading),
   };
 }
 
@@ -1426,7 +1421,7 @@ function postprocessMarkdownStage(
     context.primaryHeading,
     url
   );
-  content = maybePrependSyntheticTitle(content, context, url);
+  content = maybePrependSyntheticTitle(content, context);
   content = supplementMarkdownFromNextFlight(content, context.originalHtml);
   content = finalizeMarkdownSections(
     content,

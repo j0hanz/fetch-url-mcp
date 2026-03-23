@@ -2,8 +2,6 @@ import { parseUrlOrNull } from '../lib/utils.js';
 
 export interface SyntheticTitleContext {
   readonly title: string | undefined;
-  readonly favicon: string | undefined;
-  readonly suppressSyntheticFavicon?: boolean;
 }
 
 const TITLE_PART_SEPARATOR = /\s*(?:[-|:•·]|–|—)\s*/u;
@@ -90,18 +88,11 @@ export function maybeStripGithubPrimaryHeading(
 
 export function maybePrependSyntheticTitle(
   markdown: string,
-  context: SyntheticTitleContext,
-  url: string
+  context: SyntheticTitleContext
 ): string {
   if (!context.title || /^(#{1,6})\s/.test(markdown.trimStart())) {
     return markdown;
   }
 
-  let prefix = ' ';
-  if (context.favicon && !context.suppressSyntheticFavicon) {
-    const alt = parseUrlOrNull(url)?.hostname ?? '';
-    prefix = ` ![${alt}](${context.favicon}) `;
-  }
-
-  return `#${prefix}${context.title}\n\n${markdown}`;
+  return `# ${context.title}\n\n${markdown}`;
 }
