@@ -37,6 +37,7 @@ const HIDDEN_STYLE_REGEX =
 const DISPLAY_NONE_REGEX = /display\s*:\s*none/i;
 const DISPLAY_NONE_STRIP_REGEX = /display\s*:\s*none\s*;?/gi;
 const UTM_PARAM_REGEX = /[?&]utm_(?:source|medium|campaign)=/i;
+/** Sentinel regex that intentionally never matches; used for empty token sets. */
 const NO_MATCH_REGEX = /a^/i;
 
 // ── URL prefixes to skip during resolution ──────────────────────────
@@ -371,6 +372,57 @@ function isPromoMatch(
   );
 }
 
+function isStructuralNoise(
+  tagName: string,
+  interactive: boolean,
+  context: NoiseContext
+): boolean {
+  return context.structuralTags.has(tagName) && !interactive;
+}
+
+function isNavigationNoise(
+  tagName: string,
+  role: string | null,
+  className: string,
+  id: string,
+  context: NoiseContext
+): boolean {
+  if (!context.flags.navFooter) return false;
+
+  // Always-noise tags (nav, footer)
+  if (ALWAYS_NOISE_TAGS.has(tagName)) return true;
+  // Header with navigation role or noise class/id
+  if (
+    tagName === 'header' &&
+    ((role !== null && NAVIGATION_ROLES.has(role)) ||
+      HEADER_NOISE_PATTERN.test(`${className} ${id}`))
+  )
+    return true;
+  // Aside elements
+  if (tagName === 'aside') return true;
+  // Navigation roles (except aside+complementary)
+  if (
+    role !== null &&
+    NAVIGATION_ROLES.has(role) &&
+    (tagName !== 'aside' || role !== 'complementary')
+  )
+    return true;
+
+  return false;
+}
+
+function isHiddenNoise(hidden: boolean, interactive: boolean): boolean {
+  return hidden && !interactive;
+}
+
+function isPositionalNoise(className: string, element: Element): boolean {
+  return (
+    FIXED_OR_HIGH_Z_PATTERN.test(className) &&
+    (element.textContent || '').trim().length <
+      NAV_FOOTER_MIN_CHARS_FOR_PRESERVATION
+  );
+}
+
 function isNoiseElement(element: Element, context: NoiseContext): boolean {
   const tagName = element.tagName.toLowerCase();
   const role = element.getAttribute('role');
@@ -383,83 +435,57 @@ function isNoiseElement(element: Element, context: NoiseContext): boolean {
     element.getAttribute('aria-hidden') === 'true' ||
     (style !== null && HIDDEN_STYLE_REGEX.test(style));
 
-  // Structural tags (script, style, form, etc.)
-  if (context.structuralTags.has(tagName) && !interactive) return true;
-
-  if (context.flags.navFooter) {
-    // Always-noise tags (nav, footer)
-    if (ALWAYS_NOISE_TAGS.has(tagName)) return true;
-    // Header with navigation role or noise class/id
-    if (
-      tagName === 'header' &&
-      ((role !== null && NAVIGATION_ROLES.has(role)) ||
-        HEADER_NOISE_PATTERN.test(`${className} ${id}`))
-    )
-      return true;
-    // Aside elements
-    if (tagName === 'aside') return true;
-    // Navigation roles (except aside+complementary)
-    if (
-      role !== null &&
-      NAVIGATION_ROLES.has(role) &&
-      (tagName !== 'aside' || role !== 'complementary')
-    )
-      return true;
-  }
-
-  // Hidden elements
-  if (hidden && !interactive) return true;
-
-  // Sticky/fixed positioned elements — skip content-heavy wrappers
-  if (
-    FIXED_OR_HIGH_Z_PATTERN.test(className) &&
-    (element.textContent || '').trim().length <
-      NAV_FOOTER_MIN_CHARS_FOR_PRESERVATION
-  )
-    return true;
-
-  // Promotional/noise content
+  if (isStructuralNoise(tagName, interactive, context)) return true;
+  if (isNavigationNoise(tagName, role, className, id, context)) return true;
+  if (isHiddenNoise(hidden, interactive)) return true;
+  if (isPositionalNoise(className, element)) return true;
   if (isPromoMatch(className, id, element, context)) return true;
 
   return false;
 }
+function stripHeadingWrapperDivs(h: Element): void {
+  const divs = h.querySelectorAll('div');
+  for (let j = divs.length - 1; j >= 0; j--) {
+    const d = divs[j];
+    if (!d?.parentNode) continue;
+    const cls = d.getAttribute('class') ?? '';
+    const stl = d.getAttribute('style') ?? '';
+    if (
+      cls.includes('absolute') ||
+      stl.includes('position') ||
+      d.getAttribute('tabindex') === '-1'
+    ) {
+      d.remove();
+    }
+  }
+}
+
+function stripPermalinkAnchors(h: Element): void {
+  const anchors = h.querySelectorAll('a');
+  for (let j = anchors.length - 1; j >= 0; j--) {
+    const a = anchors[j];
+    if (!a?.parentNode) continue;
+    if (isHeadingPermalinkAnchor(a)) a.remove();
+  }
+}
+
+function stripZeroWidthSpaces(h: Element, document: Document): void {
+  const walker = document.createTreeWalker(h, NODE_FILTER_SHOW_TEXT);
+  let node: Node | null;
+  while ((node = walker.nextNode())) {
+    if (node.textContent?.includes('\u200B')) {
+      node.textContent = node.textContent.replace(/\u200B/g, '');
+    }
+  }
+}
+
 function cleanHeadings(document: Document): void {
   const headings = document.querySelectorAll('h1,h2,h3,h4,h5,h6');
   for (const h of headings) {
     if (!h.parentNode) continue;
-
-    // Remove absolute/positioned wrapper divs
-    const divs = h.querySelectorAll('div');
-    for (let j = divs.length - 1; j >= 0; j--) {
-      const d = divs[j];
-      if (!d?.parentNode) continue;
-      const cls = d.getAttribute('class') ?? '';
-      const stl = d.getAttribute('style') ?? '';
-      if (
-        cls.includes('absolute') ||
-        stl.includes('position') ||
-        d.getAttribute('tabindex') === '-1'
-      ) {
-        d.remove();
-      }
-    }
-
-    // Remove empty hash-link anchors
-    const anchors = h.querySelectorAll('a');
-    for (let j = anchors.length - 1; j >= 0; j--) {
-      const a = anchors[j];
-      if (!a?.parentNode) continue;
-      if (isHeadingPermalinkAnchor(a)) a.remove();
-    }
-
-    // Strip zero-width spaces from text nodes
-    const walker = document.createTreeWalker(h, NODE_FILTER_SHOW_TEXT);
-    let node: Node | null;
-    while ((node = walker.nextNode())) {
-      if (node.textContent?.includes('\u200B')) {
-        node.textContent = node.textContent.replace(/\u200B/g, '');
-      }
-    }
+    stripHeadingWrapperDivs(h);
+    stripPermalinkAnchors(h);
+    stripZeroWidthSpaces(h, document);
   }
 }
 
@@ -551,6 +577,15 @@ function stripNoise(document: Document, signal?: AbortSignal): void {
     }
   }
 }
+function parseSrcsetEntries(
+  srcset: string
+): { url: string; descriptor: string }[] {
+  return srcset.split(',').map((entry) => {
+    const parts = entry.trim().split(/\s+/);
+    return { url: parts[0] ?? '', descriptor: parts.slice(1).join(' ') };
+  });
+}
+
 function processUrlElement(
   el: Element,
   attr: string,
@@ -561,13 +596,13 @@ function processUrlElement(
   if (isSrcset) {
     const val = el.getAttribute(attr);
     if (val) {
-      const newVal = val
-        .split(',')
+      const newVal = parseSrcsetEntries(val)
         .map((entry) => {
-          const parts = entry.trim().split(/\s+/);
-          if (!parts[0]) return entry;
-          parts[0] = URL.parse(parts[0], base)?.href ?? parts[0];
-          return parts.join(' ');
+          if (!entry.url) return entry.descriptor;
+          const resolved = URL.parse(entry.url, base)?.href ?? entry.url;
+          return entry.descriptor
+            ? `${resolved} ${entry.descriptor}`
+            : resolved;
         })
         .join(', ');
       el.setAttribute(attr, newVal);
@@ -617,13 +652,11 @@ function preferSameDomainSrc(document: Document, base: URL): void {
     if (!srcParsed || srcParsed.hostname === pageHost) continue;
 
     const srcset = img.getAttribute('srcset') ?? '';
-    const entries = srcset.split(',');
-    for (const entry of entries) {
-      const url = entry.trim().split(/\s+/)[0];
-      if (!url) continue;
-      const parsed = URL.parse(url);
+    for (const entry of parseSrcsetEntries(srcset)) {
+      if (!entry.url) continue;
+      const parsed = URL.parse(entry.url);
       if (parsed?.hostname === pageHost) {
-        img.setAttribute('src', url);
+        img.setAttribute('src', entry.url);
         break;
       }
     }
