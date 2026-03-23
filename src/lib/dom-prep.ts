@@ -16,6 +16,9 @@ const ASIDE_NAV_MIN_LINKS = 10;
 const INLINE_DEMO_INSTRUCTION_MAX_CHARS = 160;
 const REDUNDANT_PREVIEW_SEGMENT_MAX_CHARS = 60;
 const REDUNDANT_PREVIEW_MAX_SEGMENTS = 12;
+const DENSITY_BASE_CHARS = 100;
+const MAX_PERMALINK_TEXT_LENGTH = 2;
+const MIN_LINES_FOR_TRUNCATION_CHECK = 3;
 
 // ── Regex patterns ──────────────────────────────────────────────────
 const HTML_DOCUMENT_MARKERS = /<\s*(?:!doctype|html|head|body)\b/i;
@@ -310,20 +313,19 @@ function isWithinPrimaryContent(element: Element): boolean {
   }
   return false;
 }
-function isNavigationAside(element: Element): boolean {
-  if (element.querySelector('nav')) return true;
+function isLinkDenseNavigation(
+  element: Element,
+  checkContainedNav = false
+): boolean {
+  if (checkContainedNav && element.querySelector('nav')) return true;
   const links = element.querySelectorAll('a[href]');
   if (links.length < ASIDE_NAV_MIN_LINKS) return false;
   const textLen = (element.textContent || '').trim().length;
   if (textLen === 0) return true;
-  return links.length / (textLen / 100) >= ASIDE_NAV_LINK_DENSITY_THRESHOLD;
-}
-function isNavigationSidebar(element: Element): boolean {
-  const links = element.querySelectorAll('a[href]');
-  if (links.length < ASIDE_NAV_MIN_LINKS) return false;
-  const textLen = (element.textContent || '').trim().length;
-  if (textLen === 0) return true;
-  return links.length / (textLen / 100) >= ASIDE_NAV_LINK_DENSITY_THRESHOLD;
+  return (
+    links.length / (textLen / DENSITY_BASE_CHARS) >=
+    ASIDE_NAV_LINK_DENSITY_THRESHOLD
+  );
 }
 function shouldPreserve(element: Element, tagName: string): boolean {
   // Check Dialog
@@ -340,14 +342,14 @@ function shouldPreserve(element: Element, tagName: string): boolean {
       return true;
     const textLen = (element.textContent || '').trim().length;
     if (textLen < NAV_FOOTER_MIN_CHARS_FOR_PRESERVATION) return false;
-    if (isNavigationSidebar(element)) return false;
+    if (isLinkDenseNavigation(element)) return false;
     return true;
   }
 
   // Check Aside — preserve only if it looks like article content, not navigation
   if (tagName === 'aside') {
     if (!isWithinPrimaryContent(element)) return false;
-    return !isNavigationAside(element);
+    return !isLinkDenseNavigation(element, true);
   }
 
   return false;
@@ -520,13 +522,19 @@ function isHeadingPermalinkAnchor(anchor: Element): boolean {
   }
 
   const className = anchor.getAttribute('class') ?? '';
-  if (HEADING_PERMALINK_CLASS_PATTERN.test(className) && text.length <= 2) {
+  if (
+    HEADING_PERMALINK_CLASS_PATTERN.test(className) &&
+    text.length <= MAX_PERMALINK_TEXT_LENGTH
+  ) {
     return true;
   }
 
   const ariaHidden = anchor.getAttribute('aria-hidden');
   const tabindex = anchor.getAttribute('tabindex');
-  return (ariaHidden === 'true' || tabindex === '-1') && text.length <= 2;
+  return (
+    (ariaHidden === 'true' || tabindex === '-1') &&
+    text.length <= MAX_PERMALINK_TEXT_LENGTH
+  );
 }
 
 function getDirectRows(section: Element): Element[] {
@@ -1369,6 +1377,11 @@ const SENTENCE_ENDING_CODES = new Set<number>([
   CharCode.QUESTION,
   CharCode.COLON,
   CharCode.SEMICOLON,
+  CharCode.DOUBLE_QUOTE,
+  CharCode.SINGLE_QUOTE,
+  CharCode.RIGHT_PAREN,
+  CharCode.RIGHT_BRACKET,
+  CharCode.BACKTICK,
 ]);
 
 function trimLineOffsets(
@@ -1423,7 +1436,7 @@ function hasTruncatedSentences(text: string): boolean {
     }
   }
 
-  if (linesFound < 3) return false;
+  if (linesFound < MIN_LINES_FOR_TRUNCATION_CHECK) return false;
   return incompleteFound / linesFound > MAX_TRUNCATED_LINE_RATIO;
 }
 
@@ -1447,6 +1460,14 @@ function countRealImages(doc: Document): number {
   return count;
 }
 
+const DATA_IMG_PATTERN = /<img\b[^>]*\bsrc\s*=\s*["']?data:/gi;
+
+function countRealImagesFromHtml(html: string): number {
+  const total = html.match(/<img\b/gi)?.length ?? 0;
+  const dataImages = html.match(DATA_IMG_PATTERN)?.length ?? 0;
+  return total - dataImages;
+}
+
 function passesRetentionRulesFromHtml(
   originalDoc: Document,
   articleHtml: string
@@ -1460,7 +1481,13 @@ function passesRetentionRulesFromHtml(
         ? countRealImages(originalDoc)
         : countMatchingElements(originalDoc, selector);
     if (original < minThreshold) return true;
-    return (articleHtml.match(pattern)?.length ?? 0) / original >= ratio;
+    // For images, also exclude data: URIs from the article count to
+    // align with the denominator's real-image filtering.
+    const articleCount =
+      selector === 'img'
+        ? countRealImagesFromHtml(articleHtml)
+        : (articleHtml.match(pattern)?.length ?? 0);
+    return articleCount / original >= ratio;
   });
 }
 

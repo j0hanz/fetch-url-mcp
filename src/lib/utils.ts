@@ -342,6 +342,11 @@ export const CharCode = {
   Z_UPPER: 90,
   A_LOWER: 97,
   Z_LOWER: 122,
+  DOUBLE_QUOTE: 34,
+  SINGLE_QUOTE: 39,
+  RIGHT_PAREN: 41,
+  RIGHT_BRACKET: 93,
+  BACKTICK: 96,
 } as const;
 
 export function isWhitespaceChar(code: number): boolean {
