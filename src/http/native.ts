@@ -585,7 +585,9 @@ class McpSessionGateway {
     }, config.server.sessionInitTimeoutMs);
     initTimeout.unref();
 
+    const connectState = { transportClosed: false };
     transportImpl.onclose = () => {
+      connectState.transportClosed = true;
       clearTimeout(initTimeout);
       this.sessionInitTimeouts.delete(newSessionId);
       tracker.releaseSlot();
@@ -605,6 +607,14 @@ class McpSessionGateway {
     }
 
     tracker.releaseSlot();
+
+    if (connectState.transportClosed) {
+      void teardownUnregisteredSessionResources(
+        unpublishedSession,
+        'session-closed-during-connect'
+      );
+      return null;
+    }
 
     this.store.set(newSessionId, {
       server: sessionServer,
@@ -812,6 +822,41 @@ class HttpDispatcher {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Body parse error responses
+// ---------------------------------------------------------------------------
+
+function sendBodyParseError(
+  ctx: RequestContext,
+  bodyErrorKind: string | null,
+  rawReq: IncomingMessage
+): void {
+  if (ctx.url.pathname === '/mcp') {
+    switch (bodyErrorKind) {
+      case 'payload-too-large':
+        sendError(ctx.res, -32600, 'Request body too large', 413, null);
+        break;
+      case 'read-failed':
+        if (!rawReq.destroyed) {
+          sendError(ctx.res, -32600, 'Request body read failed', 400, null);
+        }
+        break;
+      case 'invalid-json':
+      default:
+        sendError(ctx.res, -32700, 'Parse error', 400, null);
+        break;
+    }
+  } else {
+    sendJson(ctx.res, bodyErrorKind === 'payload-too-large' ? 413 : 400, {
+      error:
+        bodyErrorKind === 'payload-too-large'
+          ? 'Payload too large'
+          : 'Invalid JSON',
+    });
+  }
+  drainRequest(rawReq);
+}
+
 class HttpRequestPipeline {
   constructor(
     private readonly rateLimiter: RateLimitManagerImpl,
@@ -909,30 +954,7 @@ class HttpRequestPipeline {
       return true;
     } catch (error: unknown) {
       const bodyErrorKind = isJsonBodyError(error) ? error.kind : null;
-      if (ctx.url.pathname === '/mcp') {
-        switch (bodyErrorKind) {
-          case 'payload-too-large':
-            sendError(ctx.res, -32600, 'Request body too large', 413, null);
-            break;
-          case 'read-failed':
-            if (!rawReq.destroyed) {
-              sendError(ctx.res, -32600, 'Request body read failed', 400, null);
-            }
-            break;
-          case 'invalid-json':
-          default:
-            sendError(ctx.res, -32700, 'Parse error', 400, null);
-            break;
-        }
-      } else {
-        sendJson(ctx.res, bodyErrorKind === 'payload-too-large' ? 413 : 400, {
-          error:
-            bodyErrorKind === 'payload-too-large'
-              ? 'Payload too large'
-              : 'Invalid JSON',
-        });
-      }
-      drainRequest(rawReq);
+      sendBodyParseError(ctx, bodyErrorKind, rawReq);
       return false;
     }
   }
