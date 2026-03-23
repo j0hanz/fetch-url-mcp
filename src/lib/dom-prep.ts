@@ -1071,6 +1071,39 @@ function separateAdjacentInlineElements(document: Document): void {
   }
 }
 
+const CODE_EDITOR_LANG_REGEX = /\blanguage-(\S+)/;
+
+// Some documentation sites render code examples as highlighted, aria-hidden blocks with a textarea containing the raw code for accessibility.
+// Surface the textarea content and remove the redundant highlighted block to produce cleaner markdown output.
+export function surfaceCodeEditorContent(document: Document): void {
+  for (const pre of document.querySelectorAll('pre[aria-hidden="true"]')) {
+    const codeChild = pre.querySelector('code');
+    if (!codeChild) continue;
+
+    const container = pre.parentElement;
+    if (!container) continue;
+
+    const textarea = container.querySelector('textarea');
+    if (!textarea) continue;
+
+    // Extract language from the highlighted code element
+    const langMatch = CODE_EDITOR_LANG_REGEX.exec(
+      codeChild.getAttribute('class') ?? ''
+    );
+    const lang = langMatch?.[1] ?? '';
+
+    // Build a clean pre>code block from the textarea plain text
+    const newPre = document.createElement('pre');
+    const newCode = document.createElement('code');
+    if (lang) newCode.setAttribute('class', `language-${lang}`);
+    newCode.textContent = textarea.textContent || '';
+    newPre.appendChild(newCode);
+    container.insertBefore(newPre, pre);
+    pre.remove();
+    textarea.remove();
+  }
+}
+
 function stripDocsControls(document: Document): void {
   removeNodes(document.querySelectorAll(DOCS_CONTROL_SELECTORS.join(',')));
 }
@@ -1086,6 +1119,7 @@ function stripAriaLiveInstructions(document: Document): void {
 
 function runDocsControlPass(document: Document): void {
   normalizeTabContent(document);
+  surfaceCodeEditorContent(document);
   cleanHeadings(document);
   stripDocsControls(document);
   stripAriaLiveInstructions(document);

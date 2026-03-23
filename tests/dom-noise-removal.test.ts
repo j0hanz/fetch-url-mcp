@@ -938,3 +938,125 @@ describe('CSS utility class preservation', () => {
     );
   });
 });
+
+describe('Code-editor textarea surfacing', () => {
+  it('surfaces code-editor textarea into a clean pre>code block', () => {
+    const html = `
+      <html>
+        <body>
+          <main>
+            <p>Main content</p>
+            <div>
+              <pre aria-hidden="true"><code class="language-tsx"><span class="token">&lt;Avatar /&gt;</span></code></pre>
+              <textarea class="npm__react-simple-code-editor__textarea">&lt;Avatar alt="Remy Sharp" src="/avatar.jpg" /&gt;</textarea>
+            </div>
+          </main>
+        </body>
+      </html>
+    `;
+
+    const result = removeNoiseFromHtml(html, undefined, 'https://example.com');
+
+    assert.ok(
+      result.includes('<pre><code class="language-tsx">'),
+      'Clean pre>code block should be present'
+    );
+    assert.ok(
+      result.includes('Avatar alt="Remy Sharp"'),
+      'Textarea code content should be preserved'
+    );
+    assert.ok(
+      !result.includes('aria-hidden'),
+      'Original aria-hidden pre should be removed'
+    );
+    assert.ok(
+      !result.includes('textarea'),
+      'Original textarea should be removed'
+    );
+  });
+
+  it('leaves aria-hidden elements without code-editor pattern unchanged', () => {
+    const html = `
+      <html>
+        <body>
+          <main>
+            <p>Main content</p>
+            <div aria-hidden="true"><p>DECORATIVE</p></div>
+          </main>
+        </body>
+      </html>
+    `;
+
+    const result = removeNoiseFromHtml(html, undefined, 'https://example.com');
+
+    assert.ok(
+      !result.includes('DECORATIVE'),
+      'Non-code aria-hidden content should still be removed'
+    );
+    assert.ok(
+      result.includes('Main content'),
+      'Main content should be preserved'
+    );
+  });
+
+  it('handles pre[aria-hidden] without sibling textarea (no-op)', () => {
+    const html = `
+      <html>
+        <body>
+          <main>
+            <p>Main content</p>
+            <div>
+              <pre aria-hidden="true"><code class="language-js">console.log("hi")</code></pre>
+            </div>
+          </main>
+        </body>
+      </html>
+    `;
+
+    const result = removeNoiseFromHtml(html, undefined, 'https://example.com');
+
+    assert.ok(
+      !result.includes('console.log'),
+      'aria-hidden pre without textarea sibling should still be removed by noise pass'
+    );
+  });
+
+  it('surfaces multiple code-editor blocks on the same page', () => {
+    const html = `
+      <html>
+        <body>
+          <main>
+            <p>Content</p>
+            <div>
+              <pre aria-hidden="true"><code class="language-tsx"><span>A</span></code></pre>
+              <textarea>const a = 1;</textarea>
+            </div>
+            <div>
+              <pre aria-hidden="true"><code class="language-css"><span>B</span></code></pre>
+              <textarea>.root { color: red; }</textarea>
+            </div>
+          </main>
+        </body>
+      </html>
+    `;
+
+    const result = removeNoiseFromHtml(html, undefined, 'https://example.com');
+
+    assert.ok(
+      result.includes('language-tsx'),
+      'First code block language should be preserved'
+    );
+    assert.ok(
+      result.includes('const a = 1'),
+      'First code block content should be preserved'
+    );
+    assert.ok(
+      result.includes('language-css'),
+      'Second code block language should be preserved'
+    );
+    assert.ok(
+      result.includes('.root { color: red; }'),
+      'Second code block content should be preserved'
+    );
+  });
+});
