@@ -247,6 +247,50 @@ class StageTracker {
       });
     }
   }
+
+  runTrackedSync<T extends { truncated?: boolean }>(
+    url: string,
+    signal: AbortSignal | undefined,
+    fn: () => T
+  ): T {
+    const totalStage = this.start(url, 'transform:total');
+    try {
+      throwIfAborted(signal, url, 'transform:begin');
+      const result = fn();
+      this.end(
+        totalStage,
+        result.truncated !== undefined
+          ? { truncated: result.truncated }
+          : undefined
+      );
+      return result;
+    } catch (error) {
+      this.end(totalStage);
+      throw error;
+    }
+  }
+
+  async runTrackedAsync<T extends { truncated?: boolean }>(
+    url: string,
+    signal: AbortSignal | undefined,
+    fn: () => Promise<T>
+  ): Promise<T> {
+    const totalStage = this.start(url, 'transform:total');
+    try {
+      throwIfAborted(signal, url, 'transform:begin');
+      const result = await fn();
+      this.end(
+        totalStage,
+        result.truncated !== undefined
+          ? { truncated: result.truncated }
+          : undefined
+      );
+      return result;
+    } catch (error) {
+      this.end(totalStage);
+      throw error;
+    }
+  }
 }
 
 const stageTracker = new StageTracker();
@@ -310,7 +354,7 @@ function isReadabilityCompatible(doc: unknown): doc is Document {
   );
 }
 
-function resolveCollapsedTextLengthUpTo(text: string, max: number): number {
+function getNormalizedTextLengthUpTo(text: string, max: number): number {
   if (max <= 0) return 0;
 
   let length = 0;
@@ -405,7 +449,7 @@ function validateReaderability(
     doc.querySelector('body')?.textContent ??
     (doc.documentElement.textContent as string | null | undefined) ??
     '';
-  const textLength = resolveCollapsedTextLengthUpTo(
+  const textLength = getNormalizedTextLengthUpTo(
     rawText,
     MIN_READERABLE_TEXT_LENGTH + 1
   );
@@ -695,31 +739,29 @@ function findInlineLink(
   prefix: string;
   href: string;
 } | null {
-  let searchFrom = start;
+  let openBracket = markdown.indexOf('[', start);
 
-  while (searchFrom < markdown.length) {
-    const openBracket = markdown.indexOf('[', searchFrom);
-    if (openBracket === -1) return null;
-
+  while (openBracket !== -1) {
     const closeBracket = markdown.indexOf(']', openBracket + 1);
     if (closeBracket === -1) return null;
 
     if (markdown[closeBracket + 1] !== '(') {
-      searchFrom = closeBracket + 1;
+      openBracket = markdown.indexOf('[', closeBracket + 1);
       continue;
     }
 
     const closeParen = findBalancedCloseParen(markdown, closeBracket + 2);
     if (closeParen === -1) return null;
 
-    const prefixStart =
-      openBracket > 0 && markdown[openBracket - 1] === '!'
-        ? openBracket - 1
-        : openBracket;
-    const prefix = markdown.slice(prefixStart, closeBracket + 1);
-    const href = markdown.slice(closeBracket + 2, closeParen);
+    const isImage = openBracket > 0 && markdown[openBracket - 1] === '!';
+    const prefixStart = isImage ? openBracket - 1 : openBracket;
 
-    return { prefixStart, closeParen, prefix, href };
+    return {
+      prefixStart,
+      closeParen,
+      prefix: markdown.slice(prefixStart, closeBracket + 1),
+      href: markdown.slice(closeBracket + 2, closeParen),
+    };
   }
 
   return null;
@@ -1018,7 +1060,7 @@ function resolveContentTitle(params: {
   };
 }
 
-const CONTENT_ROOT_SELECTORS = [
+const CONTENT_REGION_SELECTORS = [
   'article',
   'main',
   '[role="main"]',
@@ -1035,15 +1077,13 @@ const CONTENT_ROOT_SELECTORS = [
   '.article-body',
 ] as const;
 
-const PRIMARY_HEADING_ROOT_SELECTORS = [
-  ...CONTENT_ROOT_SELECTORS,
+const HEADING_REGION_EXTRA_SELECTORS = [
   '.markdown-body',
-  '.entry-content',
   '[itemprop="text"]',
 ] as const;
 
 function findContentRoot(document: Document): string | undefined {
-  for (const selector of CONTENT_ROOT_SELECTORS) {
+  for (const selector of CONTENT_REGION_SELECTORS) {
     const element = document.querySelector(selector);
     if (!element) continue;
 
@@ -1085,7 +1125,10 @@ function findPrimaryHeading(document: Document): string | undefined {
   );
   if (globalHeading) return globalHeading;
 
-  for (const selector of PRIMARY_HEADING_ROOT_SELECTORS) {
+  for (const selector of [
+    ...CONTENT_REGION_SELECTORS,
+    ...HEADING_REGION_EXTRA_SELECTORS,
+  ]) {
     const root = document.querySelector(selector);
     if (!root) continue;
 
@@ -1187,17 +1230,22 @@ function buildRawSource(
   };
 }
 
-function buildContentSource(params: {
-  html: string;
-  url: string;
-  article: ExtractedArticle | null;
-  extractedMeta: ExtractedMetadata;
-  includeMetadata: boolean;
-  evaluatedArticleDoc: Document | null;
-  document?: Document;
-  truncated: boolean;
-  signal?: AbortSignal | undefined;
-}): ContentSource {
+interface BuildContentSourceInput {
+  readonly html: string;
+  readonly url: string;
+  readonly article: ExtractedArticle | null;
+  readonly extractedMeta: ExtractedMetadata;
+  readonly includeMetadata: boolean;
+  readonly evaluatedArticleDoc: Document | null;
+  readonly document?: Document;
+  readonly truncated: boolean;
+  readonly signal?: AbortSignal | undefined;
+}
+
+function resolveBaseContentSource(input: BuildContentSourceInput): {
+  base: BaseContentSource;
+  preparedDocument: ReturnType<typeof prepareContentSourceDocument> | undefined;
+} {
   const {
     html,
     url,
@@ -1208,49 +1256,56 @@ function buildContentSource(params: {
     document,
     truncated,
     signal,
-  } = params;
+  } = input;
 
-  const useArticleContent = evaluatedArticleDoc !== null;
   const metadata = createContentMetadataBlock(
     url,
     article,
     extractedMeta,
-    useArticleContent,
+    evaluatedArticleDoc !== null,
     includeMetadata
   );
   const preparedDocument = document
     ? prepareContentSourceDocument(document, url, signal)
     : undefined;
-  const primaryHeading = preparedDocument?.primaryHeading;
 
   const base: BaseContentSource = {
     favicon: extractedMeta.favicon,
     metadata,
     extractedMetadata: extractedMeta,
     truncated,
-    primaryHeading,
+    primaryHeading: preparedDocument?.primaryHeading,
     originalHtml: html,
   };
 
-  if (evaluatedArticleDoc && article) {
+  return { base, preparedDocument };
+}
+
+function buildContentSource(input: BuildContentSourceInput): ContentSource {
+  const { base, preparedDocument } = resolveBaseContentSource(input);
+
+  if (input.evaluatedArticleDoc && input.article) {
     return buildArticleSource(base, {
-      evaluatedArticleDoc,
-      article,
-      extractedMeta,
-      url,
-      signal,
+      evaluatedArticleDoc: input.evaluatedArticleDoc,
+      article: input.article,
+      extractedMeta: input.extractedMeta,
+      url: input.url,
+      signal: input.signal,
     });
   }
 
   if (preparedDocument) {
     return buildDocumentSource(base, {
       resolvedDocument: preparedDocument.document,
-      html,
-      extractedMeta,
+      html: input.html,
+      extractedMeta: input.extractedMeta,
     });
   }
 
-  return buildRawSource(base, { html, extractedMeta });
+  return buildRawSource(base, {
+    html: input.html,
+    extractedMeta: input.extractedMeta,
+  });
 }
 
 function resolveContentSource(params: {
@@ -1379,17 +1434,6 @@ function resolveTransformContentResult(
   return buildMarkdownFromContext(context, url, signal);
 }
 
-function completeTrackedTransform<T extends { truncated?: boolean }>(
-  totalStage: TransformStageContext | null,
-  result: T
-): T {
-  stageTracker.end(
-    totalStage,
-    result.truncated !== undefined ? { truncated: result.truncated } : undefined
-  );
-  return result;
-}
-
 const REPLACEMENT_CHAR = '\ufffd';
 const BINARY_INDICATOR_THRESHOLD = 0.1;
 
@@ -1418,20 +1462,10 @@ export function transformHtmlToMarkdownInProcess(
   options: TransformOptions
 ): MarkdownTransformResult {
   const signal = buildTransformSignal(options.signal);
-  const totalStage = stageTracker.start(url, 'transform:total');
-
-  try {
-    throwIfAborted(signal, url, 'transform:begin');
-
+  return stageTracker.runTrackedSync(url, signal, () => {
     validateBinaryContent(html, url);
-    return completeTrackedTransform(
-      totalStage,
-      resolveTransformContentResult(html, url, options, signal)
-    );
-  } catch (error) {
-    stageTracker.end(totalStage);
-    throw error;
-  }
+    return resolveTransformContentResult(html, url, options, signal);
+  });
 }
 
 function validateBinaryContent(html: string, url: string): void {
@@ -1557,18 +1591,9 @@ async function transformInputToMarkdown(
   url: string,
   options: TransformExecutionOptions
 ): Promise<MarkdownTransformResult> {
-  const totalStage = stageTracker.start(url, 'transform:total');
-
-  try {
-    throwIfAborted(options.signal, url, 'transform:begin');
-    return completeTrackedTransform(
-      totalStage,
-      await runWorkerTransformWithFallback(htmlOrBuffer, url, options)
-    );
-  } catch (error) {
-    stageTracker.end(totalStage);
-    throw error;
-  }
+  return stageTracker.runTrackedAsync(url, options.signal, () =>
+    runWorkerTransformWithFallback(htmlOrBuffer, url, options)
+  );
 }
 
 export async function transformHtmlToMarkdown(
