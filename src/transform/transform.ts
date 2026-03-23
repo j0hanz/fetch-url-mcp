@@ -93,10 +93,6 @@ function decodeInput(input: string | Uint8Array, encoding?: string): string {
   }
 }
 
-function asError(value: unknown): Error | undefined {
-  return value instanceof Error ? value : undefined;
-}
-
 interface ExtractionContext extends ExtractionResult {
   document: Document;
   truncated?: boolean;
@@ -309,13 +305,6 @@ function trimUtf8Buffer(buffer: Uint8Array, maxBytes: number): Uint8Array {
   return buffer.subarray(0, end);
 }
 
-const CHAR_SLASH = 47;
-const CHAR_EXCLAMATION = 33;
-const CHAR_QUESTION = 63;
-const CHAR_A_UPPER = 65;
-const CHAR_Z_UPPER = 90;
-const CHAR_A_LOWER = 97;
-const CHAR_Z_LOWER = 122;
 const MAX_ENTITY_LENGTH = 10;
 
 function trimDanglingTagFragment(content: string): string {
@@ -339,11 +328,11 @@ function trimDanglingTagFragment(content: string): string {
     const code = result.codePointAt(lastOpen + 1);
     if (
       code !== undefined &&
-      (code === CHAR_SLASH ||
-        code === CHAR_EXCLAMATION ||
-        code === CHAR_QUESTION ||
-        (code >= CHAR_A_UPPER && code <= CHAR_Z_UPPER) ||
-        (code >= CHAR_A_LOWER && code <= CHAR_Z_LOWER))
+      (code === 47 /* / */ ||
+        code === 33 /* ! */ ||
+        code === 63 /* ? */ ||
+        (code >= 65 && code <= 90) /* A-Z */ ||
+        (code >= 97 && code <= 122)) /* a-z */
     ) {
       return result.substring(0, lastOpen);
     }
@@ -474,8 +463,6 @@ function preserveCodeLanguageAttributes(doc: Document): void {
   }
 }
 
-const STRUCTURAL_SKIP_TAGS = new Set(['HTML', 'BODY']);
-
 function prepareReadabilityDocument(readabilityDoc: Document): void {
   extractNoscriptImages(readabilityDoc);
   preserveGalleryImages(readabilityDoc);
@@ -486,7 +473,7 @@ function prepareReadabilityDocument(readabilityDoc: Document): void {
   for (const el of readabilityDoc.querySelectorAll(
     '[class*="breadcrumb"],[class*="pagination"]'
   )) {
-    if (STRUCTURAL_SKIP_TAGS.has(el.tagName)) continue;
+    if (el.tagName === 'HTML' || el.tagName === 'BODY') continue;
     el.remove();
   }
 }
@@ -589,17 +576,19 @@ function extractArticle(
   }
 
   try {
-    const doc = document;
-    if (!validateReaderability(doc, url, signal)) {
+    if (!validateReaderability(document, url, signal)) {
       return null;
     }
 
-    const parsed = invokeReadability(doc, url, signal);
+    const parsed = invokeReadability(document, url, signal);
     if (!parsed) return null;
 
     return mapReadabilityResult(parsed);
   } catch (error: unknown) {
-    logError('Failed to extract article with Readability', asError(error));
+    logError(
+      'Failed to extract article with Readability',
+      error instanceof Error ? error : undefined
+    );
     return null;
   }
 }
@@ -637,10 +626,15 @@ function extractEarlyMetadataIfNeeded(
   url: string
 ): ExtractedMetadata | null {
   const maxSize = config.constants.maxHtmlSize;
-  if (maxSize <= 0 || html.length <= maxSize) {
-    if (maxSize <= 0 || isAsciiOnly(html) || getUtf8ByteLength(html) <= maxSize)
-      return null;
+  if (maxSize <= 0) return null;
+
+  if (
+    html.length <= maxSize &&
+    (isAsciiOnly(html) || getUtf8ByteLength(html) <= maxSize)
+  ) {
+    return null;
   }
+
   return stageTracker.run(url, 'extract:early-metadata', () =>
     extractMetadataFromHead(html, url)
   );
@@ -675,7 +669,7 @@ function extractArticleIfRequested(
   url: string,
   options: {
     extractArticle?: boolean;
-    signal?: AbortSignal;
+    signal?: AbortSignal | undefined;
   }
 ): ExtractedArticle | null {
   if (!options.extractArticle) return null;
@@ -689,8 +683,8 @@ function extractContentContext(
   url: string,
   options: {
     extractArticle?: boolean;
-    signal?: AbortSignal;
-    inputTruncated?: boolean;
+    signal?: AbortSignal | undefined;
+    inputTruncated?: boolean | undefined;
   }
 ): ExtractionContext {
   if (!isValidInput(html, url)) {
@@ -727,7 +721,10 @@ function extractContentContext(
 
     throwIfAborted(options.signal, url, 'extract:error');
 
-    logError('Failed to extract content', asError(error));
+    logError(
+      'Failed to extract content',
+      error instanceof Error ? error : undefined
+    );
 
     return createEmptyExtractionContext();
   }
@@ -919,9 +916,9 @@ export function htmlToMarkdown(
   metadata?: MetadataBlock,
   options?: {
     url?: string;
-    signal?: AbortSignal;
-    document?: Document;
-    skipNoiseRemoval?: boolean;
+    signal?: AbortSignal | undefined;
+    document?: Document | undefined;
+    skipNoiseRemoval?: boolean | undefined;
   }
 ): string {
   const url = options?.url ?? metadata?.url ?? '';
@@ -940,7 +937,10 @@ export function htmlToMarkdown(
   } catch (error: unknown) {
     if (error instanceof FetchError) throw error;
 
-    logError('Failed to convert HTML to markdown', asError(error));
+    logError(
+      'Failed to convert HTML to markdown',
+      error instanceof Error ? error : undefined
+    );
     throw new FetchError('Failed to convert HTML to markdown', url, 500, {
       reason: 'markdown_convert_failed',
     });
@@ -980,7 +980,7 @@ function tryTransformRawContent(params: {
   html: string;
   url: string;
   includeMetadata: boolean;
-  inputTruncated?: boolean;
+  inputTruncated?: boolean | undefined;
 }): MarkdownTransformResult | null {
   if (!shouldPreserveRawContent(params.url, params.html)) return null;
 
@@ -1031,11 +1031,7 @@ const MAX_TRUNCATED_LINE_RATIO = 0.95;
 function resolveHtmlDocument(htmlOrDocument: string | Document): Document {
   if (typeof htmlOrDocument !== 'string') return htmlOrDocument;
 
-  const trimmed = htmlOrDocument.trim().toLowerCase();
-  const needsWrapper =
-    !trimmed.startsWith('<!doctype') &&
-    !trimmed.startsWith('<html') &&
-    !trimmed.startsWith('<body');
+  const needsWrapper = !/^\s*<(?:!doctype|html|body)\b/i.test(htmlOrDocument);
   const htmlToParse = needsWrapper
     ? `<!DOCTYPE html><html><body>${htmlOrDocument}</body></html>`
     : htmlOrDocument;
@@ -1384,17 +1380,10 @@ function passesContentRatioGate(
   document: Document
 ): boolean {
   const originalLength = getVisibleTextLength(document);
-  if (originalLength >= MIN_HTML_LENGTH_FOR_GATE) {
-    if (articleTextLength / originalLength < MIN_CONTENT_RATIO) {
-      return false;
-    }
-  }
-  return true;
-}
-
-function countHtmlTagOccurrences(html: string, pattern: RegExp): number {
-  const matches = html.match(pattern);
-  return matches ? matches.length : 0;
+  return (
+    originalLength < MIN_HTML_LENGTH_FOR_GATE ||
+    articleTextLength / originalLength >= MIN_CONTENT_RATIO
+  );
 }
 
 function passesRetentionRulesFromHtml(
@@ -1404,24 +1393,17 @@ function passesRetentionRulesFromHtml(
   return RETENTION_RULES.every(({ selector, pattern, minOriginal, ratio }) => {
     const original = countMatchingElements(originalDoc, selector);
     if (original < minOriginal) return true;
-    return countHtmlTagOccurrences(articleHtml, pattern) / original >= ratio;
+    return (articleHtml.match(pattern)?.length ?? 0) / original >= ratio;
   });
 }
 
 function passesEmptySectionRatio(articleDoc: Document): boolean {
-  const articleHeadings = countMatchingElements(
-    articleDoc,
-    'h1,h2,h3,h4,h5,h6'
-  );
-  if (articleHeadings >= MIN_HEADINGS_FOR_EMPTY_SECTION_GATE) {
-    if (
-      countEmptyHeadingSections(articleDoc) / articleHeadings >
+  const headingCount = countMatchingElements(articleDoc, 'h1,h2,h3,h4,h5,h6');
+  return (
+    headingCount < MIN_HEADINGS_FOR_EMPTY_SECTION_GATE ||
+    countEmptyHeadingSections(articleDoc) / headingCount <=
       MAX_EMPTY_SECTION_RATIO
-    ) {
-      return false;
-    }
-  }
-  return true;
+  );
 }
 
 function evaluateArticleContent(
@@ -1542,7 +1524,7 @@ function buildContentSource(params: {
   evaluatedArticleDoc: Document | null;
   document?: Document;
   truncated: boolean;
-  signal?: AbortSignal;
+  signal?: AbortSignal | undefined;
 }): ContentSource {
   const {
     html,
@@ -1603,8 +1585,8 @@ function resolveContentSource(params: {
   html: string;
   url: string;
   includeMetadata: boolean;
-  signal?: AbortSignal;
-  inputTruncated?: boolean;
+  signal?: AbortSignal | undefined;
+  inputTruncated?: boolean | undefined;
 }): ContentSource {
   const {
     article,
@@ -1613,8 +1595,8 @@ function resolveContentSource(params: {
     truncated,
   } = extractContentContext(params.html, params.url, {
     extractArticle: true,
-    ...(params.signal ? { signal: params.signal } : {}),
-    ...(params.inputTruncated ? { inputTruncated: true } : {}),
+    signal: params.signal,
+    inputTruncated: params.inputTruncated,
   });
 
   const evaluatedArticleDoc = article
@@ -1630,7 +1612,7 @@ function resolveContentSource(params: {
     evaluatedArticleDoc,
     document,
     truncated: truncated ?? false,
-    ...(params.signal ? { signal: params.signal } : {}),
+    signal: params.signal,
   });
 }
 
@@ -1655,9 +1637,9 @@ function renderMarkdownStage({
   return stageTracker.run(url, 'transform:markdown', () =>
     htmlToMarkdown(context.sourceHtml, context.metadata, {
       url,
-      ...(signal ? { signal } : {}),
-      ...(context.document ? { document: context.document } : {}),
-      ...(context.skipNoiseRemoval ? { skipNoiseRemoval: true } : {}),
+      signal,
+      document: context.document,
+      skipNoiseRemoval: context.skipNoiseRemoval,
     })
   );
 }
@@ -1707,7 +1689,7 @@ function resolveTransformContentResult(
       html,
       url,
       includeMetadata: options.includeMetadata,
-      ...(options.inputTruncated ? { inputTruncated: true } : {}),
+      inputTruncated: options.inputTruncated,
     })
   );
   if (rawResult) return rawResult;
@@ -1717,8 +1699,8 @@ function resolveTransformContentResult(
       html,
       url,
       includeMetadata: options.includeMetadata,
-      ...(signal ? { signal } : {}),
-      ...(options.inputTruncated ? { inputTruncated: true } : {}),
+      signal,
+      inputTruncated: options.inputTruncated,
     })
   );
 
@@ -1740,7 +1722,7 @@ const REPLACEMENT_CHAR = '\ufffd';
 const BINARY_INDICATOR_THRESHOLD = 0.1;
 
 function hasBinaryIndicators(content: string): boolean {
-  if (!content || content.length === 0) return false;
+  if (!content) return false;
 
   if (content.includes('\x00')) return true;
 
@@ -1827,7 +1809,9 @@ function workerTransformOptions(options: TransformOptions): {
   return {
     includeMetadata: options.includeMetadata,
     ...(options.signal ? { signal: options.signal } : {}),
-    ...(options.inputTruncated ? { inputTruncated: true } : {}),
+    ...(options.inputTruncated
+      ? { inputTruncated: options.inputTruncated }
+      : {}),
   };
 }
 
