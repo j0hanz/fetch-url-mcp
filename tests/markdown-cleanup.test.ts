@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { cleanupMarkdownArtifacts } from '../dist/lib/md-cleanup.js';
+import { cleanupMarkdownArtifacts } from '../dist/transform/transform.js';
 
 describe('markdown cleanup', () => {
   it('preserves bold code key-value pairs not TypeDoc artifacts', () => {

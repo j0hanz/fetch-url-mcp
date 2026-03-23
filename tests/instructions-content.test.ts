@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { buildServerInstructions } from '../dist/resources/instructions.js';
+import { buildServerInstructions } from '../dist/resources/index.js';
 
 describe('Server instructions content', () => {
   it('does not reference removed skipNoiseRemoval parameter', () => {

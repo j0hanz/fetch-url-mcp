@@ -1,4 +1,4 @@
-import { detectLanguageFromCode } from '../lib/code-lang.js';
+import { detectLanguageFromCode } from './html-translators.js';
 
 interface FlightApiRow {
   readonly attribute: string;

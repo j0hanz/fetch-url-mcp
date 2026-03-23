@@ -7,9 +7,9 @@ import { ZodError } from 'zod';
 import * as cache from '../dist/lib/core.js';
 import { config } from '../dist/lib/core.js';
 import { normalizeUrl } from '../dist/lib/http.js';
-import { cleanupMarkdownArtifacts } from '../dist/lib/md-cleanup.js';
 import { fetchUrlOutputSchema } from '../dist/schemas.js';
 import { fetchUrlToolHandler } from '../dist/tools/fetch-url.js';
+import { cleanupMarkdownArtifacts } from '../dist/transform/transform.js';
 import {
   htmlToMarkdown,
   shutdownTransformWorkerPool,

@@ -7,7 +7,7 @@ import {
   teardownSessionRegistration,
   teardownSessionResources,
   teardownUnregisteredSessionResources,
-} from '../dist/http/session-teardown.js';
+} from '../dist/http/helpers.js';
 import {
   registerMcpSessionServer,
   resolveMcpSessionIdByServer,

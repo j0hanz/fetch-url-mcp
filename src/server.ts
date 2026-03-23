@@ -21,12 +21,12 @@ import {
 import type { IconInfo } from './lib/utils.js';
 import { toError } from './lib/utils.js';
 
-import { registerGetHelpPrompt } from './prompts/index.js';
 import {
+  buildServerInstructions,
   registerCacheResourceTemplate,
+  registerGetHelpPrompt,
   registerInstructionResource,
 } from './resources/index.js';
-import { buildServerInstructions } from './resources/instructions.js';
 import { registerTools as registerFetchUrlTool } from './tools/fetch-url.js';
 import { shutdownTransformWorkerPool } from './transform/transform.js';
 

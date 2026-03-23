@@ -94,14 +94,14 @@ import {
   sendJson,
 } from './helpers.js';
 import {
-  createRateLimitManagerImpl,
-  type RateLimitManagerImpl,
-} from './rate-limit.js';
-import {
   teardownSessionRegistration,
   teardownSessionResources,
   teardownUnregisteredSessionResources,
-} from './session-teardown.js';
+} from './helpers.js';
+import {
+  createRateLimitManagerImpl,
+  type RateLimitManagerImpl,
+} from './rate-limit.js';
 
 // ---------------------------------------------------------------------------
 // MCP session gateway

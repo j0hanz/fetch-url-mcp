@@ -1,11 +1,14 @@
 import { randomUUID } from 'node:crypto';
+import { createHmac, randomBytes } from 'node:crypto';
 import { setInterval } from 'node:timers';
 
 import { ErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js';
+import type { ServerResult } from '@modelcontextprotocol/sdk/types.js';
 
 import { config, logWarn } from '../lib/core.js';
+import type { ToolHandlerExtra } from '../lib/progress.js';
+import { timingSafeEqualUtf8 } from '../lib/utils.js';
 
-import { decodeTaskCursor, encodeTaskCursor } from './cursor-codec.js';
 import {
   TaskWaiterRegistry,
   waitForTerminalTask as waitForTerminalTaskWithDeadline,
@@ -395,3 +398,102 @@ class TaskManager {
 }
 
 export const taskManager = new TaskManager();
+
+const MAX_CURSOR_LENGTH = 256;
+const CURSOR_SECRET = randomBytes(32);
+
+function signPayload(payload: string): string {
+  return createHmac('sha256', CURSOR_SECRET)
+    .update(payload)
+    .digest('base64url');
+}
+
+export function encodeTaskCursor(anchorTaskId: string): string {
+  const payload = Buffer.from(
+    JSON.stringify({ anchorTaskId }),
+    'utf8'
+  ).toString('base64url');
+  const signature = signPayload(payload);
+  return `${payload}.${signature}`;
+}
+
+export function decodeTaskCursor(
+  cursor: string
+): { anchorTaskId: string } | null {
+  if (!cursor || cursor.length > MAX_CURSOR_LENGTH) return null;
+
+  const [payload, signature, ...rest] = cursor.split('.');
+  if (!payload || !signature || rest.length > 0) return null;
+  if (!timingSafeEqualUtf8(signPayload(payload), signature)) return null;
+
+  try {
+    const decoded = JSON.parse(
+      Buffer.from(payload, 'base64url').toString('utf8')
+    ) as { anchorTaskId?: unknown };
+    if (
+      typeof decoded.anchorTaskId !== 'string' ||
+      decoded.anchorTaskId.length === 0 ||
+      decoded.anchorTaskId.length > 128
+    ) {
+      return null;
+    }
+
+    return { anchorTaskId: decoded.anchorTaskId };
+  } catch {
+    return null;
+  }
+}
+
+export type TaskCapableToolSupport = 'optional' | 'forbidden';
+
+export interface TaskCapableToolDescriptor<TArgs = unknown> {
+  name: string;
+  parseArguments: (args: unknown) => TArgs;
+  execute: (args: TArgs, extra?: ToolHandlerExtra) => Promise<ServerResult>;
+  getCompletionStatusMessage?: (result: ServerResult) => string | undefined;
+  taskSupport?: TaskCapableToolSupport;
+}
+
+const taskCapableTools = new Map<string, TaskCapableToolDescriptor>();
+
+export function registerTaskCapableTool<TArgs>(
+  descriptor: TaskCapableToolDescriptor<TArgs>
+): void {
+  taskCapableTools.set(descriptor.name, {
+    ...descriptor,
+    taskSupport: descriptor.taskSupport ?? 'optional',
+  } as TaskCapableToolDescriptor);
+}
+
+export function unregisterTaskCapableTool(name: string): void {
+  taskCapableTools.delete(name);
+}
+
+export function getTaskCapableTool(
+  name: string
+): TaskCapableToolDescriptor | undefined {
+  return taskCapableTools.get(name);
+}
+
+export function getTaskCapableToolSupport(
+  name: string
+): TaskCapableToolSupport | undefined {
+  return taskCapableTools.get(name)?.taskSupport;
+}
+
+export function hasTaskCapableTool(name: string): boolean {
+  return taskCapableTools.has(name);
+}
+
+export function hasRegisteredTaskCapableTools(): boolean {
+  return taskCapableTools.size > 0;
+}
+
+export function setTaskCapableToolSupport(
+  name: string,
+  support: TaskCapableToolSupport
+): void {
+  const descriptor = taskCapableTools.get(name);
+  if (!descriptor) return;
+  descriptor.taskSupport = support;
+}
