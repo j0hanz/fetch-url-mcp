@@ -660,6 +660,21 @@ function stripCopyButtonText(text: string): string {
   return text.replace(/\[Copy\]\(#copy\)\s*/gi, '');
 }
 
+export function finalizeMarkdownSections(
+  content: string,
+  options?: Pick<CleanupOptions, 'signal' | 'url'>
+): string {
+  if (!content) return '';
+  throwIfAborted(
+    options?.signal,
+    options?.url ?? '',
+    'markdown:cleanup:empty-headings'
+  );
+  return stripLeadingBreadcrumbNoise(
+    stripLeadingDocsChrome(removeEmptyHeadingSections(content))
+  );
+}
+
 export function cleanupMarkdownArtifacts(
   content: string,
   options?: CleanupOptions
@@ -675,13 +690,10 @@ export function cleanupMarkdownArtifacts(
   );
 
   if (!options?.preserveEmptyHeadings) {
-    throwIfAborted(
-      options?.signal,
-      options?.url ?? '',
-      'markdown:cleanup:empty-headings'
-    );
-    result = removeEmptyHeadingSections(result);
+    result = finalizeMarkdownSections(result, options);
+  } else {
+    result = stripLeadingBreadcrumbNoise(stripLeadingDocsChrome(result));
   }
 
-  return stripLeadingBreadcrumbNoise(stripLeadingDocsChrome(result));
+  return result;
 }

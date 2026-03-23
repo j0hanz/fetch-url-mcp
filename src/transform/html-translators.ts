@@ -455,29 +455,24 @@ function buildDdTranslator(): Record<string, unknown> {
   };
 }
 
-function buildKbdTranslator(): Record<string, unknown> {
+function wrapTranslator(
+  prefix: string,
+  suffix: string
+): Record<string, unknown> {
   return {
-    postprocess: ({ content }: { content: string }) => `\`${content}\``,
+    postprocess: ({ content }: { content: string }) =>
+      `${prefix}${content}${suffix}`,
   };
 }
 
-function buildMarkTranslator(): Record<string, unknown> {
-  return {
-    postprocess: ({ content }: { content: string }) => `==${content}==`,
-  };
-}
-
-function buildSubTranslator(): Record<string, unknown> {
-  return {
-    postprocess: ({ content }: { content: string }) => `~${content}~`,
-  };
-}
-
-function buildSupTranslator(): Record<string, unknown> {
-  return {
-    postprocess: ({ content }: { content: string }) => `^${content}^`,
-  };
-}
+const buildKbdTranslator = (): Record<string, unknown> =>
+  wrapTranslator('`', '`');
+const buildMarkTranslator = (): Record<string, unknown> =>
+  wrapTranslator('==', '==');
+const buildSubTranslator = (): Record<string, unknown> =>
+  wrapTranslator('~', '~');
+const buildSupTranslator = (): Record<string, unknown> =>
+  wrapTranslator('^', '^');
 
 function buildDetailsTranslator(): Record<string, unknown> {
   return {

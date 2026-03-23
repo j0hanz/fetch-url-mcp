@@ -318,6 +318,13 @@ function isNavigationAside(element: Element): boolean {
   if (textLen === 0) return true;
   return links.length / (textLen / 100) >= ASIDE_NAV_LINK_DENSITY_THRESHOLD;
 }
+function isNavigationSidebar(element: Element): boolean {
+  const links = element.querySelectorAll('a[href]');
+  if (links.length < ASIDE_NAV_MIN_LINKS) return false;
+  const textLen = (element.textContent || '').trim().length;
+  if (textLen === 0) return true;
+  return links.length / (textLen / 100) >= ASIDE_NAV_LINK_DENSITY_THRESHOLD;
+}
 function shouldPreserve(element: Element, tagName: string): boolean {
   // Check Dialog
   const role = element.getAttribute('role');
@@ -328,14 +335,13 @@ function shouldPreserve(element: Element, tagName: string): boolean {
     return element.querySelector('h1,h2,h3,h4,h5,h6') !== null;
   }
 
-  // Check Nav/Footer
   if (tagName === 'nav' || tagName === 'footer') {
     if (element.querySelector('article,main,section,[role="main"]'))
       return true;
-    return (
-      (element.textContent || '').trim().length >=
-      NAV_FOOTER_MIN_CHARS_FOR_PRESERVATION
-    );
+    const textLen = (element.textContent || '').trim().length;
+    if (textLen < NAV_FOOTER_MIN_CHARS_FOR_PRESERVATION) return false;
+    if (isNavigationSidebar(element)) return false;
+    return true;
   }
 
   // Check Aside — preserve only if it looks like article content, not navigation
@@ -1098,7 +1104,16 @@ function runCodeExamplePass(document: Document): void {
   cleanCodeExamples(document);
 }
 
+function unwrapOrphanedTableCells(document: Document): void {
+  for (const cell of document.querySelectorAll('td, th')) {
+    if (!cell.closest('table')) {
+      cell.replaceWith(...Array.from(cell.childNodes));
+    }
+  }
+}
+
 function runTableNormalizationPass(document: Document): void {
+  unwrapOrphanedTableCells(document);
   normalizeTableCells(document);
   normalizeTableStructure(document);
 }

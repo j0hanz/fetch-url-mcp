@@ -40,6 +40,7 @@ import { extractLanguageFromClassName } from './html-translators.js';
 import { translateHtmlFragmentToMarkdown } from './html-translators.js';
 import {
   cleanupMarkdownArtifacts,
+  finalizeMarkdownSections,
   processFencedContent,
 } from './markdown-cleanup.js';
 import {
@@ -1324,7 +1325,7 @@ function postprocessMarkdownStage(
   );
   content = maybePrependSyntheticTitle(content, context, url);
   content = supplementMarkdownFromNextFlight(content, context.originalHtml);
-  content = cleanupMarkdownArtifacts(
+  content = finalizeMarkdownSections(
     content,
     signal ? { signal, url } : { url }
   );
@@ -1584,4 +1585,8 @@ export async function transformBufferToMarkdown(
   return transformInputToMarkdown(htmlBuffer, url, options);
 }
 
-export { cleanupMarkdownArtifacts, processFencedContent };
+export {
+  cleanupMarkdownArtifacts,
+  finalizeMarkdownSections,
+  processFencedContent,
+};
