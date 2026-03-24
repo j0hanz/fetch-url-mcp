@@ -281,15 +281,24 @@ class CancelAckTracker {
       timeout: CancellableTimeout<unknown>;
     }
   >();
+  private readonly earlyResolutions = new Set<string>();
 
   resolve(id: string): void {
     const entry = this.pending.get(id);
-    if (!entry) return;
+    if (!entry) {
+      this.earlyResolutions.add(id);
+      return;
+    }
     entry.timeout.cancel();
     entry.resolve();
   }
 
   wait(id: string, timeoutMs: number): Promise<void> {
+    if (this.earlyResolutions.has(id)) {
+      this.earlyResolutions.delete(id);
+      return Promise.resolve();
+    }
+
     const existing = this.pending.get(id);
     if (existing) return existing.promise as Promise<void>;
 
@@ -320,6 +329,7 @@ class CancelAckTracker {
       entry.resolve();
     }
     this.pending.clear();
+    this.earlyResolutions.clear();
   }
 }
 
@@ -452,16 +462,11 @@ class WorkerPool implements TransformWorkerPool {
     for (const id of Array.from(this.inflight.keys())) {
       const inflight = this.takeInflight(id);
       if (!inflight) continue;
-      this.finalizeTask(inflight.context, () => {
-        inflight.reject(new Error(WorkerPool.CLOSED_MESSAGE));
-      });
+      this.abortAndCleanTask(inflight, new Error(WorkerPool.CLOSED_MESSAGE));
     }
 
     this.queue.drain((task) => {
-      this.clearAbortListener(task.signal, task.abortListener);
-      this.finalizeTask(task.context, () => {
-        task.reject(new Error(WorkerPool.CLOSED_MESSAGE));
-      });
+      this.abortAndCleanTask(task, new Error(WorkerPool.CLOSED_MESSAGE));
     });
 
     await Promise.allSettled(terminations);
@@ -544,10 +549,10 @@ class WorkerPool implements TransformWorkerPool {
 
     const queuedTask = this.queue.removeById(id);
     if (queuedTask) {
-      this.clearAbortListener(queuedTask.signal, queuedTask.abortListener);
-      this.finalizeTask(queuedTask.context, () => {
-        queuedTask.reject(createAbortError(url, 'transform:queued-abort'));
-      });
+      this.abortAndCleanTask(
+        queuedTask,
+        createAbortError(url, 'transform:queued-abort')
+      );
     }
   }
 
@@ -766,9 +771,7 @@ class WorkerPool implements TransformWorkerPool {
     const inflight = this.takeInflight(id);
     if (!inflight) return false;
 
-    this.finalizeTask(inflight.context, () => {
-      inflight.reject(error);
-    });
+    this.abortAndCleanTask(inflight, error);
     this.markIdle(inflight.workerIndex);
     return true;
   }
@@ -819,20 +822,18 @@ class WorkerPool implements TransformWorkerPool {
     while (task) {
       const currentTask = task;
       if (this.closed) {
-        this.clearAbortListener(currentTask.signal, currentTask.abortListener);
-        this.finalizeTask(currentTask.context, () => {
-          currentTask.reject(new Error(WorkerPool.CLOSED_MESSAGE));
-        });
+        this.abortAndCleanTask(
+          currentTask,
+          new Error(WorkerPool.CLOSED_MESSAGE)
+        );
         return;
       }
 
       if (currentTask.signal?.aborted) {
-        this.clearAbortListener(currentTask.signal, currentTask.abortListener);
-        this.finalizeTask(currentTask.context, () => {
-          currentTask.reject(
-            createAbortError(currentTask.url, 'transform:dispatch')
-          );
-        });
+        this.abortAndCleanTask(
+          currentTask,
+          createAbortError(currentTask.url, 'transform:dispatch')
+        );
         task = this.queue.dequeue();
         continue;
       }
@@ -867,15 +868,15 @@ class WorkerPool implements TransformWorkerPool {
         const inflight = this.takeInflight(task.id);
         if (!inflight) return;
 
-        this.finalizeTask(inflight.context, () => {
-          inflight.reject(
-            new FetchError('Request timeout', task.url, HTTP_GATEWAY_TIMEOUT, {
-              reason: 'timeout',
-              stage: 'transform:worker-timeout',
-            })
-          );
-        });
+        this.abortAndCleanTask(
+          inflight,
+          new FetchError('Request timeout', task.url, HTTP_GATEWAY_TIMEOUT, {
+            reason: 'timeout',
+            stage: 'transform:worker-timeout',
+          })
+        );
 
+        this.markIdle(workerIndex);
         this.restartWorker(workerIndex, slot);
       })
       .catch((error: unknown) => {
@@ -907,23 +908,31 @@ class WorkerPool implements TransformWorkerPool {
       slot.worker.postMessage(message, transferList);
     } catch (error: unknown) {
       timeout.cancel();
-      this.clearAbortListener(task.signal, task.abortListener);
       this.inflight.delete(task.id);
       this.markIdle(workerIndex);
 
-      this.finalizeTask(task.context, () => {
-        task.reject(
-          error instanceof Error
-            ? error
-            : new Error('Failed to dispatch transform worker message')
-        );
-      });
+      this.abortAndCleanTask(
+        task,
+        error instanceof Error
+          ? error
+          : new Error('Failed to dispatch transform worker message')
+      );
       this.restartWorker(workerIndex, slot);
     }
   }
 
   private finalizeTask(context: TaskContext, fn: () => void): void {
     context.run(fn);
+  }
+
+  private abortAndCleanTask(
+    task: PendingTask | InflightTask,
+    error: unknown
+  ): void {
+    this.clearAbortListener(task.signal, task.abortListener);
+    this.finalizeTask(task.context, () => {
+      task.reject(error);
+    });
   }
 }
 
