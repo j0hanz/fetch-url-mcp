@@ -41,14 +41,14 @@ import {
   normalizeExtractedMetadata,
   normalizePageTitle,
 } from '../schemas.js';
+import { withRequestContextIfMissing } from '../tasks/owner.js';
 import {
   registerTaskCapableTool,
   setTaskCapableToolSupport,
   type TaskCapableToolDescriptor,
   type TaskCapableToolSupport,
   unregisterTaskCapableTool,
-} from '../tasks/manager.js';
-import { withRequestContextIfMissing } from '../tasks/owner.js';
+} from '../tasks/registry.js';
 
 type FetchUrlInput = z.infer<typeof fetchUrlInputSchema>;
 

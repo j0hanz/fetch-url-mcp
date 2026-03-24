@@ -21,16 +21,16 @@ import {
   type TaskState,
 } from './manager.js';
 import {
-  getTaskCapableTool,
-  getTaskCapableToolSupport,
-  type TaskCapableToolDescriptor,
-} from './manager.js';
-import {
   buildToolHandlerExtra,
   compact,
   type ToolCallContext,
   tryReadToolStructuredError,
 } from './owner.js';
+import {
+  getTaskCapableTool,
+  getTaskCapableToolSupport,
+  type TaskCapableToolDescriptor,
+} from './registry.js';
 
 const TASK_NOT_FOUND_ERROR_CODE = -32002;
 

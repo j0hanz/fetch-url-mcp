@@ -3,10 +3,8 @@ import { createHmac, randomBytes } from 'node:crypto';
 import { setInterval } from 'node:timers';
 
 import { ErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js';
-import type { ServerResult } from '@modelcontextprotocol/sdk/types.js';
 
 import { config, logWarn } from '../lib/core.js';
-import type { ToolHandlerExtra } from '../lib/progress.js';
 import { timingSafeEqualUtf8 } from '../lib/utils.js';
 
 import {
@@ -130,10 +128,14 @@ class TaskManager {
     }
   }
 
+  private isTaskExpired(task: InternalTaskState, nowMs: number): boolean {
+    return nowMs - task._createdAtMs > task.ttl;
+  }
+
   private removeExpiredTasks(): void {
     const now = Date.now();
     for (const task of this.tasks.values()) {
-      if (now - task._createdAtMs > task.ttl) {
+      if (this.isTaskExpired(task, now)) {
         this.removeTask(task.taskId);
       }
     }
@@ -142,6 +144,15 @@ class TaskManager {
   private removeTask(taskId: string): void {
     const task = this.tasks.get(taskId);
     if (!task) return;
+
+    if (!isTerminalStatus(task.status)) {
+      this.applyTaskUpdate(task, {
+        status: 'failed',
+        statusMessage: 'Task removed due to expiration',
+      });
+      this.waiters.notify(task);
+    }
+
     this.tasks.delete(taskId);
     this.releaseTaskCapacity(task);
   }
@@ -235,7 +246,7 @@ class TaskManager {
     if (!task) return undefined;
     if (ownerKey && task.ownerKey !== ownerKey) return undefined;
 
-    if (Date.now() - task._createdAtMs > task.ttl) {
+    if (this.isTaskExpired(task, Date.now())) {
       this.removeTask(taskId);
       return undefined;
     }
@@ -313,32 +324,26 @@ class TaskManager {
     anchorTaskId: string | null,
     pageSize: number
   ): TaskState[] {
-    const page: TaskState[] = [];
-    let collecting = anchorTaskId === null;
-    let anchorFound = anchorTaskId === null;
     const now = Date.now();
-
-    for (const task of this.tasks.values()) {
-      if (task.ownerKey !== ownerKey) continue;
-
-      if (now - task._createdAtMs > task.ttl) {
+    const validTasks = Array.from(this.tasks.values()).filter((task) => {
+      if (task.ownerKey !== ownerKey) return false;
+      if (this.isTaskExpired(task, now)) {
         this.removeTask(task.taskId);
-        continue;
+        return false;
       }
+      return true;
+    });
 
-      if (!collecting) {
-        if (task.taskId === anchorTaskId) {
-          anchorFound = true;
-          collecting = true;
-        }
-        continue;
-      }
-
-      page.push(task);
-      if (page.length > pageSize) break;
+    if (anchorTaskId === null) {
+      return validTasks.slice(0, pageSize + 1);
     }
 
-    return anchorFound ? page : [];
+    const anchorIndex = validTasks.findIndex((t) => t.taskId === anchorTaskId);
+    if (anchorIndex === -1) {
+      return [];
+    }
+
+    return validTasks.slice(anchorIndex + 1, anchorIndex + 1 + pageSize + 1);
   }
 
   listTasks(options: { ownerKey: string; cursor?: string; limit?: number }): {
@@ -400,6 +405,7 @@ class TaskManager {
 export const taskManager = new TaskManager();
 
 const MAX_CURSOR_LENGTH = 256;
+const MAX_ANCHOR_ID_LENGTH = 128;
 const CURSOR_SECRET = randomBytes(32);
 
 function signPayload(payload: string): string {
@@ -433,7 +439,7 @@ export function decodeTaskCursor(
     if (
       typeof decoded.anchorTaskId !== 'string' ||
       decoded.anchorTaskId.length === 0 ||
-      decoded.anchorTaskId.length > 128
+      decoded.anchorTaskId.length > MAX_ANCHOR_ID_LENGTH
     ) {
       return null;
     }
@@ -442,58 +448,4 @@ export function decodeTaskCursor(
   } catch {
     return null;
   }
-}
-
-export type TaskCapableToolSupport = 'optional' | 'forbidden';
-
-export interface TaskCapableToolDescriptor<TArgs = unknown> {
-  name: string;
-  parseArguments: (args: unknown) => TArgs;
-  execute: (args: TArgs, extra?: ToolHandlerExtra) => Promise<ServerResult>;
-  getCompletionStatusMessage?: (result: ServerResult) => string | undefined;
-  taskSupport?: TaskCapableToolSupport;
-}
-
-const taskCapableTools = new Map<string, TaskCapableToolDescriptor>();
-
-export function registerTaskCapableTool<TArgs>(
-  descriptor: TaskCapableToolDescriptor<TArgs>
-): void {
-  taskCapableTools.set(descriptor.name, {
-    ...descriptor,
-    taskSupport: descriptor.taskSupport ?? 'optional',
-  } as TaskCapableToolDescriptor);
-}
-
-export function unregisterTaskCapableTool(name: string): void {
-  taskCapableTools.delete(name);
-}
-
-export function getTaskCapableTool(
-  name: string
-): TaskCapableToolDescriptor | undefined {
-  return taskCapableTools.get(name);
-}
-
-export function getTaskCapableToolSupport(
-  name: string
-): TaskCapableToolSupport | undefined {
-  return taskCapableTools.get(name)?.taskSupport;
-}
-
-export function hasTaskCapableTool(name: string): boolean {
-  return taskCapableTools.has(name);
-}
-
-export function hasRegisteredTaskCapableTools(): boolean {
-  return taskCapableTools.size > 0;
-}
-
-export function setTaskCapableToolSupport(
-  name: string,
-  support: TaskCapableToolSupport
-): void {
-  const descriptor = taskCapableTools.get(name);
-  if (!descriptor) return;
-  descriptor.taskSupport = support;
 }

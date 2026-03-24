@@ -22,15 +22,15 @@ import {
 } from '../tasks/execution.js';
 import { taskManager } from '../tasks/manager.js';
 import {
-  hasRegisteredTaskCapableTools,
-  hasTaskCapableTool,
-} from '../tasks/manager.js';
-import {
   isServerResult,
   parseHandlerExtra,
   resolveTaskOwnerKey,
   resolveToolCallContext,
 } from '../tasks/owner.js';
+import {
+  hasRegisteredTaskCapableTools,
+  hasTaskCapableTool,
+} from '../tasks/registry.js';
 import { logWarn, runWithRequestContext } from './core.js';
 import { getSdkCallToolHandler } from './sdk-interop.js';
 
