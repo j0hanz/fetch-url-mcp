@@ -896,10 +896,15 @@ class InMemoryCacheStore {
     const expiresAtMs = now + this.ttlMs;
     const entrySize = content.length;
 
+    const isUpdate = this.entries.has(cacheKey);
+    if (isUpdate) {
+      this.delete(cacheKey);
+    }
+
     const capacity = this.ensureCapacity(cacheKey, entrySize);
     if (!capacity.ok) return;
 
-    let listChanged = !this.entries.has(cacheKey) || capacity.listChanged;
+    let listChanged = !isUpdate || capacity.listChanged;
 
     const entry: StoredCacheEntry = {
       url: metadata.url,
@@ -909,10 +914,6 @@ class InMemoryCacheStore {
       expiresAtMs,
       ...(metadata.title ? { title: metadata.title } : {}),
     };
-
-    if (this.entries.has(cacheKey)) {
-      this.delete(cacheKey);
-    }
 
     this.entries.set(cacheKey, entry);
     this.currentBytes += entrySize;
@@ -1483,24 +1484,47 @@ class SessionCleanupLoop {
       }
     }
 
+    const closePromise = Promise.allSettled([
+      session.transport.close(),
+      session.server.close(),
+    ]);
+
+    let timeoutId: NodeJS.Timeout | undefined;
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      timeoutId = setTimeout(() => {
+        reject(new Error('Session close timed out'));
+      }, 5000);
+      timeoutId.unref();
+    });
+
+    try {
+      const [transportResult, serverResult] = await Promise.race([
+        closePromise,
+        timeoutPromise,
+      ]);
+
+      if (transportResult.status === 'rejected') {
+        this.logCloseFailure('transport', transportResult.reason);
+      }
+      if (serverResult.status === 'rejected') {
+        this.logCloseFailure('server', serverResult.reason);
+      }
+    } catch (error) {
+      logWarn('Session close operation failed or timed out', {
+        error: getErrorMessage(error),
+      });
+    } finally {
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+      }
+    }
+
     try {
       unregisterMcpSessionServer(sessionId);
     } catch (error) {
       logWarn('Failed to unregister session server', {
         error: getErrorMessage(error),
       });
-    }
-
-    const [transportResult, serverResult] = await Promise.allSettled([
-      session.transport.close(),
-      session.server.close(),
-    ]);
-
-    if (transportResult.status === 'rejected') {
-      this.logCloseFailure('transport', transportResult.reason);
-    }
-    if (serverResult.status === 'rejected') {
-      this.logCloseFailure('server', serverResult.reason);
     }
   }
 
