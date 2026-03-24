@@ -317,7 +317,10 @@ interface LikeNode {
   getAttribute?(name: string): string | null;
 }
 export function isLikeNode(value: unknown): value is LikeNode {
-  return isObject(value);
+  return (
+    isObject(value) &&
+    ('nodeType' in value || 'nodeName' in value || 'tagName' in value)
+  );
 }
 
 export function withSignal(
