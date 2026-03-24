@@ -7,7 +7,7 @@ interface FlightApiRow {
   readonly defaultValue: string;
 }
 
-interface NextFlightSupplement {
+interface FlightPayloadData {
   readonly installationCommands?: string[];
   readonly importCommands?: string[];
   readonly apiTables: Map<string, string>;
@@ -183,7 +183,7 @@ function normalizeSupplementHeadingText(value: string): string {
 function getMarkdownHeadingInfo(
   line: string
 ): { level: number; title: string } | null {
-  const match = /^(#{1,6})\s+(.+?)\s*$/.exec(line.trim());
+  const match = /^(#{1,6})\s+(.+?)(?:\s+#*)?\s*$/.exec(line.trim());
   if (!match) return null;
 
   return {
@@ -230,16 +230,22 @@ function getSectionBody(
     .trim();
 }
 
-function replaceMarkdownSection(
+function updateMarkdownSection(
   lines: string[],
   title: string,
-  body: string
+  strategy: (sectionBody: string) => string | null
 ): boolean {
   const section = findMarkdownSection(lines, title);
   if (!section) return false;
 
+  const bodyText = getSectionBody(lines, section);
+  const nextBody = strategy(bodyText);
+  if (nextBody === null) return false;
+
   const replacement =
-    body.trim().length > 0 ? ['', ...body.trim().split('\n'), ''] : [''];
+    nextBody.trim().length > 0
+      ? ['', ...nextBody.trim().split('\n'), '']
+      : [''];
   lines.splice(
     section.start + 1,
     section.end - section.start - 1,
@@ -248,19 +254,23 @@ function replaceMarkdownSection(
   return true;
 }
 
+function replaceMarkdownSection(
+  lines: string[],
+  title: string,
+  body: string
+): boolean {
+  return updateMarkdownSection(lines, title, () => body);
+}
+
 function appendMarkdownSection(
   lines: string[],
   title: string,
   body: string
 ): boolean {
-  const section = findMarkdownSection(lines, title);
-  if (!section) return false;
-
-  const bodyText = getSectionBody(lines, section);
-  if (bodyText.includes('```')) return false;
-
-  const nextBody = bodyText ? `${bodyText}\n\n${body.trim()}` : body.trim();
-  return replaceMarkdownSection(lines, title, nextBody);
+  return updateMarkdownSection(lines, title, (bodyText) => {
+    if (bodyText.includes('```')) return null;
+    return bodyText ? `${bodyText}\n\n${body.trim()}` : body.trim();
+  });
 }
 
 function conditionallyAppendMarkdownSection(
@@ -283,16 +293,26 @@ function mergeMermaidDiagramSection(
   title: string,
   mermaidBlock: string
 ): void {
-  const section = findMarkdownSection(lines, title);
-  if (!section) return;
+  updateMarkdownSection(lines, title, (sectionBody) => {
+    if (sectionBody.includes('```mermaid')) return null;
+    return sectionBody ? `${sectionBody}\n\n${mermaidBlock}` : mermaidBlock;
+  });
+}
 
-  const sectionBody = getSectionBody(lines, section);
-  if (sectionBody.includes('```mermaid')) return;
-
-  const nextBody = sectionBody
-    ? `${sectionBody}\n\n${mermaidBlock}`
-    : mermaidBlock;
-  replaceMarkdownSection(lines, title, nextBody);
+function parseFlightApiRow(rowMatch: RegExpMatchArray): FlightApiRow | null {
+  const attribute = rowMatch[1];
+  const type = rowMatch[2];
+  const description = rowMatch[3];
+  const defaultValue = rowMatch[4];
+  if (
+    !attribute ||
+    !type ||
+    description === undefined ||
+    defaultValue === undefined
+  ) {
+    return null;
+  }
+  return { attribute, type, description, defaultValue };
 }
 
 function extractFlightApiTables(text: string): Map<string, string> {
@@ -304,19 +324,8 @@ function extractFlightApiTables(text: string): Map<string, string> {
 
     const rows: FlightApiRow[] = [];
     for (const rowMatch of rawRows.matchAll(FLIGHT_API_ROW_RE)) {
-      const attribute = rowMatch[1];
-      const type = rowMatch[2];
-      const description = rowMatch[3];
-      const defaultValue = rowMatch[4];
-      if (
-        !attribute ||
-        !type ||
-        description === undefined ||
-        defaultValue === undefined
-      ) {
-        continue;
-      }
-      rows.push({ attribute, type, description, defaultValue });
+      const row = parseFlightApiRow(rowMatch);
+      if (row) rows.push(row);
     }
 
     const table = buildMarkdownTable(rows);
@@ -356,7 +365,7 @@ function extractFlightDemoBlocks(
 
 function extractNextFlightSupplement(
   originalHtml: string
-): NextFlightSupplement | null {
+): FlightPayloadData | null {
   const payloads = decodeNextFlightPayloads(originalHtml);
   if (payloads.length === 0) return null;
 
@@ -379,38 +388,38 @@ export function supplementMarkdownFromNextFlight(
   markdown: string,
   originalHtml: string
 ): string {
-  const supplement = extractNextFlightSupplement(originalHtml);
-  if (!supplement) return markdown;
+  const payloadData = extractNextFlightSupplement(originalHtml);
+  if (!payloadData) return markdown;
 
   const lines = markdown.split('\n');
 
-  if (supplement.installationCommands?.length) {
+  if (payloadData.installationCommands?.length) {
     conditionallyAppendMarkdownSection(
       lines,
       'Installation',
-      buildCodeBlock(supplement.installationCommands.join('\n')),
+      buildCodeBlock(payloadData.installationCommands.join('\n')),
       /(npm|pnpm|yarn|bun|npx)\s+(install|add)/
     );
   }
 
-  if (supplement.importCommands?.length) {
+  if (payloadData.importCommands?.length) {
     conditionallyAppendMarkdownSection(
       lines,
       'Import',
-      buildCodeBlock(supplement.importCommands.join('\n\n')),
+      buildCodeBlock(payloadData.importCommands.join('\n\n')),
       /import\s+\{/
     );
   }
 
-  for (const [title, table] of supplement.apiTables) {
+  for (const [title, table] of payloadData.apiTables) {
     replaceMarkdownSection(lines, title, table);
   }
 
-  for (const [title, mermaidBlock] of supplement.mermaidDiagrams) {
+  for (const [title, mermaidBlock] of payloadData.mermaidDiagrams) {
     mergeMermaidDiagramSection(lines, title, mermaidBlock);
   }
 
-  for (const [title, codeBlock] of supplement.demoCodeBlocks) {
+  for (const [title, codeBlock] of payloadData.demoCodeBlocks) {
     appendMarkdownSection(lines, title, codeBlock);
   }
 
