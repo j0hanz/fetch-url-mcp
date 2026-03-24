@@ -145,6 +145,10 @@ function isPingRequest(method: string): boolean {
   return method === 'ping';
 }
 
+function isMcpRoute(pathname: string): boolean {
+  return pathname === '/mcp' || pathname === '/mcp/';
+}
+
 type SessionTeardownOptions = Parameters<typeof teardownSessionResources>[1];
 type PostRequestBody = {
   id?: JsonRpcId | undefined;
@@ -253,9 +257,9 @@ class McpSessionGateway {
     ctx: AuthenticatedContext
   ): PostRequestBody | null {
     if (!acceptsJsonAndEventStream(getHeaderValue(ctx.req, 'accept'))) {
-      sendJson(ctx.res, 400, {
+      sendJson(ctx.res, 406, {
         error:
-          'Accept header must include application/json and text/event-stream',
+          'Not Acceptable: expected application/json and text/event-stream',
       });
       return null;
     }
@@ -805,7 +809,7 @@ class HttpDispatcher {
 
       if (this.tryHandleDownloadRoute(authCtx)) return;
 
-      if (ctx.url.pathname === '/mcp') {
+      if (isMcpRoute(ctx.url.pathname)) {
         const handled = await this.handleMcpRoutes(authCtx);
         if (handled) return;
       }
@@ -900,7 +904,7 @@ function sendBodyParseError(
     BODY_PARSE_ERRORS[bodyErrorKind ?? 'default'] ?? DEFAULT_BODY_ERROR;
 
   if (bodyErrorKind !== 'read-failed' || !rawReq.destroyed) {
-    if (ctx.url.pathname === '/mcp') {
+    if (isMcpRoute(ctx.url.pathname)) {
       sendError(
         ctx.res,
         errorDef.mcpCode,
