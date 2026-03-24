@@ -309,14 +309,10 @@ function isInteractive(element: Element, role: string | null): boolean {
     element.hasAttribute('data-radix-collection-item')
   );
 }
-function isWithinPrimaryContent(element: Element): boolean {
-  let current: Element | null = element;
-  while (current) {
-    const tagName = current.tagName.toLowerCase();
-    if (tagName === 'article' || tagName === 'main') return true;
-    if (current.getAttribute('role') === 'main') return true;
-    current = current.parentElement;
-  }
+function isPrimaryContent(element: Element, checkDescendants = false): boolean {
+  if (element.closest('article,main,[role="main"]')) return true;
+  if (checkDescendants && element.querySelector('article,main,[role="main"]'))
+    return true;
   return false;
 }
 function isLinkDenseNavigation(
@@ -337,7 +333,7 @@ function shouldPreserve(element: Element, tagName: string): boolean {
   // Check Dialog
   const role = element.getAttribute('role');
   if (role === 'dialog' || role === 'alertdialog') {
-    if (isWithinPrimaryContent(element)) return true;
+    if (isPrimaryContent(element)) return true;
     const textLen = (element.textContent || '').length;
     if (textLen > DIALOG_MIN_CHARS_FOR_PRESERVATION) return true;
     return element.querySelector('h1,h2,h3,h4,h5,h6') !== null;
@@ -354,7 +350,7 @@ function shouldPreserve(element: Element, tagName: string): boolean {
 
   // Check Aside — preserve only if it looks like article content, not navigation
   if (tagName === 'aside') {
-    if (!isWithinPrimaryContent(element)) return false;
+    if (!isPrimaryContent(element)) return false;
     return !isLinkDenseNavigation(element, true);
   }
 
@@ -369,85 +365,6 @@ function removeNodes(nodes: ArrayLike<Element>): void {
   }
 }
 
-// Checks if the element itself or any of its ancestors contain primary content indicators (article, main, role=main).
-function containsPrimaryContent(element: Element): boolean {
-  const tag = element.tagName.toLowerCase();
-  if (tag === 'article' || tag === 'main') return true;
-  if (element.getAttribute('role') === 'main') return true;
-  return element.querySelector('article,main,[role="main"]') !== null;
-}
-
-function isPromoMatch(
-  className: string,
-  id: string,
-  element: Element,
-  context: NoiseContext
-): boolean {
-  if (!context.promoEnabled) return false;
-  const aggTest =
-    context.promoMatchers.aggressive.test(className) ||
-    context.promoMatchers.aggressive.test(id);
-  if (aggTest) return !isWithinPrimaryContent(element);
-  // Base test must match and be outside primary content to be considered noise
-  if (
-    !context.promoMatchers.base.test(className) &&
-    !context.promoMatchers.base.test(id)
-  )
-    return false;
-  return !containsPrimaryContent(element);
-}
-
-function isStructuralNoise(
-  tagName: string,
-  interactive: boolean,
-  context: NoiseContext
-): boolean {
-  return context.structuralTags.has(tagName) && !interactive;
-}
-
-function isNavigationNoise(
-  tagName: string,
-  role: string | null,
-  className: string,
-  id: string,
-  context: NoiseContext
-): boolean {
-  if (!context.flags.navFooter) return false;
-
-  // Always-noise tags (nav, footer)
-  if (ALWAYS_NOISE_TAGS.has(tagName)) return true;
-  // Header with navigation role or noise class/id
-  if (
-    tagName === 'header' &&
-    ((role !== null && NAVIGATION_ROLES.has(role)) ||
-      HEADER_NOISE_PATTERN.test(`${className} ${id}`))
-  )
-    return true;
-  // Aside elements
-  if (tagName === 'aside') return true;
-  // Navigation roles (except aside+complementary)
-  if (
-    role !== null &&
-    NAVIGATION_ROLES.has(role) &&
-    (tagName !== 'aside' || role !== 'complementary')
-  )
-    return true;
-
-  return false;
-}
-
-function isHiddenNoise(hidden: boolean, interactive: boolean): boolean {
-  return hidden && !interactive;
-}
-
-function isPositionalNoise(className: string, element: Element): boolean {
-  return (
-    FIXED_OR_HIGH_Z_PATTERN.test(className) &&
-    (element.textContent || '').trim().length <
-      NAV_FOOTER_MIN_CHARS_FOR_PRESERVATION
-  );
-}
-
 function isNoiseElement(element: Element, context: NoiseContext): boolean {
   const tagName = element.tagName.toLowerCase();
   const role = element.getAttribute('role');
@@ -460,11 +377,53 @@ function isNoiseElement(element: Element, context: NoiseContext): boolean {
     element.getAttribute('aria-hidden') === 'true' ||
     (style !== null && HIDDEN_STYLE_REGEX.test(style));
 
-  if (isStructuralNoise(tagName, interactive, context)) return true;
-  if (isNavigationNoise(tagName, role, className, id, context)) return true;
-  if (isHiddenNoise(hidden, interactive)) return true;
-  if (isPositionalNoise(className, element)) return true;
-  if (isPromoMatch(className, id, element, context)) return true;
+  // 1. Structural Noise
+  if (context.structuralTags.has(tagName) && !interactive) return true;
+
+  // 2. Navigation / Layout Noise
+  if (context.flags.navFooter) {
+    if (ALWAYS_NOISE_TAGS.has(tagName)) return true;
+    if (
+      tagName === 'header' &&
+      ((role !== null && NAVIGATION_ROLES.has(role)) ||
+        HEADER_NOISE_PATTERN.test(`${className} ${id}`))
+    )
+      return true;
+    if (tagName === 'aside') return true;
+    if (
+      role !== null &&
+      NAVIGATION_ROLES.has(role) &&
+      (tagName !== 'aside' || role !== 'complementary')
+    )
+      return true;
+  }
+
+  // 3. Hidden Noise
+  if (hidden && !interactive) return true;
+
+  // 4. Positional Noise
+  if (
+    FIXED_OR_HIGH_Z_PATTERN.test(className) &&
+    (element.textContent || '').trim().length <
+      NAV_FOOTER_MIN_CHARS_FOR_PRESERVATION
+  ) {
+    return true;
+  }
+
+  // 5. Promo/Advert Noise
+  if (context.promoEnabled) {
+    const aggTest =
+      context.promoMatchers.aggressive.test(className) ||
+      context.promoMatchers.aggressive.test(id);
+    if (aggTest && !isPrimaryContent(element)) return true;
+
+    if (
+      context.promoMatchers.base.test(className) ||
+      context.promoMatchers.base.test(id)
+    ) {
+      if (!isPrimaryContent(element, true)) return true;
+    }
+  }
 
   return false;
 }
@@ -543,35 +502,16 @@ function isHeadingPermalinkAnchor(anchor: Element): boolean {
   );
 }
 
-function getDirectRows(section: Element): Element[] {
-  return Array.from(section.children).filter((child) => child.tagName === 'TR');
-}
-
-function getDirectCells(row: Element): Element[] {
-  return Array.from(row.children).filter(
-    (child) => child.tagName === 'TH' || child.tagName === 'TD'
-  );
-}
-
 function hoistNestedRows(table: Element): void {
-  const sections = Array.from(table.querySelectorAll('thead,tbody,tfoot'));
+  const nestedRows = table.querySelectorAll('td tr, th tr');
+  // Iterate backwards to preserve the original document order when inserting after the parent row
+  for (let i = nestedRows.length - 1; i >= 0; i--) {
+    const nestedRow = nestedRows[i];
+    if (nestedRow?.closest('table') !== table) continue;
 
-  for (const section of sections) {
-    const rows = getDirectRows(section);
-
-    for (const row of rows) {
-      let insertAfter: Element = row;
-
-      for (const cell of getDirectCells(row)) {
-        const nestedRows = Array.from(cell.querySelectorAll('tr')).filter(
-          (nested) => nested.closest('table') === table
-        );
-
-        for (const nestedRow of nestedRows) {
-          insertAfter.after(nestedRow);
-          insertAfter = nestedRow;
-        }
-      }
+    const parentRow = nestedRow.parentElement?.closest('tr');
+    if (parentRow && parentRow !== nestedRow) {
+      parentRow.after(nestedRow);
     }
   }
 }
@@ -1478,21 +1418,20 @@ function passesContentRatioGate(
   );
 }
 
-function countRealImages(doc: Document): number {
+const DATA_IMG_PATTERN = /<img\b[^>]*\bsrc\s*=\s*["']?data:/gi;
+
+function countRealImages(htmlOrDoc: string | Document): number {
+  if (typeof htmlOrDoc === 'string') {
+    const total = htmlOrDoc.match(/<img\b/gi)?.length ?? 0;
+    const dataImages = htmlOrDoc.match(DATA_IMG_PATTERN)?.length ?? 0;
+    return total - dataImages;
+  }
   let count = 0;
-  for (const img of doc.querySelectorAll('img')) {
+  for (const img of htmlOrDoc.querySelectorAll('img')) {
     const src = img.getAttribute('src') ?? '';
     if (!src.startsWith('data:')) count++;
   }
   return count;
-}
-
-const DATA_IMG_PATTERN = /<img\b[^>]*\bsrc\s*=\s*["']?data:/gi;
-
-function countRealImagesFromHtml(html: string): number {
-  const total = html.match(/<img\b/gi)?.length ?? 0;
-  const dataImages = html.match(DATA_IMG_PATTERN)?.length ?? 0;
-  return total - dataImages;
 }
 
 function passesRetentionRulesFromHtml(
@@ -1512,7 +1451,7 @@ function passesRetentionRulesFromHtml(
     // align with the denominator's real-image filtering.
     const articleCount =
       selector === 'img'
-        ? countRealImagesFromHtml(articleHtml)
+        ? countRealImages(articleHtml)
         : (articleHtml.match(pattern)?.length ?? 0);
     return articleCount / original >= ratio;
   });
