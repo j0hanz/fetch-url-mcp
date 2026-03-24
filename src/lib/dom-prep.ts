@@ -1100,6 +1100,20 @@ export function stripDocsControls(document: Document): void {
   removeNodes(document.querySelectorAll(DOCS_CONTROL_SELECTORS.join(',')));
 }
 
+export function stripScreenReaderText(document: Document): void {
+  const selectors = [
+    '.sr-only',
+    '.screen-reader-text',
+    '.visually-hidden',
+    '[class*="sr-only"]',
+    '[class*="visually-hidden"]',
+    '.cdk-visually-hidden',
+    '.vh',
+    '.hidden-visually'
+  ];
+  removeNodes(document.querySelectorAll(selectors.join(',')));
+}
+
 function stripAriaLiveInstructions(document: Document): void {
   for (const el of document.querySelectorAll('[aria-live]')) {
     const text = (el.textContent || '').trim();
@@ -1358,6 +1372,11 @@ function countEmptyHeadingSections(root: ParentNode): number {
   const headings = root.querySelectorAll('h1,h2,h3,h4,h5,h6');
 
   for (const heading of headings) {
+    // Skip headings that are explicitly hidden or for screen readers
+    const cls = heading.getAttribute('class') ?? '';
+    if (cls.includes('screen-reader-text') || cls.includes('sr-only') || cls.includes('visually-hidden')) {
+      continue;
+    }
     if (!hasSectionContent(heading)) emptyCount += 1;
   }
 
@@ -1485,7 +1504,12 @@ function passesRetentionRulesFromHtml(
 }
 
 function passesEmptySectionRatio(articleDoc: Document): boolean {
-  const headingCount = countMatchingElements(articleDoc, 'h1,h2,h3,h4,h5,h6');
+  const headings = Array.from(articleDoc.querySelectorAll('h1,h2,h3,h4,h5,h6'))
+    .filter((h) => {
+      const cls = h.getAttribute('class') ?? '';
+      return !cls.includes('screen-reader-text') && !cls.includes('sr-only') && !cls.includes('visually-hidden');
+    });
+  const headingCount = headings.length;
   return (
     headingCount < MIN_HEADINGS_FOR_EMPTY_SECTION_GATE ||
     countEmptyHeadingSections(articleDoc) / headingCount <=
@@ -1498,14 +1522,17 @@ export function evaluateArticleContent(
   document: Document
 ): Document | null {
   if (!passesContentRatioGate(article.textContent.length, document)) {
+    console.log("FAILED passesContentRatioGate");
     return null;
   }
 
   if (!passesRetentionRulesFromHtml(document, article.content)) {
+    console.log("FAILED passesRetentionRulesFromHtml");
     return null;
   }
 
   if (hasTruncatedSentences(article.textContent)) {
+    console.log("FAILED hasTruncatedSentences");
     return null;
   }
 
@@ -1514,6 +1541,11 @@ export function evaluateArticleContent(
   ).document;
 
   if (!passesEmptySectionRatio(articleDoc)) {
+    const headings = articleDoc.querySelectorAll('h1,h2,h3,h4,h5,h6');
+    console.log("FAILED passesEmptySectionRatio:", headings.length, "headings");
+    for (const h of headings) {
+       console.log("H:", h.textContent, hasSectionContent(h));
+    }
     return null;
   }
 

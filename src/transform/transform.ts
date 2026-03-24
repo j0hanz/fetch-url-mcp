@@ -22,6 +22,7 @@ import {
   removeNoiseFromHtml,
   serializeDocumentForMarkdown,
   stripDocsControls,
+  stripScreenReaderText,
   surfaceCodeEditorContent,
 } from '../lib/dom-prep.js';
 import { isRawTextContentUrl } from '../lib/http.js';
@@ -474,6 +475,7 @@ function prepareReadabilityDocument(readabilityDoc: Document): void {
   normalizeTabContent(readabilityDoc);
   surfaceCodeEditorContent(readabilityDoc);
   stripDocsControls(readabilityDoc);
+  stripScreenReaderText(readabilityDoc);
 
   for (const el of readabilityDoc.querySelectorAll(
     '[class*="breadcrumb"],[class*="pagination"]'
