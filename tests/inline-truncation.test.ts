@@ -95,6 +95,57 @@ Text after fence.
     }
   });
 
+  it('closes fences when fence-like lines include info strings inside code content', async (t) => {
+    const originalInlineLimit = config.constants.maxInlineContentChars;
+    config.constants.maxInlineContentChars = 20000;
+    const longContent = 'c'.repeat(20100);
+    const trickyFenceMarkdown = `
+# Example
+
+\`\`\`markdown
+Literal fence content follows:
+\`\`\`typescript
+${longContent}
+`;
+
+    const mockFetch = async (_url: RequestInfo | URL, _init?: RequestInit) => {
+      return new Response(trickyFenceMarkdown, {
+        status: 200,
+        headers: { 'content-type': 'text/plain' },
+      });
+    };
+
+    t.mock.method(globalThis, 'fetch', mockFetch);
+
+    try {
+      const result = await fetchUrlToolHandler(
+        { url: 'https://example.com/fence-info-string.md' },
+        {}
+      );
+
+      const textBlock = result.content?.find((b) => b.type === 'text');
+      assert.ok(textBlock && textBlock.type === 'text');
+
+      if (textBlock?.type === 'text') {
+        const content = JSON.parse(textBlock.text) as {
+          markdown?: string;
+          truncated?: boolean;
+        };
+
+        assert.equal(content.truncated, true);
+        const markdown = content.markdown ?? '';
+
+        assert.ok(markdown.includes('```typescript'));
+        assert.ok(
+          markdown.endsWith('\n```\n...[truncated]'),
+          'Truncated markdown should append a real closing fence before the marker'
+        );
+      }
+    } finally {
+      config.constants.maxInlineContentChars = originalInlineLimit;
+    }
+  });
+
   it('handles truncation of nested code fences correctly', async (t) => {
     const originalInlineLimit = config.constants.maxInlineContentChars;
     config.constants.maxInlineContentChars = 20000;
@@ -139,21 +190,10 @@ End of example.
 
         const markdown = content.markdown ?? '';
 
-        // All opened fences should be closed
-        const lines = markdown.split('\n');
-        let openCount = 0;
-
-        for (const line of lines) {
-          if (line.trim().startsWith('```')) {
-            openCount++;
-          }
-        }
-
-        // Even number means all fences are closed
-        assert.equal(
-          openCount % 2,
-          0,
-          'All code fences should be properly closed'
+        assert.ok(markdown.includes('```javascript'));
+        assert.ok(
+          markdown.endsWith('\n```\n...[truncated]'),
+          'Nested fence content should still end with a real closing fence before the marker'
         );
       }
     } finally {
@@ -165,8 +205,6 @@ End of example.
 describe('Global-only inline truncation', () => {
   it('applies global maxInlineContentChars without per-request override', async (t) => {
     const originalInlineLimit = config.constants.maxInlineContentChars;
-    config.constants.maxInlineContentChars = 100;
-
     const longContent = 'x'.repeat(200);
 
     t.mock.method(
@@ -181,6 +219,19 @@ describe('Global-only inline truncation', () => {
     );
 
     try {
+      config.constants.maxInlineContentChars = 1000;
+      const baseline = await fetchUrlToolHandler(
+        { url: 'https://example.com/global-limit.txt' },
+        {}
+      );
+
+      const baselineMarkdown = baseline.structuredContent?.markdown;
+      assert.equal(typeof baselineMarkdown, 'string');
+      if (typeof baselineMarkdown !== 'string') {
+        throw new TypeError('Expected baseline markdown to be a string');
+      }
+
+      config.constants.maxInlineContentChars = 100;
       const result = await fetchUrlToolHandler(
         { url: 'https://example.com/global-limit.txt' },
         {}
@@ -191,6 +242,17 @@ describe('Global-only inline truncation', () => {
         result.structuredContent?.truncated,
         true,
         'Content exceeding global limit should be truncated'
+      );
+      assert.equal(
+        result.structuredContent?.contentSize,
+        baselineMarkdown.length,
+        'contentSize should report the markdown fragment size before final inline truncation'
+      );
+      assert.ok(
+        typeof result.structuredContent?.markdown === 'string' &&
+          result.structuredContent.markdown.length <=
+            config.constants.maxInlineContentChars,
+        'markdown should respect the final inline truncation limit'
       );
     } finally {
       config.constants.maxInlineContentChars = originalInlineLimit;

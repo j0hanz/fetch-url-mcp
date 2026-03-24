@@ -45,13 +45,14 @@ interface FetchTransformInput {
 function getOpenCodeFence(
   content: string
 ): { fenceChar: string; fenceLength: number } | null {
-  const FENCE_PATTERN = /^[ \t]*(`{3,}|~{3,})/gm;
+  const FENCE_PATTERN = /^[ \t]*(`{3,}|~{3,})([^\S\r\n]*|[^\r\n]*)$/gm;
   let inFence = false;
   let fenceChar: string | null = null;
   let fenceLength = 0;
 
   for (const match of content.matchAll(FENCE_PATTERN)) {
     const marker = match[1] ?? '';
+    const suffix = match[2] ?? '';
     const char = marker[0] ?? '';
     const { length } = marker;
 
@@ -59,7 +60,13 @@ function getOpenCodeFence(
       inFence = true;
       fenceChar = char;
       fenceLength = length;
-    } else if (char === fenceChar && length >= fenceLength) {
+      continue;
+    }
+
+    const isClosingFence =
+      char === fenceChar && length >= fenceLength && suffix.trim().length === 0;
+
+    if (isClosingFence) {
       inFence = false;
       fenceChar = null;
       fenceLength = 0;
