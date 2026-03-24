@@ -18,16 +18,15 @@ interface FlightPayloadData {
 const NEXT_FLIGHT_PAYLOAD_RE =
   /self\.__next_f\.push\(\[1,"((?:\\.|[^"\\])*)"\]\)<\/script>/gs;
 const TEMPLATE_ASSIGNMENT_RE = /([A-Za-z_$][\w$]*)=`([\s\S]*?)`;/g;
-const OBJECT_ASSIGNMENT_RE = /([A-Za-z_$][\w$]*)=\{([^{}]+)\}/g;
 const FLIGHT_INSTALL_RE =
   /commands:\{cli:"([^"]+)",npm:"([^"]+)",yarn:"([^"]+)",pnpm:"([^"]+)",bun:"([^"]+)"\}/;
 const FLIGHT_IMPORT_RE = /commands:\{main:'([^']+)',individual:'([^']+)'\}/;
 const FLIGHT_DEMO_RE =
-  /title:"([^"]+)",files:([A-Za-z_$][\w$]*)\.([A-Za-z_$][\w$]*)/g;
+  /title:"((?:\\.|[^"\\])*)",files:([A-Za-z_$][\w$]*)\.([A-Za-z_$][\w$]*)/g;
 const FLIGHT_API_RE =
   /children:"([^"]+)"\}\),`\\n`,\(0,e\.jsx\)\(o,\{data:\[([\s\S]*?)\]\}\)/g;
 const FLIGHT_API_ROW_RE =
-  /attribute:"([^"]+)",type:"([^"]+)",description:"([^"]*)",default:"([^"]*)"/g;
+  /attribute:"((?:\\.|[^"\\])*)",type:"((?:\\.|[^"\\])*)",description:"((?:\\.|[^"\\])*)",default:"((?:\\.|[^"\\])*)"/g;
 const FLIGHT_MERMAID_SECTION_RE =
   /_jsx\(Heading,\{\s*level:"[1-6]",\s*id:"[^"]+",\s*children:"((?:\\.|[^"\\])*)"\s*\}\)(?:(?!_jsx\(Heading,\{)[\s\S]){0,12000}?_jsx\(Mermaid,\{\s*chart:"((?:\\.|[^"\\])*)"\s*\}\)/g;
 
@@ -67,9 +66,44 @@ function decodeNextFlightPayloads(html: string): string[] {
 
 function parseObjectEntries(body: string): Map<string, string> {
   const entries = new Map<string, string>();
-  for (const part of body.split(',')) {
+  const segments: string[] = [];
+  let currentSegment = '';
+  let inString = false;
+  let escapeNext = false;
+  let nestLevel = 0;
+
+  for (const char of body) {
+    if (escapeNext) {
+      escapeNext = false;
+      currentSegment += char;
+      continue;
+    }
+    if (char === '\\') {
+      escapeNext = true;
+      currentSegment += char;
+      continue;
+    }
+    if (char === '"' || char === "'") {
+      inString = !inString;
+    }
+    if (!inString) {
+      if (char === '{' || char === '[' || char === '(') nestLevel++;
+      else if (char === '}' || char === ']' || char === ')') nestLevel--;
+    }
+    if (char === ',' && !inString && nestLevel === 0) {
+      segments.push(currentSegment);
+      currentSegment = '';
+    } else {
+      currentSegment += char;
+    }
+  }
+  if (currentSegment) segments.push(currentSegment);
+
+  for (const part of segments) {
     const entryMatch =
-      /(?:"([^"]+)"|([A-Za-z_$][\w$]*)):([A-Za-z_$][\w$]*)$/.exec(part.trim());
+      /(?:"((?:\\.|[^"\\])*)"|([A-Za-z_$][\w$]*)):([A-Za-z_$][\w$]*)$/.exec(
+        part.trim()
+      );
     const key = entryMatch?.[1] ?? entryMatch?.[2];
     const value = entryMatch?.[3];
     if (key && value) entries.set(key, value);
@@ -92,10 +126,46 @@ function parseFlightObjectRefs(text: string): {
     if (name && code) templateMap.set(name, decodeHtmlEntities(code));
   }
 
-  for (const match of text.matchAll(OBJECT_ASSIGNMENT_RE)) {
+  const regex = /([A-Za-z_$][\w$]*)=\{/g;
+  let match;
+  while ((match = regex.exec(text)) !== null) {
     const objectName = match[1];
-    const body = match[2]?.trim() ?? '';
-    if (!objectName || !body) continue;
+    if (!objectName) continue;
+
+    const start = regex.lastIndex;
+    let inString = false;
+    let escapeLevel = false;
+    let depth = 1;
+    let end = -1;
+
+    for (let i = start; i < text.length; i++) {
+      const char = text[i];
+      if (escapeLevel) {
+        escapeLevel = false;
+        continue;
+      }
+      if (char === '\\') {
+        escapeLevel = true;
+        continue;
+      }
+      if (char === '"' || char === "'") {
+        inString = !inString;
+        continue;
+      }
+      if (!inString) {
+        if (char === '{') depth++;
+        else if (char === '}') depth--;
+        if (depth === 0) {
+          end = i;
+          break;
+        }
+      }
+    }
+
+    if (end === -1) continue;
+
+    const body = text.substring(start, end).trim();
+    if (!body) continue;
 
     const spreadMatch = /^\.\.\.([A-Za-z_$][\w$]*)$/.exec(body);
     if (spreadMatch?.[1]) {
@@ -254,48 +324,29 @@ function updateMarkdownSection(
   return true;
 }
 
-function replaceMarkdownSection(
-  lines: string[],
-  title: string,
-  body: string
-): boolean {
-  return updateMarkdownSection(lines, title, () => body);
+interface UpsertOptions {
+  readonly exclusionPattern?: RegExp | string;
+  readonly replacement?: boolean;
 }
 
-function appendMarkdownSection(
-  lines: string[],
-  title: string,
-  body: string
-): boolean {
-  return updateMarkdownSection(lines, title, (bodyText) => {
-    if (bodyText.includes('```')) return null;
-    return bodyText ? `${bodyText}\n\n${body.trim()}` : body.trim();
-  });
-}
-
-function conditionallyAppendMarkdownSection(
+function upsertMarkdownSection(
   lines: string[],
   title: string,
   content: string,
-  exclusionPattern?: RegExp
-): void {
-  const section = findMarkdownSection(lines, title);
-  if (!section) return;
+  options?: UpsertOptions
+): boolean {
+  return updateMarkdownSection(lines, title, (bodyText) => {
+    if (options?.replacement) return content;
 
-  const bodyText = getSectionBody(lines, section);
-  if (exclusionPattern?.test(bodyText)) return;
+    if (options?.exclusionPattern) {
+      if (options.exclusionPattern instanceof RegExp) {
+        if (options.exclusionPattern.test(bodyText)) return null;
+      } else if (bodyText.includes(options.exclusionPattern)) {
+        return null;
+      }
+    }
 
-  appendMarkdownSection(lines, title, content);
-}
-
-function mergeMermaidDiagramSection(
-  lines: string[],
-  title: string,
-  mermaidBlock: string
-): void {
-  updateMarkdownSection(lines, title, (sectionBody) => {
-    if (sectionBody.includes('```mermaid')) return null;
-    return sectionBody ? `${sectionBody}\n\n${mermaidBlock}` : mermaidBlock;
+    return bodyText ? `${bodyText}\n\n${content.trim()}` : content.trim();
   });
 }
 
@@ -394,33 +445,35 @@ export function supplementMarkdownFromNextFlight(
   const lines = markdown.split('\n');
 
   if (payloadData.installationCommands?.length) {
-    conditionallyAppendMarkdownSection(
+    upsertMarkdownSection(
       lines,
       'Installation',
       buildCodeBlock(payloadData.installationCommands.join('\n')),
-      /(npm|pnpm|yarn|bun|npx)\s+(install|add)/
+      { exclusionPattern: /(npm|pnpm|yarn|bun|npx)\s+(install|add)/ }
     );
   }
 
   if (payloadData.importCommands?.length) {
-    conditionallyAppendMarkdownSection(
+    upsertMarkdownSection(
       lines,
       'Import',
       buildCodeBlock(payloadData.importCommands.join('\n\n')),
-      /import\s+\{/
+      { exclusionPattern: /import\s+\{/ }
     );
   }
 
   for (const [title, table] of payloadData.apiTables) {
-    replaceMarkdownSection(lines, title, table);
+    upsertMarkdownSection(lines, title, table, { replacement: true });
   }
 
   for (const [title, mermaidBlock] of payloadData.mermaidDiagrams) {
-    mergeMermaidDiagramSection(lines, title, mermaidBlock);
+    upsertMarkdownSection(lines, title, mermaidBlock, {
+      exclusionPattern: '```mermaid',
+    });
   }
 
   for (const [title, codeBlock] of payloadData.demoCodeBlocks) {
-    appendMarkdownSection(lines, title, codeBlock);
+    upsertMarkdownSection(lines, title, codeBlock, { exclusionPattern: '```' });
   }
 
   return lines.join('\n');
