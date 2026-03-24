@@ -12,9 +12,7 @@ import {
 
 const DNS_LOOKUP_TIMEOUT_MS = 5000;
 const CNAME_LOOKUP_MAX_DEPTH = 5;
-function normalizeDnsName(value: string): string {
-  return stripTrailingDots(value.trim().toLowerCase());
-}
+
 async function withTimeout<T>(
   promise: Promise<T>,
   timeoutMs: number,
@@ -30,22 +28,18 @@ async function withTimeout<T>(
       ? (onAbort?.() ?? new Error('Request was canceled'))
       : onTimeout();
 
-  return Promise.race([
-    promise,
-    new Promise<never>((_, reject) => {
-      if (raceSignal.aborted) {
-        reject(classifyError());
-      } else {
-        raceSignal.addEventListener(
-          'abort',
-          () => {
-            reject(classifyError());
-          },
-          { once: true }
-        );
-      }
-    }),
-  ]);
+  if (raceSignal.aborted) throw classifyError();
+
+  return new Promise<T>((resolve, reject) => {
+    const handleAbort = (): void => {
+      reject(classifyError());
+    };
+    raceSignal.addEventListener('abort', handleAbort, { once: true });
+
+    promise.then(resolve, reject).finally(() => {
+      raceSignal.removeEventListener('abort', handleAbort);
+    });
+  });
 }
 function createAbortSignalError(): Error {
   const err = new Error('Request was canceled');
@@ -82,7 +76,7 @@ export class SafeDnsResolver {
     hostname: string,
     signal?: AbortSignal
   ): Promise<string> {
-    const normalizedHostname = normalizeDnsName(
+    const normalizedHostname = normalizeHostname(
       hostname.replace(/^\[|\]$/g, '')
     );
 
@@ -185,8 +179,8 @@ export class SafeDnsResolver {
       const cnames = await this.cnameResolver.resolveCname(hostname);
 
       return cnames
-        .map((value) => normalizeDnsName(value))
-        .filter((value) => value.length > 0);
+        .map((value) => normalizeHostname(value))
+        .filter((value): value is string => value !== null && value.length > 0);
     } catch (error) {
       if (isError(error) && error.name === 'AbortError') {
         throw error;
@@ -389,18 +383,8 @@ export class RawUrlTransformer {
   transformToRawUrl(url: string): TransformResult {
     if (!url) return { url, transformed: false };
     if (this.isRawUrl(url)) return { url, transformed: false };
-    let base: string;
-    let hash: string;
-    let parsed: URL | undefined;
 
-    const maybeParsed = URL.parse(url);
-    if (maybeParsed) {
-      parsed = maybeParsed;
-      base = parsed.origin + parsed.pathname;
-      ({ hash } = parsed);
-    } else {
-      ({ base, hash } = this.splitParams(url));
-    }
+    const { base, hash, parsed } = this.resolveUrlStructure(url);
 
     const match = this.tryTransformWithUrl(base, hash, parsed);
     if (!match) return { url, transformed: false };
@@ -418,19 +402,27 @@ export class RawUrlTransformer {
     if (!urlString) return false;
     if (this.isRawUrl(urlString)) return true;
 
-    const parsed = URL.parse(urlString);
-    if (parsed) {
-      const pathname = parsed.pathname.toLowerCase();
-      const lastDot = pathname.lastIndexOf('.');
-      if (lastDot === -1) return false;
-      return RAW_TEXT_EXTENSIONS.has(pathname.slice(lastDot));
-    }
-
-    const { base } = this.splitParams(urlString);
+    const { base } = this.resolveUrlStructure(urlString);
     const lowerBase = base.toLowerCase();
     const lastDot = lowerBase.lastIndexOf('.');
     if (lastDot === -1) return false;
     return RAW_TEXT_EXTENSIONS.has(lowerBase.slice(lastDot));
+  }
+
+  private resolveUrlStructure(urlString: string): {
+    base: string;
+    hash: string;
+    parsed?: URL;
+  } {
+    const parsed = URL.parse(urlString);
+    if (parsed) {
+      return {
+        base: parsed.origin + parsed.pathname,
+        hash: parsed.hash,
+        parsed,
+      };
+    }
+    return this.splitParams(urlString);
   }
 
   private isRawUrl(url: string): boolean {
@@ -497,21 +489,32 @@ export class RawUrlTransformer {
     url: string,
     hash: string
   ): { url: string; platform: string } | null {
+    return this.transformRawGist(url) ?? this.transformStandardGist(url, hash);
+  }
+
+  private transformRawGist(
+    url: string
+  ): { url: string; platform: string } | null {
     const rawMatch = GITHUB_GIST_RAW_PATTERN.exec(url);
-    if (rawMatch) {
-      const groups = rawMatch.pathname.groups as UrlPatternGroups;
-      const user = getPatternGroup(groups, 'user');
-      const gistId = getPatternGroup(groups, 'gistId');
-      const rawFilePath = getPatternGroup(groups, 'filePath');
-      if (!user || !gistId) return null;
+    if (!rawMatch) return null;
 
-      const resolvedFilePath = rawFilePath ? `/${rawFilePath}` : '';
-      return {
-        url: `https://gist.githubusercontent.com/${user}/${gistId}/raw${resolvedFilePath}`,
-        platform: 'github-gist',
-      };
-    }
+    const groups = rawMatch.pathname.groups as UrlPatternGroups;
+    const user = getPatternGroup(groups, 'user');
+    const gistId = getPatternGroup(groups, 'gistId');
+    const rawFilePath = getPatternGroup(groups, 'filePath');
+    if (!user || !gistId) return null;
 
+    const resolvedFilePath = rawFilePath ? `/${rawFilePath}` : '';
+    return {
+      url: `https://gist.githubusercontent.com/${user}/${gistId}/raw${resolvedFilePath}`,
+      platform: 'github-gist',
+    };
+  }
+
+  private transformStandardGist(
+    url: string,
+    hash: string
+  ): { url: string; platform: string } | null {
     const match = GITHUB_GIST_PATTERN.exec(url);
     if (!match) return null;
 
