@@ -56,6 +56,344 @@ function getNodeAttr(
 // Code translators
 // ---------------------------------------------------------------------------
 
+class DetectionContext {
+  private _lower?: string;
+  private _lines?: readonly string[];
+  private _trimmedStart?: string;
+
+  constructor(readonly code: string) {}
+
+  get lower(): string {
+    return (this._lower ??= this.code.toLowerCase());
+  }
+
+  get lines(): readonly string[] {
+    return (this._lines ??= this.code.split(/\r?\n/));
+  }
+
+  get trimmedStart(): string {
+    return (this._trimmedStart ??= this.code.trimStart());
+  }
+}
+const BASH_COMMANDS = new Set([
+  'sudo',
+  'chmod',
+  'mkdir',
+  'cd',
+  'ls',
+  'cat',
+  'echo',
+]);
+const BASH_PACKAGE_MANAGERS = [
+  'npm',
+  'yarn',
+  'pnpm',
+  'npx',
+  'brew',
+  'apt',
+  'pip',
+  'cargo',
+  'go',
+] as const;
+const TYPESCRIPT_HINTS = [
+  ': string',
+  ':string',
+  ': number',
+  ':number',
+  ': boolean',
+  ':boolean',
+  ': void',
+  ':void',
+  ': any',
+  ':any',
+  ': unknown',
+  ':unknown',
+  ': never',
+  ':never',
+];
+const HTML_TAGS = [
+  '<!doctype',
+  '<html',
+  '<head',
+  '<body',
+  '<div',
+  '<span',
+  '<p',
+  '<a',
+  '<script',
+  '<style',
+];
+function isBashLine(line: string): boolean {
+  const trimmed = line.trimStart();
+  if (!trimmed) return false;
+
+  if (
+    trimmed.startsWith('#!') ||
+    trimmed.startsWith('$ ') ||
+    /^\s*\.\.\.\\?>\s+\S/m.test(trimmed)
+  ) {
+    return true;
+  }
+
+  const spaceIdx = trimmed.indexOf(' ');
+  const firstWord = spaceIdx === -1 ? trimmed : trimmed.slice(0, spaceIdx);
+
+  if (BASH_COMMANDS.has(firstWord)) return true;
+
+  return (
+    spaceIdx !== -1 &&
+    BASH_PACKAGE_MANAGERS.includes(
+      firstWord as (typeof BASH_PACKAGE_MANAGERS)[number]
+    )
+  );
+}
+function detectBashIndicators(lines: readonly string[]): boolean {
+  return lines.some(isBashLine);
+}
+function detectCssStructure(lines: readonly string[]): boolean {
+  for (const line of lines) {
+    const trimmed = line.trimStart();
+    if (!trimmed || trimmed.startsWith('# ') || trimmed.startsWith('//')) {
+      continue;
+    }
+
+    if (/^[.#][A-Za-z_-][\w-]*\s*\{/.test(trimmed)) return true;
+
+    if (
+      trimmed.includes(';') &&
+      /^\s*[a-z][\w-]*\s*:/.test(trimmed) &&
+      !trimmed.includes('(')
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+function detectYamlStructure(lines: readonly string[]): boolean {
+  for (const line of lines) {
+    const trimmed = line.trim();
+    const colonIdx = trimmed.indexOf(':');
+    if (colonIdx > 0) {
+      const after = trimmed[colonIdx + 1];
+      if (after === ' ' || after === '\t') return true;
+    }
+  }
+  return false;
+}
+type Matcher = (ctx: DetectionContext) => boolean;
+interface LanguageDef {
+  lang: string;
+  weight: number;
+  match: Matcher;
+}
+
+const LANGUAGES: LanguageDef[] = [
+  {
+    lang: 'rust',
+    weight: 25,
+    match: (ctx) =>
+      ctx.lower.includes('let mut') ||
+      /\b(?:fn|impl|struct|enum)\b/.test(ctx.lower) ||
+      (ctx.lower.includes('use ') && ctx.lower.includes('::')),
+  },
+  {
+    lang: 'go',
+    weight: 22,
+    match: (ctx) =>
+      ctx.lower.includes('import "') || /\b(?:package|func)\b/.test(ctx.lower),
+  },
+  {
+    lang: 'jsx',
+    weight: 22,
+    match: (ctx) => {
+      const l = ctx.lower;
+      if (
+        l.includes('classname=') ||
+        l.includes('jsx:') ||
+        l.includes("from 'react'") ||
+        l.includes('from "react"')
+      ) {
+        return true;
+      }
+      return /<\/?[A-Z][A-Za-z0-9]*(?:\s+[A-Za-z_:][\w:.-]*(?:\s*=\s*(?:"[^"]*"|'[^']*'|\{[^}]*\}))?)*\s*\/?>/m.test(
+        ctx.code
+      );
+    },
+  },
+  {
+    lang: 'typescript',
+    weight: 20,
+    match: (ctx) =>
+      /\b(?:interface|type)\b/.test(ctx.lower) ||
+      TYPESCRIPT_HINTS.some((hint) => ctx.lower.includes(hint)),
+  },
+  {
+    lang: 'sql',
+    weight: 20,
+    match: (ctx) =>
+      /\b(?:select\s+(?:.+?\s+from|[\d*@])|insert\s+into|update\s+.+?\s+set|delete\s+from|create\s+(?:table|database|index|view|function|procedure|trigger|user|role)|alter\s+(?:table|database|index|view))\b/.test(
+        ctx.lower
+      ),
+  },
+  {
+    lang: 'html',
+    weight: 19,
+    match: (ctx) => HTML_TAGS.some((tag) => ctx.lower.includes(tag)),
+  },
+  {
+    lang: 'python',
+    weight: 18,
+    match: (ctx) => {
+      if (HTML_TAGS.some((tag) => ctx.lower.includes(tag))) return false;
+
+      const l = ctx.lower;
+      const c = ctx.code;
+
+      if (
+        /^\s*(?:>>>|\.\.\.)\s/m.test(c) ||
+        /<(?:QuerySet|[A-Z][A-Za-z0-9_]*:\s)|\bdatetime\.datetime\(|\bDoesNotExist:/.test(
+          c
+        ) ||
+        /^\s*[A-Za-z_][\w.]*\s*=\s*[A-Z][\w.]*\(/m.test(c) ||
+        /^\s*[A-Za-z_][\w.]*\.[A-Za-z_][\w]*\s*$/m.test(c) ||
+        c.includes('None') ||
+        c.includes('True') ||
+        c.includes('False') ||
+        l.includes('print(') ||
+        l.includes('__name__') ||
+        l.includes('self.') ||
+        l.includes('elif ') ||
+        /\b(?:def |elif |except |finally:|yield |lambda |raise |pass$)/m.test(l)
+      ) {
+        return true;
+      }
+
+      const hasJsSignals =
+        /\b(?:const |let |var |function |require\(|=>|===|!==|console\.)/.test(
+          l
+        ) ||
+        l.includes('{') ||
+        l.includes("from '");
+      return /\b(?:import|from|class)\b/.test(l) && !hasJsSignals;
+    },
+  },
+  {
+    lang: 'css',
+    weight: 18,
+    match: (ctx) =>
+      /@media|@import|@keyframes|@theme\b|@utility\b|@layer\b|@apply\b|@variant\b|@custom-variant\b|@reference\b|@source\b/.test(
+        ctx.lower
+      ) || detectCssStructure(ctx.lines),
+  },
+  { lang: 'bash', weight: 15, match: (ctx) => detectBashIndicators(ctx.lines) },
+  { lang: 'yaml', weight: 15, match: (ctx) => detectYamlStructure(ctx.lines) },
+  {
+    lang: 'javascript',
+    weight: 15,
+    match: (ctx) =>
+      /\b(?:const|let|var|function|class|async|await|export|import)\b/.test(
+        ctx.lower
+      ),
+  },
+  {
+    lang: 'json',
+    weight: 10,
+    match: (ctx) =>
+      ctx.trimmedStart.startsWith('{') || ctx.trimmedStart.startsWith('['),
+  },
+];
+
+const KNOWN_LANG_PREFIXES = new Set([
+  'css',
+  'javascript',
+  'js',
+  'typescript',
+  'ts',
+  'python',
+  'py',
+  'html',
+  'xml',
+  'sql',
+  'bash',
+  'sh',
+  'yaml',
+  'json',
+  'ruby',
+  'go',
+  'rust',
+  'java',
+  'php',
+  'c',
+  'cpp',
+  'swift',
+  'kotlin',
+  'scss',
+  'sass',
+  'less',
+  'graphql',
+  'markdown',
+  'md',
+]);
+
+export function extractLanguageFromClassName(
+  className: string
+): string | undefined {
+  if (!className) return undefined;
+
+  // Split by whitespace and check for language indicators
+  const tokens = className.match(/\S+/g);
+  if (!tokens) return undefined;
+
+  // Fast path: check for prefixes
+  for (const token of tokens) {
+    const lower = token.toLowerCase();
+    if (lower.startsWith('language-')) return token.slice(9);
+    if (lower.startsWith('lang-')) return token.slice(5);
+    if (lower.startsWith('highlight-')) return token.slice(10);
+  }
+
+  // Special handling for hljs which often appears with a separate language class
+  if (tokens.includes('hljs')) {
+    const langClass = tokens.find((t) => {
+      const l = t.toLowerCase();
+      return l !== 'hljs' && !l.startsWith('hljs-');
+    });
+    if (langClass) return langClass;
+  }
+
+  // Last resort: look for any known language prefix followed by a dash
+  for (const token of tokens) {
+    const dashIdx = token.indexOf('-');
+    if (dashIdx > 0) {
+      const prefix = token.slice(0, dashIdx).toLowerCase();
+      if (KNOWN_LANG_PREFIXES.has(prefix)) return prefix;
+    }
+  }
+
+  return undefined;
+}
+function resolveLanguageFromDataAttribute(
+  dataLang: string
+): string | undefined {
+  const trimmed = dataLang.trim();
+  return /^\w+$/.test(trimmed) ? trimmed : undefined;
+}
+export function resolveLanguageFromAttributes(
+  className: string,
+  dataLang: string
+): string | undefined {
+  return (
+    extractLanguageFromClassName(className) ??
+    resolveLanguageFromDataAttribute(dataLang)
+  );
+}
+export function detectLanguageFromCode(code: string): string | undefined {
+  if (!code || !/\S/.test(code)) return undefined;
+
+  const ctx = new DetectionContext(code);
+  return LANGUAGES.find((def) => def.match(ctx))?.lang;
+}
+
 function buildInlineCode(content: string): string {
   const trimmed = content.trim();
   if (!trimmed) return '``';
@@ -213,31 +551,22 @@ function resolveImageSrc(
 function deriveAltFromImageUrl(src: string): string {
   if (!src) return '';
 
-  try {
-    const absoluteParsed = URL.parse(src);
-    const parsed = absoluteParsed ?? URL.parse(src, 'http://localhost');
+  const absoluteParsed = URL.parse(src);
+  const parsed = absoluteParsed ?? URL.parse(src, 'http://localhost');
 
-    if (!parsed) return '';
-    if (
-      absoluteParsed &&
-      parsed.protocol !== 'http:' &&
-      parsed.protocol !== 'https:'
-    ) {
-      return '';
-    }
-
-    const { pathname } = parsed;
-    const segments = pathname.split('/');
-    const filename = segments.pop() ?? '';
-    if (!filename) return '';
-
-    const dotIndex = filename.lastIndexOf('.');
-    const name = dotIndex > 0 ? filename.slice(0, dotIndex) : filename;
-
-    return name.replace(/[_-]+/g, ' ').trim();
-  } catch {
+  if (!parsed) return '';
+  if (
+    absoluteParsed &&
+    parsed.protocol !== 'http:' &&
+    parsed.protocol !== 'https:'
+  ) {
     return '';
   }
+
+  const match = /\/([^/]+?)(?:\.[^/.]+)?$/.exec(parsed.pathname);
+  if (!match?.[1]) return '';
+
+  return match[1].replace(/[_-]+/g, ' ').trim();
 }
 
 function buildImageTranslator(ctx: unknown): TranslatorConfig {
@@ -458,21 +787,12 @@ function buildDdTranslator(): Record<string, unknown> {
 function wrapTranslator(
   prefix: string,
   suffix: string
-): Record<string, unknown> {
-  return {
+): () => Record<string, unknown> {
+  return () => ({
     postprocess: ({ content }: { content: string }) =>
       `${prefix}${content}${suffix}`,
-  };
+  });
 }
-
-const buildKbdTranslator = (): Record<string, unknown> =>
-  wrapTranslator('`', '`');
-const buildMarkTranslator = (): Record<string, unknown> =>
-  wrapTranslator('==', '==');
-const buildSubTranslator = (): Record<string, unknown> =>
-  wrapTranslator('~', '~');
-const buildSupTranslator = (): Record<string, unknown> =>
-  wrapTranslator('^', '^');
 
 function buildDetailsTranslator(): Record<string, unknown> {
   return {
@@ -502,10 +822,10 @@ function createCustomTranslators(): TranslatorConfigObject {
     dt: buildDtTranslator,
     dd: buildDdTranslator,
     div: buildDivTranslator,
-    kbd: buildKbdTranslator,
-    mark: buildMarkTranslator,
-    sub: buildSubTranslator,
-    sup: buildSupTranslator,
+    kbd: wrapTranslator('`', '`'),
+    mark: wrapTranslator('==', '=='),
+    sub: wrapTranslator('~', '~'),
+    sup: wrapTranslator('^', '^'),
     section: buildSectionTranslator,
     details: buildDetailsTranslator,
     summary: buildSummaryTranslator,
@@ -532,339 +852,4 @@ function getMarkdownConverter(): NodeHtmlMarkdown {
 
 export function translateHtmlFragmentToMarkdown(html: string): string {
   return getMarkdownConverter().translate(html).trim();
-}
-class DetectionContext {
-  private _lower?: string;
-  private _lines?: readonly string[];
-  private _trimmedStart?: string;
-
-  constructor(readonly code: string) {}
-
-  get lower(): string {
-    return (this._lower ??= this.code.toLowerCase());
-  }
-
-  get lines(): readonly string[] {
-    return (this._lines ??= this.code.split(/\r?\n/));
-  }
-
-  get trimmedStart(): string {
-    return (this._trimmedStart ??= this.code.trimStart());
-  }
-}
-const BASH_COMMANDS = new Set([
-  'sudo',
-  'chmod',
-  'mkdir',
-  'cd',
-  'ls',
-  'cat',
-  'echo',
-]);
-const BASH_PACKAGE_MANAGERS = [
-  'npm',
-  'yarn',
-  'pnpm',
-  'npx',
-  'brew',
-  'apt',
-  'pip',
-  'cargo',
-  'go',
-] as const;
-const TYPESCRIPT_HINTS = [
-  ': string',
-  ':string',
-  ': number',
-  ':number',
-  ': boolean',
-  ':boolean',
-  ': void',
-  ':void',
-  ': any',
-  ':any',
-  ': unknown',
-  ':unknown',
-  ': never',
-  ':never',
-];
-const HTML_TAGS = [
-  '<!doctype',
-  '<html',
-  '<head',
-  '<body',
-  '<div',
-  '<span',
-  '<p',
-  '<a',
-  '<script',
-  '<style',
-];
-const RUST_REGEX = /\b(?:fn|impl|struct|enum)\b/;
-const JS_REGEX =
-  /\b(?:const|let|var|function|class|async|await|export|import)\b/;
-const PYTHON_UNIQUE_REGEX =
-  /\b(?:def |elif |except |finally:|yield |lambda |raise |pass$)/m;
-const JS_SIGNAL_REGEX =
-  /\b(?:const |let |var |function |require\(|=>|===|!==|console\.)/;
-const CSS_REGEX =
-  /@media|@import|@keyframes|@theme\b|@utility\b|@layer\b|@apply\b|@variant\b|@custom-variant\b|@reference\b|@source\b/;
-const CSS_PROPERTY_REGEX = /^\s*[a-z][\w-]*\s*:/;
-const PYTHON_REPL_PROMPT_REGEX = /^\s*(?:>>>|\.\.\.)\s/m;
-const PYTHON_OUTPUT_HINT_REGEX =
-  /<(?:QuerySet|[A-Z][A-Za-z0-9_]*:\s)|\bdatetime\.datetime\(|\bDoesNotExist:/;
-const WINDOWS_SHELL_PROMPT_REGEX = /^\s*\.\.\.\\?>\s+\S/m;
-const JSX_TAG_REGEX =
-  /<\/?[A-Z][A-Za-z0-9]*(?:\s+[A-Za-z_:][\w:.-]*(?:\s*=\s*(?:"[^"]*"|'[^']*'|\{[^}]*\}))?)*\s*\/?>/m;
-
-function containsJsxTag(code: string): boolean {
-  return JSX_TAG_REGEX.test(code);
-}
-function isBashLine(line: string): boolean {
-  const trimmed = line.trimStart();
-  if (!trimmed) return false;
-
-  if (
-    trimmed.startsWith('#!') ||
-    trimmed.startsWith('$ ') ||
-    WINDOWS_SHELL_PROMPT_REGEX.test(trimmed)
-  ) {
-    return true;
-  }
-
-  const spaceIdx = trimmed.indexOf(' ');
-  const firstWord = spaceIdx === -1 ? trimmed : trimmed.slice(0, spaceIdx);
-
-  if (BASH_COMMANDS.has(firstWord)) return true;
-
-  return (
-    spaceIdx !== -1 &&
-    BASH_PACKAGE_MANAGERS.includes(
-      firstWord as (typeof BASH_PACKAGE_MANAGERS)[number]
-    )
-  );
-}
-function detectBashIndicators(lines: readonly string[]): boolean {
-  return lines.some(isBashLine);
-}
-function detectCssStructure(lines: readonly string[]): boolean {
-  for (const line of lines) {
-    const trimmed = line.trimStart();
-    if (!trimmed || trimmed.startsWith('# ') || trimmed.startsWith('//')) {
-      continue;
-    }
-
-    if (/^[.#][A-Za-z_-][\w-]*\s*\{/.test(trimmed)) return true;
-
-    if (
-      trimmed.includes(';') &&
-      CSS_PROPERTY_REGEX.test(trimmed) &&
-      !trimmed.includes('(')
-    ) {
-      return true;
-    }
-  }
-  return false;
-}
-function detectYamlStructure(lines: readonly string[]): boolean {
-  for (const line of lines) {
-    const trimmed = line.trim();
-    const colonIdx = trimmed.indexOf(':');
-    if (colonIdx > 0) {
-      const after = trimmed[colonIdx + 1];
-      if (after === ' ' || after === '\t') return true;
-    }
-  }
-  return false;
-}
-type Matcher = (ctx: DetectionContext) => boolean;
-interface LanguageDef {
-  lang: string;
-  weight: number;
-  match: Matcher;
-}
-function matchRust(ctx: DetectionContext): boolean {
-  if (ctx.lower.includes('let mut')) return true;
-  if (RUST_REGEX.test(ctx.lower)) return true;
-  return ctx.lower.includes('use ') && ctx.lower.includes('::');
-}
-function matchGo(ctx: DetectionContext): boolean {
-  if (ctx.lower.includes('import "')) return true;
-  return /\b(?:package|func)\b/.test(ctx.lower);
-}
-function matchJsx(ctx: DetectionContext): boolean {
-  const l = ctx.lower;
-  if (
-    l.includes('classname=') ||
-    l.includes('jsx:') ||
-    l.includes("from 'react'") ||
-    l.includes('from "react"')
-  ) {
-    return true;
-  }
-  return containsJsxTag(ctx.code);
-}
-function matchTypeScript(ctx: DetectionContext): boolean {
-  return (
-    /\b(?:interface|type)\b/.test(ctx.lower) ||
-    TYPESCRIPT_HINTS.some((hint) => ctx.lower.includes(hint))
-  );
-}
-function matchSql(ctx: DetectionContext): boolean {
-  return /\b(?:select\s+(?:.+?\s+from|[\d*@])|insert\s+into|update\s+.+?\s+set|delete\s+from|create\s+(?:table|database|index|view|function|procedure|trigger|user|role)|alter\s+(?:table|database|index|view))\b/.test(
-    ctx.lower
-  );
-}
-function hasJsSignals(lowerCode: string): boolean {
-  return (
-    JS_SIGNAL_REGEX.test(lowerCode) ||
-    lowerCode.includes('{') ||
-    lowerCode.includes("from '")
-  );
-}
-
-function matchPython(ctx: DetectionContext): boolean {
-  if (matchHtml(ctx)) return false;
-
-  const l = ctx.lower;
-  const c = ctx.code;
-
-  if (
-    PYTHON_REPL_PROMPT_REGEX.test(c) ||
-    PYTHON_OUTPUT_HINT_REGEX.test(c) ||
-    /^\s*[A-Za-z_][\w.]*\s*=\s*[A-Z][\w.]*\(/m.test(c) ||
-    /^\s*[A-Za-z_][\w.]*\.[A-Za-z_][\w]*\s*$/m.test(c) ||
-    c.includes('None') ||
-    c.includes('True') ||
-    c.includes('False') ||
-    l.includes('print(') ||
-    l.includes('__name__') ||
-    l.includes('self.') ||
-    l.includes('elif ') ||
-    PYTHON_UNIQUE_REGEX.test(l)
-  ) {
-    return true;
-  }
-
-  // Shared keywords (import, from, class) — only match if no JS signals present
-  return /\b(?:import|from|class)\b/.test(l) && !hasJsSignals(l);
-}
-function matchHtml(ctx: DetectionContext): boolean {
-  return HTML_TAGS.some((tag) => ctx.lower.includes(tag));
-}
-
-// Pre-sorted by weight descending — first match wins in detectLanguageFromCode
-const LANGUAGES: LanguageDef[] = [
-  { lang: 'rust', weight: 25, match: matchRust },
-  { lang: 'go', weight: 22, match: matchGo },
-  { lang: 'jsx', weight: 22, match: matchJsx },
-  { lang: 'typescript', weight: 20, match: matchTypeScript },
-  { lang: 'sql', weight: 20, match: matchSql },
-  { lang: 'html', weight: 19, match: matchHtml },
-  { lang: 'python', weight: 18, match: matchPython },
-  {
-    lang: 'css',
-    weight: 18,
-    match: (ctx) => CSS_REGEX.test(ctx.lower) || detectCssStructure(ctx.lines),
-  },
-  { lang: 'bash', weight: 15, match: (ctx) => detectBashIndicators(ctx.lines) },
-  { lang: 'yaml', weight: 15, match: (ctx) => detectYamlStructure(ctx.lines) },
-  { lang: 'javascript', weight: 15, match: (ctx) => JS_REGEX.test(ctx.lower) },
-  {
-    lang: 'json',
-    weight: 10,
-    match: (ctx) =>
-      ctx.trimmedStart.startsWith('{') || ctx.trimmedStart.startsWith('['),
-  },
-];
-
-const KNOWN_LANG_PREFIXES = new Set([
-  'css',
-  'javascript',
-  'js',
-  'typescript',
-  'ts',
-  'python',
-  'py',
-  'html',
-  'xml',
-  'sql',
-  'bash',
-  'sh',
-  'yaml',
-  'json',
-  'ruby',
-  'go',
-  'rust',
-  'java',
-  'php',
-  'c',
-  'cpp',
-  'swift',
-  'kotlin',
-  'scss',
-  'sass',
-  'less',
-  'graphql',
-  'markdown',
-  'md',
-]);
-
-export function extractLanguageFromClassName(
-  className: string
-): string | undefined {
-  if (!className) return undefined;
-
-  // Split by whitespace and check for language indicators
-  const tokens = className.match(/\S+/g);
-  if (!tokens) return undefined;
-
-  // Fast path: check for prefixes
-  for (const token of tokens) {
-    const lower = token.toLowerCase();
-    if (lower.startsWith('language-')) return token.slice(9);
-    if (lower.startsWith('lang-')) return token.slice(5);
-    if (lower.startsWith('highlight-')) return token.slice(10);
-  }
-
-  // Special handling for hljs which often appears with a separate language class
-  if (tokens.includes('hljs')) {
-    const langClass = tokens.find((t) => {
-      const l = t.toLowerCase();
-      return l !== 'hljs' && !l.startsWith('hljs-');
-    });
-    if (langClass) return langClass;
-  }
-
-  // Last resort: look for any known language prefix followed by a dash
-  for (const token of tokens) {
-    const dashIdx = token.indexOf('-');
-    if (dashIdx > 0) {
-      const prefix = token.slice(0, dashIdx).toLowerCase();
-      if (KNOWN_LANG_PREFIXES.has(prefix)) return prefix;
-    }
-  }
-
-  return undefined;
-}
-function resolveLanguageFromDataAttribute(
-  dataLang: string
-): string | undefined {
-  const trimmed = dataLang.trim();
-  return /^\w+$/.test(trimmed) ? trimmed : undefined;
-}
-export function resolveLanguageFromAttributes(
-  className: string,
-  dataLang: string
-): string | undefined {
-  return (
-    extractLanguageFromClassName(className) ??
-    resolveLanguageFromDataAttribute(dataLang)
-  );
-}
-export function detectLanguageFromCode(code: string): string | undefined {
-  if (!code || !/\S/.test(code)) return undefined;
-
-  const ctx = new DetectionContext(code);
-  return LANGUAGES.find((def) => def.match(ctx))?.lang;
 }
