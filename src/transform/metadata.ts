@@ -13,17 +13,13 @@ const HEAD_END_PATTERN = /<\/head\s*>|<body\b/i;
 const MAX_HEAD_SCAN_LENGTH = 50_000;
 
 function extractHeadSection(html: string): string | null {
-  if (html.length <= MAX_HEAD_SCAN_LENGTH) {
-    const match = HEAD_END_PATTERN.exec(html);
-    return match ? html.substring(0, match.index) : null;
-  }
-
-  const searchText = html.substring(0, MAX_HEAD_SCAN_LENGTH);
+  const searchText =
+    html.length <= MAX_HEAD_SCAN_LENGTH
+      ? html
+      : html.slice(0, MAX_HEAD_SCAN_LENGTH);
 
   const match = HEAD_END_PATTERN.exec(searchText);
-  if (!match) return null;
-
-  return html.substring(0, match.index);
+  return match ? html.slice(0, match.index) : null;
 }
 
 // ---------------------------------------------------------------------------
@@ -367,7 +363,6 @@ function scanBodyForTitle(content: string): string | undefined {
       if (HEADING_STRICT.test(trimmed)) {
         return trimmed.replace(HEADING_MARKER, '').trim() || undefined;
       }
-      return undefined;
     }
 
     scanIndex = nextIndex + 1;
@@ -382,7 +377,7 @@ export function extractTitleFromRawMarkdown(
     const title = fm.entries.get('title') ?? fm.entries.get('name');
     if (title) return title;
   }
-  return scanBodyForTitle(content);
+  return scanBodyForTitle(fm ? content.slice(fm.range.end) : content);
 }
 export function addSourceToMarkdown(content: string, url: string): string {
   const fm = parseFrontmatter(content);
