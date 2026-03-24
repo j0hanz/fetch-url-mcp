@@ -14,8 +14,8 @@ const PATHS = {
 };
 
 const TEST_PATTERNS = [
+  '__tests__/**/*.test.ts',
   'src/__tests__/**/*.test.ts',
-  'tests/**/*.test.ts',
   'node-tests/**/*.test.ts',
 ];
 

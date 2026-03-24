@@ -1,0 +1,245 @@
+import assert from 'node:assert/strict';
+import { describe, it } from 'node:test';
+
+import { config } from '../dist/lib/core.js';
+import { removeNoiseFromHtml } from '../dist/lib/dom-prep.js';
+
+// Helper: wraps content in a minimal HTML page with enough main content
+// so that body innerHTML > 100 chars after noise removal (MIN_BODY_CONTENT_LENGTH).
+function page(bodyContent: string): string {
+  return `<html><body><main><p>This is the main article content that must be preserved through noise removal for proper testing purposes.</p></main>${bodyContent}</body></html>`;
+}
+
+// ── Structural tag removal ──────────────────────────────────────────
+
+describe('Structural tag removal', () => {
+  it('removes <script> tags and their content', () => {
+    const html = page('<script>alert("xss")</script>');
+    const result = removeNoiseFromHtml(html, undefined, 'https://example.com');
+    assert.ok(!result.includes('alert'), 'Script content must be removed');
+    assert.ok(
+      result.includes('main article content'),
+      'Main content preserved'
+    );
+  });
+
+  it('removes <style> tags and their content', () => {
+    const html = page('<style>body { color: red; }</style>');
+    const result = removeNoiseFromHtml(html, undefined, 'https://example.com');
+    assert.ok(!result.includes('color: red'), 'Style content must be removed');
+  });
+
+  it('removes <iframe> elements', () => {
+    const html = page('<iframe src="https://ads.example.com/banner"></iframe>');
+    const result = removeNoiseFromHtml(html, undefined, 'https://example.com');
+    assert.ok(!result.includes('iframe'), 'Iframe must be removed');
+  });
+
+  it('removes <form> elements outside primary content', () => {
+    const html = page(
+      '<form action="/subscribe"><input type="email"/><button>Go</button></form>'
+    );
+    const result = removeNoiseFromHtml(html, undefined, 'https://example.com');
+    assert.ok(!result.includes('subscribe'), 'Form must be removed');
+  });
+
+  it('removes <input>, <select>, <textarea> elements', () => {
+    const html = `<html><body><main><p>This is the main article content that must be preserved through noise removal for proper testing purposes.</p></main>
+      <input type="text" value="search"/>
+      <select><option>Pick</option></select>
+      <textarea>Notes</textarea>
+    </body></html>`;
+    const result = removeNoiseFromHtml(html, undefined, 'https://example.com');
+    assert.ok(!result.includes('<input'), 'Input must be removed');
+    assert.ok(!result.includes('<select'), 'Select must be removed');
+    assert.ok(!result.includes('<textarea'), 'Textarea must be removed');
+  });
+
+  it('removes <svg> and <canvas> by default (preserveSvgCanvas=false)', () => {
+    const html = `<html><body><main><p>This is the main article content that must be preserved through noise removal for proper testing purposes.</p></main>
+      <svg viewBox="0 0 100 100"><circle cx="50" cy="50" r="40"/></svg>
+      <canvas id="chart"></canvas>
+    </body></html>`;
+    const result = removeNoiseFromHtml(html, undefined, 'https://example.com');
+    assert.ok(!result.includes('<svg'), 'SVG must be removed by default');
+    assert.ok(!result.includes('<canvas'), 'Canvas must be removed by default');
+  });
+
+  it('preserves <svg> and <canvas> when preserveSvgCanvas=true', () => {
+    const original = config.noiseRemoval.preserveSvgCanvas;
+    config.noiseRemoval.preserveSvgCanvas = true;
+    try {
+      const html = `<html><body><main>
+        <p>Content</p>
+        <svg viewBox="0 0 100 100"><circle cx="50" cy="50" r="40"/></svg>
+        <canvas id="chart"></canvas>
+      </main></body></html>`;
+      const result = removeNoiseFromHtml(
+        html,
+        undefined,
+        'https://example.com'
+      );
+      assert.ok(
+        result.includes('<svg') || result.includes('circle'),
+        'SVG must be preserved when config enabled'
+      );
+    } finally {
+      config.noiseRemoval.preserveSvgCanvas = original;
+    }
+  });
+});
+
+// ── ARIA role-based noise ───────────────────────────────────────────
+
+describe('ARIA role-based noise removal', () => {
+  it('removes role="navigation" elements', () => {
+    const html = page(
+      '<div role="navigation"><a href="/">Home</a><a href="/about">About</a></div>'
+    );
+    const result = removeNoiseFromHtml(html, undefined, 'https://example.com');
+    assert.ok(
+      !result.includes('role="navigation"'),
+      'Navigation role must be removed'
+    );
+  });
+
+  it('removes role="banner" elements', () => {
+    const html = page('<div role="banner"><p>Site banner content</p></div>');
+    const result = removeNoiseFromHtml(html, undefined, 'https://example.com');
+    assert.ok(
+      !result.includes('Site banner content'),
+      'Banner role content must be removed'
+    );
+  });
+
+  it('removes role="contentinfo" elements', () => {
+    const html = page('<div role="contentinfo"><p>Footer info</p></div>');
+    const result = removeNoiseFromHtml(html, undefined, 'https://example.com');
+    assert.ok(
+      !result.includes('Footer info'),
+      'Contentinfo role must be removed'
+    );
+  });
+
+  it('removes role="menubar" elements', () => {
+    const html = page(
+      '<div role="menubar"><span>File</span><span>Edit</span></div>'
+    );
+    const result = removeNoiseFromHtml(html, undefined, 'https://example.com');
+    assert.ok(
+      !result.includes('role="menubar"'),
+      'Menubar role must be removed'
+    );
+  });
+
+  it('removes role="search" elements', () => {
+    const html = page(
+      '<div role="search"><input type="text"/><button>Search</button></div>'
+    );
+    const result = removeNoiseFromHtml(html, undefined, 'https://example.com');
+    assert.ok(!result.includes('role="search"'), 'Search role must be removed');
+  });
+
+  it('removes role="menu" elements', () => {
+    const html = page('<ul role="menu"><li>Item 1</li><li>Item 2</li></ul>');
+    const result = removeNoiseFromHtml(html, undefined, 'https://example.com');
+    assert.ok(!result.includes('role="menu"'), 'Menu role must be removed');
+  });
+
+  it('removes role="tree" elements', () => {
+    const html = page('<ul role="tree"><li role="treeitem">Node 1</li></ul>');
+    const result = removeNoiseFromHtml(html, undefined, 'https://example.com');
+    assert.ok(!result.includes('role="tree"'), 'Tree role must be removed');
+  });
+});
+
+// ── Hidden attribute removal ────────────────────────────────────────
+
+describe('Hidden attribute removal', () => {
+  it('removes elements with [hidden] attribute', () => {
+    const html = `<html><body><main><p>This is the main article content that must be preserved through noise removal for proper testing purposes.</p></main>
+      <div hidden><p>Hidden content</p></div></body></html>`;
+    const result = removeNoiseFromHtml(html, undefined, 'https://example.com');
+    assert.ok(!result.includes('Hidden content'), '[hidden] must be removed');
+    assert.ok(
+      result.includes('main article content'),
+      'Visible content preserved'
+    );
+  });
+
+  it('removes elements with aria-hidden="true"', () => {
+    const html = `<html><body><main><p>This is the main article content that must be preserved through noise removal for proper testing purposes.</p></main>
+      <div aria-hidden="true"><p>Screen reader hidden</p></div></body></html>`;
+    const result = removeNoiseFromHtml(html, undefined, 'https://example.com');
+    assert.ok(
+      !result.includes('Screen reader hidden'),
+      'aria-hidden must be removed'
+    );
+  });
+});
+
+// ── Promo token categories ──────────────────────────────────────────
+
+describe('Promo token categories', () => {
+  it('removes cookie consent elements when category enabled', () => {
+    const html = `<html><body><main><p>This is the main article content that must be preserved through noise removal for proper testing purposes.</p></main>
+      <div class="cookie-consent"><p>We use cookies</p><button>Accept</button></div>
+    </body></html>`;
+    const result = removeNoiseFromHtml(html, undefined, 'https://example.com');
+    assert.ok(
+      !result.includes('We use cookies'),
+      'Cookie consent must be removed'
+    );
+  });
+
+  it('removes newsletter subscribe elements', () => {
+    const html = `<html><body><main><p>This is the main article content that must be preserved through noise removal for proper testing purposes.</p></main>
+      <div class="newsletter-signup"><p>Subscribe to updates</p></div>
+    </body></html>`;
+    const result = removeNoiseFromHtml(html, undefined, 'https://example.com');
+    assert.ok(
+      !result.includes('Subscribe to updates'),
+      'Newsletter must be removed'
+    );
+  });
+
+  it('removes aggressive promo tokens when aggressiveMode=true', () => {
+    const originalAggressive = config.noiseRemoval.aggressiveMode;
+    config.noiseRemoval.aggressiveMode = true;
+    try {
+      const html = `<html><body><main><p>This is the main article content that must be preserved through noise removal for proper testing purposes.</p></main>
+        <div class="related-posts"><p>You may also like</p></div>
+      </body></html>`;
+      const result = removeNoiseFromHtml(
+        html,
+        undefined,
+        'https://example.com'
+      );
+      assert.ok(
+        !result.includes('You may also like'),
+        'Related posts must be removed in aggressive mode'
+      );
+    } finally {
+      config.noiseRemoval.aggressiveMode = originalAggressive;
+    }
+  });
+
+  it('removes breadcrumb elements', () => {
+    const html = `<html><body><main><p>This is the main article content that must be preserved through noise removal for proper testing purposes.</p></main>
+      <div class="breadcrumb"><a href="/">Home</a> &gt; <a href="/docs">Docs</a></div>
+    </body></html>`;
+    const result = removeNoiseFromHtml(html, undefined, 'https://example.com');
+    assert.ok(!result.includes('breadcrumb'), 'Breadcrumb must be removed');
+  });
+
+  it('removes sponsor/advert elements', () => {
+    const html = `<html><body><main><p>This is the main article content that must be preserved through noise removal for proper testing purposes.</p></main>
+      <div class="sponsor-banner"><p>Sponsored by Example Corp</p></div>
+    </body></html>`;
+    const result = removeNoiseFromHtml(html, undefined, 'https://example.com');
+    assert.ok(
+      !result.includes('Sponsored by'),
+      'Sponsor banner must be removed'
+    );
+  });
+});
