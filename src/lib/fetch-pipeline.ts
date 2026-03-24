@@ -97,7 +97,10 @@ function truncateWithMarker(
       0,
       limit - marker.length - fenceCloser.length
     );
-    return `${content.substring(0, adjustedLength)}${fenceCloser}${marker}`;
+    return `${content.substring(0, adjustedLength)}${fenceCloser}${marker}`.slice(
+      0,
+      limit
+    );
   }
 
   const safeBoundary = findSafeLinkBoundary(content, maxContentLength);
@@ -334,13 +337,8 @@ function persistCacheTargets<T>(
 ): void {
   if (!cacheKey) return;
 
-  persistCacheEntry(
-    cacheKey,
-    data,
-    options.serialize,
-    finalUrl ?? requestedUrl,
-    options.cacheNamespace
-  );
+  const targets = new Map<string, string>();
+  targets.set(cacheKey, finalUrl ?? requestedUrl);
 
   if (finalUrl && finalUrl !== requestedUrl) {
     const finalCacheKey = createCacheKey(
@@ -348,15 +346,19 @@ function persistCacheTargets<T>(
       finalUrl,
       options.cacheVary
     );
-    if (finalCacheKey && finalCacheKey !== cacheKey) {
-      persistCacheEntry(
-        finalCacheKey,
-        data,
-        options.serialize,
-        finalUrl,
-        options.cacheNamespace
-      );
+    if (finalCacheKey) {
+      targets.set(finalCacheKey, finalUrl);
     }
+  }
+
+  for (const [key, url] of targets) {
+    persistCacheEntry(
+      key,
+      data,
+      options.serialize,
+      url,
+      options.cacheNamespace
+    );
   }
 }
 
@@ -520,7 +522,7 @@ export function serializeMarkdownResult(
   return stringifyCachedPayload(z.encode(markdownPipelineCacheCodec, result));
 }
 
-interface SharedFetchOptions {
+interface MarkdownFetchOptions {
   readonly url: string;
   readonly signal?: AbortSignal;
   readonly cacheVary?: Record<string, unknown> | string;
@@ -537,7 +539,7 @@ interface SharedFetchDeps {
   readonly executeFetchPipeline?: typeof executeFetchPipeline;
 }
 function buildSharedFetchPipelineOptions(
-  options: SharedFetchOptions
+  options: MarkdownFetchOptions
 ): FetchPipelineOptions<MarkdownPipelineResult> {
   return {
     ...options,
@@ -545,7 +547,7 @@ function buildSharedFetchPipelineOptions(
   };
 }
 export async function performSharedFetch(
-  options: SharedFetchOptions,
+  options: MarkdownFetchOptions,
   deps: SharedFetchDeps = {}
 ): Promise<{
   pipeline: PipelineResult<MarkdownPipelineResult>;

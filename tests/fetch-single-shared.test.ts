@@ -3,7 +3,7 @@ import { beforeEach, describe, it } from 'node:test';
 
 import { performSharedFetch } from '../dist/lib/fetch-pipeline.js';
 
-type SharedFetchOptions = Parameters<typeof performSharedFetch>[0];
+type MarkdownFetchOptions = Parameters<typeof performSharedFetch>[0];
 type SharedFetchDeps = NonNullable<Parameters<typeof performSharedFetch>[1]>;
 type ExecuteFetchPipeline = NonNullable<
   SharedFetchDeps['executeFetchPipeline']
@@ -37,7 +37,7 @@ describe('performSharedFetch', () => {
           title: undefined,
           truncated: false,
         }),
-      } as SharedFetchOptions,
+      } as MarkdownFetchOptions,
       { executeFetchPipeline }
     );
 
