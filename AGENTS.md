@@ -1,42 +1,42 @@
 # AGENTS.md
 
-Intelligent web content fetcher MCP server that converts HTML to clean, AI-readable Markdown.
+A web content fetcher MCP server that converts HTML to clean, AI and human readable markdown.
 
 ## Tooling
 
 - **Manager**: npm
-- **Frameworks**: typescript, eslint, @modelcontextprotocol/sdk, @modelcontextprotocol/sdk, @trivago/prettier-plugin-sort-imports, eslint, eslint-config-prettier, eslint-plugin-de-morgan
+- **Runtime**: Node.js `>=24`, native ESM package, CLI entrypoint at `dist/index.js`
+- **Build**: TypeScript compiles through `scripts/tasks.mjs`, which cleans `dist/`, runs `tsc -p tsconfig.build.json`, copies `assets/`, and marks the CLI executable
+- **MCP SDK**: `@modelcontextprotocol/sdk` powers the stdio server, Streamable HTTP transport, prompts, resources, logging, completions, and task-capable tool wiring
+- **Fetch + transform stack**: `undici` for HTTP fetches, `linkedom` plus `@mozilla/readability` for DOM parsing/extraction, `node-html-markdown` for Markdown conversion
+- **Schemas**: Zod v4 schemas validate tool input/output and cached payloads, and are also converted to JSON Schema for MCP tool registration
+- **Lint + format**: flat ESLint config with `typescript-eslint` strict/stylistic rules, `eslint-plugin-depend`, `eslint-plugin-unused-imports`, `eslint-plugin-de-morgan`, plus Prettier with import sorting
+- **Tests + diagnostics**: Node's built-in test runner executes TypeScript tests through `tsx/esm`; dedicated scripts exist for coverage, extended type-check diagnostics, and trace generation
+- **Repo maintenance**: `knip` is available for unused-code audits, and Docker/Docker Compose files support containerized packaging and local runs
 
 ## Architecture
 
-- Tool-based MCP server with two entry paths:
-  `src/index.ts` selects stdio by default and HTTP mode via CLI flags, and installs shared fatal-error and graceful-shutdown handling.
-- `src/server.ts` builds the core `McpServer`, registers tools/prompts/resources, enables task-capable tool execution, and shuts down the transform worker pool on exit.
-- `src/tools/fetch-url.ts` is the main product surface. It validates inputs with Zod, wraps tool calls in request context, reports progress, supports optional MCP task execution, and emits structured JSON-safe output.
-- `src/lib/fetch-pipeline.ts` holds the shared fetch/cache/transform pipeline:
-  URL normalization and raw-URL rewriting happen before fetch, cache lookup/persist is centralized, redirects can populate alias cache keys, and inline Markdown truncation is applied after transform.
-- `src/transform/*` contains HTML-to-Markdown conversion and worker-pool logic; expensive transforms are intentionally isolated from transport code.
-- `src/http/native.ts` is a separate authenticated Streamable HTTP gateway:
-  it manages MCP sessions, protocol-version negotiation, rate limiting, CORS/host checks, health/download routes, and cancels owner-scoped tasks when sessions expire, are evicted, or shut down.
+- **Bootstrap**: `src/index.ts` parses CLI flags, serves `--help` / `--version`, and starts either stdio mode or HTTP mode with fatal-error handling and graceful shutdown paths
+- **Server composition**: `src/server.ts` creates the MCP server, advertises capabilities, registers the `fetch-url` tool, `get-help` prompt, instruction resource, cache resource template, logging level handler, and shutdown cleanup
+- **Transport split**: stdio mode uses one long-lived `McpServer`; HTTP mode creates one `McpServer` per authenticated session and serves it through `StreamableHTTPServerTransport`
+- **Fetch pipeline**: `src/tools/fetch-url.ts` validates arguments with Zod, emits progress updates, and delegates execution to `performSharedFetch()` for normalization, cache lookup, remote fetch, transform, and response assembly
+- **URL + cache layer**: `src/lib/fetch-pipeline.ts` normalizes URLs, rewrites supported code-host pages to raw endpoints, serializes cached Markdown payloads, and applies inline truncation safeguards for links and code fences
+- **Transform isolation**: `src/transform/worker-pool.ts` runs HTML-to-Markdown work in worker threads with queue backpressure, dynamic pool scaling, cancellation, per-task timeouts, and worker restart on failure
+- **HTTP gateway**: `src/http/native.ts` wraps MCP over HTTP with host/origin validation, auth, rate limiting, health and download routes, protocol-version negotiation, session TTL cleanup, and shutdown draining
+- **Task system**: `src/tasks/manager.ts` keeps owner-scoped task state with TTLs, capacity limits, cancellation, signed pagination cursors, and waiter-based delivery for terminal task results
+- **Resource surface**: `src/resources/index.ts` exposes `internal://instructions` and `internal://cache/{namespace}/{hash}`, including completions and resource update notifications backed by the in-memory cache
 
 ## Testing Strategy
 
-- Tests live in `tests/` and primarily exercise built output from `dist/`, so changes usually need a fresh `npm run build` before targeted test runs.
-- Coverage is subsystem-oriented rather than purely unit-level:
-  CLI/bootstrap (`cli.test.ts`, `mcp-server.test.ts`), fetch/cache pipeline (`fetch-pipeline.test.ts`, cache tests, redirects), HTTP server/auth/session behavior (`http-*`, `health-endpoint.test.ts`, download routes), and task lifecycle/cancellation (`task-manager.test.ts`, `mcp-task-tools.test.ts`).
-- The suite also covers transform correctness and output cleanup:
-  Markdown cleanup, DOM noise removal, code language tagging, header promotion, truncation behavior, and worker/telemetry behavior under `transform-*` tests.
-- Several tests spawn isolated Node processes or use mocked fetch servers/fixtures to verify runtime behavior, startup constraints, and shutdown semantics instead of only asserting pure functions.
-- When changing protocol wiring, HTTP lifecycle, or task ownership, prefer running the focused matching test files first, then `npm run test` before finishing.
+- Unit tests cover core logic in isolation, including URL normalization, cache key generation, HTML parsing, Markdown conversion, and worker pool behavior.
 
 ## Commands
 
-- **Dev**: `npm run dev`
 - **Test**: `npm run test`
 - **Lint**: `npm run lint`
-- **Build**: `npm run build`
+- **Type-check**: `npm run type-check`
 - **Format**: `npm run format`
-- **Type Check**: `npm run type-check`
+- **Build**: `npm run build`
 
 ## Safety Boundaries
 
@@ -47,7 +47,6 @@ Intelligent web content fetcher MCP server that converts HTML to clean, AI-reada
 ## Directory Overview
 
 ```text
-.
 ├── .github/            # CI/workflows and repo automation
 ├── .vscode/
 ├── assets/             # static assets
@@ -57,14 +56,13 @@ Intelligent web content fetcher MCP server that converts HTML to clean, AI-reada
 ├── tests/              # test suites
 ├── .prettierignore     # formatter config
 ├── .prettierrc         # formatter config
-├── AGENTS.md           # agent guidance
 ├── docker-compose.yml  # local container orchestration
 ├── Dockerfile          # container image build
 ├── eslint.config.mjs   # lint config
 ├── package.json        # scripts and dependencies
 ├── README.md           # usage and setup docs
-└── server.json         # published server metadata
-└── ...                # 3 more top-level items omitted
+├── server.json         # published server metadata
+└── tsconfig.build.json # TypeScript config
 ```
 
 ## Navigation
@@ -87,3 +85,4 @@ Intelligent web content fetcher MCP server that converts HTML to clean, AI-reada
 2. Run `npm run type-check` to verify types.
 3. Run `npm run test` to ensure tests pass.
 4. Run `npm run format` to format code.
+5. Update `README.md` if usage or setup instructions change.
