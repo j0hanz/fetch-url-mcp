@@ -222,6 +222,26 @@ function getPromoMatchers(
     aggressive: buildTokenRegex(aggressiveTokens),
   };
 }
+function buildNoiseSelector(flags: NoiseContext['flags']): string {
+  const selectors = [BASE_NOISE_SELECTORS.hidden];
+  if (flags.navFooter) selectors.push(BASE_NOISE_SELECTORS.navFooter);
+  if (flags.cookieBanners) selectors.push(BASE_NOISE_SELECTORS.cookieBanners);
+  return selectors.join(',');
+}
+
+function buildCandidateSelector(structuralTags: Set<string>): string {
+  return [
+    ...structuralTags,
+    ...ALWAYS_NOISE_TAGS,
+    'aside',
+    'header',
+    '[class]',
+    '[id]',
+    '[role]',
+    '[style]',
+  ].join(',');
+}
+
 function getContext(): NoiseContext {
   const currentConfig = config.noiseRemoval;
   const contextKey = JSON.stringify({
@@ -262,24 +282,10 @@ function getContext(): NoiseContext {
     .map((s) => s.trim())
     .filter((s) => s.length > 0);
 
-  // Pre-build selectors
-  const selectors = [BASE_NOISE_SELECTORS.hidden];
-  if (flags.navFooter) selectors.push(BASE_NOISE_SELECTORS.navFooter);
-  if (flags.cookieBanners) selectors.push(BASE_NOISE_SELECTORS.cookieBanners);
-  const noiseSelector = selectors.join(',');
+  const noiseSelector = buildNoiseSelector(flags);
   const extraSelector =
     extraSelectors.length > 0 ? extraSelectors.join(',') : null;
-
-  const candidateSelector = [
-    ...structuralTags,
-    ...ALWAYS_NOISE_TAGS,
-    'aside',
-    'header',
-    '[class]',
-    '[id]',
-    '[role]',
-    '[style]',
-  ].join(',');
+  const candidateSelector = buildCandidateSelector(structuralTags);
 
   cachedContext = {
     flags,
@@ -365,6 +371,69 @@ function removeNodes(nodes: ArrayLike<Element>): void {
   }
 }
 
+function isStructuralNoise(
+  tagName: string,
+  interactive: boolean,
+  context: NoiseContext
+): boolean {
+  return context.structuralTags.has(tagName) && !interactive;
+}
+
+function isNavigationNoise(
+  tagName: string,
+  role: string | null,
+  className: string,
+  id: string,
+  context: NoiseContext
+): boolean {
+  if (!context.flags.navFooter) return false;
+  if (ALWAYS_NOISE_TAGS.has(tagName)) return true;
+  if (
+    tagName === 'header' &&
+    ((role !== null && NAVIGATION_ROLES.has(role)) ||
+      HEADER_NOISE_PATTERN.test(`${className} ${id}`))
+  )
+    return true;
+  if (tagName === 'aside') return true;
+  return (
+    role !== null &&
+    NAVIGATION_ROLES.has(role) &&
+    (tagName !== 'aside' || role !== 'complementary')
+  );
+}
+
+function isHiddenNoise(hidden: boolean, interactive: boolean): boolean {
+  return hidden && !interactive;
+}
+
+function isPositionalNoise(className: string, element: Element): boolean {
+  return (
+    FIXED_OR_HIGH_Z_PATTERN.test(className) &&
+    (element.textContent || '').trim().length <
+      NAV_FOOTER_MIN_CHARS_FOR_PRESERVATION
+  );
+}
+
+function isPromoNoise(
+  className: string,
+  id: string,
+  element: Element,
+  context: NoiseContext
+): boolean {
+  if (!context.promoEnabled) return false;
+  const aggTest =
+    context.promoMatchers.aggressive.test(className) ||
+    context.promoMatchers.aggressive.test(id);
+  if (aggTest && !isPrimaryContent(element)) return true;
+  if (
+    context.promoMatchers.base.test(className) ||
+    context.promoMatchers.base.test(id)
+  ) {
+    if (!isPrimaryContent(element, true)) return true;
+  }
+  return false;
+}
+
 function isNoiseElement(element: Element, context: NoiseContext): boolean {
   const tagName = element.tagName.toLowerCase();
   const role = element.getAttribute('role');
@@ -377,55 +446,13 @@ function isNoiseElement(element: Element, context: NoiseContext): boolean {
     element.getAttribute('aria-hidden') === 'true' ||
     (style !== null && HIDDEN_STYLE_REGEX.test(style));
 
-  // 1. Structural Noise
-  if (context.structuralTags.has(tagName) && !interactive) return true;
-
-  // 2. Navigation / Layout Noise
-  if (context.flags.navFooter) {
-    if (ALWAYS_NOISE_TAGS.has(tagName)) return true;
-    if (
-      tagName === 'header' &&
-      ((role !== null && NAVIGATION_ROLES.has(role)) ||
-        HEADER_NOISE_PATTERN.test(`${className} ${id}`))
-    )
-      return true;
-    if (tagName === 'aside') return true;
-    if (
-      role !== null &&
-      NAVIGATION_ROLES.has(role) &&
-      (tagName !== 'aside' || role !== 'complementary')
-    )
-      return true;
-  }
-
-  // 3. Hidden Noise
-  if (hidden && !interactive) return true;
-
-  // 4. Positional Noise
-  if (
-    FIXED_OR_HIGH_Z_PATTERN.test(className) &&
-    (element.textContent || '').trim().length <
-      NAV_FOOTER_MIN_CHARS_FOR_PRESERVATION
-  ) {
-    return true;
-  }
-
-  // 5. Promo/Advert Noise
-  if (context.promoEnabled) {
-    const aggTest =
-      context.promoMatchers.aggressive.test(className) ||
-      context.promoMatchers.aggressive.test(id);
-    if (aggTest && !isPrimaryContent(element)) return true;
-
-    if (
-      context.promoMatchers.base.test(className) ||
-      context.promoMatchers.base.test(id)
-    ) {
-      if (!isPrimaryContent(element, true)) return true;
-    }
-  }
-
-  return false;
+  return (
+    isStructuralNoise(tagName, interactive, context) ||
+    isNavigationNoise(tagName, role, className, id, context) ||
+    isHiddenNoise(hidden, interactive) ||
+    isPositionalNoise(className, element) ||
+    isPromoNoise(className, id, element, context)
+  );
 }
 function stripHeadingWrapperDivs(h: Element): void {
   const divs = h.querySelectorAll('div');
