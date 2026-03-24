@@ -179,17 +179,18 @@ class TaskManager {
     if (!internal._capacityCounted) return;
     internal._capacityCounted = false;
 
-    const nextCount = (this.ownerCounts.get(task.ownerKey) ?? 0) - 1;
+    const { ownerKey } = task;
+    const nextCount = (this.ownerCounts.get(ownerKey) ?? 0) - 1;
     if (nextCount > 0) {
-      this.ownerCounts.set(task.ownerKey, nextCount);
+      this.ownerCounts.set(ownerKey, nextCount);
     } else {
-      this.ownerCounts.delete(task.ownerKey);
+      this.ownerCounts.delete(ownerKey);
     }
 
     if (this.activeTaskCount > 0) this.activeTaskCount--;
   }
 
-  private assertTaskCapacity(ownerKey: string): void {
+  private reserveTaskCapacity(ownerKey: string): void {
     const { maxPerOwner, maxTotal } = config.tasks;
 
     if (this.activeTaskCount >= maxTotal) {
@@ -205,6 +206,9 @@ class TaskManager {
         `Task capacity reached for owner (${maxPerOwner} tasks)`
       );
     }
+
+    this.ownerCounts.set(ownerKey, (this.ownerCounts.get(ownerKey) ?? 0) + 1);
+    this.activeTaskCount += 1;
   }
 
   createTask(
@@ -213,7 +217,7 @@ class TaskManager {
     ownerKey: string = DEFAULT_OWNER_KEY
   ): TaskState {
     this.removeExpiredTasks();
-    this.assertTaskCapacity(ownerKey);
+    this.reserveTaskCapacity(ownerKey);
 
     const now = new Date();
     const createdAt = now.toISOString();
@@ -232,8 +236,6 @@ class TaskManager {
     };
 
     this.tasks.set(task.taskId, task);
-    this.ownerCounts.set(ownerKey, (this.ownerCounts.get(ownerKey) ?? 0) + 1);
-    this.activeTaskCount += 1;
     this.ensureCleanupLoop();
     return task;
   }

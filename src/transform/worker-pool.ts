@@ -757,6 +757,16 @@ class WorkerPool implements TransformWorkerPool {
     return inflight;
   }
 
+  private markBusy(workerIndex: number, taskId: string): void {
+    const slot = this.workers[workerIndex];
+    if (!slot) return;
+    if (!slot.busy) {
+      slot.busy = true;
+      this.busyCount += 1;
+    }
+    slot.currentTaskId = taskId;
+  }
+
   private markIdle(workerIndex: number): void {
     const slot = this.workers[workerIndex];
     if (!slot) return;
@@ -843,9 +853,7 @@ class WorkerPool implements TransformWorkerPool {
 
     if (!task) return;
 
-    slot.busy = true;
-    slot.currentTaskId = task.id;
-    this.busyCount += 1;
+    this.markBusy(workerIndex, task.id);
 
     const timeout = this.registerInflight(task, workerIndex, slot);
     this.sendToWorker(task, slot, workerIndex, timeout);

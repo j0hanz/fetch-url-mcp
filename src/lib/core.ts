@@ -1041,6 +1041,12 @@ let stdioMcpLogLevel: McpLogLevel | undefined;
 let stderrAvailable = true;
 process.stderr.on('error', () => {
   stderrAvailable = false;
+  // Recover after transient EPIPE — stderr may become writable again.
+  setTimeout(() => {
+    if (!process.stderr.destroyed && !process.stderr.writableEnded) {
+      stderrAvailable = true;
+    }
+  }, 5_000).unref();
 });
 export function setMcpServer(server: McpServer): void {
   if (mcpServer) {

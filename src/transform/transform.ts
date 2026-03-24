@@ -1103,6 +1103,20 @@ function resolveContentTitle(params: {
   };
 }
 
+function resolveSourceTitle(
+  base: BaseContentSource,
+  candidateTitle: string | undefined,
+  url: string
+): Pick<ContentSource, 'title'> {
+  return resolveContentTitle({
+    primaryHeading: base.primaryHeading,
+    title: candidateTitle,
+    preferPrimaryHeading:
+      TransformHeuristics.isGithubRepositoryRootUrl(url) ||
+      shouldPreferPrimaryHeadingTitle(base.primaryHeading, candidateTitle),
+  });
+}
+
 const CONTENT_REGION_SELECTORS = [
   'article',
   'main',
@@ -1217,13 +1231,7 @@ function buildArticleSource(
     article.title !== undefined
       ? normalizeDocumentTitle(article.title, url)
       : extractedMeta.title;
-  const title = resolveContentTitle({
-    primaryHeading: base.primaryHeading,
-    title: articleTitle,
-    preferPrimaryHeading:
-      TransformHeuristics.isGithubRepositoryRootUrl(url) ||
-      shouldPreferPrimaryHeadingTitle(base.primaryHeading, articleTitle),
-  });
+  const title = resolveSourceTitle(base, articleTitle, url);
 
   return {
     ...base,
@@ -1239,18 +1247,12 @@ function buildDocumentSource(
     resolvedDocument: Document;
     html: string;
     extractedMeta: ExtractedMetadata;
+    url: string;
   }
 ): ContentSource {
-  const { resolvedDocument, html, extractedMeta } = params;
+  const { resolvedDocument, html, extractedMeta, url } = params;
   const contentRoot = TransformHeuristics.findContentRoot(resolvedDocument);
-  const title = resolveContentTitle({
-    primaryHeading: base.primaryHeading,
-    title: extractedMeta.title,
-    preferPrimaryHeading: shouldPreferPrimaryHeadingTitle(
-      base.primaryHeading,
-      extractedMeta.title
-    ),
-  });
+  const title = resolveSourceTitle(base, extractedMeta.title, url);
 
   return {
     ...base,
@@ -1342,6 +1344,7 @@ function buildContentSource(input: BuildContentSourceInput): ContentSource {
       resolvedDocument: preparedDocument.document,
       html: input.html,
       extractedMeta: input.extractedMeta,
+      url: input.url,
     });
   }
 

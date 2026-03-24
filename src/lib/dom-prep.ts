@@ -1531,17 +1531,17 @@ export function evaluateArticleContent(
   document: Document
 ): Document | null {
   if (!passesContentRatioGate(article.textContent.length, document)) {
-    console.log('FAILED passesContentRatioGate');
+    logDebug('FAILED passesContentRatioGate');
     return null;
   }
 
   if (!passesRetentionRulesFromHtml(document, article.content)) {
-    console.log('FAILED passesRetentionRulesFromHtml');
+    logDebug('FAILED passesRetentionRulesFromHtml');
     return null;
   }
 
   if (hasTruncatedSentences(article.textContent)) {
-    console.log('FAILED hasTruncatedSentences');
+    logDebug('FAILED hasTruncatedSentences');
     return null;
   }
 
@@ -1551,9 +1551,9 @@ export function evaluateArticleContent(
 
   if (!passesEmptySectionRatio(articleDoc)) {
     const headings = articleDoc.querySelectorAll('h1,h2,h3,h4,h5,h6');
-    console.log('FAILED passesEmptySectionRatio:', headings.length, 'headings');
+    logDebug(`FAILED passesEmptySectionRatio: ${headings.length} headings`);
     for (const h of headings) {
-      console.log('H:', h.textContent, hasSectionContent(h));
+      logDebug(`H: ${h.textContent} ${String(hasSectionContent(h))}`);
     }
     return null;
   }

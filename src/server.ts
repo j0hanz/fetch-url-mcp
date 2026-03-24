@@ -34,27 +34,24 @@ import { shutdownTransformWorkerPool } from './transform/transform.js';
  * Icons + server info
  * ------------------------------------------------------------------------------------------------- */
 
-let iconCache: { value: IconInfo | undefined } | null = null;
+let iconPromise: Promise<IconInfo | undefined> | null = null;
 
 async function getLocalIconInfo(): Promise<IconInfo | undefined> {
-  if (iconCache) return iconCache.value;
-
-  const name = 'logo.svg';
-  const mime = 'image/svg+xml';
-  let result: IconInfo | undefined;
-  try {
-    const iconPath = new URL(`../assets/${name}`, import.meta.url);
-    const buffer = await fs.readFile(iconPath);
-    result = {
-      src: `data:${mime};base64,${buffer.toString('base64')}`,
-      mimeType: mime,
-    };
-  } catch {
-    result = undefined;
-  }
-
-  iconCache = { value: result };
-  return result;
+  iconPromise ??= (async () => {
+    const name = 'logo.svg';
+    const mime = 'image/svg+xml';
+    try {
+      const iconPath = new URL(`../assets/${name}`, import.meta.url);
+      const buffer = await fs.readFile(iconPath);
+      return {
+        src: `data:${mime};base64,${buffer.toString('base64')}`,
+        mimeType: mime,
+      };
+    } catch {
+      return undefined;
+    }
+  })();
+  return iconPromise;
 }
 
 const serverInstructions = buildServerInstructions();

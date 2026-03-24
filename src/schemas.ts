@@ -37,26 +37,27 @@ const normalizedMetadataField = (
     .transform((value) => normalizeWithSchema(metadataTextField(max), value))
     .optional();
 
-const normalizedMetadataSchema = z.object({
-  title: normalizedMetadataField(METADATA_LIMITS.title),
-  description: normalizedMetadataField(METADATA_LIMITS.description),
-  author: normalizedMetadataField(METADATA_LIMITS.author),
-  image: normalizedMetadataField(METADATA_LIMITS.image),
-  favicon: normalizedMetadataField(METADATA_LIMITS.favicon),
-  publishedAt: normalizedMetadataField(METADATA_LIMITS.publishedAt),
-  modifiedAt: normalizedMetadataField(METADATA_LIMITS.modifiedAt),
-});
+type MetadataFieldName = keyof typeof METADATA_LIMITS;
+
+function buildMetadataShape<T extends z.ZodType>(
+  fieldBuilder: (max: number) => T
+): Record<MetadataFieldName, T> {
+  return Object.fromEntries(
+    Object.entries(METADATA_LIMITS).map(([key, max]) => [
+      key,
+      fieldBuilder(max),
+    ])
+  ) as Record<MetadataFieldName, T>;
+}
+
+const normalizedMetadataSchema = z.object(
+  buildMetadataShape(normalizedMetadataField)
+);
 
 export const extractedMetadataSchema: z.ZodType<ExtractedMetadata> =
-  z.strictObject({
-    title: metadataTextField(METADATA_LIMITS.title).optional(),
-    description: metadataTextField(METADATA_LIMITS.description).optional(),
-    author: metadataTextField(METADATA_LIMITS.author).optional(),
-    image: metadataTextField(METADATA_LIMITS.image).optional(),
-    favicon: metadataTextField(METADATA_LIMITS.favicon).optional(),
-    publishedAt: metadataTextField(METADATA_LIMITS.publishedAt).optional(),
-    modifiedAt: metadataTextField(METADATA_LIMITS.modifiedAt).optional(),
-  });
+  z.strictObject(
+    buildMetadataShape((max) => metadataTextField(max).optional())
+  );
 
 function compactDefined<T extends Record<string, string | undefined>>(
   value: T
