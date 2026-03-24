@@ -288,7 +288,6 @@ class McpSessionGateway {
     const isInitializedMethod =
       method !== null && isInitializedNotification(method);
     const isInitNotification = isInitializedMethod && body.id === undefined;
-    const sessionId = getMcpSessionId(ctx.req);
 
     if (isInitializedMethod && !isInitNotification) {
       sendError(
@@ -301,15 +300,10 @@ class McpSessionGateway {
       return null;
     }
 
-    const authFingerprint = buildAuthFingerprint(ctx.auth);
-    const session = sessionId
-      ? (this.getAuthenticatedSessionById(
-          sessionId,
-          authFingerprint,
-          ctx.res,
-          requestId
-        ) ?? undefined)
-      : undefined;
+    const sessionState = this.getOptionalAuthenticatedSession(ctx, requestId);
+    if (!sessionState) return null;
+    const { sessionId, session } = sessionState;
+
     if (
       !this.ensurePostSessionAccess({
         ctx,
@@ -458,15 +452,14 @@ class McpSessionGateway {
     return session.transport;
   }
 
-  private getRequiredAuthenticatedSession(
+  private getOptionalAuthenticatedSession(
     ctx: AuthenticatedContext,
-    requestId: JsonRpcId = null,
-    options?: { requireInitialized?: boolean }
-  ): { sessionId: string; session: SessionRecord } | null {
-    const sessionId = this.getRequiredSessionId(ctx.req, ctx.res, requestId);
-    if (!sessionId) return null;
-    const authFingerprint = buildAuthFingerprint(ctx.auth);
+    requestId: JsonRpcId = null
+  ): { sessionId: string | null; session: SessionRecord | undefined } | null {
+    const sessionId = getMcpSessionId(ctx.req);
+    if (!sessionId) return { sessionId: null, session: undefined };
 
+    const authFingerprint = buildAuthFingerprint(ctx.auth);
     const session = this.getAuthenticatedSessionById(
       sessionId,
       authFingerprint,
@@ -474,6 +467,24 @@ class McpSessionGateway {
       requestId
     );
     if (!session) return null;
+
+    return { sessionId, session };
+  }
+
+  private getRequiredAuthenticatedSession(
+    ctx: AuthenticatedContext,
+    requestId: JsonRpcId = null,
+    options?: { requireInitialized?: boolean }
+  ): { sessionId: string; session: SessionRecord } | null {
+    const state = this.getOptionalAuthenticatedSession(ctx, requestId);
+    if (!state) return null;
+
+    const { sessionId, session } = state;
+    if (!sessionId || !session) {
+      sendError(ctx.res, -32600, 'Missing session ID', 400, requestId);
+      return null;
+    }
+
     if (!this.ensureSessionProtocolVersion(ctx, session)) return null;
     if (options?.requireInitialized && !session.protocolInitialized) {
       sendError(ctx.res, -32600, 'Session not initialized', 400, requestId);
@@ -481,18 +492,6 @@ class McpSessionGateway {
     }
 
     return { sessionId, session };
-  }
-
-  private getRequiredSessionId(
-    req: IncomingMessage,
-    res: ServerResponse,
-    requestId: JsonRpcId = null
-  ): string | null {
-    const sessionId = getMcpSessionId(req);
-    if (sessionId) return sessionId;
-
-    sendError(res, -32600, 'Missing session ID', 400, requestId);
-    return null;
   }
 
   private getAuthenticatedSessionById(
@@ -535,6 +534,72 @@ class McpSessionGateway {
     if (sessionId) this.store.touch(sessionId);
   }
 
+  private createSessionInitTimeout(
+    sessionId: string,
+    tracker: ReturnType<typeof createSlotTracker>,
+    unpublishedSession: {
+      server: McpServer;
+      transport: StreamableHTTPServerTransport;
+    }
+  ): NodeJS.Timeout {
+    const initTimeout = setTimeout(() => {
+      const session = this.store.get(sessionId);
+      if (session) {
+        if (session.protocolInitialized) {
+          this.clearSessionInitTimeout(sessionId);
+          return;
+        }
+
+        this.cleanupSessionRecord(sessionId, 'session-init-timeout');
+        return;
+      }
+
+      tracker.releaseSlot();
+      void teardownUnregisteredSessionResources(
+        unpublishedSession,
+        'session-init-timeout'
+      );
+    }, config.server.sessionInitTimeoutMs);
+    initTimeout.unref();
+
+    return initTimeout;
+  }
+
+  private async connectTransport(
+    sessionServer: McpServer,
+    transportImpl: StreamableHTTPServerTransport,
+    initTimeout: NodeJS.Timeout,
+    tracker: ReturnType<typeof createSlotTracker>,
+    unpublishedSession: {
+      server: McpServer;
+      transport: StreamableHTTPServerTransport;
+    },
+    sessionId: string
+  ): Promise<boolean> {
+    const connectState = { transportClosed: false };
+    transportImpl.onclose = () => {
+      connectState.transportClosed = true;
+      clearTimeout(initTimeout);
+      this.sessionInitTimeouts.delete(sessionId);
+      tracker.releaseSlot();
+    };
+
+    try {
+      const transport = createTransportAdapter(transportImpl);
+      await sessionServer.connect(transport);
+    } catch (err) {
+      clearTimeout(initTimeout);
+      tracker.releaseSlot();
+      void teardownUnregisteredSessionResources(
+        unpublishedSession,
+        'session-connect-failed'
+      );
+      throw err;
+    }
+
+    return !connectState.transportClosed;
+  }
+
   private async createNewSession(
     ctx: AuthenticatedContext,
     requestId: JsonRpcId,
@@ -565,50 +630,24 @@ class McpSessionGateway {
       transport: transportImpl,
     };
 
-    const initTimeout = setTimeout(() => {
-      const session = this.store.get(newSessionId);
-      if (session) {
-        if (session.protocolInitialized) {
-          this.clearSessionInitTimeout(newSessionId);
-          return;
-        }
+    const initTimeout = this.createSessionInitTimeout(
+      newSessionId,
+      tracker,
+      unpublishedSession
+    );
 
-        this.cleanupSessionRecord(newSessionId, 'session-init-timeout');
-        return;
-      }
-
-      tracker.releaseSlot();
-      void teardownUnregisteredSessionResources(
-        unpublishedSession,
-        'session-init-timeout'
-      );
-    }, config.server.sessionInitTimeoutMs);
-    initTimeout.unref();
-
-    const connectState = { transportClosed: false };
-    transportImpl.onclose = () => {
-      connectState.transportClosed = true;
-      clearTimeout(initTimeout);
-      this.sessionInitTimeouts.delete(newSessionId);
-      tracker.releaseSlot();
-    };
-
-    try {
-      const transport = createTransportAdapter(transportImpl);
-      await sessionServer.connect(transport);
-    } catch (err) {
-      clearTimeout(initTimeout);
-      tracker.releaseSlot();
-      void teardownUnregisteredSessionResources(
-        unpublishedSession,
-        'session-connect-failed'
-      );
-      throw err;
-    }
+    const isConnected = await this.connectTransport(
+      sessionServer,
+      transportImpl,
+      initTimeout,
+      tracker,
+      unpublishedSession,
+      newSessionId
+    );
 
     tracker.releaseSlot();
 
-    if (connectState.transportClosed) {
+    if (!isConnected) {
       void teardownUnregisteredSessionResources(
         unpublishedSession,
         'session-closed-during-connect'
@@ -826,34 +865,54 @@ class HttpDispatcher {
 // Body parse error responses
 // ---------------------------------------------------------------------------
 
+const DEFAULT_BODY_ERROR = {
+  statusCode: 400,
+  mcpCode: -32700,
+  mcpMsg: 'Parse error',
+  restMsg: 'Invalid JSON',
+};
+
+const BODY_PARSE_ERRORS: Record<
+  string,
+  { statusCode: number; mcpCode: number; mcpMsg: string; restMsg: string }
+> = {
+  'payload-too-large': {
+    statusCode: 413,
+    mcpCode: -32600,
+    mcpMsg: 'Request body too large',
+    restMsg: 'Payload too large',
+  },
+  'read-failed': {
+    statusCode: 400,
+    mcpCode: -32600,
+    mcpMsg: 'Request body read failed',
+    restMsg: 'Invalid JSON',
+  },
+  default: DEFAULT_BODY_ERROR,
+};
+
 function sendBodyParseError(
   ctx: RequestContext,
   bodyErrorKind: string | null,
   rawReq: IncomingMessage
 ): void {
-  if (ctx.url.pathname === '/mcp') {
-    switch (bodyErrorKind) {
-      case 'payload-too-large':
-        sendError(ctx.res, -32600, 'Request body too large', 413, null);
-        break;
-      case 'read-failed':
-        if (!rawReq.destroyed) {
-          sendError(ctx.res, -32600, 'Request body read failed', 400, null);
-        }
-        break;
-      case 'invalid-json':
-      default:
-        sendError(ctx.res, -32700, 'Parse error', 400, null);
-        break;
+  const errorDef =
+    BODY_PARSE_ERRORS[bodyErrorKind ?? 'default'] ?? DEFAULT_BODY_ERROR;
+
+  if (bodyErrorKind !== 'read-failed' || !rawReq.destroyed) {
+    if (ctx.url.pathname === '/mcp') {
+      sendError(
+        ctx.res,
+        errorDef.mcpCode,
+        errorDef.mcpMsg,
+        errorDef.statusCode,
+        null
+      );
+    } else {
+      sendJson(ctx.res, errorDef.statusCode, { error: errorDef.restMsg });
     }
-  } else {
-    sendJson(ctx.res, bodyErrorKind === 'payload-too-large' ? 413 : 400, {
-      error:
-        bodyErrorKind === 'payload-too-large'
-          ? 'Payload too large'
-          : 'Invalid JSON',
-    });
   }
+
   drainRequest(rawReq);
 }
 
@@ -930,6 +989,7 @@ class HttpRequestPipeline {
       return false;
     }
     if (!this.rateLimiter.check(ctx)) {
+      sendJson(ctx.res, 429, { error: 'Too Many Requests' });
       drainRequest(rawReq);
       return false;
     }
