@@ -4,7 +4,6 @@ import diagnosticsChannel from 'node:diagnostics_channel';
 import { type ServerResponse } from 'node:http';
 import { posix as pathPosix } from 'node:path';
 import { PassThrough, Readable, Transform } from 'node:stream';
-import { buffer as consumeBuffer } from 'node:stream/consumers';
 import { finished, pipeline } from 'node:stream/promises';
 import { type ReadableStream as NodeReadableStream } from 'node:stream/web';
 import tls from 'node:tls';
@@ -531,6 +530,31 @@ const CLIENT_ERROR_CODES = new Set([
   'ENODATA',
   'EINVAL',
 ]);
+
+function mapAbortError(
+  error: unknown,
+  timeoutMs: number,
+  url: string
+): FetchError {
+  return isTimeoutError(error)
+    ? createFetchError({ kind: 'timeout', timeout: timeoutMs }, url)
+    : createFetchError({ kind: 'canceled' }, url);
+}
+
+function mapSystemError(error: NodeJS.ErrnoException, url: string): FetchError {
+  const { code, message } = error;
+
+  if (code === 'ETIMEOUT') {
+    return new FetchError(message, url, 504, { code });
+  }
+
+  if (code && CLIENT_ERROR_CODES.has(code)) {
+    return new FetchError(message, url, 400, { code });
+  }
+
+  return createFetchError({ kind: 'network', message }, url);
+}
+
 function mapFetchError(
   error: unknown,
   fallbackUrl: string,
@@ -541,38 +565,27 @@ function mapFetchError(
   const url = resolveErrorUrl(error, fallbackUrl);
 
   if (isAbortError(error) || isTimeoutError(error)) {
-    return isTimeoutError(error)
-      ? createFetchError({ kind: 'timeout', timeout: timeoutMs }, url)
-      : createFetchError({ kind: 'canceled' }, url);
+    return mapAbortError(error, timeoutMs, url);
   }
 
-  if (!isError(error))
+  if (!isError(error)) {
     return createFetchError(
       { kind: 'unknown', message: 'Unexpected error' },
       url
     );
-
-  if (!isSystemError(error)) {
-    const err = error as { message: string; cause?: unknown };
-    const causeStr =
-      err.cause instanceof Error ? err.cause.message : String(err.cause);
-    return createFetchError(
-      { kind: 'network', message: `${err.message}. Cause: ${causeStr}` },
-      url
-    );
   }
 
-  const { code } = error;
-
-  if (code === 'ETIMEOUT') {
-    return new FetchError(error.message, url, 504, { code });
+  if (isSystemError(error)) {
+    return mapSystemError(error, url);
   }
 
-  if (code && CLIENT_ERROR_CODES.has(code)) {
-    return new FetchError(error.message, url, 400, { code });
-  }
-
-  return createFetchError({ kind: 'network', message: error.message }, url);
+  const err = error as { message: string; cause?: unknown };
+  const causeStr =
+    err.cause instanceof Error ? err.cause.message : String(err.cause);
+  return createFetchError(
+    { kind: 'network', message: `${err.message}. Cause: ${causeStr}` },
+    url
+  );
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -1251,6 +1264,20 @@ class ResponseTextReader {
 
     const limit = maxBytes <= 0 ? Number.POSITIVE_INFINITY : maxBytes;
 
+    const contentLength = response.headers.get('content-length');
+    if (contentLength) {
+      const parsedLength = parseInt(contentLength, 10);
+      if (!Number.isNaN(parsedLength) && parsedLength > limit) {
+        throw createFetchError(
+          {
+            kind: 'network',
+            message: `Payload too large (${parsedLength} bytes). Streaming is unavailable and response exceeds limit of ${limit} bytes.`,
+          },
+          url
+        );
+      }
+    }
+
     const arrayBuffer = await response.arrayBuffer();
     const truncated = Number.isFinite(limit) && arrayBuffer.byteLength > limit;
     const length = truncated ? limit : arrayBuffer.byteLength;
@@ -1292,30 +1319,33 @@ class ResponseTextReader {
       encoding
     );
 
-    const guarded = source.pipe(guard);
-    const abortHandler = (): void => {
-      source.destroy();
-      guard.destroy();
-    };
-
-    if (signal) {
-      signal.addEventListener('abort', abortHandler, { once: true });
-    }
+    const chunks: Uint8Array[] = [];
 
     try {
-      const buffer = await consumeBuffer(guarded);
+      await pipeline(
+        source,
+        guard,
+        async (iterable: AsyncIterable<Uint8Array>) => {
+          for await (const chunk of iterable) {
+            chunks.push(chunk);
+          }
+        },
+        // Only pass `{ signal }` if signal exists to avoid type errors with exactOptionalPropertyTypes
+        ...(signal ? [{ signal }] : [])
+      );
+
       return {
-        buffer,
+        buffer: concatUint8Arrays(chunks, guard.total),
         encoding: guard.effectiveEncoding,
         size: guard.total,
         truncated: false,
       };
     } catch (error: unknown) {
-      if (signal?.aborted) throw createFetchError({ kind: 'aborted' }, url);
+      if (signal?.aborted || isAbortError(error)) {
+        throw createFetchError({ kind: 'aborted' }, url);
+      }
       if (error instanceof FetchError) throw error;
       if (error instanceof MaxBytesError) {
-        source.destroy();
-        guard.destroy();
         return {
           buffer: concatUint8Arrays(guard.chunks, guard.total),
           encoding: guard.effectiveEncoding,
@@ -1324,10 +1354,6 @@ class ResponseTextReader {
         };
       }
       throw error;
-    } finally {
-      if (signal) {
-        signal.removeEventListener('abort', abortHandler);
-      }
     }
   }
 }
