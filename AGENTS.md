@@ -28,7 +28,8 @@ A web content fetcher MCP server that converts HTML to clean, AI and human reada
 
 ## Testing Strategy
 
-- Unit tests cover core logic in isolation, including URL normalization, cache key generation, HTML parsing, Markdown conversion, and worker pool behavior.
+- Unit tests cover core logic in isolation, such as URL normalization, cache key generation, and transform correctness with various HTML inputs
+- Integration tests validate the full fetch pipeline, including cache hits/misses, transform outcomes, and end-to-end behavior.
 
 ## Commands
 
@@ -47,13 +48,13 @@ A web content fetcher MCP server that converts HTML to clean, AI and human reada
 ## Directory Overview
 
 ```text
+├── __tests__           # test suites
 ├── .github/            # CI/workflows and repo automation
 ├── .vscode/
 ├── assets/             # static assets
 ├── memory_db/
 ├── scripts/            # automation scripts
 ├── src/                # application source
-├── tests/              # test suites
 ├── .prettierignore     # formatter config
 ├── .prettierrc         # formatter config
 ├── docker-compose.yml  # local container orchestration
