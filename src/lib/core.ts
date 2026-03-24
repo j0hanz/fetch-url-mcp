@@ -896,6 +896,16 @@ class InMemoryCacheStore {
     const expiresAtMs = now + this.ttlMs;
     const entrySize = content.length;
 
+    // Reject oversized entries before deleting the old one to avoid data loss
+    if (entrySize > this.maxBytes) {
+      logWarn('Cache entry exceeds max size', {
+        key: cacheKey,
+        size: entrySize,
+        max: this.maxBytes,
+      });
+      return;
+    }
+
     const isUpdate = this.entries.has(cacheKey);
     if (isUpdate) {
       this.delete(cacheKey);
@@ -1398,6 +1408,7 @@ export {
 const MIN_CLEANUP_INTERVAL_MS = 10_000;
 const MAX_CLEANUP_INTERVAL_MS = 60_000;
 const SESSION_CLOSE_BATCH_SIZE = 10;
+const SESSION_CLOSE_TIMEOUT_MS = 5_000;
 function getCleanupIntervalMs(sessionTtlMs: number): number {
   return Math.min(
     Math.max(Math.floor(sessionTtlMs / 2), MIN_CLEANUP_INTERVAL_MS),
@@ -1493,7 +1504,7 @@ class SessionCleanupLoop {
     const timeoutPromise = new Promise<never>((_, reject) => {
       timeoutId = setTimeout(() => {
         reject(new Error('Session close timed out'));
-      }, 5000);
+      }, SESSION_CLOSE_TIMEOUT_MS);
       timeoutId.unref();
     });
 
