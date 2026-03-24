@@ -95,5 +95,6 @@ describe('Heading wrapper div stripping', () => {
       '<h2><div tabindex="-1">anchor</div>Features</h2><p>Feature list.</p>'
     );
     assert.ok(result.includes('Features'), 'Heading text preserved');
+    assert.ok(!result.includes('anchor'), 'Wrapper div must be stripped');
   });
 });

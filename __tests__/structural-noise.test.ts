@@ -243,3 +243,170 @@ describe('Promo token categories', () => {
     );
   });
 });
+
+// ── Complex element preservation ──────────────────────────────────────
+
+describe('Complex element preservation', () => {
+  it('removes small <nav> and <footer> tags', () => {
+    const html = page(
+      '<nav>Link 1</nav><footer><p>Copyright 2024</p></footer>'
+    );
+    const result = removeNoiseFromHtml(html, undefined, 'https://example.com');
+    assert.ok(!result.includes('Link 1'), '<nav> must be removed when small');
+    assert.ok(
+      !result.includes('Copyright'),
+      '<footer> must be removed when small'
+    );
+  });
+
+  it('preserves <nav> and <footer> tags with > 500 characters', () => {
+    const longText = 'x'.repeat(600);
+    const html = page(
+      '<nav>' + longText + '</nav><footer>' + longText + '</footer>'
+    );
+    const result = removeNoiseFromHtml(html, undefined, 'https://example.com');
+    const navMatch = result.match(/<nav/);
+    const footerMatch = result.match(/<footer/);
+    assert.ok(navMatch !== null, '<nav> must be preserved when large');
+    assert.ok(footerMatch !== null, '<footer> must be preserved when large');
+  });
+
+  it('removes <aside>', () => {
+    const html = page('<aside><p>Sidebar info.</p></aside>');
+    const result = removeNoiseFromHtml(html, undefined, 'https://example.com');
+    assert.ok(!result.includes('Sidebar info.'), '<aside> must be removed');
+  });
+
+  it('preserves <aside> if it is primary content', () => {
+    const html =
+      '<html><body><aside><main><p>This is the main article content that must be preserved through noise removal for proper testing purposes. ' +
+      'x'.repeat(100) +
+      '</p></main></aside></body></html>';
+    const result = removeNoiseFromHtml(html, undefined, 'https://example.com');
+    assert.ok(
+      result.includes('This is the main article'),
+      'Main content must be preserved inside <aside>'
+    );
+  });
+
+  it('removes dialogs when small and not containing headings', () => {
+    const html = page('<div role="dialog"><p>Cookie consent</p></div>');
+    const result = removeNoiseFromHtml(html, undefined, 'https://example.com');
+    assert.ok(
+      !result.includes('Cookie consent'),
+      'Small dialog must be removed'
+    );
+  });
+
+  it('preserves dialogs containing a heading', () => {
+    const html = page(
+      '<div role="dialog"><h2>Important</h2><p>Message</p></div>'
+    );
+    const result = removeNoiseFromHtml(html, undefined, 'https://example.com');
+    assert.ok(
+      result.includes('Message'),
+      'Dialog with heading must be preserved'
+    );
+  });
+
+  it('preserves large dialogs', () => {
+    const longText = 'x'.repeat(600);
+    const html = page('<div role="dialog"><p>' + longText + '</p></div>');
+    const result = removeNoiseFromHtml(html, undefined, 'https://example.com');
+    assert.ok(result.includes(longText), 'Large dialog must be preserved');
+  });
+});
+
+// ── Positional noise removal ──────────────────────────────────────────
+
+describe('Positional noise removal', () => {
+  it('removes elements with fixed/sticky positioning and z-index classes', () => {
+    const html = page(
+      '<div class="fixed top-0">Fixed top</div>' +
+        '<div class="sticky top-0">Sticky top</div>' +
+        '<div class="z-50 modal">High z-index</div>'
+    );
+    const result = removeNoiseFromHtml(html, undefined, 'https://example.com');
+    assert.ok(!result.includes('Fixed top'), 'fixed element must be removed');
+    assert.ok(!result.includes('Sticky top'), 'sticky element must be removed');
+    assert.ok(!result.includes('High z-index'), 'z-50 element must be removed');
+  });
+
+  it('preserves large positional elements', () => {
+    const longText = 'x'.repeat(600);
+    const html = page('<div class="fixed top-0">' + longText + '</div>');
+    const result = removeNoiseFromHtml(html, undefined, 'https://example.com');
+    assert.ok(
+      result.includes(longText),
+      'large positional element must be preserved'
+    );
+  });
+});
+
+// ── Interactive custom element states ─────────────────────────────────
+
+describe('Interactive custom element states', () => {
+  it('preserves elements with data-state="inactive" or "closed"', () => {
+    const html = page(
+      '<div data-state="inactive">Inactive element</div>' +
+        '<div data-state="closed">Closed element</div>'
+    );
+    const result = removeNoiseFromHtml(html, undefined, 'https://example.com');
+    assert.ok(
+      result.includes('Inactive element'),
+      'Inactive element must be preserved'
+    );
+    assert.ok(
+      result.includes('Closed element'),
+      'Closed element must be preserved'
+    );
+  });
+
+  it('preserves elements with data-orientation', () => {
+    const html = page(
+      '<div data-orientation="horizontal">Horizontal element</div>'
+    );
+    const result = removeNoiseFromHtml(html, undefined, 'https://example.com');
+    assert.ok(
+      result.includes('Horizontal element'),
+      'data-orientation element must be preserved'
+    );
+  });
+
+  it('preserves elements with data-accordion-item', () => {
+    const html = page('<div data-accordion-item>Accordion item</div>');
+    const result = removeNoiseFromHtml(html, undefined, 'https://example.com');
+    assert.ok(
+      result.includes('Accordion item'),
+      'Accordion item must be preserved'
+    );
+  });
+});
+
+// ── Configuration overrides ───────────────────────────────────────────
+
+describe('Configuration overrides', () => {
+  it('removes custom tokens specified in extraTokens', () => {
+    const originalTokens = config.noiseRemoval.extraTokens;
+    config.noiseRemoval.extraTokens = ['my-custom-promo'];
+    const html = page('<div class="my-custom-promo">Custom promo text</div>');
+    const result = removeNoiseFromHtml(html, undefined, 'https://example.com');
+    assert.ok(
+      !result.includes('Custom promo text'),
+      'Custom promo token should be applied'
+    );
+    config.noiseRemoval.extraTokens = originalTokens;
+  });
+
+  it('removes custom selectors specified in extraSelectors', () => {
+    const originalSelectors = config.noiseRemoval.extraSelectors;
+    config.noiseRemoval.extraSelectors = ['#my-custom-sidebar'];
+    const html = page('<div id="my-custom-sidebar">Sidebar content</div>');
+    const result = removeNoiseFromHtml(html, undefined, 'https://example.com');
+    assert.ok(
+      !result.includes('Sidebar content'),
+      'Custom selector should be applied'
+    );
+    config.noiseRemoval.extraSelectors = originalSelectors;
+  });
+});
