@@ -69,11 +69,11 @@
     "prepublishOnly": "npm run lint && npm run type-check && npm run build"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.27.1",
+    "@modelcontextprotocol/sdk": "^1.28",
     "@mozilla/readability": "^0.6.0",
     "linkedom": "^0.18.12",
     "node-html-markdown": "^2.0.0",
-    "undici": "^7.24.5",
+    "undici": "^7.24.6",
     "zod": "^4.3.6"
   },
   "devDependencies": {
@@ -85,7 +85,7 @@
     "eslint-plugin-de-morgan": "^2.1.1",
     "eslint-plugin-depend": "^1.5.0",
     "eslint-plugin-unused-imports": "^4.4.1",
-    "knip": "^6.0.4",
+    "knip": "^6",
     "prettier": "^3.8.1",
     "tsx": "^4.21.0",
     "typescript": "^5.9.3",
