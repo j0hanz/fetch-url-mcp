@@ -11,16 +11,8 @@ import {
 } from '../schemas.js';
 import { transformBufferToMarkdown } from '../transform/transform.js';
 import { type MarkdownTransformResult } from '../transform/types.js';
-import {
-  config,
-  createCacheKey,
-  get,
-  isEnabled,
-  logDebug,
-  logError,
-  logWarn,
-  set,
-} from './core.js';
+import { createCacheKey, get, isEnabled, set } from './cache.js';
+import { config, logDebug, logError, logWarn } from './core.js';
 import {
   fetchNormalizedUrlBuffer,
   normalizeUrl,

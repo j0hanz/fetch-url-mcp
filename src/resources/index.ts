@@ -19,9 +19,8 @@ import {
   keys as listCacheKeys,
   onCacheUpdate,
   parseCacheKey,
-} from '../lib/core.js';
-import { logWarn } from '../lib/core.js';
-import { config } from '../lib/core.js';
+} from '../lib/cache.js';
+import { config, logWarn } from '../lib/core.js';
 import { registerServerLifecycleCleanup } from '../lib/mcp-interop.js';
 import { buildOptionalIcons, type IconInfo } from '../lib/utils.js';
 import { isObject } from '../lib/utils.js';

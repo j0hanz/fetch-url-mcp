@@ -21,6 +21,7 @@ A web content fetcher MCP server that converts HTML to clean, AI and human reada
 - **Transport split**: stdio mode uses one long-lived `McpServer`; HTTP mode creates one `McpServer` per authenticated session and serves it through `StreamableHTTPServerTransport`
 - **Fetch pipeline**: `src/tools/fetch-url.ts` validates arguments with Zod, emits progress updates, and delegates execution to `performSharedFetch()` for normalization, cache lookup, remote fetch, transform, and response assembly
 - **URL + cache layer**: `src/lib/fetch-pipeline.ts` normalizes URLs, rewrites supported code-host pages to raw endpoints, serializes cached Markdown payloads, and applies inline truncation safeguards for links and code fences
+- **Cache**: `src/lib/cache.ts` provides an LRU in-memory cache store with TTL expiration, byte-budget eviction, and update event notifications; `src/lib/core.ts` re-exports the cache API for backward compatibility
 - **Transform isolation**: `src/transform/worker-pool.ts` runs HTML-to-Markdown work in worker threads with queue backpressure, dynamic pool scaling, cancellation, per-task timeouts, and worker restart on failure
 - **HTTP gateway**: `src/http/native.ts` wraps MCP over HTTP with host/origin validation, auth, rate limiting, health and download routes, protocol-version negotiation, session TTL cleanup, and shutdown draining
 - **Task system**: `src/tasks/manager.ts` keeps owner-scoped task state with TTLs, capacity limits, cancellation, signed pagination cursors, and waiter-based delivery for terminal task results
