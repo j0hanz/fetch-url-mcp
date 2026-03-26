@@ -89,7 +89,6 @@ function isMissingEnvFileError(error: unknown): boolean {
 }
 
 function loadEnvFileIfAvailable(): void {
-  if (typeof process.loadEnvFile !== 'function') return;
   try {
     process.loadEnvFile();
   } catch (error) {
@@ -339,7 +338,22 @@ function resolveWorkerResourceLimits(): WorkerResourceLimits | undefined {
     }
   }
 
-  return hasLimits ? limits : undefined;
+  if (hasLimits) return limits;
+
+  // If no explicit limits are set, apply a default maxOldGenerationSizeMb based on constrained memory if available.
+  // This helps prevent OOM crashes in memory-constrained environments like AWS Lambda.
+  const constrained = process.constrainedMemory();
+  if (constrained > 0) {
+    const availableMb = Math.floor(constrained / (1024 * 1024));
+    // Set maxOldGenerationSizeMb to 75% of available memory, but no less than 64MB to allow some headroom for the young generation and code.
+    limits.maxOldGenerationSizeMb = Math.max(
+      64,
+      Math.floor(availableMb * 0.75)
+    );
+    return limits;
+  }
+
+  return undefined;
 }
 
 interface AuthConfig {
