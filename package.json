@@ -69,7 +69,7 @@
     "prepublishOnly": "npm run lint && npm run type-check && npm run build"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.28",
+    "@modelcontextprotocol/sdk": "^1.27.1",
     "@mozilla/readability": "^0.6.0",
     "linkedom": "^0.18.12",
     "node-html-markdown": "^2.0.0",

@@ -16,35 +16,24 @@ const toolCallMetaSchema = z.looseObject({
   'io.modelcontextprotocol/related-task': relatedTaskMetaSchema.optional(),
 });
 
-export const extendedCallToolRequestSchema = z.looseObject(
-  {
-    method: z.literal('tools/call', 'Expected "tools/call"'),
-    params: z.strictObject(
-      {
-        name: z.string('Expected string').min(1, 'Tool name required'),
-        arguments: z
-          .record(z.string(), z.unknown(), 'Expected object')
+export const extendedCallToolRequestSchema = z.looseObject({
+  method: z.literal('tools/call'),
+  params: z.strictObject({
+    name: z.string().min(1),
+    arguments: z.record(z.string(), z.unknown()).optional(),
+    task: z
+      .strictObject({
+        ttl: z
+          .number()
+          .int()
+          .min(MIN_TASK_TTL_MS)
+          .max(MAX_TASK_TTL_MS)
           .optional(),
-        task: z
-          .strictObject(
-            {
-              ttl: z
-                .number('Expected number (ms)')
-                .int('Expected integer')
-                .min(MIN_TASK_TTL_MS, `Minimum ${MIN_TASK_TTL_MS}ms`)
-                .max(MAX_TASK_TTL_MS, `Maximum ${MAX_TASK_TTL_MS}ms`)
-                .optional(),
-            },
-            'Expected object'
-          )
-          .optional(),
-        _meta: toolCallMetaSchema.optional(),
-      },
-      'Expected object'
-    ),
-  },
-  'Invalid tool call request'
-);
+      })
+      .optional(),
+    _meta: toolCallMetaSchema.optional(),
+  }),
+});
 
 export type ExtendedCallToolRequest = z.infer<
   typeof extendedCallToolRequestSchema
