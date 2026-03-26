@@ -5,7 +5,7 @@ import type {
 } from '@modelcontextprotocol/sdk/types.js';
 import { ErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js';
 import type { ServerResult } from '@modelcontextprotocol/sdk/types.js';
-import { z } from 'zod';
+import type { z } from 'zod';
 
 import { config, logDebug, logError, logWarn } from '../lib/core.js';
 import {
@@ -376,7 +376,7 @@ const TOOL_DEFINITION = {
   title: 'Fetch URL',
   description: FETCH_URL_TOOL_DESCRIPTION,
   inputSchema: fetchUrlInputSchema,
-  outputSchema: z.toJSONSchema(fetchUrlOutputSchema) as Record<string, unknown>,
+  outputSchema: fetchUrlOutputSchema,
   handler: fetchUrlToolHandler,
   annotations: {
     readOnlyHint: true,
@@ -430,7 +430,10 @@ export function registerTools(server: McpServer): ToolRegistrationControls {
       annotations: TOOL_DEFINITION.annotations,
       execution: { taskSupport: 'optional' as const },
       icons: [TOOL_ICON],
-    } as { inputSchema: typeof fetchUrlInputSchema } & Record<string, unknown>,
+    } as {
+      inputSchema: typeof fetchUrlInputSchema;
+      outputSchema: typeof fetchUrlOutputSchema;
+    } & Record<string, unknown>,
     withRequestContextIfMissing(TOOL_DEFINITION.handler)
   );
 
