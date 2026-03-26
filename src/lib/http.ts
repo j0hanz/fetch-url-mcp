@@ -3,7 +3,7 @@ import { hash, randomUUID } from 'node:crypto';
 import diagnosticsChannel from 'node:diagnostics_channel';
 import { type ServerResponse } from 'node:http';
 import { posix as pathPosix } from 'node:path';
-import { PassThrough, Readable, Transform } from 'node:stream';
+import { PassThrough, Readable } from 'node:stream';
 import { finished, pipeline } from 'node:stream/promises';
 import { type ReadableStream as NodeReadableStream } from 'node:stream/web';
 import tls from 'node:tls';
@@ -905,13 +905,14 @@ function createDecompressor(
   | ReturnType<typeof createGunzip>
   | ReturnType<typeof createInflate>
   | ReturnType<typeof createBrotliDecompress> {
+  const options = { chunkSize: 64 * 1024 };
   switch (encoding) {
     case 'gzip':
-      return createGunzip();
+      return createGunzip(options);
     case 'deflate':
-      return createInflate();
+      return createInflate(options);
     case 'br':
-      return createBrotliDecompress();
+      return createBrotliDecompress(options);
   }
 }
 function createPumpedStream(
@@ -1102,102 +1103,6 @@ async function decodeResponseIfNeeded(
 // RESPONSE READING
 // ═══════════════════════════════════════════════════════════════════
 
-function concatUint8Arrays(
-  chunks: Uint8Array[],
-  totalLength: number
-): Uint8Array {
-  const result = new Uint8Array(totalLength);
-  let offset = 0;
-  for (const chunk of chunks) {
-    result.set(chunk, offset);
-    offset += chunk.byteLength;
-  }
-  return result;
-}
-
-class BoundedBufferTransform extends Transform {
-  total = 0;
-  readonly chunks: Uint8Array[] = [];
-  effectiveEncoding: string;
-  private encodingResolved = false;
-  private firstChunk = true;
-
-  constructor(
-    private readonly byteLimit: number,
-    private readonly captureChunks: boolean,
-    private readonly url: string,
-    private readonly declaredEncoding: string | undefined
-  ) {
-    super();
-    this.effectiveEncoding = declaredEncoding ?? 'utf-8';
-  }
-
-  override _transform(
-    chunk: unknown,
-    _encoding: string,
-    callback: (error?: Error | null, data?: Uint8Array) => void
-  ): void {
-    try {
-      const buf: Uint8Array =
-        chunk instanceof Uint8Array
-          ? chunk
-          : new Uint8Array(chunk as ArrayBuffer);
-
-      this.resolveChunkEncoding(buf);
-
-      const binaryError = this.detectBinaryContent(buf);
-      if (binaryError) {
-        callback(binaryError);
-        return;
-      }
-
-      this.enforceByteLimit(buf, callback);
-    } catch (error: unknown) {
-      callback(toError(error));
-    }
-  }
-
-  private resolveChunkEncoding(buf: Uint8Array): void {
-    if (this.encodingResolved) return;
-    this.encodingResolved = true;
-    this.effectiveEncoding = resolveEncoding(this.declaredEncoding, buf);
-  }
-
-  private detectBinaryContent(buf: Uint8Array): FetchError | null {
-    const isFirst = this.firstChunk;
-    this.firstChunk = false;
-    if (
-      (isFirst && hasBinarySignature(buf)) ||
-      (!isUnicodeWideEncoding(this.effectiveEncoding) &&
-        hasNullByte(buf, BINARY_NULL_CHECK_LIMIT))
-    ) {
-      return createBinaryContentError(this.url);
-    }
-    return null;
-  }
-
-  private enforceByteLimit(
-    buf: Uint8Array,
-    callback: (error?: Error | null, data?: Uint8Array) => void
-  ): void {
-    const newTotal = this.total + buf.length;
-    if (newTotal > this.byteLimit) {
-      const remaining = this.byteLimit - this.total;
-      if (remaining > 0) {
-        const slice = buf.subarray(0, remaining);
-        this.total += remaining;
-        if (this.captureChunks) this.chunks.push(slice);
-        this.push(slice);
-      }
-      callback(new MaxBytesError());
-      return;
-    }
-
-    this.total = newTotal;
-    if (this.captureChunks) this.chunks.push(buf);
-    callback(null, buf);
-  }
-}
 function assertNonBinaryContent(
   buffer: Uint8Array,
   encoding: string,
@@ -1312,14 +1217,50 @@ class ResponseTextReader {
       toNodeReadableStream(stream, url, 'response:read-stream-buffer')
     );
 
-    const guard = new BoundedBufferTransform(
-      byteLimit,
-      captureChunks,
-      url,
-      encoding
-    );
-
     const chunks: Uint8Array[] = [];
+    let total = 0;
+    let effectiveEncoding = encoding ?? 'utf-8';
+    let encodingResolved = false;
+    let firstChunk = true;
+
+    async function* guard(
+      sourceIterable: AsyncIterable<Uint8Array>
+    ): AsyncGenerator<Uint8Array, void, unknown> {
+      for await (const chunk of sourceIterable) {
+        const buf: Uint8Array =
+          chunk instanceof Uint8Array
+            ? chunk
+            : new Uint8Array(chunk as ArrayBuffer);
+
+        if (!encodingResolved) {
+          encodingResolved = true;
+          effectiveEncoding = resolveEncoding(encoding, buf);
+        }
+
+        if (
+          (firstChunk && hasBinarySignature(buf)) ||
+          (!isUnicodeWideEncoding(effectiveEncoding) &&
+            hasNullByte(buf, BINARY_NULL_CHECK_LIMIT))
+        ) {
+          throw createBinaryContentError(url);
+        }
+        firstChunk = false;
+
+        const newTotal = total + buf.length;
+        if (newTotal > byteLimit) {
+          const remaining = byteLimit - total;
+          if (remaining > 0) {
+            const slice = buf.subarray(0, remaining);
+            total += remaining;
+            yield slice;
+          }
+          throw new MaxBytesError();
+        }
+
+        total = newTotal;
+        yield buf;
+      }
+    }
 
     try {
       await pipeline(
@@ -1327,7 +1268,7 @@ class ResponseTextReader {
         guard,
         async (iterable: AsyncIterable<Uint8Array>) => {
           for await (const chunk of iterable) {
-            chunks.push(chunk);
+            if (captureChunks) chunks.push(chunk);
           }
         },
         // Only pass `{ signal }` if signal exists to avoid type errors with exactOptionalPropertyTypes
@@ -1335,9 +1276,9 @@ class ResponseTextReader {
       );
 
       return {
-        buffer: concatUint8Arrays(chunks, guard.total),
-        encoding: guard.effectiveEncoding,
-        size: guard.total,
+        buffer: Buffer.concat(chunks, total),
+        encoding: effectiveEncoding,
+        size: total,
         truncated: false,
       };
     } catch (error: unknown) {
@@ -1347,9 +1288,9 @@ class ResponseTextReader {
       if (error instanceof FetchError) throw error;
       if (error instanceof MaxBytesError) {
         return {
-          buffer: concatUint8Arrays(guard.chunks, guard.total),
-          encoding: guard.effectiveEncoding,
-          size: guard.total,
+          buffer: Buffer.concat(chunks, total),
+          encoding: effectiveEncoding,
+          size: total,
           truncated: true,
         };
       }
@@ -1474,38 +1415,37 @@ interface RequestContextAccessor {
 interface UrlRedactor {
   redact(url: string): string;
 }
-type FetchChannelEvent =
-  | {
-      v: 1;
-      type: 'start';
-      requestId: string;
-      method: string;
-      url: string;
-      contextRequestId?: string;
-      operationId?: string;
-    }
-  | {
-      v: 1;
-      type: 'end';
-      requestId: string;
-      status: number;
-      duration: number;
-      contextRequestId?: string;
-      operationId?: string;
-    }
-  | {
-      v: 1;
-      type: 'error';
-      requestId: string;
-      url: string;
-      error: string;
-      code?: string;
-      status?: number;
-      duration: number;
-      contextRequestId?: string;
-      operationId?: string;
-    };
-const fetchChannel = diagnosticsChannel.channel('fetch-url-mcp.fetch');
+interface FetchStartEvent {
+  v: 1;
+  requestId: string;
+  method: string;
+  url: string;
+  contextRequestId?: string;
+  operationId?: string;
+}
+
+interface FetchEndEvent {
+  v: 1;
+  requestId: string;
+  status: number;
+  duration: number;
+  contextRequestId?: string;
+  operationId?: string;
+}
+
+interface FetchErrorEvent {
+  v: 1;
+  requestId: string;
+  url: string;
+  error: string;
+  code?: string;
+  status?: number;
+  duration: number;
+  contextRequestId?: string;
+  operationId?: string;
+}
+
+const fetchChannels = diagnosticsChannel.tracingChannel('fetch-url-mcp.fetch');
 interface FetchTelemetryContext {
   requestId: string;
   startTime: number;
@@ -1552,14 +1492,20 @@ class FetchTelemetry {
     if (operationId) ctx.operationId = operationId;
 
     const fields = this.contextFields(ctx);
-    this.publish({
+    const event: FetchStartEvent = {
       v: 1,
-      type: 'start',
       requestId: ctx.requestId,
       method: ctx.method,
       url: ctx.url,
       ...fields,
-    });
+    };
+    if (fetchChannels.hasSubscribers) {
+      try {
+        fetchChannels.start.publish(event);
+      } catch {
+        // Best-effort telemetry; never crash request path.
+      }
+    }
 
     this.logger.debug('HTTP Request', {
       requestId: ctx.requestId,
@@ -1580,14 +1526,20 @@ class FetchTelemetry {
     const durationLabel = `${Math.round(duration)}ms`;
     const fields = this.contextFields(context);
 
-    this.publish({
+    const event: FetchEndEvent = {
       v: 1,
-      type: 'end',
       requestId: context.requestId,
       status: response.status,
       duration,
       ...fields,
-    });
+    };
+    if (fetchChannels.hasSubscribers) {
+      try {
+        fetchChannels.end.publish(event);
+      } catch {
+        // Best-effort telemetry; never crash request path.
+      }
+    }
 
     const contentType = response.headers.get('content-type') ?? undefined;
     const contentLengthHeader = response.headers.get('content-length');
@@ -1625,9 +1577,8 @@ class FetchTelemetry {
     const code = isSystemError(err) ? err.code : undefined;
     const fields = this.contextFields(context);
 
-    this.publish({
+    const event: FetchErrorEvent = {
       v: 1,
-      type: 'error',
       requestId: context.requestId,
       url: context.url,
       error: err.message,
@@ -1635,7 +1586,14 @@ class FetchTelemetry {
       ...(code !== undefined ? { code } : {}),
       ...(status !== undefined ? { status } : {}),
       ...fields,
-    });
+    };
+    if (fetchChannels.hasSubscribers) {
+      try {
+        fetchChannels.error.publish(event);
+      } catch {
+        // Best-effort telemetry; never crash request path.
+      }
+    }
 
     const logData: Record<string, unknown> = {
       requestId: context.requestId,
@@ -1652,16 +1610,6 @@ class FetchTelemetry {
     }
 
     this.logger.error('HTTP Request Error', logData);
-  }
-
-  private publish(event: FetchChannelEvent): void {
-    if (!fetchChannel.hasSubscribers) return;
-
-    try {
-      fetchChannel.publish(event);
-    } catch {
-      // Best-effort telemetry; never crash request path.
-    }
   }
 }
 
