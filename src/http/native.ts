@@ -42,7 +42,7 @@ import {
   isMcpMessageBody,
   isMcpRequestBody,
   type JsonRpcId,
-} from '../lib/mcp-tools.js';
+} from '../lib/mcp-interop.js';
 import { toError } from '../lib/utils.js';
 import {
   applyHttpServerTuning,

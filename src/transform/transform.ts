@@ -13,18 +13,6 @@ import {
   logWarn,
   redactUrl,
 } from '../lib/core.js';
-import {
-  evaluateArticleContent,
-  extractNoscriptImages,
-  getVisibleTextLength,
-  normalizeTabContent,
-  prepareDocumentForMarkdown,
-  removeNoiseFromHtml,
-  serializeDocumentForMarkdown,
-  stripDocsControls,
-  stripScreenReaderText,
-  surfaceCodeEditorContent,
-} from '../lib/dom-prep.js';
 import { isRawTextContentUrl } from '../lib/http.js';
 import {
   composeAbortSignal,
@@ -39,6 +27,18 @@ import {
   truncateToUtf8Boundary,
 } from '../lib/utils.js';
 
+import {
+  evaluateArticleContent,
+  extractNoscriptImages,
+  getVisibleTextLength,
+  normalizeTabContent,
+  prepareDocumentForMarkdown,
+  removeNoiseFromHtml,
+  serializeDocumentForMarkdown,
+  stripDocsControls,
+  stripScreenReaderText,
+  surfaceCodeEditorContent,
+} from './dom-prep.js';
 import { extractLanguageFromClassName } from './html-translators.js';
 import { translateHtmlFragmentToMarkdown } from './html-translators.js';
 import {
@@ -55,16 +55,14 @@ import {
 import {
   extractMetadata,
   extractMetadataFromHead,
-  mergeMetadata,
-  normalizeDocumentTitle,
-} from './metadata.js';
-import { supplementMarkdownFromNextFlight } from './next-flight.js';
-import {
   isGithubRepositoryRootUrl,
   maybePrependSyntheticTitle,
   maybeStripGithubPrimaryHeading,
+  mergeMetadata,
+  normalizeDocumentTitle,
   shouldPreferPrimaryHeadingTitle,
-} from './title-policy.js';
+} from './metadata.js';
+import { supplementMarkdownFromNextFlight } from './next-flight.js';
 import type {
   ExtractedArticle,
   ExtractedMetadata,

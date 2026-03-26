@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 import { config } from '../dist/lib/core.js';
-import { removeNoiseFromHtml } from '../dist/lib/dom-prep.js';
+import { removeNoiseFromHtml } from '../dist/transform/dom-prep.js';
 
 // Helper: wraps content in a minimal HTML page with enough main content
 // so that body innerHTML > 100 chars after noise removal (MIN_BODY_CONTENT_LENGTH).

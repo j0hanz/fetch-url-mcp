@@ -10,7 +10,7 @@ import {
   isJsonRpcResponseBody,
   isMcpMessageBody,
   isMcpRequestBody,
-} from '../dist/lib/mcp-tools.js';
+} from '../dist/lib/mcp-interop.js';
 import { FetchError } from '../dist/lib/utils.js';
 
 // ── JSON-RPC body validation ────────────────────────────────────────

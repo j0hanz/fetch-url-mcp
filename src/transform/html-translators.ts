@@ -4,8 +4,9 @@ import {
   type TranslatorConfigObject,
 } from 'node-html-markdown';
 
-import { WP_PHOTON_HOST_PATTERN } from '../lib/dom-prep.js';
 import { isLikeNode, isObject } from '../lib/utils.js';
+
+import { WP_PHOTON_HOST_PATTERN } from './dom-prep.js';
 
 // ---------------------------------------------------------------------------
 // Shared constant

@@ -3,7 +3,7 @@ import { describe, it } from 'node:test';
 
 import { parseHTML } from 'linkedom';
 
-import { stripScreenReaderText } from '../dist/lib/dom-prep.js';
+import { stripScreenReaderText } from '../dist/transform/dom-prep.js';
 
 function applyStrip(bodyInnerHtml: string): string {
   const { document } = parseHTML(`<html><body>${bodyInnerHtml}</body></html>`);

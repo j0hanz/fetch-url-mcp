@@ -7,7 +7,7 @@ import {
 
 import { config } from '../lib/core.js';
 import { logWarn, runWithRequestContext } from '../lib/core.js';
-import type { ProgressNotification } from '../lib/progress.js';
+import type { ProgressNotification } from '../lib/mcp-interop.js';
 import { getErrorMessage } from '../lib/utils.js';
 import { isObject } from '../lib/utils.js';
 

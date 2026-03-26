@@ -6,7 +6,7 @@ import { parseHTML } from 'linkedom';
 import {
   evaluateArticleContent,
   getVisibleTextLength,
-} from '../dist/lib/dom-prep.js';
+} from '../dist/transform/dom-prep.js';
 import type { ExtractedArticle } from '../dist/transform/types.js';
 
 function makeArticle(content: string, textContent?: string): ExtractedArticle {

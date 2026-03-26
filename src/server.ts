@@ -13,11 +13,7 @@ import {
   setLogLevel,
   setMcpServer,
 } from './lib/core.js';
-import { setTaskToolCallCapability } from './lib/sdk-interop.js';
-import {
-  abortAllTaskExecutions,
-  registerTaskHandlers,
-} from './lib/task-handlers.js';
+import { setTaskToolCallCapability } from './lib/mcp-interop.js';
 import type { IconInfo } from './lib/utils.js';
 import { toError } from './lib/utils.js';
 
@@ -27,6 +23,10 @@ import {
   registerGetHelpPrompt,
   registerInstructionResource,
 } from './resources/index.js';
+import {
+  abortAllTaskExecutions,
+  registerTaskHandlers,
+} from './tasks/handlers.js';
 import { registerTools as registerFetchUrlTool } from './tools/fetch-url.js';
 import { shutdownTransformWorkerPool } from './transform/transform.js';
 

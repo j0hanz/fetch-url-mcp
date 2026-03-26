@@ -3,7 +3,7 @@ import { describe, it } from 'node:test';
 
 import { parseHTML } from 'linkedom';
 
-import { extractNoscriptImages } from '../dist/lib/dom-prep.js';
+import { extractNoscriptImages } from '../dist/transform/dom-prep.js';
 
 function extract(bodyHtml: string): string {
   const { document } = parseHTML(`<html><body>${bodyHtml}</body></html>`);

@@ -15,10 +15,11 @@ import {
   unregisterMcpSessionServer,
   unregisterMcpSessionServerByServer,
 } from '../lib/core.js';
-import type { JsonRpcId } from '../lib/mcp-tools.js';
-import { cancelTasksForOwner } from '../lib/task-handlers.js';
+import type { JsonRpcId } from '../lib/mcp-interop.js';
 import { createDefaultBlockList, normalizeIpForBlockList } from '../lib/url.js';
 import { getErrorMessage, toError } from '../lib/utils.js';
+
+import { cancelTasksForOwner } from '../tasks/handlers.js';
 
 // ---------------------------------------------------------------------------
 // Shared types

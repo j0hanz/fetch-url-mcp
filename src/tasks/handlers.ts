@@ -9,35 +9,33 @@ import {
 } from '@modelcontextprotocol/sdk/types.js';
 import { z } from 'zod';
 
+import { logWarn, runWithRequestContext } from '../lib/core.js';
+import { getSdkCallToolHandler } from '../lib/mcp-interop.js';
+
 import {
   parseExtendedCallToolRequest,
   withRelatedTaskMeta,
-} from '../tasks/call-contract.js';
+} from './call-contract.js';
 import {
   abortTaskExecution,
   emitTaskStatusNotification,
   handleToolCallRequest,
   throwTaskNotFound,
   toTaskSummary,
-} from '../tasks/execution.js';
-import { taskManager } from '../tasks/manager.js';
+} from './execution.js';
+import { taskManager } from './manager.js';
 import {
   isServerResult,
   parseHandlerExtra,
   resolveTaskOwnerKey,
   resolveToolCallContext,
-} from '../tasks/owner.js';
+} from './owner.js';
 import {
   hasRegisteredTaskCapableTools,
   hasTaskCapableTool,
-} from '../tasks/registry.js';
-import { logWarn, runWithRequestContext } from './core.js';
-import { getSdkCallToolHandler } from './mcp-interop.js';
+} from './registry.js';
 
-export {
-  cancelTasksForOwner,
-  abortAllTaskExecutions,
-} from '../tasks/execution.js';
+export { cancelTasksForOwner, abortAllTaskExecutions } from './execution.js';
 
 /* -------------------------------------------------------------------------------------------------
  * Task handler schemas and registration

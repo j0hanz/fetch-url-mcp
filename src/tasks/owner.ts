@@ -4,8 +4,10 @@ import type { ServerResult } from '@modelcontextprotocol/sdk/types.js';
 import { z } from 'zod';
 
 import { getRequestId, runWithRequestContext } from '../lib/core.js';
-import type { ProgressNotification } from '../lib/progress.js';
-import type { ToolHandlerExtra } from '../lib/progress.js';
+import type {
+  ProgressNotification,
+  ToolHandlerExtra,
+} from '../lib/mcp-interop.js';
 import { isObject } from '../lib/utils.js';
 
 import {

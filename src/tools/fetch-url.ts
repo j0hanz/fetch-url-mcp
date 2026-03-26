@@ -20,12 +20,12 @@ import {
   withSignal,
 } from '../lib/fetch-pipeline.js';
 import type { SharedFetchStage } from '../lib/fetch-pipeline.js';
-import { handleToolError } from '../lib/mcp-tools.js';
+import { handleToolError } from '../lib/mcp-interop.js';
 import {
   createProgressReporter,
+  type ProgressReporter,
   type ToolHandlerExtra,
-} from '../lib/progress.js';
-import type { ProgressReporter } from '../lib/progress.js';
+} from '../lib/mcp-interop.js';
 import {
   composeAbortSignal,
   isAbortError,

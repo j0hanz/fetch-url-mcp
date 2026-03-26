@@ -1,6 +1,6 @@
 import type { ServerResult } from '@modelcontextprotocol/sdk/types.js';
 
-import type { ToolHandlerExtra } from '../lib/progress.js';
+import type { ToolHandlerExtra } from '../lib/mcp-interop.js';
 
 export type TaskCapableToolSupport = 'optional' | 'forbidden';
 

@@ -1,8 +1,9 @@
 import { parseHTML } from 'linkedom';
 
-import type { ExtractedArticle } from '../transform/types.js';
-import { config, logDebug } from './core.js';
-import { CharCode, isWhitespaceChar } from './utils.js';
+import { config, logDebug } from '../lib/core.js';
+import { CharCode, isWhitespaceChar } from '../lib/utils.js';
+
+import type { ExtractedArticle } from './types.js';
 
 // ── Thresholds ──────────────────────────────────────────────────────
 const NOISE_SCAN_LIMIT = 50_000;
