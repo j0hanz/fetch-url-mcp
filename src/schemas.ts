@@ -150,17 +150,23 @@ const cachedPayloadSchema = cachedPayloadCompatSchema
       })
   );
 
-export const fetchUrlInputSchema = z.strictObject({
-  url: z
-    .httpUrl()
-    .min(1)
-    .max(config.constants.maxUrlLength)
-    .describe(`Target URL. Max ${config.constants.maxUrlLength} chars.`),
-  forceRefresh: z
-    .boolean()
-    .optional()
-    .describe('Bypass cache and fetch fresh content.'),
-});
+export const fetchUrlInputSchema = z.strictObject(
+  {
+    url: z
+      .httpUrl('Expected HTTP or HTTPS URL')
+      .min(1, 'URL required')
+      .max(
+        config.constants.maxUrlLength,
+        `URL exceeds ${config.constants.maxUrlLength} chars`
+      )
+      .describe(`Target URL. Max ${config.constants.maxUrlLength} chars.`),
+    forceRefresh: z
+      .boolean('Expected boolean')
+      .optional()
+      .describe('Bypass cache and fetch fresh content.'),
+  },
+  'Invalid input'
+);
 
 export const fetchUrlOutputSchema = z.strictObject({
   url: z.httpUrl().max(config.constants.maxUrlLength).describe('Fetched URL.'),

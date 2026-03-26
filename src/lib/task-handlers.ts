@@ -43,26 +43,50 @@ export {
  * Task handler schemas and registration
  * ------------------------------------------------------------------------------------------------- */
 
-const TaskGetSchema = z.looseObject({
-  method: z.literal('tasks/get'),
-  params: z.looseObject({ taskId: z.string() }),
-});
-const TaskListSchema = z.looseObject({
-  method: z.literal('tasks/list'),
-  params: z
-    .looseObject({
-      cursor: z.string().optional(),
-    })
-    .optional(),
-});
-const TaskCancelSchema = z.looseObject({
-  method: z.literal('tasks/cancel'),
-  params: z.looseObject({ taskId: z.string() }),
-});
-const TaskResultSchema = z.looseObject({
-  method: z.literal('tasks/result'),
-  params: z.looseObject({ taskId: z.string() }),
-});
+const TaskGetSchema = z.looseObject(
+  {
+    method: z.literal('tasks/get', 'Expected "tasks/get"'),
+    params: z.looseObject(
+      { taskId: z.string('Expected string') },
+      'Expected object'
+    ),
+  },
+  'Invalid request'
+);
+const TaskListSchema = z.looseObject(
+  {
+    method: z.literal('tasks/list', 'Expected "tasks/list"'),
+    params: z
+      .looseObject(
+        {
+          cursor: z.string('Expected string').optional(),
+        },
+        'Expected object'
+      )
+      .optional(),
+  },
+  'Invalid request'
+);
+const TaskCancelSchema = z.looseObject(
+  {
+    method: z.literal('tasks/cancel', 'Expected "tasks/cancel"'),
+    params: z.looseObject(
+      { taskId: z.string('Expected string') },
+      'Expected object'
+    ),
+  },
+  'Invalid request'
+);
+const TaskResultSchema = z.looseObject(
+  {
+    method: z.literal('tasks/result', 'Expected "tasks/result"'),
+    params: z.looseObject(
+      { taskId: z.string('Expected string') },
+      'Expected object'
+    ),
+  },
+  'Invalid request'
+);
 function resolveOwnerScopedExtra(extra: unknown): {
   parsedExtra: ReturnType<typeof parseHandlerExtra>;
   ownerKey: string;
