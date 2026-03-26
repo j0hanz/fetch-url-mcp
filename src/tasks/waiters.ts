@@ -125,7 +125,7 @@ export async function waitForTerminalTask<TTask extends WaitableTask>(options: {
 
   if (options.signal?.aborted) {
     onAbort();
-    return;
+    return promise;
   }
 
   options.registry.add(options.taskId, waiter);

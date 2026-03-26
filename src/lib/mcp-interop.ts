@@ -255,7 +255,7 @@ export function registerServerLifecycleCleanup(
 /**
  * Retrieves the SDK's internal request-handler map.
  *
- * Depends on SDK private API `_requestHandlers` (verified against ^1.27.1).
+ * Depends on SDK private API `_requestHandlers` (verified against ^1.28).
  * If the SDK changes this internal, the sdk-compat-guard.test.ts tests will fail.
  */
 export function getSdkCallToolHandler(
@@ -271,7 +271,7 @@ export function getSdkCallToolHandler(
 /**
  * Patches the SDK's internal capabilities to enable/disable task-mode tool calls.
  *
- * Depends on SDK private API `_capabilities.tasks.requests` (verified against ^1.27.1).
+ * Depends on SDK private API `_capabilities.tasks.requests` (verified against ^1.28).
  * If the SDK changes this internal, the sdk-compat-guard.test.ts tests will fail.
  */
 export function setTaskToolCallCapability(

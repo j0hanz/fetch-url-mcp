@@ -100,8 +100,8 @@ function resolveNextTaskStatus(
 }
 
 function normalizeTaskTtl(ttl: number | undefined): number {
-  if (!Number.isFinite(ttl)) return DEFAULT_TTL_MS;
-  return Math.max(MIN_TTL_MS, Math.min(Math.trunc(Number(ttl)), MAX_TTL_MS));
+  if (ttl === undefined || !Number.isFinite(ttl)) return DEFAULT_TTL_MS;
+  return Math.max(MIN_TTL_MS, Math.min(Math.trunc(ttl), MAX_TTL_MS));
 }
 
 class TaskManager {

@@ -3,8 +3,8 @@ import diagnosticsChannel from 'node:diagnostics_channel';
 import { isProbablyReaderable, Readability } from '@mozilla/readability';
 import { parseHTML } from 'linkedom';
 
-import { config } from '../lib/core.js';
 import {
+  config,
   getOperationId,
   getRequestId,
   logDebug,

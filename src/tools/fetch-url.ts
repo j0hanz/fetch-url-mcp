@@ -20,19 +20,19 @@ import {
   withSignal,
 } from '../lib/fetch-pipeline.js';
 import type { SharedFetchStage } from '../lib/fetch-pipeline.js';
-import { handleToolError } from '../lib/mcp-interop.js';
 import {
   createProgressReporter,
+  handleToolError,
   type ProgressReporter,
   type ToolHandlerExtra,
 } from '../lib/mcp-interop.js';
 import {
   composeAbortSignal,
   isAbortError,
+  isObject,
   parseUrlOrNull,
   toError,
 } from '../lib/utils.js';
-import { isObject } from '../lib/utils.js';
 import { formatZodError } from '../lib/zod.js';
 
 import {
@@ -437,11 +437,9 @@ export function registerTools(server: McpServer): ToolRegistrationControls {
     withRequestContextIfMissing(TOOL_DEFINITION.handler)
   );
 
-  const registeredToolRecord = registeredTool as Record<string, unknown>;
-
   const updateTaskSupport = (support: TaskCapableToolSupport): void => {
     setTaskCapableToolSupport(FETCH_URL_TOOL_NAME, support);
-    registeredToolRecord.execution = { taskSupport: support };
+    registeredTool.execution = { taskSupport: support };
   };
 
   updateTaskSupport('optional');

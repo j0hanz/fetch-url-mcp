@@ -18,19 +18,18 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
 
-import { config, enableHttpMode } from '../lib/core.js';
 import {
+  composeCloseHandlers,
+  config,
+  createSessionStore,
+  createSlotTracker,
+  enableHttpMode,
+  ensureSessionCapacity,
   logError,
   logInfo,
   registerMcpSessionServer,
-  runWithRequestContext,
-} from '../lib/core.js';
-import {
-  composeCloseHandlers,
-  createSessionStore,
-  createSlotTracker,
-  ensureSessionCapacity,
   reserveSessionSlot,
+  runWithRequestContext,
   type SessionStore,
   startSessionCleanupLoop,
 } from '../lib/core.js';
@@ -43,12 +42,12 @@ import {
   isMcpRequestBody,
   type JsonRpcId,
 } from '../lib/mcp-interop.js';
-import { toError } from '../lib/utils.js';
 import {
   applyHttpServerTuning,
   drainConnectionsOnShutdown,
+  isObject,
+  toError,
 } from '../lib/utils.js';
-import { isObject } from '../lib/utils.js';
 
 import { createMcpServerForHttpSession } from '../server.js';
 import {
