@@ -1183,6 +1183,7 @@ const LOG_LEVEL_ALIASES: Readonly<Record<string, McpLogLevel>> = {
 function normalizeLogLevel(level: string): McpLogLevel | undefined {
   return LOG_LEVEL_ALIASES[level.toLowerCase()];
 }
+// Map internal log levels to standard RFC 5424 severities
 function toMcpLogLevel(level: LogLevel): McpLogLevel {
   return level === 'warn' ? 'warning' : level;
 }

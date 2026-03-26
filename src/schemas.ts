@@ -159,7 +159,9 @@ export const fetchUrlInputSchema = z.strictObject(
         config.constants.maxUrlLength,
         `URL exceeds ${config.constants.maxUrlLength} chars`
       )
-      .describe(`Target URL. Max ${config.constants.maxUrlLength} chars.`),
+      .describe(
+        `Target URL. Max ${config.constants.maxUrlLength} chars. Example: https://example.com`
+      ),
     forceRefresh: z
       .boolean('Expected boolean')
       .optional()
