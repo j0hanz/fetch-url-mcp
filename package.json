@@ -74,7 +74,7 @@
     "test:coverage": "node scripts/tasks.mjs test --coverage",
     "knip": "knip",
     "knip:fix": "knip --fix",
-    "inspector": "npm run build && npx -y @modelcontextprotocol/inspector node dist/index.js --stdio",
+    "inspector": "npm run build && npx -y @modelcontextprotocol/inspector node dist/index.js",
     "prepublishOnly": "npm run lint && npm run type-check && npm run build"
   },
   "dependencies": {
