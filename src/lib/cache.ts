@@ -50,6 +50,10 @@ interface CacheEntryMetadata {
   title?: string;
   scopeIds?: string[];
 }
+
+export interface CacheEntryScopeView {
+  scopeIds: string[];
+}
 interface StoredCacheEntry extends CacheEntry {
   expiresAtMs: number;
 }
@@ -359,6 +363,14 @@ export function getEntryMeta(
     ...(entry.fetchedAt ? { fetchedAt: entry.fetchedAt } : {}),
   };
 }
+
+export function isCacheEntryVisibleToScope(
+  scopeId: string,
+  meta: CacheEntryScopeView
+): boolean {
+  return meta.scopeIds.includes(scopeId);
+}
+
 export function isEnabled(): boolean {
   return store.isEnabled();
 }

@@ -66,6 +66,14 @@ function createSessionHeaders(
   };
 }
 
+function createDownloadHeaders(sessionId?: string): HeadersInit {
+  return {
+    accept: 'text/markdown',
+    'x-api-key': TEST_API_KEY,
+    ...(sessionId ? { 'mcp-session-id': sessionId } : {}),
+  };
+}
+
 async function parseMcpResponse<T>(response: Response): Promise<T> {
   const body = await response.text();
   const trimmed = body.trim();
@@ -251,5 +259,69 @@ describe('HTTP native gateway routing', () => {
 
     assert.equal(readResponseB.status, 200);
     assert.equal(readPayloadB.error?.code, -32002);
+  });
+
+  it('requires the owning MCP session for cached downloads', async () => {
+    const sessionA = await initializeSession(baseUrl);
+    const sessionB = await initializeSession(baseUrl);
+    const namespace = 'markdown';
+    const cacheKey = createCacheKey(
+      namespace,
+      `https://example.com/download-${Date.now()}`
+    );
+
+    assert.ok(cacheKey);
+
+    setCacheEntry(
+      cacheKey,
+      stringifyCachedPayload({ markdown: '# Session A Download' }),
+      {
+        url: 'https://example.com/download',
+        title: 'Session A Download',
+        scopeIds: [toCacheScopeId(sessionA)],
+      }
+    );
+
+    const hash = cacheKey.split(':')[1];
+    assert.ok(hash);
+
+    const missingSessionResponse = await fetch(
+      `${baseUrl}/mcp/downloads/${namespace}/${hash}`,
+      {
+        headers: createDownloadHeaders(),
+      }
+    );
+
+    assert.equal(missingSessionResponse.status, 400);
+    assert.deepEqual(await missingSessionResponse.json(), {
+      error: 'Missing MCP-Session-ID header',
+    });
+
+    const wrongSessionResponse = await fetch(
+      `${baseUrl}/mcp/downloads/${namespace}/${hash}`,
+      {
+        headers: createDownloadHeaders(sessionB),
+      }
+    );
+
+    assert.equal(wrongSessionResponse.status, 404);
+    assert.deepEqual(await wrongSessionResponse.json(), {
+      error: 'Not found or expired',
+      code: 'NOT_FOUND',
+    });
+
+    const ownerResponse = await fetch(
+      `${baseUrl}/mcp/downloads/${namespace}/${hash}`,
+      {
+        headers: createDownloadHeaders(sessionA),
+      }
+    );
+
+    assert.equal(ownerResponse.status, 200);
+    assert.equal(
+      ownerResponse.headers.get('content-type'),
+      'text/markdown; charset=utf-8'
+    );
+    assert.equal(await ownerResponse.text(), '# Session A Download');
   });
 });

@@ -16,6 +16,7 @@ import {
 import {
   get as getCacheEntry,
   getEntryMeta,
+  isCacheEntryVisibleToScope,
   keys as listCacheKeys,
   onCacheUpdate,
   parseCacheKey,
@@ -28,6 +29,8 @@ import { isObject } from '../lib/utils.js';
 
 import { parseCachedPayload, resolveCachedPayloadContent } from '../schemas.js';
 import { FETCH_URL_TOOL_NAME } from '../tools/fetch-url.js';
+
+export { isCacheEntryVisibleToScope } from '../lib/cache.js';
 
 const RESOURCE_NOT_FOUND_ERROR_CODE = -32002;
 
@@ -47,10 +50,6 @@ const CACHE_RESOURCE_PREFIX = 'internal://cache/';
 const CACHE_NAMESPACE_PATTERN = /^[a-z0-9_-]{1,64}$/i;
 const CACHE_HASH_PATTERN = /^[a-f0-9.]{8,64}$/i;
 const MAX_COMPLETION_VALUES = 100;
-
-interface CacheEntryMetaView {
-  scopeIds: string[];
-}
 
 function normalizeCompletionPrefix(value: string): string {
   return value.trim().toLowerCase();
@@ -137,13 +136,6 @@ function toCacheResourceUri(parts: CacheResourceParts): string {
   const namespace = encodeURIComponent(parts.namespace);
   const hash = encodeURIComponent(parts.hash);
   return `${CACHE_RESOURCE_PREFIX}${namespace}/${hash}`;
-}
-
-export function isCacheEntryVisibleToScope(
-  scopeId: string,
-  meta: CacheEntryMetaView
-): boolean {
-  return meta.scopeIds.includes(scopeId);
 }
 
 function getVisibleCacheEntries(scopeId: string): CacheResourceParts[] {

@@ -18,7 +18,7 @@ The Fetch URL MCP Server provides a standardized interface for fetching public w
 - The tool advertises optional task support and emits progress updates while fetching and transforming larger pages.
 - GitHub, GitLab, Bitbucket, and Gist page URLs are rewritten to raw-content endpoints when possible before fetch.
 - `internal://instructions` and `internal://cache/{namespace}/{hash}` expose built-in guidance and cached Markdown as MCP resources.
-- HTTP mode adds host/origin validation, auth, rate limiting, health checks, OAuth protected-resource metadata, and cached-download URLs.
+- HTTP mode adds host/origin validation, auth, rate limiting, health checks, OAuth protected-resource metadata, and session-bound cached-download URLs.
 
 ## Requirements
 
@@ -609,7 +609,6 @@ The response is returned as MCP text content and, when validation succeeds, as `
 | `SERVER_KEEP_ALIVE_TIMEOUT_BUFFER_MS`      | unset                     | HTTP mode         | Optional keep-alive tuning buffer.                                    |
 | `SERVER_MAX_HEADERS_COUNT`                 | unset                     | HTTP mode         | Optional header count limit.                                          |
 | `SERVER_BLOCK_PRIVATE_CONNECTIONS`         | `false`                   | HTTP mode         | Enables inbound private-network protections.                          |
-| `MCP_STRICT_PROTOCOL_VERSION_HEADER`       | `true`                    | HTTP mode         | Requires `MCP-Protocol-Version` on session init.                      |
 | `ALLOWED_HOSTS`                            | empty                     | HTTP mode         | Additional allowed `Host` and `Origin` values.                        |
 | `ALLOW_LOCAL_FETCH`                        | `false`                   | Fetching          | Allows loopback and private-network fetch targets.                    |
 | `FETCH_TIMEOUT_MS`                         | `15000`                   | Fetching          | Network fetch timeout in milliseconds.                                |
@@ -643,7 +642,7 @@ The response is returned as MCP text content and, when validation succeeds, as `
 | `POST`   | `/mcp`                                      | yes                                        | Session initialization and JSON-RPC requests.           |
 | `GET`    | `/mcp`                                      | yes                                        | Session-bound server-to-client stream handling.         |
 | `DELETE` | `/mcp`                                      | yes                                        | Session shutdown.                                       |
-| `GET`    | `/mcp/downloads/{namespace}/{hash}`         | yes                                        | Download route used by HTTP-mode cached fetch results.  |
+| `GET`    | `/mcp/downloads/{namespace}/{hash}`         | yes, plus owning `MCP-Session-ID`          | Download route for session-scoped cached Markdown.      |
 
 ## Security
 
@@ -651,7 +650,7 @@ The response is returned as MCP text content and, when validation succeeds, as `
 | -------------------------- | ----------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
 | Host and origin validation | implemented | HTTP requests are rejected unless `Host` and `Origin` match the allowlist built from loopback, the configured host, and `ALLOWED_HOSTS`. |
 | Authentication             | implemented | HTTP mode supports static bearer tokens locally or OAuth token introspection; remote bindings require OAuth.                             |
-| Protocol version checks    | implemented | HTTP sessions validate `MCP-Protocol-Version` and pin it to the negotiated session version.                                              |
+| Protocol version checks    | implemented | Session-bound MCP HTTP requests validate `MCP-Protocol-Version` and pin it to the negotiated session version.                            |
 | Rate limiting              | implemented | Requests pass through the HTTP rate limiter before route dispatch.                                                                       |
 | Outbound SSRF protections  | implemented | Local/private IPs, metadata endpoints, and `.local`/`.internal` hosts are blocked unless `ALLOW_LOCAL_FETCH=true`.                       |
 | TLS                        | optional    | HTTPS is enabled when both TLS key and certificate files are configured.                                                                 |

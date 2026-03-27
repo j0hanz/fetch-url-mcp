@@ -22,6 +22,7 @@ export {
   createCacheKey,
   get,
   getEntryMeta,
+  isCacheEntryVisibleToScope,
   isEnabled,
   keys,
   onCacheUpdate,

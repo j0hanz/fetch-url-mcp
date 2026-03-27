@@ -18,6 +18,7 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
 
+import { toCacheScopeId } from '../lib/cache.js';
 import {
   composeCloseHandlers,
   config,
@@ -757,6 +758,32 @@ class HttpDispatcher {
     private readonly mcpGateway: McpSessionGateway
   ) {}
 
+  private resolveDownloadScopeId(ctx: AuthenticatedContext): string | null {
+    const sessionId = getMcpSessionId(ctx.req);
+    if (!sessionId) {
+      sendJson(ctx.res, 400, { error: 'Missing MCP-Session-ID header' });
+      return null;
+    }
+
+    const session = this.store.get(sessionId);
+    const authFingerprint = buildAuthFingerprint(ctx.auth);
+    if (
+      !session ||
+      !authFingerprint ||
+      session.authFingerprint !== authFingerprint
+    ) {
+      sendJson(ctx.res, 404, { error: 'Not Found' });
+      return null;
+    }
+
+    if (!session.protocolInitialized) {
+      sendJson(ctx.res, 400, { error: 'Session not initialized' });
+      return null;
+    }
+
+    return toCacheScopeId(sessionId);
+  }
+
   private async tryHandleHealthRoute(ctx: RequestContext): Promise<boolean> {
     if (!shouldHandleHealthRoute(ctx)) return false;
 
@@ -774,13 +801,16 @@ class HttpDispatcher {
     return true;
   }
 
-  private tryHandleDownloadRoute(ctx: RequestContext): boolean {
+  private tryHandleDownloadRoute(ctx: AuthenticatedContext): boolean {
     if (ctx.method !== 'GET') return false;
 
     const download = checkDownloadRoute(ctx.url.pathname);
     if (!download) return false;
 
-    handleDownload(ctx.res, download.namespace, download.hash);
+    const scopeId = this.resolveDownloadScopeId(ctx);
+    if (!scopeId) return true;
+
+    handleDownload(ctx.res, download.namespace, download.hash, { scopeId });
     return true;
   }
 

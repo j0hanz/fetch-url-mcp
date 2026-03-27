@@ -16,8 +16,10 @@ import { parseCachedPayload, resolveCachedPayloadContent } from '../schemas.js';
 import {
   get as cacheGet,
   config,
+  getEntryMeta,
   getOperationId,
   getRequestId,
+  isCacheEntryVisibleToScope,
   logDebug,
   logError,
   logWarn,
@@ -134,7 +136,10 @@ function writeJsonError(
 export function handleDownload(
   res: ServerResponse,
   namespace: string,
-  hash: string
+  hash: string,
+  options?: {
+    scopeId?: string;
+  }
 ): void {
   const parsed = DownloadParamsSchema.safeParse({ namespace, hash });
   if (!parsed.success) {
@@ -148,6 +153,15 @@ export function handleDownload(
   }
 
   const cacheKey = `${parsed.data.namespace}:${parsed.data.hash}`;
+  const scopeId = options?.scopeId;
+  if (scopeId) {
+    const meta = getEntryMeta(cacheKey);
+    if (!meta || !isCacheEntryVisibleToScope(scopeId, meta)) {
+      writeJsonError(res, 404, 'Not found or expired', 'NOT_FOUND');
+      return;
+    }
+  }
+
   const entry = cacheGet(cacheKey, { force: true });
 
   if (!entry) {
