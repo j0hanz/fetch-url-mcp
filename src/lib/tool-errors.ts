@@ -98,7 +98,6 @@ export function createToolErrorResponse(
 
   return {
     content: [{ type: 'text', text: JSON.stringify(errorContent) }],
-    structuredContent: errorContent,
     isError: true,
   };
 }

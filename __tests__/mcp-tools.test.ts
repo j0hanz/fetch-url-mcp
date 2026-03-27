@@ -164,11 +164,6 @@ describe('createToolErrorResponse', () => {
     const parsed = parseToolPayload(result);
     assert.equal(parsed['error'], 'Something failed');
     assert.equal(parsed['url'], 'https://example.com');
-    assertRecord(
-      result.structuredContent,
-      'Expected structuredContent payload'
-    );
-    assert.equal(result.structuredContent['error'], 'Something failed');
   });
 
   it('includes code and statusCode when provided', () => {
