@@ -38,11 +38,11 @@ function getTagName(node: unknown): string {
 }
 
 function getNode(ctx: unknown): unknown {
-  return isObject(ctx) ? (ctx as { node?: unknown }).node : undefined;
+  return isObject(ctx) ? ctx['node'] : undefined;
 }
 
 function getParent(ctx: unknown): unknown {
-  return isObject(ctx) ? (ctx as { parent?: unknown }).parent : undefined;
+  return isObject(ctx) ? ctx['parent'] : undefined;
 }
 
 function getNodeAttr(

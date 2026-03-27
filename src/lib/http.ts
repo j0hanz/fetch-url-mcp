@@ -520,7 +520,7 @@ function resolveErrorUrl(error: unknown, fallback: string): string {
   if (error instanceof FetchError) return error.url;
   if (!isObject(error)) return fallback;
 
-  const { requestUrl } = error as Record<string, unknown>;
+  const { requestUrl } = error;
   return typeof requestUrl === 'string' ? requestUrl : fallback;
 }
 const CLIENT_ERROR_CODES = new Set([
@@ -579,11 +579,10 @@ function mapFetchError(
     return mapSystemError(error, url);
   }
 
-  const err = error as { message: string; cause?: unknown };
   const causeStr =
-    err.cause instanceof Error ? err.cause.message : String(err.cause);
+    error.cause instanceof Error ? error.cause.message : String(error.cause);
   return createFetchError(
-    { kind: 'network', message: `${err.message}. Cause: ${causeStr}` },
+    { kind: 'network', message: `${error.message}. Cause: ${causeStr}` },
     url
   );
 }
@@ -767,7 +766,7 @@ class RedirectFollower {
 
   private annotateRedirectError(error: unknown, url: string): void {
     if (!isObject(error)) return;
-    (error as Record<string, unknown>)['requestUrl'] = url;
+    error['requestUrl'] = url;
   }
 
   private assertHttpProtocol(url: string): void {

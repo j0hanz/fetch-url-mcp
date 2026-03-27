@@ -115,7 +115,7 @@ export function emitTaskStatusNotification(
   void server.server
     .notification({
       method: 'notifications/tasks/status',
-      params: toTaskSummary(task) as Record<string, unknown>,
+      params: { ...toTaskSummary(task) },
     })
     .catch((error: unknown) => {
       logWarn('Failed to send task status notification', {

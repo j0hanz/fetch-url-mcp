@@ -143,13 +143,14 @@ describe('resolveCachedPayloadContent', () => {
   });
 
   it('returns null when markdown is null', () => {
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-explicit-any
-    assert.equal(resolveCachedPayloadContent({ markdown: null } as any), null);
+    const payload = {
+      markdown: null,
+    } as Parameters<typeof resolveCachedPayloadContent>[0];
+    assert.equal(resolveCachedPayloadContent(payload), null);
   });
 
   it('returns null when markdown is undefined', () => {
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-explicit-any
-    assert.equal(resolveCachedPayloadContent({} as any), null);
+    assert.equal(resolveCachedPayloadContent({}), null);
   });
 
   it('returns empty string for empty markdown', () => {

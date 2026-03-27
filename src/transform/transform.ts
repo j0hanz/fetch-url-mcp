@@ -344,12 +344,11 @@ const MAX_READABILITY_ELEMENTS = 20_000;
 
 function isReadabilityCompatible(doc: unknown): doc is Document {
   if (!isObject(doc)) return false;
-  const record = doc as Record<string, unknown>;
+  const { querySelectorAll, querySelector } = doc;
   return (
-    'documentElement' in record &&
-    typeof (record as { querySelectorAll?: unknown }).querySelectorAll ===
-      'function' &&
-    typeof (record as { querySelector?: unknown }).querySelector === 'function'
+    'documentElement' in doc &&
+    typeof querySelectorAll === 'function' &&
+    typeof querySelector === 'function'
   );
 }
 

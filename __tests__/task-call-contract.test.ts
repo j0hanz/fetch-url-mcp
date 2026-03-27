@@ -8,6 +8,15 @@ import {
   withRelatedTaskMeta,
 } from '../dist/tasks/call-contract.js';
 
+function getRelatedTaskId(value: unknown): string | undefined {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+    return undefined;
+  }
+
+  const taskId = (value as Record<string, unknown>)['taskId'];
+  return typeof taskId === 'string' ? taskId : undefined;
+}
+
 // ── Extended tool call request parsing ──────────────────────────────
 
 describe('parseExtendedCallToolRequest', () => {
@@ -69,10 +78,12 @@ describe('parseExtendedCallToolRequest', () => {
       },
     };
     const parsed = parseExtendedCallToolRequest(request);
-    const related = parsed.params._meta?.[
-      'io.modelcontextprotocol/related-task'
-    ] as { taskId: string } | undefined;
-    assert.equal(related?.taskId, 'task-abc');
+    assert.equal(
+      getRelatedTaskId(
+        parsed.params._meta?.['io.modelcontextprotocol/related-task']
+      ),
+      'task-abc'
+    );
   });
 
   // ── Validation errors ─────────────────────────────────────────
@@ -154,12 +165,7 @@ describe('sanitizeToolCallMeta', () => {
     };
     const result = sanitizeToolCallMeta(meta);
     assert.equal(result?.progressToken, 'tok-1');
-    assert.equal(
-      (result as Record<string, unknown> | undefined)?.[
-        'io.modelcontextprotocol/related-task'
-      ],
-      undefined
-    );
+    assert.equal(result?.['io.modelcontextprotocol/related-task'], undefined);
   });
 
   it('returns undefined when only related-task key exists', () => {
@@ -220,10 +226,7 @@ describe('withRelatedTaskMeta', () => {
       _meta: { existingKey: 'value' },
     };
     const result = withRelatedTaskMeta(original, 'task-789');
-    assert.equal(
-      (result._meta as Record<string, unknown>)['existingKey'],
-      'value'
-    );
+    assert.equal(result._meta?.['existingKey'], 'value');
     assert.deepEqual(result._meta?.['io.modelcontextprotocol/related-task'], {
       taskId: 'task-789',
     });

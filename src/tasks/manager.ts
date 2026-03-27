@@ -5,7 +5,7 @@ import { setInterval } from 'node:timers';
 import { ErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js';
 
 import { config, logWarn } from '../lib/core.js';
-import { timingSafeEqualUtf8 } from '../lib/utils.js';
+import { isObject, timingSafeEqualUtf8 } from '../lib/utils.js';
 
 import {
   TaskWaiterRegistry,
@@ -435,18 +435,21 @@ export function decodeTaskCursor(
   if (!timingSafeEqualUtf8(signPayload(payload), signature)) return null;
 
   try {
-    const decoded = JSON.parse(
+    const decoded: unknown = JSON.parse(
       Buffer.from(payload, 'base64url').toString('utf8')
-    ) as { anchorTaskId?: unknown };
+    );
+    if (!isObject(decoded)) return null;
+
+    const { anchorTaskId } = decoded;
     if (
-      typeof decoded.anchorTaskId !== 'string' ||
-      decoded.anchorTaskId.length === 0 ||
-      decoded.anchorTaskId.length > MAX_ANCHOR_ID_LENGTH
+      typeof anchorTaskId !== 'string' ||
+      anchorTaskId.length === 0 ||
+      anchorTaskId.length > MAX_ANCHOR_ID_LENGTH
     ) {
       return null;
     }
 
-    return { anchorTaskId: decoded.anchorTaskId };
+    return { anchorTaskId };
   } catch {
     return null;
   }

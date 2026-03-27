@@ -9,6 +9,28 @@ import {
   setTaskToolCallCapability,
 } from '../dist/lib/mcp-interop.js';
 
+function assertRecord(
+  value: unknown,
+  message: string
+): asserts value is Record<string, unknown> {
+  assert.ok(
+    value !== null && typeof value === 'object' && !Array.isArray(value),
+    message
+  );
+}
+
+function getPrivateHandlerMap(server: McpServer): Map<string, unknown> {
+  const handlers: unknown = Reflect.get(server.server, '_requestHandlers');
+  assert.ok(handlers instanceof Map, '_requestHandlers should be a Map');
+  return handlers;
+}
+
+function getPrivateCapabilities(server: McpServer): Record<string, unknown> {
+  const caps: unknown = Reflect.get(server.server, '_capabilities');
+  assertRecord(caps, '_capabilities should be a plain object');
+  return caps;
+}
+
 // ── SDK private API compatibility guard ─────────────────────────────
 //
 // These tests verify that the internal properties the codebase depends on
@@ -57,15 +79,12 @@ describe('SDK compatibility guard', () => {
 
   describe('_requestHandlers', () => {
     it('is a Map on the inner Server instance', () => {
-      const handlers: unknown = Reflect.get(server.server, '_requestHandlers');
+      const handlers = getPrivateHandlerMap(server);
       assert.ok(handlers instanceof Map, '_requestHandlers should be a Map');
     });
 
     it('contains a tools/call handler after tool registration', () => {
-      const handlers = Reflect.get(server.server, '_requestHandlers') as Map<
-        string,
-        unknown
-      >;
+      const handlers = getPrivateHandlerMap(server);
       const handler = handlers.get('tools/call');
       assert.equal(
         typeof handler,
@@ -88,24 +107,20 @@ describe('SDK compatibility guard', () => {
 
   describe('_capabilities', () => {
     it('is a plain object on the inner Server instance', () => {
-      const caps: unknown = Reflect.get(server.server, '_capabilities');
-      assert.ok(
-        caps !== null && typeof caps === 'object' && !Array.isArray(caps),
-        '_capabilities should be a plain object'
-      );
+      const caps = getPrivateCapabilities(server);
+      assertRecord(caps, '_capabilities should be a plain object');
     });
 
     it('setTaskToolCallCapability(enabled=true) adds tasks.requests.tools.call', () => {
       setTaskToolCallCapability(server, true);
 
-      const caps = Reflect.get(server.server, '_capabilities') as Record<
-        string,
-        unknown
-      >;
-      const tasks = caps['tasks'] as Record<string, unknown> | undefined;
+      const caps = getPrivateCapabilities(server);
+      const tasks = caps['tasks'];
+      assertRecord(tasks, 'capabilities.tasks should exist');
       assert.ok(tasks, 'capabilities.tasks should exist');
 
-      const requests = tasks['requests'] as Record<string, unknown> | undefined;
+      const requests = tasks['requests'];
+      assertRecord(requests, 'capabilities.tasks.requests should exist');
       assert.ok(requests, 'capabilities.tasks.requests should exist');
       assert.ok(
         requests['tools'],
@@ -118,14 +133,13 @@ describe('SDK compatibility guard', () => {
       setTaskToolCallCapability(server, true);
       setTaskToolCallCapability(server, false);
 
-      const caps = Reflect.get(server.server, '_capabilities') as Record<
-        string,
-        unknown
-      >;
-      const tasks = caps['tasks'] as Record<string, unknown> | undefined;
+      const caps = getPrivateCapabilities(server);
+      const tasks = caps['tasks'];
+      assertRecord(tasks, 'capabilities.tasks should still exist');
       assert.ok(tasks, 'capabilities.tasks should still exist');
 
-      const requests = tasks['requests'] as Record<string, unknown> | undefined;
+      const requests = tasks['requests'];
+      assertRecord(requests, 'capabilities.tasks.requests should still exist');
       assert.ok(requests, 'capabilities.tasks.requests should still exist');
       assert.equal(
         requests['tools'],

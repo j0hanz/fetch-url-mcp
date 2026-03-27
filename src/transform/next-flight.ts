@@ -39,9 +39,14 @@ function decodeHtmlEntities(value: string): string {
     .replace(/&gt;/g, '>');
 }
 
+function decodeJsonStringLiteral(value: string): string | undefined {
+  const decoded: unknown = JSON.parse(`"${value}"`);
+  return typeof decoded === 'string' ? decoded : undefined;
+}
+
 function decodeFlightStringValue(value: string): string {
   try {
-    return JSON.parse(`"${value}"`) as string;
+    return decodeJsonStringLiteral(value) ?? decodeHtmlEntities(value);
   } catch {
     return decodeHtmlEntities(value);
   }
@@ -55,7 +60,8 @@ function decodeNextFlightPayloads(html: string): string[] {
     if (!rawPayload) continue;
 
     try {
-      payloads.push(JSON.parse(`"${rawPayload}"`) as string);
+      const decodedPayload = decodeJsonStringLiteral(rawPayload);
+      if (decodedPayload) payloads.push(decodedPayload);
     } catch {
       // Ignore malformed payload fragments and continue with the rest.
     }

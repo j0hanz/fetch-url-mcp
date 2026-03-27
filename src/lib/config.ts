@@ -14,11 +14,15 @@ import { getErrorMessage } from './utils.js';
 
 // ── Version ─────────────────────────────────────────────────────────
 
+function getObjectProperty(value: object, key: PropertyKey): unknown {
+  return (value as Record<PropertyKey, unknown>)[key];
+}
+
 function hasPackageJsonVersion(value: unknown): value is { version: string } {
   return (
     typeof value === 'object' &&
     value !== null &&
-    typeof (value as { version?: unknown }).version === 'string'
+    typeof getObjectProperty(value, 'version') === 'string'
   );
 }
 
@@ -84,7 +88,7 @@ class ConfigError extends Error {
 
 function isMissingEnvFileError(error: unknown): boolean {
   if (!error || typeof error !== 'object') return false;
-  const { code } = error as { code?: string };
+  const code = getObjectProperty(error, 'code');
   return code === 'ENOENT' || code === 'ERR_ENV_FILE_NOT_FOUND';
 }
 

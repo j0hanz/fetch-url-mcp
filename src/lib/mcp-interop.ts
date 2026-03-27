@@ -200,6 +200,14 @@ export function handleToolError(
 type CleanupCallback = () => void;
 type RequestHandlerFn = (request: unknown, extra?: unknown) => Promise<unknown>;
 
+function getNestedRecord(
+  value: Record<PropertyKey, unknown>,
+  key: string
+): Record<PropertyKey, unknown> | undefined {
+  const nested = value[key];
+  return isObject(nested) ? nested : undefined;
+}
+
 const patchedCleanupServers = new WeakSet<McpServer>();
 const serverCleanupCallbacks = new WeakMap<McpServer, Set<CleanupCallback>>();
 
@@ -281,14 +289,10 @@ export function setTaskToolCallCapability(
   const capabilities: unknown = Reflect.get(server.server, '_capabilities');
   if (!isObject(capabilities)) return;
 
-  const tasks = isObject(capabilities.tasks)
-    ? (capabilities.tasks as Record<string, unknown>)
-    : undefined;
+  const tasks = getNestedRecord(capabilities, 'tasks');
   if (!tasks) return;
 
-  const requests = isObject(tasks.requests)
-    ? (tasks.requests as Record<string, unknown>)
-    : undefined;
+  const requests = getNestedRecord(tasks, 'requests');
   if (!requests) return;
 
   if (enabled) {
@@ -346,7 +350,7 @@ function resolveRelatedTaskMeta(
 ): { taskId: string } | undefined {
   const related = meta?.['io.modelcontextprotocol/related-task'];
   if (!isObject(related)) return undefined;
-  const { taskId } = related as { taskId?: unknown };
+  const { taskId } = related;
   return typeof taskId === 'string' ? { taskId } : undefined;
 }
 

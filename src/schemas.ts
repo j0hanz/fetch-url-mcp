@@ -235,8 +235,8 @@ export function stringifyCachedPayload(
   return JSON.stringify(cachedPayloadValueSchema.parse(payload));
 }
 
-export function resolveCachedPayloadContent(
-  payload: Partial<CachedPayload> & { markdown?: string | null }
-): string | null {
+export function resolveCachedPayloadContent(payload: {
+  markdown?: string | null;
+}): string | null {
   return typeof payload.markdown === 'string' ? payload.markdown : null;
 }

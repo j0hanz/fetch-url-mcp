@@ -130,7 +130,7 @@ export function createErrorWithCode(
 export function isSystemError(error: unknown): error is NodeJS.ErrnoException {
   if (!isError(error)) return false;
   if (!('code' in error)) return false;
-  const { code } = error as { code?: unknown };
+  const { code } = error;
   return typeof code === 'string';
 }
 const MAX_DEPTH = 20;
@@ -153,10 +153,10 @@ export function stableStringify(obj: unknown): string {
         return value.map((item) => process(item, depth + 1));
       }
 
-      const record = value as Record<string, unknown>;
       const sorted: Record<string, unknown> = {};
-      for (const key of Object.keys(record).sort()) {
-        sorted[key] = process(record[key], depth + 1);
+      if (!isObject(value)) return value;
+      for (const key of Object.keys(value).sort()) {
+        sorted[key] = process(value[key], depth + 1);
       }
       return sorted;
     } finally {
@@ -299,11 +299,19 @@ export function isObject(
 ): value is Record<PropertyKey, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
+
+type ErrorConstructorWithIsError = ErrorConstructor & {
+  isError?: (value: unknown) => boolean;
+};
+
 export function isError(value: unknown): value is Error {
-  return (
-    (Error as { isError?: (v: unknown) => boolean }).isError?.(value) ??
-    value instanceof Error
-  );
+  const maybeIsError = (Error as ErrorConstructorWithIsError).isError;
+  if (typeof maybeIsError === 'function') {
+    const result = maybeIsError(value);
+    if (typeof result === 'boolean') return result;
+  }
+
+  return value instanceof Error;
 }
 interface LikeNode {
   readonly tagName?: string | undefined;

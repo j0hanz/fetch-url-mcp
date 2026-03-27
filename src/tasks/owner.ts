@@ -122,7 +122,7 @@ export function resolveTaskOwnerKey(extra?: HandlerExtra): string {
 function resolveRequestIdFromExtra(extra: unknown): string | undefined {
   if (!isObject(extra)) return undefined;
 
-  const { requestId } = extra as { requestId?: unknown };
+  const { requestId } = extra;
   if (typeof requestId === 'string') return requestId;
   if (typeof requestId === 'number') return String(requestId);
 
@@ -130,7 +130,7 @@ function resolveRequestIdFromExtra(extra: unknown): string | undefined {
 }
 
 function getHeaderString(
-  headers: Record<string, unknown>,
+  headers: Record<PropertyKey, unknown>,
   name: string
 ): string | undefined {
   const value = headers[name];
@@ -143,7 +143,7 @@ function getHeaderString(
 function resolveSessionIdFromExtra(extra: unknown): string | undefined {
   if (!isObject(extra)) return undefined;
 
-  const { sessionId } = extra as { sessionId?: unknown };
+  const { sessionId } = extra;
   if (typeof sessionId === 'string') return sessionId;
 
   const { requestInfo } = extra;
@@ -153,8 +153,8 @@ function resolveSessionIdFromExtra(extra: unknown): string | undefined {
   if (!isObject(headers)) return undefined;
 
   return (
-    getHeaderString(headers as Record<string, unknown>, 'mcp-session-id') ??
-    getHeaderString(headers as Record<string, unknown>, 'x-mcp-session-id')
+    getHeaderString(headers, 'mcp-session-id') ??
+    getHeaderString(headers, 'x-mcp-session-id')
   );
 }
 
@@ -215,9 +215,7 @@ export function withRequestContextIfMissing<TParams, TResult, TExtra = unknown>(
 }
 
 export function isServerResult(value: unknown): value is ServerResult {
-  return (
-    isObject(value) && Array.isArray((value as { content?: unknown }).content)
-  );
+  return isObject(value) && Array.isArray(value['content']);
 }
 
 const toolErrorContentSchema = z.strictObject({
@@ -231,10 +229,9 @@ const toolErrorBlockSchema = z.strictObject({
 
 export function tryReadToolStructuredError(value: unknown): string | undefined {
   if (!isObject(value)) return undefined;
-  const record = value as { content?: unknown[] };
-  if (!Array.isArray(record.content) || record.content.length === 0)
-    return undefined;
-  const parsedBlock = toolErrorBlockSchema.safeParse(record.content[0]);
+  const { content } = value;
+  if (!Array.isArray(content) || content.length === 0) return undefined;
+  const parsedBlock = toolErrorBlockSchema.safeParse(content[0]);
   if (!parsedBlock.success) return undefined;
 
   try {

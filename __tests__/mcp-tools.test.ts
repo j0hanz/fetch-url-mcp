@@ -13,6 +13,39 @@ import {
 } from '../dist/lib/mcp-interop.js';
 import { FetchError } from '../dist/lib/utils.js';
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function assertRecord(
+  value: unknown,
+  message: string
+): asserts value is Record<string, unknown> {
+  assert.ok(isRecord(value), message);
+}
+
+function parseToolPayload(result: {
+  content: readonly unknown[];
+}): Record<string, unknown> {
+  const [block] = result.content;
+  assertRecord(block, 'Expected first content block to be an object');
+  assert.equal(block['type'], 'text');
+  const text = block['text'];
+  if (typeof text !== 'string') {
+    assert.fail('Expected text payload');
+  }
+
+  const parsed: unknown = JSON.parse(text);
+  assertRecord(parsed, 'Expected tool payload to be a JSON object');
+  return parsed;
+}
+
+function getOptionalRecord(
+  value: unknown
+): Record<string, unknown> | undefined {
+  return isRecord(value) ? value : undefined;
+}
+
 // ── JSON-RPC body validation ────────────────────────────────────────
 
 describe('isJsonRpcBatchRequest', () => {
@@ -149,9 +182,7 @@ describe('createToolErrorResponse', () => {
     assert.equal(result.isError, true);
     assert.equal(result.content.length, 1);
 
-    const parsed = JSON.parse(
-      (result.content[0] as { text: string }).text
-    ) as Record<string, unknown>;
+    const parsed = parseToolPayload(result);
     assert.equal(parsed.error, 'Something failed');
     assert.equal(parsed.url, 'https://example.com');
   });
@@ -161,9 +192,7 @@ describe('createToolErrorResponse', () => {
       code: 'NOT_FOUND',
       statusCode: 404,
     });
-    const parsed = JSON.parse(
-      (result.content[0] as { text: string }).text
-    ) as Record<string, unknown>;
+    const parsed = parseToolPayload(result);
     assert.equal(parsed.code, 'NOT_FOUND');
     assert.equal(parsed.statusCode, 404);
   });
@@ -181,9 +210,7 @@ describe('handleToolError', () => {
     const result = handleToolError(error, 'https://example.com');
     assert.equal(result.isError, true);
 
-    const parsed = JSON.parse(
-      (result.content[0] as { text: string }).text
-    ) as Record<string, unknown>;
+    const parsed = parseToolPayload(result);
     assert.equal(parsed.statusCode, 404);
   });
 
@@ -195,11 +222,9 @@ describe('handleToolError', () => {
       { reason: 'timeout', timeout: 15000 }
     );
     const result = handleToolError(error, 'https://example.com');
-    const parsed = JSON.parse(
-      (result.content[0] as { text: string }).text
-    ) as Record<string, unknown>;
+    const parsed = parseToolPayload(result);
     assert.equal(parsed.statusCode, 504);
-    const details = parsed.details as Record<string, unknown> | undefined;
+    const details = getOptionalRecord(parsed.details);
     assert.equal(details?.reason, 'timeout');
     assert.equal(details?.timeout, 15000);
   });
@@ -208,9 +233,7 @@ describe('handleToolError', () => {
     const error = new Error('Request was canceled');
     error.name = 'AbortError';
     const result = handleToolError(error, 'https://example.com');
-    const parsed = JSON.parse(
-      (result.content[0] as { text: string }).text
-    ) as Record<string, unknown>;
+    const parsed = parseToolPayload(result);
     assert.equal(parsed.code, 'ABORTED');
   });
 
@@ -221,9 +244,7 @@ describe('handleToolError', () => {
       'https://example.com',
       'Fetch failed'
     );
-    const parsed = JSON.parse(
-      (result.content[0] as { text: string }).text
-    ) as Record<string, unknown>;
+    const parsed = parseToolPayload(result);
     assert.ok(
       (parsed.error as string).includes('Fetch failed'),
       'Should include fallback message'
@@ -241,9 +262,7 @@ describe('handleToolError', () => {
       'Op failed'
     );
     assert.equal(result.isError, true);
-    const parsed = JSON.parse(
-      (result.content[0] as { text: string }).text
-    ) as Record<string, unknown>;
+    const parsed = parseToolPayload(result);
     assert.equal(parsed.code, 'FETCH_ERROR');
   });
 
@@ -252,11 +271,9 @@ describe('handleToolError', () => {
       reason: 'queue_full',
     });
     const result = handleToolError(error, 'https://example.com');
-    const parsed = JSON.parse(
-      (result.content[0] as { text: string }).text
-    ) as Record<string, unknown>;
+    const parsed = parseToolPayload(result);
     assert.equal(parsed.code, 'queue_full');
-    const details = parsed.details as Record<string, unknown> | undefined;
+    const details = getOptionalRecord(parsed.details);
     assert.equal(details?.reason, 'queue_full');
   });
 });

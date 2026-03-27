@@ -161,8 +161,7 @@ class HostOriginPolicy {
     const hostHeader = getHeaderValue(req, 'host');
     if (!hostHeader) return null;
 
-    const isEncrypted =
-      (req.socket as { encrypted?: boolean }).encrypted === true;
+    const isEncrypted = Reflect.get(req.socket, 'encrypted') === true;
     const scheme = isEncrypted ? 'https' : 'http';
     const parsed = parseUrlOrNull(`${scheme}://${hostHeader}`);
     if (!parsed) return null;

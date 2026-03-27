@@ -12,14 +12,23 @@ import {
   unregisterTaskCapableTool,
 } from '../dist/tasks/registry.js';
 
-function getTaskResultHandler(server: McpServer) {
-  const handlers = Reflect.get(server.server, '_requestHandlers') as Map<
-    string,
-    unknown
-  >;
+type UnknownRequestHandler = (
+  request: unknown,
+  extra?: unknown
+) => Promise<unknown>;
+
+function isUnknownRequestHandler(
+  value: unknown
+): value is UnknownRequestHandler {
+  return typeof value === 'function';
+}
+
+function getTaskResultHandler(server: McpServer): UnknownRequestHandler {
+  const handlers: unknown = Reflect.get(server.server, '_requestHandlers');
+  assert.ok(handlers instanceof Map);
   const handler = handlers.get('tasks/result');
-  assert.equal(typeof handler, 'function');
-  return handler as (request: unknown, extra?: unknown) => Promise<unknown>;
+  assert.ok(isUnknownRequestHandler(handler));
+  return handler;
 }
 
 describe('task result failure normalization', () => {

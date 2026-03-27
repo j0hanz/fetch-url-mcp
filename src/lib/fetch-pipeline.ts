@@ -308,11 +308,9 @@ function persistCacheEntry<T>(
   cacheNamespace: string
 ): void {
   const serializer = serialize ?? JSON.stringify;
-  const dataRecord = isObject(data)
-    ? (data as Record<string, unknown>)
-    : undefined;
+  const dataRecord = isObject(data) ? data : undefined;
   const title =
-    typeof dataRecord?.title === 'string' ? dataRecord.title : undefined;
+    typeof dataRecord?.['title'] === 'string' ? dataRecord['title'] : undefined;
   const metadata = {
     url: normalizedUrl,
     scopeIds: [toCacheScopeId(getSessionId())],
