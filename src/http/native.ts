@@ -109,7 +109,7 @@ import {
 
 type SessionRecord = NonNullable<ReturnType<SessionStore['get']>>;
 
-function resolveRequestedProtocolVersion(body: unknown): string | null {
+function resolveRequestedProtocolVersion(body: unknown): string {
   if (!isObject(body)) return DEFAULT_MCP_PROTOCOL_VERSION;
 
   const { params } = body;
@@ -120,11 +120,9 @@ function resolveRequestedProtocolVersion(body: unknown): string | null {
 
   const normalized = value.trim();
   if (normalized.length === 0) return DEFAULT_MCP_PROTOCOL_VERSION;
-  if (!SUPPORTED_MCP_PROTOCOL_VERSIONS.has(normalized)) {
-    return null;
-  }
-
-  return normalized;
+  return SUPPORTED_MCP_PROTOCOL_VERSIONS.has(normalized)
+    ? normalized
+    : DEFAULT_MCP_PROTOCOL_VERSION;
 }
 
 function resolveProtocolVersionHeader(
@@ -213,7 +211,7 @@ function logRequestCompletion(params: {
 }
 
 function createSessionTeardownOptions(
-  mode: 'ended' | 'evicted' | 'shutdown',
+  mode: 'ended' | 'evicted' | 'shutdown' | 'init-timeout',
   context?: string
 ): SessionTeardownOptions {
   switch (mode) {
@@ -236,6 +234,15 @@ function createSessionTeardownOptions(
           'The task was cancelled because the HTTP server is shutting down.',
         closeTransportReason: 'shutdown-session-close',
         closeServerReason: 'shutdown-session-close',
+        unregisterByServer: true,
+        awaitClose: true,
+      };
+    case 'init-timeout':
+      return {
+        cancelMessage:
+          'The task was cancelled because the MCP session did not finish initialization.',
+        closeTransportReason: 'session-init-timeout',
+        closeServerReason: 'session-init-timeout',
         unregisterByServer: true,
         awaitClose: true,
       };
@@ -319,7 +326,10 @@ class McpSessionGateway {
 
     await session.transport.close();
     logDebug('MCP DELETE received', { sessionId }, 'http');
-    this.cleanupSessionRecord(sessionId, 'session-delete');
+    this.cleanupSessionRecord(
+      sessionId,
+      createSessionTeardownOptions('ended', 'session-delete')
+    );
 
     sendJson(ctx.res, 200, { status: 'closed' });
   }
@@ -461,7 +471,7 @@ class McpSessionGateway {
         return false;
       }
 
-      return ensureMcpProtocolVersion(ctx.req, ctx.res);
+      return true;
     }
 
     if (!this.ensureSessionProtocolVersion(ctx, session)) return false;
@@ -550,26 +560,6 @@ class McpSessionGateway {
     }
 
     const negotiatedProtocolVersion = resolveRequestedProtocolVersion(ctx.body);
-    if (!negotiatedProtocolVersion) {
-      logGatewayRejection({
-        message: 'Rejected MCP initialize request',
-        method: ctx.method,
-        path: ctx.url.pathname,
-        reason: 'unsupported_protocol_version',
-        status: 400,
-        mcpCode: -32602,
-        rpcId: requestId,
-      });
-      sendError(
-        ctx.res,
-        -32602,
-        `Unsupported protocolVersion; supported versions: ${[...SUPPORTED_MCP_PROTOCOL_VERSIONS].join(', ')}`,
-        400,
-        requestId
-      );
-      return null;
-    }
-
     const headerProtocolVersion = resolveProtocolVersionHeader(ctx.req);
     if (
       headerProtocolVersion &&
@@ -737,7 +727,10 @@ class McpSessionGateway {
         }
 
         logWarn('Session init timeout', { sessionId }, 'session');
-        this.cleanupSessionRecord(sessionId, 'session-init-timeout');
+        this.cleanupSessionRecord(
+          sessionId,
+          createSessionTeardownOptions('init-timeout')
+        );
         return;
       }
 
@@ -891,22 +884,29 @@ class McpSessionGateway {
     );
 
     transportImpl.onclose = composeCloseHandlers(transportImpl.onclose, () => {
-      this.cleanupSessionRecord(newSessionId, 'session-close');
+      this.cleanupSessionRecord(
+        newSessionId,
+        createSessionTeardownOptions('ended', 'session-close')
+      );
     });
 
     return transportImpl;
   }
 
-  private cleanupSessionRecord(sessionId: string, context: string): void {
+  private cleanupSessionRecord(
+    sessionId: string,
+    teardownOptions: SessionTeardownOptions
+  ): void {
+    const context =
+      teardownOptions.closeTransportReason ??
+      teardownOptions.closeServerReason ??
+      'session';
     logDebug('Session cleanup', { sessionId, context }, 'session');
     this.clearSessionInitTimeout(sessionId);
     const session = this.store.remove(sessionId);
     if (!session) return;
 
-    void teardownSessionResources(
-      session,
-      createSessionTeardownOptions('ended', context)
-    );
+    void teardownSessionResources(session, teardownOptions);
   }
 
   private clearSessionInitTimeout(sessionId: string | null): void {

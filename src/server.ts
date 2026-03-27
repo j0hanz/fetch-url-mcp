@@ -215,11 +215,14 @@ async function shutdownServer(
   }
 }
 
-function createShutdownHandler(server: McpServer): (signal: string) => void {
+function createShutdownHandler(
+  server: McpServer
+): (signal: string) => Promise<void> {
   let shuttingDown = false;
   let initialSignal: string | null = null;
+  let shutdownPromise: Promise<void> | null = null;
 
-  return (signal: string): void => {
+  return (signal: string): Promise<void> => {
     if (shuttingDown) {
       logInfo(
         'Shutdown already in progress; ignoring signal',
@@ -229,13 +232,13 @@ function createShutdownHandler(server: McpServer): (signal: string) => void {
         },
         'server'
       );
-      return;
+      return shutdownPromise ?? Promise.resolve();
     }
 
     shuttingDown = true;
     initialSignal = signal;
 
-    Promise.resolve()
+    shutdownPromise = Promise.resolve()
       .then(() => shutdownServer(server, signal))
       .catch((err: unknown) => {
         const error = toError(err);
@@ -245,13 +248,17 @@ function createShutdownHandler(server: McpServer): (signal: string) => void {
       .finally(() => {
         if (process.exitCode === undefined) process.exitCode = 0;
       });
+
+    return shutdownPromise;
   };
 }
 
-function registerSignalHandlers(handler: (signal: string) => void): void {
+function registerSignalHandlers(
+  handler: (signal: string) => Promise<void>
+): void {
   for (const signal of SHUTDOWN_SIGNALS) {
     process.once(signal, () => {
-      handler(signal);
+      void handler(signal);
     });
   }
 }
@@ -271,10 +278,15 @@ async function connectStdioServer(
   }
 }
 
-export async function startStdioServer(): Promise<void> {
+export async function startStdioServer(): Promise<{
+  shutdown: (signal: string) => Promise<void>;
+}> {
   const server = await createMcpServer();
   const transport = new StdioServerTransport();
+  const shutdown = createShutdownHandler(server);
 
-  registerSignalHandlers(createShutdownHandler(server));
+  registerSignalHandlers(shutdown);
   await connectStdioServer(server, transport);
+
+  return { shutdown };
 }

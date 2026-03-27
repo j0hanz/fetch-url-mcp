@@ -53,7 +53,7 @@ let isShuttingDown = false;
 const shutdownHandlerRef: { current?: (signal: string) => Promise<void> } = {};
 
 function shouldAttemptShutdown(): boolean {
-  return !isShuttingDown && !isStdioMode && Boolean(shutdownHandlerRef.current);
+  return !isShuttingDown && Boolean(shutdownHandlerRef.current);
 }
 
 function attemptShutdown(signal: string): void {
@@ -117,7 +117,8 @@ process.on('unhandledRejection', (reason) => {
 
 try {
   if (isStdioMode) {
-    await startStdioServer();
+    const { shutdown } = await startStdioServer();
+    shutdownHandlerRef.current = shutdown;
   } else {
     const { shutdown } = await startHttpServer();
     shutdownHandlerRef.current = shutdown;
