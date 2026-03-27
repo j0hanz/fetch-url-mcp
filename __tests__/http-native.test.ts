@@ -167,7 +167,8 @@ describe('HTTP native gateway routing', () => {
 
     assert.equal(response.status, 406);
     assert.deepEqual(await response.json(), {
-      error: 'Not Acceptable: expected application/json and text/event-stream',
+      error:
+        'We need the request to accept both "application/json" and "text/event-stream".',
     });
   });
 
@@ -180,7 +181,8 @@ describe('HTTP native gateway routing', () => {
 
     assert.equal(response.status, 406);
     assert.deepEqual(await response.json(), {
-      error: 'Not Acceptable: expected application/json and text/event-stream',
+      error:
+        'We need the request to accept both "application/json" and "text/event-stream".',
     });
   });
 
@@ -199,7 +201,8 @@ describe('HTTP native gateway routing', () => {
       jsonrpc: '2.0',
       error: {
         code: -32700,
-        message: 'Parse error',
+        message:
+          "We couldn't parse the request body. Please ensure it's valid JSON.",
       },
       id: null,
     });
@@ -250,7 +253,8 @@ describe('HTTP native gateway routing', () => {
       jsonrpc: '2.0',
       error: {
         code: -32600,
-        message: 'Session not initialized',
+        message:
+          "Your session hasn't been initialized yet. Please wait a moment and try again.",
       },
       id: 2,
     });
@@ -343,7 +347,8 @@ describe('HTTP native gateway routing', () => {
       jsonrpc: '2.0',
       error: {
         code: -32600,
-        message: 'Unsupported MCP-Protocol-Version: 1999-01-01',
+        message:
+          "The protocol version '1999-01-01' isn't supported right now. Please check and try again.",
       },
       id: null,
     });
@@ -465,7 +470,9 @@ describe('HTTP native gateway routing', () => {
     });
 
     assert.equal(response.status, 405);
-    assert.deepEqual(await response.json(), { error: 'Method Not Allowed' });
+    assert.deepEqual(await response.json(), {
+      error: "Looks like you tried to use a method that isn't allowed here.",
+    });
     assert.equal(response.headers.get('allow'), 'DELETE, GET, OPTIONS, POST');
   });
 });

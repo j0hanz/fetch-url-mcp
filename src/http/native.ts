@@ -309,7 +309,7 @@ class McpSessionGateway {
         sessionId,
       });
       sendJson(ctx.res, 406, {
-        error: 'Not Acceptable: expected text/event-stream',
+        error: 'We need you to use "text/event-stream" for this connection.',
       });
       return;
     }
@@ -349,7 +349,7 @@ class McpSessionGateway {
       });
       sendJson(ctx.res, 406, {
         error:
-          'Not Acceptable: expected application/json and text/event-stream',
+          'We need the request to accept both "application/json" and "text/event-stream".',
       });
       return null;
     }
@@ -364,7 +364,11 @@ class McpSessionGateway {
         status: 400,
         mcpCode: -32600,
       });
-      sendError(ctx.res, -32600, 'Batch requests not supported');
+      sendError(
+        ctx.res,
+        -32600,
+        "We don't support batch requests yet. Please send one request at a time."
+      );
       return null;
     }
     if (!isMcpMessageBody(body)) {
@@ -376,7 +380,11 @@ class McpSessionGateway {
         status: 400,
         mcpCode: -32600,
       });
-      sendError(ctx.res, -32600, 'Invalid request body');
+      sendError(
+        ctx.res,
+        -32600,
+        "The request body isn't quite right. Please check the format and try again."
+      );
       return null;
     }
 
@@ -412,7 +420,7 @@ class McpSessionGateway {
       sendError(
         ctx.res,
         -32600,
-        'notifications/initialized must be sent as a notification',
+        "The 'notifications/initialized' message must be sent as a notification, without an ID.",
         400,
         requestId
       );
@@ -469,7 +477,13 @@ class McpSessionGateway {
           mcpCode: -32600,
           rpcId: requestId,
         });
-        sendError(ctx.res, -32600, 'Missing session ID', 400, requestId);
+        sendError(
+          ctx.res,
+          -32600,
+          "We couldn't find a session ID for your request. Please ensure you have an active session.",
+          400,
+          requestId
+        );
         return false;
       }
 
@@ -491,7 +505,13 @@ class McpSessionGateway {
       sessionId,
       rpcId: requestId,
     });
-    sendError(ctx.res, -32600, 'Session not initialized', 400, requestId);
+    sendError(
+      ctx.res,
+      -32600,
+      "Your session hasn't been initialized yet. Please wait a moment and try again.",
+      400,
+      requestId
+    );
     return false;
   }
 
@@ -534,7 +554,13 @@ class McpSessionGateway {
         mcpCode: -32600,
         rpcId: requestId,
       });
-      sendError(ctx.res, -32600, 'Missing session ID', 400, requestId);
+      sendError(
+        ctx.res,
+        -32600,
+        "We couldn't find a session ID for your request. Please ensure you have an active session.",
+        400,
+        requestId
+      );
       return null;
     }
 
@@ -554,7 +580,9 @@ class McpSessionGateway {
       sendError(
         ctx.res,
         invalidInitialize ? -32602 : -32600,
-        invalidInitialize ? 'Invalid initialize request' : 'Missing session ID',
+        invalidInitialize
+          ? 'The initialize request format is invalid. Please double-check your parameters.'
+          : "We couldn't find a session ID for your request. Please ensure you have an active session.",
         400,
         requestId
       );
@@ -583,7 +611,7 @@ class McpSessionGateway {
       sendError(
         ctx.res,
         -32600,
-        `initialize protocolVersion mismatch: header=${headerProtocolVersion}, body=${negotiatedProtocolVersion}`,
+        `There's a mismatch in the protocol version. The header says '${headerProtocolVersion}' but the body says '${negotiatedProtocolVersion}'.`,
         400,
         requestId
       );
@@ -640,13 +668,25 @@ class McpSessionGateway {
 
     const { sessionId, session } = state;
     if (!sessionId || !session) {
-      sendError(ctx.res, -32600, 'Missing session ID', 400, requestId);
+      sendError(
+        ctx.res,
+        -32600,
+        "We couldn't find a session ID for your request. Please ensure you have an active session.",
+        400,
+        requestId
+      );
       return null;
     }
 
     if (!this.ensureSessionProtocolVersion(ctx, session)) return null;
     if (options?.requireInitialized && !session.protocolInitialized) {
-      sendError(ctx.res, -32600, 'Session not initialized', 400, requestId);
+      sendError(
+        ctx.res,
+        -32600,
+        "Your session hasn't been initialized yet. Please wait a moment and try again.",
+        400,
+        requestId
+      );
       return null;
     }
 
@@ -670,7 +710,13 @@ class McpSessionGateway {
         sessionId,
         rpcId: requestId,
       });
-      sendError(res, -32600, 'Session not found', 404, requestId);
+      sendError(
+        res,
+        -32600,
+        "We couldn't find your session. It might have expired or been closed.",
+        404,
+        requestId
+      );
       return null;
     }
 
@@ -684,7 +730,13 @@ class McpSessionGateway {
         sessionId,
         rpcId: requestId,
       });
-      sendError(res, -32600, 'Session not found', 404, requestId);
+      sendError(
+        res,
+        -32600,
+        "We couldn't find your session. It might have expired or been closed.",
+        404,
+        requestId
+      );
       return null;
     }
 
@@ -810,7 +862,13 @@ class McpSessionGateway {
         },
         'session'
       );
-      sendError(ctx.res, -32603, 'Missing auth context', 500, requestId);
+      sendError(
+        ctx.res,
+        -32603,
+        "We're missing some authorization details to process this request.",
+        500,
+        requestId
+      );
       return null;
     }
 
@@ -824,7 +882,13 @@ class McpSessionGateway {
         },
         'session'
       );
-      sendError(ctx.res, -32603, 'Missing auth owner context', 500, requestId);
+      sendError(
+        ctx.res,
+        -32603,
+        "We're missing the owner information needed to authorize this request.",
+        500,
+        requestId
+      );
       return null;
     }
 
@@ -959,7 +1023,13 @@ class McpSessionGateway {
         { maxSessions: config.server.maxSessions },
         'session'
       );
-      sendError(res, -32000, 'Server busy', 503, requestId);
+      sendError(
+        res,
+        -32000,
+        'The server is currently too busy to handle your request. Please try again in a little while.',
+        503,
+        requestId
+      );
       return false;
     }
 
@@ -970,7 +1040,13 @@ class McpSessionGateway {
         { maxSessions: config.server.maxSessions },
         'session'
       );
-      sendError(res, -32000, 'Server busy', 503, requestId);
+      sendError(
+        res,
+        -32000,
+        'The server is currently too busy to handle your request. Please try again in a little while.',
+        503,
+        requestId
+      );
       return false;
     }
 
@@ -1032,16 +1108,23 @@ class HttpDispatcher {
         if (handled) return;
 
         ctx.res.setHeader('Allow', 'DELETE, GET, OPTIONS, POST');
-        sendJson(ctx.res, 405, { error: 'Method Not Allowed' });
+        sendJson(ctx.res, 405, {
+          error:
+            "Looks like you tried to use a method that isn't allowed here.",
+        });
         return;
       }
 
-      sendJson(ctx.res, 404, { error: 'Not Found' });
+      sendJson(ctx.res, 404, {
+        error: "We couldn't find what you were looking for.",
+      });
     } catch (err) {
       const error = toError(err);
       logError('Request failed', error, 'http');
       if (!ctx.res.writableEnded) {
-        sendJson(ctx.res, 500, { error: 'Internal Server Error' });
+        sendJson(ctx.res, 500, {
+          error: "Something went wrong on our end. We're looking into it!",
+        });
       }
     }
   }
@@ -1099,8 +1182,9 @@ class HttpDispatcher {
 const DEFAULT_BODY_ERROR = {
   statusCode: 400,
   mcpCode: -32700,
-  mcpMsg: 'Parse error',
-  restMsg: 'Invalid JSON',
+  mcpMsg: "We couldn't parse the request body. Please ensure it's valid JSON.",
+  restMsg:
+    "The request body doesn't seem to be valid JSON. Please check and try again.",
 };
 
 const BODY_PARSE_ERRORS: Record<
@@ -1110,14 +1194,16 @@ const BODY_PARSE_ERRORS: Record<
   'payload-too-large': {
     statusCode: 413,
     mcpCode: -32600,
-    mcpMsg: 'Request body too large',
-    restMsg: 'Payload too large',
+    mcpMsg: 'The request body is too large. Please send a smaller payload.',
+    restMsg: 'That request is a bit too big for us to handle right now.',
   },
   'read-failed': {
     statusCode: 400,
     mcpCode: -32600,
-    mcpMsg: 'Request body read failed',
-    restMsg: 'Invalid JSON',
+    mcpMsg:
+      'We ran into an issue reading the request. Please try sending it again.',
+    restMsg:
+      "The request body doesn't seem to be valid JSON. Please check and try again.",
   },
   default: DEFAULT_BODY_ERROR,
 };
@@ -1210,7 +1296,7 @@ class HttpRequestPipeline {
       details: { header: duplicateHeader },
     });
     sendJson(rawRes, 400, {
-      error: `Duplicate ${duplicateHeader} header is not allowed`,
+      error: `It seems the '${duplicateHeader}' header was sent multiple times when it should only be sent once.`,
     });
     drainRequest(rawReq);
     return true;
@@ -1241,7 +1327,10 @@ class HttpRequestPipeline {
       return false;
     }
     if (!this.rateLimiter.check(ctx)) {
-      sendJson(ctx.res, 429, { error: 'Too Many Requests' });
+      sendJson(ctx.res, 429, {
+        error:
+          "You're sending requests a bit too quickly. Please slow down and try again.",
+      });
       drainRequest(rawReq);
       return false;
     }
@@ -1269,7 +1358,7 @@ class HttpRequestPipeline {
 
       if (bodyErrorKind === 'payload-too-large') {
         logWarn(
-          'Request body too large',
+          'The request body is too large. Please send a smaller payload.',
           { method: ctx.method, path: ctx.url.pathname },
           'http'
         );
@@ -1310,7 +1399,9 @@ function handlePipelineError(error: unknown, res: ServerResponse): void {
   if (res.writableEnded) return;
 
   if (!res.headersSent) {
-    sendJson(res, 500, { error: 'Internal Server Error' });
+    sendJson(res, 500, {
+      error: "Something went wrong on our end. We're looking into it!",
+    });
     return;
   }
 

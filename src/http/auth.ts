@@ -302,7 +302,11 @@ export function ensureMcpProtocolVersion(
       { reason: 'missing_header', path },
       'http'
     );
-    sendError(res, -32600, 'Missing MCP-Protocol-Version header');
+    sendError(
+      res,
+      -32600,
+      'Please include the MCP-Protocol-Version header in your request.'
+    );
     return false;
   }
 
@@ -312,7 +316,11 @@ export function ensureMcpProtocolVersion(
       { reason: 'unsupported_version', version, path },
       'http'
     );
-    sendError(res, -32600, `Unsupported MCP-Protocol-Version: ${version}`);
+    sendError(
+      res,
+      -32600,
+      `The protocol version '${version}' isn't supported right now. Please check and try again.`
+    );
     return false;
   }
 
@@ -331,7 +339,7 @@ export function ensureMcpProtocolVersion(
     sendError(
       res,
       -32600,
-      `MCP-Protocol-Version mismatch: expected ${expectedVersion}, got ${version}`
+      `There's a protocol version mismatch. We expected '${expectedVersion}', but received '${version}'.`
     );
     return false;
   }
