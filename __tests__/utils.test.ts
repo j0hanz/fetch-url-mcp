@@ -3,8 +3,8 @@ import { describe, it } from 'node:test';
 
 import {
   CharCode,
+  CodedError,
   composeAbortSignal,
-  createErrorWithCode,
   FetchError,
   getErrorMessage,
   getUtf8ByteLength,
@@ -117,7 +117,7 @@ describe('isAbortError', () => {
 
 describe('isSystemError', () => {
   it('returns true for error with code property', () => {
-    const err = createErrorWithCode('test', 'ENOENT');
+    const err = new CodedError('test', 'ENOENT');
     assert.equal(isSystemError(err), true);
   });
 
@@ -130,14 +130,15 @@ describe('isSystemError', () => {
   });
 });
 
-// ── createErrorWithCode ────────────────────────────────────────────
+// ── CodedError ─────────────────────────────────────────────────────
 
-describe('createErrorWithCode', () => {
+describe('CodedError', () => {
   it('creates Error with code property', () => {
-    const err = createErrorWithCode('not found', 'ENOENT');
+    const err = new CodedError('not found', 'ENOENT');
     assert.equal(err.message, 'not found');
     assert.equal(err.code, 'ENOENT');
     assert.ok(err instanceof Error);
+    assert.equal(err.name, 'CodedError');
   });
 });
 

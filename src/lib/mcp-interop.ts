@@ -11,11 +11,19 @@ import { z } from 'zod';
 
 import { logError, logWarn } from './core.js';
 import {
+  ABORTED,
+  FETCH_ERROR,
+  QUEUE_FULL,
+  VALIDATION_ERROR,
+} from './error-codes.js';
+import { LOG_MCP } from './logger-names.js';
+import {
   FetchError,
   getErrorMessage,
   isAbortError,
   isObject,
   isSystemError,
+  toError,
 } from './utils.js';
 
 export function createMcpError(
@@ -117,7 +125,7 @@ type ToolErrorResponse = CallToolResult & {
   isError: true;
 };
 
-const PUBLIC_ERROR_REASONS = new Set(['aborted', 'queue_full', 'timeout']);
+const PUBLIC_ERROR_REASONS = new Set(['aborted', QUEUE_FULL, 'timeout']);
 
 function sanitizeToolErrorDetails(
   details: Readonly<Record<string, unknown>>
@@ -174,7 +182,7 @@ function isValidationError(error: unknown): error is NodeJS.ErrnoException {
   return (
     error instanceof Error &&
     isSystemError(error) &&
-    error.code === 'VALIDATION_ERROR'
+    error.code === VALIDATION_ERROR
   );
 }
 export function handleToolError(
@@ -187,8 +195,8 @@ export function handleToolError(
     let { code } = error;
     if (typeof detailsCode === 'string') {
       code = detailsCode;
-    } else if (reason === 'queue_full') {
-      code = 'queue_full';
+    } else if (reason === QUEUE_FULL) {
+      code = QUEUE_FULL;
     }
     const details = sanitizeToolErrorDetails(error.details);
     return createToolErrorResponse(error.message, url, {
@@ -199,15 +207,54 @@ export function handleToolError(
   }
   if (isValidationError(error)) {
     return createToolErrorResponse(error.message, url, {
-      code: 'VALIDATION_ERROR',
+      code: VALIDATION_ERROR,
     });
   }
-  const code = isAbortError(error) ? 'ABORTED' : 'FETCH_ERROR';
+  const code = isAbortError(error) ? ABORTED : FETCH_ERROR;
   const message =
     error instanceof Error
       ? error.message
       : `${fallbackMessage}: unknown error`;
   return createToolErrorResponse(message, url, { code });
+}
+
+export function classifyAndLogToolError(
+  error: unknown,
+  meta: { url: string; durationMs: number },
+  loggerName: string,
+  toolName: string,
+  fallbackMessage: string
+): ToolErrorResponse {
+  if (error instanceof McpError) {
+    logError(
+      `${toolName} tool failed`,
+      { url: meta.url, durationMs: meta.durationMs, error: toError(error) },
+      loggerName
+    );
+    throw error;
+  }
+  if (error instanceof FetchError || isAbortError(error)) {
+    logWarn(
+      `${toolName} request failed`,
+      {
+        url: meta.url,
+        error: toError(error).message,
+        durationMs: meta.durationMs,
+      },
+      loggerName
+    );
+  } else {
+    logError(
+      `${toolName} request failed unexpectedly`,
+      {
+        url: meta.url,
+        error: toError(error).message,
+        durationMs: meta.durationMs,
+      },
+      loggerName
+    );
+  }
+  return handleToolError(error, meta.url, fallbackMessage);
 }
 
 /* =================================================================================================
@@ -250,7 +297,7 @@ function drainServerCleanupCallbacks(server: McpServer): void {
     try {
       callback();
     } catch (error: unknown) {
-      logWarn('Server cleanup callback failed', { error }, 'mcp');
+      logWarn('Server cleanup callback failed', { error }, LOG_MCP);
     }
   }
 }
@@ -476,7 +523,7 @@ class ToolProgressReporter implements ProgressReporter {
       return { report: () => {} };
     }
 
-    return new ToolProgressReporter(
+    const reporter = new ToolProgressReporter(
       token,
       {
         send: extra.sendNotification,
@@ -486,6 +533,7 @@ class ToolProgressReporter implements ProgressReporter {
       extra.progressState,
       resolveRelatedTaskMeta(extra._meta)
     );
+    return reporter;
   }
 
   /**
@@ -524,7 +572,7 @@ class ToolProgressReporter implements ProgressReporter {
             progress: effectiveProgress,
             message,
           },
-          'mcp'
+          LOG_MCP
         );
       }
     }
@@ -602,7 +650,7 @@ class ToolProgressReporter implements ProgressReporter {
             progress: notification.params.progress,
             message: notification.params.message,
           },
-          'mcp'
+          LOG_MCP
         );
       }
     } catch (error: unknown) {
@@ -613,7 +661,7 @@ class ToolProgressReporter implements ProgressReporter {
           progress: notification.params.progress,
           message: notification.params.message,
         },
-        'mcp'
+        LOG_MCP
       );
     }
   }

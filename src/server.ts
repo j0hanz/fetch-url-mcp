@@ -14,6 +14,7 @@ import {
   setLogLevel,
   setMcpServer,
 } from './lib/core.js';
+import { LOG_SERVER } from './lib/logger-names.js';
 import { setTaskToolCallCapability } from './lib/mcp-interop.js';
 import type { IconInfo } from './lib/utils.js';
 import { toError } from './lib/utils.js';
@@ -186,7 +187,7 @@ function registerLoggingSetLevelHandler(server: McpServer): void {
 
 function attachServerErrorHandler(server: McpServer): void {
   server.server.onerror = (error) => {
-    logError('MCP server error', toError(error), 'server');
+    logError('MCP server error', toError(error), LOG_SERVER);
   };
 }
 
@@ -210,7 +211,7 @@ async function shutdownServer(
 
   for (const result of results) {
     if (result.status === 'rejected') {
-      logError('Shutdown step failed', toError(result.reason), 'server');
+      logError('Shutdown step failed', toError(result.reason), LOG_SERVER);
     }
   }
 }
@@ -230,7 +231,7 @@ function createShutdownHandler(
           signal,
           initialSignal,
         },
-        'server'
+        LOG_SERVER
       );
       return shutdownPromise ?? Promise.resolve();
     }
@@ -242,7 +243,7 @@ function createShutdownHandler(
       .then(() => shutdownServer(server, signal))
       .catch((err: unknown) => {
         const error = toError(err);
-        logError('Error during shutdown', error, 'server');
+        logError('Error during shutdown', error, LOG_SERVER);
         process.exitCode = 1;
       })
       .finally(() => {
@@ -269,10 +270,10 @@ async function connectStdioServer(
 ): Promise<void> {
   try {
     await server.connect(transport);
-    logInfo('Fetch URL MCP server running on stdio', undefined, 'server');
+    logInfo('Fetch URL MCP server running on stdio', undefined, LOG_SERVER);
   } catch (error: unknown) {
     const err = toError(error);
-    throw new Error(`Failed to start stdio server: ${err.message}`, {
+    throw Error(`Failed to start stdio server: ${err.message}`, {
       cause: error,
     });
   }

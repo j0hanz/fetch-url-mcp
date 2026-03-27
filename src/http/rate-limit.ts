@@ -1,4 +1,5 @@
 import { logWarn } from '../lib/core.js';
+import { LOG_RATE_LIMIT } from '../lib/logger-names.js';
 import { isAbortError } from '../lib/utils.js';
 import { startAbortableIntervalLoop } from '../lib/utils.js';
 
@@ -46,7 +47,7 @@ class RateLimiter implements RateLimitManagerImpl {
       },
       onError: (err) => {
         if (!isAbortError(err)) {
-          logWarn('Rate limit cleanup failed', { error: err }, 'rate-limit');
+          logWarn('Rate limit cleanup failed', { error: err }, LOG_RATE_LIMIT);
         }
       },
     });
@@ -100,7 +101,7 @@ class RateLimiter implements RateLimitManagerImpl {
     }
 
     if (entry.count > this.options.maxRequests) {
-      logWarn('Rate limit exceeded', { ip: key }, 'rate-limit');
+      logWarn('Rate limit exceeded', { ip: key }, LOG_RATE_LIMIT);
       const retryAfter = Math.max(1, Math.ceil((entry.resetTime - now) / 1000));
       ctx.res.setHeader('Retry-After', String(retryAfter));
       sendJson(ctx.res, 429, { error: 'Rate limit exceeded', retryAfter });
@@ -118,5 +119,6 @@ class RateLimiter implements RateLimitManagerImpl {
 export function createRateLimitManagerImpl(
   options: RateLimitConfig
 ): RateLimitManagerImpl {
-  return new RateLimiter(options);
+  const limiter = new RateLimiter(options);
+  return limiter;
 }

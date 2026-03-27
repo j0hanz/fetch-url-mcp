@@ -13,6 +13,8 @@ import {
 import { z } from 'zod';
 
 import { config, logDebug, logInfo, logWarn } from '../lib/core.js';
+import { QUEUE_FULL } from '../lib/error-codes.js';
+import { LOG_TRANSFORM } from '../lib/logger-names.js';
 import {
   type CancellableTimeout,
   createAbortError,
@@ -112,7 +114,8 @@ function ensureTightBuffer(buffer: Uint8Array): Uint8Array {
     return buffer;
   }
 
-  return new Uint8Array(buffer);
+  const copy = new Uint8Array(buffer);
+  return copy;
 }
 
 function getTransferableBuffer(buffer: Uint8Array): ArrayBuffer | null {
@@ -407,17 +410,18 @@ class WorkerPool implements TransformWorkerPool {
           capacity: this.capacity,
           url,
         },
-        'transform'
+        LOG_TRANSFORM
       );
-      throw new FetchError(
+      const error = new FetchError(
         'Transform worker queue is full',
         url,
         HTTP_SERVICE_UNAVAILABLE,
         {
-          reason: 'queue_full',
+          reason: QUEUE_FULL,
           stage: 'transform:enqueue',
         }
       );
+      throw error;
     }
 
     const { promise, resolve, reject } =
@@ -469,7 +473,7 @@ class WorkerPool implements TransformWorkerPool {
         queueDepth: this.queue.depth,
         inflight: this.inflight.size,
       },
-      'transform'
+      LOG_TRANSFORM
     );
 
     const terminations = this.workers
@@ -495,7 +499,7 @@ class WorkerPool implements TransformWorkerPool {
   }
 
   private ensureOpen(): void {
-    if (this.closed) throw new Error(WorkerPool.CLOSED_MESSAGE);
+    if (this.closed) throw Error(WorkerPool.CLOSED_MESSAGE);
   }
 
   private createPendingTask(
@@ -631,7 +635,7 @@ class WorkerPool implements TransformWorkerPool {
         workerIndex,
         workerName: name,
       },
-      'transform'
+      LOG_TRANSFORM
     );
 
     worker.unref();
@@ -675,7 +679,7 @@ class WorkerPool implements TransformWorkerPool {
         workerName: slot.name,
         threadId: slot.worker.threadId,
       },
-      'transform'
+      LOG_TRANSFORM
     );
 
     if (slot.busy && slot.currentTaskId) {
@@ -714,7 +718,7 @@ class WorkerPool implements TransformWorkerPool {
           delayMs,
           attempt: attempts + 1,
         },
-        'transform'
+        LOG_TRANSFORM
       );
       setTimeout(() => {
         if (this.closed) return;
@@ -844,7 +848,7 @@ class WorkerPool implements TransformWorkerPool {
           toCapacity: this.capacity,
           queueDepth: this.getQueueDepth(),
         },
-        'transform'
+        LOG_TRANSFORM
       );
     }
   }
@@ -938,7 +942,7 @@ class WorkerPool implements TransformWorkerPool {
             workerIndex,
             timeoutMs: this.timeoutMs,
           },
-          'transform'
+          LOG_TRANSFORM
         );
 
         this.abortAndCleanTask(
@@ -1023,7 +1027,7 @@ export function getOrCreateWorkerPool(): WorkerPool {
         initialCapacity: workerPool.getCapacity(),
         timeoutMs: DEFAULT_TIMEOUT_MS,
       },
-      'transform'
+      LOG_TRANSFORM
     );
   }
   return workerPool;

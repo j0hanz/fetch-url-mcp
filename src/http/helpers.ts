@@ -15,6 +15,7 @@ import {
   unregisterMcpSessionServer,
   unregisterMcpSessionServerByServer,
 } from '../lib/core.js';
+import { LOG_HTTP } from '../lib/logger-names.js';
 import type { JsonRpcId } from '../lib/mcp-interop.js';
 import { createDefaultBlockList, normalizeIpForBlockList } from '../lib/url.js';
 import { getErrorMessage, toError } from '../lib/utils.js';
@@ -227,7 +228,7 @@ export function registerInboundBlockList(server: NetworkServer): void {
           remoteAddress: normalized.ip,
           family: normalized.family,
         },
-        'http'
+        LOG_HTTP
       );
       socket.destroy();
     }
@@ -271,7 +272,7 @@ export async function closeTransportBestEffort(
   try {
     await transport.close();
   } catch (error) {
-    logWarn('Transport close failed', { context, error }, 'http');
+    logWarn('Transport close failed', { context, error }, LOG_HTTP);
   }
 }
 
@@ -282,7 +283,7 @@ export async function closeMcpServerBestEffort(
   try {
     await server.close();
   } catch (error) {
-    logWarn('MCP server close failed', { context, error }, 'http');
+    logWarn('MCP server close failed', { context, error }, LOG_HTTP);
   }
 }
 
@@ -373,12 +374,17 @@ class JsonBodyReader {
     if (contentLengthHeader) {
       const contentLength = Number.parseInt(contentLengthHeader, 10);
       if (Number.isFinite(contentLength) && contentLength > limit) {
-        throw new JsonBodyError('payload-too-large', 'Payload too large');
+        const error = new JsonBodyError(
+          'payload-too-large',
+          'Payload too large'
+        );
+        throw error;
       }
     }
 
     if (signal?.aborted || isRequestReadAborted(req)) {
-      throw new JsonBodyError('read-failed', 'Request aborted');
+      const error = new JsonBodyError('read-failed', 'Request aborted');
+      throw error;
     }
 
     const body = await this.readBody(req, limit, signal);
@@ -387,7 +393,8 @@ class JsonBodyReader {
     try {
       return JSON.parse(body);
     } catch (err: unknown) {
-      throw new JsonBodyError('invalid-json', getErrorMessage(err));
+      const error = new JsonBodyError('invalid-json', getErrorMessage(err));
+      throw error;
     }
   }
 
@@ -420,7 +427,8 @@ class JsonBodyReader {
         combined.set(chunk, offset);
         offset += chunk.byteLength;
       }
-      return new TextDecoder().decode(combined);
+      const text = new TextDecoder().decode(combined);
+      return text;
     } finally {
       if (signal && abortListener) {
         try {
@@ -468,7 +476,8 @@ class JsonBodyReader {
 
     try {
       if (signal?.aborted || isRequestReadAborted(req)) {
-        throw new JsonBodyError('read-failed', 'Request aborted');
+        const error = new JsonBodyError('read-failed', 'Request aborted');
+        throw error;
       }
 
       await pipeline(req, sink, signal ? { signal } : undefined);
@@ -476,14 +485,19 @@ class JsonBodyReader {
     } catch (err: unknown) {
       if (err instanceof JsonBodyError) throw err;
       if (signal?.aborted || isRequestReadAborted(req)) {
-        throw new JsonBodyError('read-failed', 'Request aborted');
+        const error = new JsonBodyError('read-failed', 'Request aborted');
+        throw error;
       }
-      throw new JsonBodyError('read-failed', getErrorMessage(err));
+      const error = new JsonBodyError('read-failed', getErrorMessage(err));
+      throw error;
     }
   }
 
   private normalizeChunk(chunk: Uint8Array | string): Uint8Array {
-    if (typeof chunk === 'string') return new TextEncoder().encode(chunk);
+    if (typeof chunk === 'string') {
+      const encoded = new TextEncoder().encode(chunk);
+      return encoded;
+    }
     return chunk;
   }
 }

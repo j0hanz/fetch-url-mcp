@@ -18,6 +18,19 @@ import {
   logWarn,
   redactUrl,
 } from './core.js';
+import {
+  EBADREDIRECT,
+  EBLOCKED,
+  EINVAL,
+  ENODATA,
+  VALIDATION_ERROR,
+} from './error-codes.js';
+import {
+  invalidRedirectError,
+  redirectCredentialsError,
+  unsupportedProtocolError,
+} from './error-messages.js';
+import { LOG_FETCH } from './logger-names.js';
 import { isIP } from './url.js';
 import {
   BLOCKED_HOST_SUFFIXES,
@@ -28,11 +41,9 @@ import {
   SafeDnsResolver,
   type TransformResult,
   UrlNormalizer,
-  VALIDATION_ERROR_CODE,
 } from './url.js';
 import {
   composeAbortSignal,
-  createErrorWithCode,
   FetchError,
   isAbortError,
   isError,
@@ -284,9 +295,10 @@ function isBinaryContent(buffer: Uint8Array, encoding?: string): boolean {
   return hasNullByte(buffer, BINARY_SCAN_LIMIT);
 }
 function createBinaryContentError(url: string): FetchError {
-  return new FetchError('Binary content detected', url, 500, {
+  const error = new FetchError('Binary content detected', url, 500, {
     reason: 'binary_content_detected',
   });
+  return error;
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -322,41 +334,64 @@ type FetchErrorInput =
   | { kind: 'unknown'; message?: string };
 function createFetchError(input: FetchErrorInput, url: string): FetchError {
   switch (input.kind) {
-    case 'canceled':
-      return new FetchError('Request canceled', url, 499, {
+    case 'canceled': {
+      const error = new FetchError('Request canceled', url, 499, {
         reason: 'aborted',
       });
-    case 'aborted':
-      return new FetchError('Request aborted during response read', url, 499, {
-        reason: 'aborted',
-      });
-    case 'timeout':
-      return new FetchError(
+      return error;
+    }
+    case 'aborted': {
+      const error = new FetchError(
+        'Request aborted during response read',
+        url,
+        499,
+        {
+          reason: 'aborted',
+        }
+      );
+      return error;
+    }
+    case 'timeout': {
+      const error = new FetchError(
         `Request timed out after ${input.timeout}ms`,
         url,
         504,
         { timeout: input.timeout }
       );
-    case 'rate-limited':
-      return new FetchError('Too many requests', url, 429, {
+      return error;
+    }
+    case 'rate-limited': {
+      const error = new FetchError('Too many requests', url, 429, {
         retryAfter: parseRetryAfter(input.retryAfter),
       });
-    case 'http':
-      return new FetchError(
+      return error;
+    }
+    case 'http': {
+      const error = new FetchError(
         `HTTP ${input.status}: ${input.statusText}`,
         url,
         input.status
       );
-    case 'too-many-redirects':
-      return new FetchError('Too many redirects', url);
-    case 'missing-redirect-location':
-      return new FetchError('Redirect missing Location header', url);
-    case 'network':
-      return new FetchError('Network error', url, undefined, {
+      return error;
+    }
+    case 'too-many-redirects': {
+      const error = new FetchError('Too many redirects', url);
+      return error;
+    }
+    case 'missing-redirect-location': {
+      const error = new FetchError('Redirect missing Location header', url);
+      return error;
+    }
+    case 'network': {
+      const error = new FetchError('Network error', url, undefined, {
         message: input.message,
       });
-    case 'unknown':
-      return new FetchError(input.message ?? 'Unexpected error', url);
+      return error;
+    }
+    case 'unknown': {
+      const error = new FetchError(input.message ?? 'Unexpected error', url);
+      return error;
+    }
     default: {
       const _exhaustive: never = input;
       return _exhaustive;
@@ -374,11 +409,11 @@ function resolveErrorUrl(error: unknown, fallback: string): string {
   return typeof requestUrl === 'string' ? requestUrl : fallback;
 }
 const CLIENT_ERROR_CODES = new Set([
-  VALIDATION_ERROR_CODE,
-  'EBADREDIRECT',
-  'EBLOCKED',
-  'ENODATA',
-  'EINVAL',
+  VALIDATION_ERROR,
+  EBADREDIRECT,
+  EBLOCKED,
+  ENODATA,
+  EINVAL,
 ]);
 
 function mapAbortError(
@@ -395,11 +430,13 @@ function mapSystemError(error: NodeJS.ErrnoException, url: string): FetchError {
   const { code, message } = error;
 
   if (code === 'ETIMEOUT') {
-    return new FetchError(message, url, 504, { code });
+    const fetchError = new FetchError(message, url, 504, { code });
+    return fetchError;
   }
 
   if (code && CLIENT_ERROR_CODES.has(code)) {
-    return new FetchError(message, url, 400, { code });
+    const fetchError = new FetchError(message, url, 400, { code });
+    return fetchError;
   }
 
   return createFetchError({ kind: 'network', message }, url);
@@ -464,7 +501,7 @@ type NormalizeUrl = (urlString: string) => string;
 type RedirectPreflight = (url: string, signal?: AbortSignal) => Promise<string>;
 function createPinnedAgent(ipAddress: string): Agent {
   const ca = tls.rootCertificates.length > 0 ? tls.rootCertificates : undefined;
-  return new Agent({
+  const agent = new Agent({
     connect: {
       lookup: (hostname, options, callback) => {
         const family = isIP(ipAddress) === 6 ? 6 : 4;
@@ -482,6 +519,7 @@ function createPinnedAgent(ipAddress: string): Agent {
     keepAliveTimeout: 1000,
     keepAliveMaxTimeout: 1000,
   });
+  return agent;
 }
 class RedirectFollower {
   constructor(
@@ -602,13 +640,10 @@ class RedirectFollower {
   private resolveRedirectTarget(baseUrl: string, location: string): string {
     const resolved = URL.parse(location, baseUrl);
     if (!resolved) {
-      throw createErrorWithCode('Invalid redirect target', 'EBADREDIRECT');
+      throw invalidRedirectError();
     }
     if (resolved.username || resolved.password) {
-      throw createErrorWithCode(
-        'Redirect target includes credentials',
-        'EBADREDIRECT'
-      );
+      throw redirectCredentialsError();
     }
 
     return this.normalizeUrl(resolved.href);
@@ -622,10 +657,7 @@ class RedirectFollower {
   private assertHttpProtocol(url: string): void {
     const parsed = new URL(url);
     if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
-      throw createErrorWithCode(
-        `Unsupported redirect protocol: ${parsed.protocol}`,
-        'EUNSUPPORTEDPROTOCOL'
-      );
+      throw unsupportedProtocolError(parsed.protocol);
     }
   }
 
@@ -711,13 +743,14 @@ function assertSupportedContentType(
       {
         url: redactUrl(url),
       },
-      'fetch'
+      LOG_FETCH
     );
     return;
   }
 
   if (!isTextLikeMediaType(mediaType)) {
-    throw new FetchError(`Unsupported content type: ${mediaType}`, url);
+    const error = new FetchError(`Unsupported content type: ${mediaType}`, url);
+    throw error;
   }
 }
 function extractEncodingTokens(value: string): string[] {
@@ -742,7 +775,7 @@ function createUnsupportedContentEncodingError(
   url: string,
   encodingHeader: string
 ): FetchError {
-  return new FetchError(
+  const error = new FetchError(
     `Unsupported Content-Encoding: ${encodingHeader}`,
     url,
     415,
@@ -751,6 +784,7 @@ function createUnsupportedContentEncodingError(
       encoding: encodingHeader,
     }
   );
+  return error;
 }
 function createDecompressor(
   encoding: ContentEncoding
@@ -772,7 +806,7 @@ function createPumpedStream(
   initialChunk: Uint8Array | undefined,
   reader: ReadableStreamDefaultReader<Uint8Array>
 ): ReadableStream<Uint8Array> {
-  return new ReadableStream({
+  const stream = new ReadableStream<Uint8Array>({
     start(controller) {
       if (initialChunk && initialChunk.byteLength > 0) {
         controller.enqueue(initialChunk);
@@ -794,6 +828,7 @@ function createPumpedStream(
       void reader.cancel(reason).catch(() => undefined);
     },
   });
+  return stream;
 }
 interface DecodePipeline {
   decodedReader: ReadableStreamDefaultReader<Uint8Array>;
@@ -891,11 +926,12 @@ async function primeDecodedResponse(
     const first = await pipe.decodedReader.read();
     if (first.done) {
       clearAbortListener();
-      return new Response(null, {
+      const result = new Response(null, {
         status: response.status,
         statusText: response.statusText,
         headers: pipe.headers,
       });
+      return result;
     }
 
     const body = createPumpedStream(first.value, pipe.decodedReader);
@@ -908,20 +944,22 @@ async function primeDecodedResponse(
         });
     }
 
-    return new Response(body, {
+    const result = new Response(body, {
       status: response.status,
       statusText: response.statusText,
       headers: pipe.headers,
     });
+    return result;
   } catch (error: unknown) {
     clearAbortListener();
     pipe.cleanup();
     void pipe.decodedReader.cancel(error).catch(() => undefined);
 
-    throw new FetchError(
+    const fetchError = new FetchError(
       `Content-Encoding decode failed for ${redactUrl(url)}: ${isError(error) ? error.message : String(error)}`,
       url
     );
+    throw fetchError;
   }
 }
 async function decodeResponseIfNeeded(
@@ -1107,7 +1145,8 @@ class ResponseTextReader {
             total += remaining;
             yield slice;
           }
-          throw new MaxBytesError();
+          const error = new MaxBytesError();
+          throw error;
         }
 
         total = newTotal;
@@ -1234,10 +1273,11 @@ function assertReadableStreamLike(
   stage: string
 ): asserts stream is CompatibleReadableStream {
   if (isReadableStreamLike(stream)) return;
-  throw new FetchError('Invalid response stream', url, 500, {
+  const error = new FetchError('Invalid response stream', url, 500, {
     reason: 'invalid_stream',
     stage,
   });
+  throw error;
 }
 function toNodeReadableStream(
   stream: ReadableStream<Uint8Array>,

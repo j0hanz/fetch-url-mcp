@@ -13,7 +13,9 @@ import {
   logWarn,
   redactUrl,
 } from '../lib/core.js';
+import { QUEUE_FULL } from '../lib/error-codes.js';
 import { isRawTextContentUrl } from '../lib/http.js';
+import { LOG_TRANSFORM } from '../lib/logger-names.js';
 import {
   composeAbortSignal,
   FetchError,
@@ -89,12 +91,17 @@ function decodeInput(input: string | Uint8Array, encoding?: string): string {
     normalizedEncoding === 'utf-8' ||
     normalizedEncoding === 'utf8'
   ) {
-    return new TextDecoder('utf-8').decode(input);
+    const decoded = new TextDecoder('utf-8').decode(input);
+    return decoded;
   }
   try {
-    return new TextDecoder(normalizedEncoding, { fatal: true }).decode(input);
+    const decoded = new TextDecoder(normalizedEncoding, { fatal: true }).decode(
+      input
+    );
+    return decoded;
   } catch {
-    return new TextDecoder('utf-8').decode(input);
+    const decoded = new TextDecoder('utf-8').decode(input);
+    return decoded;
   }
 }
 
@@ -167,7 +174,7 @@ class StageTracker {
             thresholdMs: Math.round(warnThresholdMs),
             url: context.url,
           },
-          'transform'
+          LOG_TRANSFORM
         );
       }
     }
@@ -191,12 +198,13 @@ class StageTracker {
 
   private checkBudget(url: string, stage: string, budget?: StageBudget): void {
     if (budget && budget.elapsedMs >= budget.totalBudgetMs) {
-      throw new FetchError('Transform budget exhausted', url, 504, {
+      const error = new FetchError('Transform budget exhausted', url, 504, {
         reason: 'timeout',
         stage: `${stage}:budget_exhausted`,
         elapsedMs: budget.elapsedMs,
         totalBudgetMs: budget.totalBudgetMs,
       });
+      throw error;
     }
   }
 
@@ -250,7 +258,7 @@ class StageTracker {
           stage: event.stage,
           error: getErrorMessage(error),
         },
-        'transform'
+        LOG_TRANSFORM
       );
     }
   }
@@ -345,7 +353,7 @@ function truncateHtml(
       maxSize,
       truncatedSize: getUtf8ByteLength(content),
     },
-    'transform'
+    LOG_TRANSFORM
   );
   return { html: content, truncated: true };
 }
@@ -516,7 +524,7 @@ function validateReaderability(
         'This might be a client-side rendered (SPA) application. ' +
         'Content extraction may be incomplete.',
       { textLength },
-      'transform'
+      LOG_TRANSFORM
     );
   }
 
@@ -588,7 +596,11 @@ function extractArticle(
   signal?: AbortSignal
 ): ExtractedArticle | null {
   if (!isReadabilityCompatible(document)) {
-    logWarn('Document not compatible with Readability', undefined, 'transform');
+    logWarn(
+      'Document not compatible with Readability',
+      undefined,
+      LOG_TRANSFORM
+    );
     return null;
   }
 
@@ -605,7 +617,7 @@ function extractArticle(
     logError(
       'Failed to extract article with Readability',
       error instanceof Error ? error : undefined,
-      'transform'
+      LOG_TRANSFORM
     );
     return null;
   }
@@ -616,12 +628,12 @@ function isValidInput(html: string, url: string): boolean {
     logWarn(
       'extractContent called with invalid HTML input',
       undefined,
-      'transform'
+      LOG_TRANSFORM
     );
     return false;
   }
   if (typeof url !== 'string' || url.length === 0) {
-    logWarn('extractContent called with invalid URL', undefined, 'transform');
+    logWarn('extractContent called with invalid URL', undefined, LOG_TRANSFORM);
     return false;
   }
   return true;
@@ -637,7 +649,7 @@ function applyBaseUri(document: Document, url: string): void {
         url: url.substring(0, 100),
         error: getErrorMessage(error),
       },
-      'transform'
+      LOG_TRANSFORM
     );
   }
 }
@@ -750,7 +762,7 @@ function extractContentContext(
     logError(
       'Failed to extract content',
       error instanceof Error ? error : undefined,
-      'transform'
+      LOG_TRANSFORM
     );
 
     return createEmptyExtractionContext();
@@ -962,11 +974,17 @@ export function htmlToMarkdown(
     logError(
       'Failed to convert HTML to markdown',
       error instanceof Error ? error : undefined,
-      'transform'
+      LOG_TRANSFORM
     );
-    throw new FetchError('Failed to convert HTML to markdown', url, 500, {
-      reason: 'markdown_convert_failed',
-    });
+    const fetchError = new FetchError(
+      'Failed to convert HTML to markdown',
+      url,
+      500,
+      {
+        reason: 'markdown_convert_failed',
+      }
+    );
+    throw fetchError;
   }
 }
 
@@ -1012,7 +1030,7 @@ function tryTransformRawContent(params: {
     {
       url: params.url.substring(0, 80),
     },
-    'transform'
+    LOG_TRANSFORM
   );
 
   const { content, title } = buildRawMarkdownPayload({
@@ -1541,12 +1559,13 @@ export function transformHtmlToMarkdownInProcess(
 
 function validateBinaryContent(html: string, url: string): void {
   if (hasBinaryIndicators(html)) {
-    throw new FetchError(
+    const error = new FetchError(
       'Content appears to be binary data (high replacement character ratio or null bytes)',
       url,
       415,
       { reason: 'binary_content_detected', stage: 'transform:validate' }
     );
+    throw error;
   }
 }
 
@@ -1619,7 +1638,7 @@ function resolveWorkerFallback(
 ): MarkdownTransformResult {
   const poolStats = getWorkerPoolStats();
   const isQueueFull =
-    error instanceof FetchError && error.details['reason'] === 'queue_full';
+    error instanceof FetchError && error.details['reason'] === QUEUE_FULL;
 
   if (isQueueFull) {
     logWarn(
@@ -1628,7 +1647,7 @@ function resolveWorkerFallback(
         url: redactUrl(url),
         ...(poolStats ?? {}),
       },
-      'transform'
+      LOG_TRANSFORM
     );
 
     return transformInputInProcess(htmlOrBuffer, url, options);
@@ -1648,7 +1667,7 @@ function resolveWorkerFallback(
       error: message,
       ...(poolStats ?? {}),
     },
-    'transform'
+    LOG_TRANSFORM
   );
 
   return transformInputInProcess(htmlOrBuffer, url, options);

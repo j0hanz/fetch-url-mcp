@@ -5,6 +5,7 @@ import { setInterval } from 'node:timers';
 import { ErrorCode } from '@modelcontextprotocol/sdk/types.js';
 
 import { config, logInfo, logWarn } from '../lib/core.js';
+import { LOG_TASKS } from '../lib/logger-names.js';
 import { createMcpError } from '../lib/mcp-interop.js';
 import { isObject, timingSafeEqualUtf8 } from '../lib/utils.js';
 
@@ -136,11 +137,11 @@ function logTaskStatusTransition(
   };
 
   if (nextStatus === 'failed') {
-    logWarn('Task status changed to failed', meta, 'tasks');
+    logWarn('Task status changed to failed', meta, LOG_TASKS);
     return;
   }
 
-  logInfo('Task status changed', meta, 'tasks');
+  logInfo('Task status changed', meta, LOG_TASKS);
 }
 
 class TaskManager {
@@ -181,7 +182,7 @@ class TaskManager {
             ownerKey: task.ownerKey,
             status: task.status,
           },
-          'tasks'
+          LOG_TASKS
         );
         this.removeTask(task.taskId);
       }
@@ -290,7 +291,7 @@ class TaskManager {
         ownerKey,
         ttl: task.ttl,
       },
-      'tasks'
+      LOG_TASKS
     );
     return task;
   }
@@ -321,7 +322,7 @@ class TaskManager {
   ): void {
     const task = this.tasks.get(taskId);
     if (!task) {
-      logWarn('updateTask called for unknown task', { taskId }, 'tasks');
+      logWarn('updateTask called for unknown task', { taskId }, LOG_TASKS);
       return;
     }
     if (isTerminalStatus(task.status)) {
@@ -331,7 +332,7 @@ class TaskManager {
           taskId,
           currentStatus: task.status,
         },
-        'tasks'
+        LOG_TASKS
       );
       return;
     }
@@ -367,7 +368,7 @@ class TaskManager {
         taskId: task.taskId,
         ownerKey: task.ownerKey,
       },
-      'tasks'
+      LOG_TASKS
     );
     return task;
   }
@@ -392,7 +393,7 @@ class TaskManager {
           ownerKey,
           count: cancelled.length,
         },
-        'tasks'
+        LOG_TASKS
       );
     }
     return cancelled;

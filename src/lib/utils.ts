@@ -7,6 +7,8 @@ import {
 import { inspect } from 'node:util';
 
 import { config, logDebug, logWarn } from './core.js';
+import { FETCH_ERROR } from './error-codes.js';
+import { LOG_HTTP } from './logger-names.js';
 
 const textEncoder = new TextEncoder();
 const UNKNOWN_ERROR_MESSAGE = 'Unknown error';
@@ -35,19 +37,21 @@ export function throwIfAborted(
   if (!signal?.aborted) return;
 
   if (signal.reason instanceof Error && signal.reason.name === 'TimeoutError') {
-    throw new FetchError('Request timeout', url, 504, {
+    const error = new FetchError('Request timeout', url, 504, {
       reason: 'timeout',
       stage,
     });
+    throw error;
   }
 
   throw createAbortError(url, stage);
 }
 export function createAbortError(url: string, stage: string): FetchError {
-  return new FetchError('Request was canceled', url, 499, {
+  const error = new FetchError('Request was canceled', url, 499, {
     reason: 'aborted',
     stage,
   });
+  return error;
 }
 export function timingSafeEqualUtf8(a: string, b: string): boolean {
   const aBuf = textEncoder.encode(a);
@@ -84,7 +88,7 @@ export class FetchError extends Error {
     } else if (httpStatus) {
       this.code = `HTTP_${httpStatus}`;
     } else {
-      this.code = 'FETCH_ERROR';
+      this.code = FETCH_ERROR;
     }
   }
 }
@@ -117,13 +121,13 @@ export function toError(error: unknown): Error {
 export function isAbortError(error: unknown): boolean {
   return isError(error) && error.name === 'AbortError';
 }
-export function createErrorWithCode(
-  message: string,
-  code: string,
-  options?: ErrorOptions
-): NodeJS.ErrnoException {
-  const error = new Error(message, options);
-  return Object.assign(error, { code });
+export class CodedError extends Error {
+  readonly code: string;
+  constructor(message: string, code: string, options?: ErrorOptions) {
+    super(message, options);
+    this.code = code;
+    this.name = 'CodedError';
+  }
 }
 export function isSystemError(error: unknown): error is NodeJS.ErrnoException {
   if (!isError(error)) return false;
@@ -182,7 +186,7 @@ export function applyHttpServerTuning(server: TunableHttpServer): void {
             dropped: droppedSinceLastLog,
             data,
           },
-          'http'
+          LOG_HTTP
         );
 
         lastLoggedAt = now;
@@ -196,7 +200,11 @@ export function applyHttpServerTuning(server: TunableHttpServer): void {
 export function drainConnectionsOnShutdown(server: TunableHttpServer): void {
   if (typeof server.closeIdleConnections === 'function') {
     server.closeIdleConnections();
-    logDebug('Closed idle HTTP connections during shutdown', undefined, 'http');
+    logDebug(
+      'Closed idle HTTP connections during shutdown',
+      undefined,
+      LOG_HTTP
+    );
   }
 }
 export interface CancellableTimeout<T> {
@@ -218,7 +226,8 @@ function createAbortSafeTimeoutPromise<T>(
     signal,
   }).catch((err: unknown) => {
     if (isAbortError(err)) {
-      return new Promise<T>(() => {});
+      const pending = new Promise<T>(() => {});
+      return pending;
     }
     throw err;
   });

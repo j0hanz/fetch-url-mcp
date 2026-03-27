@@ -58,7 +58,8 @@ function decodeHtml(
   }
 
   try {
-    return new TextDecoder(encoding).decode(htmlBuffer);
+    const decoded = new TextDecoder(encoding).decode(htmlBuffer);
+    return decoded;
   } catch {
     return decoder.decode(htmlBuffer);
   }

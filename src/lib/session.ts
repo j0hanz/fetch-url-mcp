@@ -146,7 +146,8 @@ class InMemorySessionStore implements SessionStore {
 }
 
 export function createSessionStore(sessionTtlMs: number): SessionStore {
-  return new InMemorySessionStore(sessionTtlMs);
+  const store = new InMemorySessionStore(sessionTtlMs);
+  return store;
 }
 
 /* -------------------------------------------------------------------------------------------------

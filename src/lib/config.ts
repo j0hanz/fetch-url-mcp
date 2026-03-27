@@ -28,19 +28,19 @@ function hasPackageJsonVersion(value: unknown): value is { version: string } {
 
 function readServerVersion(moduleUrl: string): string {
   const packageJsonPath = findPackageJSON(moduleUrl);
-  if (!packageJsonPath) throw new Error('package.json not found');
+  if (!packageJsonPath) throw Error('package.json not found');
 
   let packageJson: unknown;
   try {
     packageJson = JSON.parse(readFileSync(packageJsonPath, 'utf-8'));
   } catch (error) {
-    throw new Error(
+    throw Error(
       `Failed to parse package.json at ${packageJsonPath}: ${getErrorMessage(error)}`,
       { cause: error }
     );
   }
   if (!hasPackageJsonVersion(packageJson)) {
-    throw new Error(`package.json version is missing at ${packageJsonPath}`);
+    throw Error(`package.json version is missing at ${packageJsonPath}`);
   }
 
   return packageJson.version;
@@ -250,15 +250,19 @@ const EnvParser = {
   url(value: string | undefined, name: string): URL | undefined {
     if (!value) return undefined;
     const parsed = URL.parse(value);
-    if (!parsed) throw new ConfigError(`Invalid ${name} value: ${value}`);
+    if (!parsed) {
+      const error = new ConfigError(`Invalid ${name} value: ${value}`);
+      throw error;
+    }
     return parsed;
   },
   allowedHosts(envValue: string | undefined): Set<string> {
-    return new Set(
+    const hosts = new Set(
       EnvParser.list(envValue)
         .map((h) => EnvParser.normalizeHostValue(h))
         .filter((h): h is string => h !== null)
     );
+    return hosts;
   },
   optionalFilePath(value: string | undefined): string | undefined {
     const trimmed = value?.trim();
@@ -440,9 +444,10 @@ function buildHttpsConfig(): HttpsConfig {
   const caFile = EnvParser.optionalFilePath(env['SERVER_TLS_CA_FILE']);
 
   if ((keyFile && !certFile) || (!keyFile && certFile)) {
-    throw new ConfigError(
+    const error = new ConfigError(
       'Both SERVER_TLS_KEY_FILE and SERVER_TLS_CERT_FILE must be set together'
     );
+    throw error;
   }
 
   return {

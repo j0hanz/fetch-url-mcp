@@ -36,6 +36,7 @@ import {
   type SessionStore,
   startSessionCleanupLoop,
 } from '../lib/core.js';
+import { LOG_AUTH, LOG_HTTP, LOG_SESSION } from '../lib/logger-names.js';
 import {
   acceptsEventStream,
   acceptsJsonAndEventStream,
@@ -174,7 +175,7 @@ function logGatewayRejection(params: {
       ...(rpcId === null || rpcId === undefined ? {} : { rpcId }),
       ...(details ?? {}),
     },
-    'http'
+    LOG_HTTP
   );
 }
 
@@ -200,16 +201,16 @@ function logRequestCompletion(params: {
   };
 
   if (params.statusCode >= 500) {
-    logError('HTTP request completed with server error', meta, 'http');
+    logError('HTTP request failed with server error', meta, LOG_HTTP);
     return;
   }
 
   if (params.statusCode >= 400) {
-    logWarn('HTTP request completed with client error', meta, 'http');
+    logWarn('HTTP client error', meta, LOG_HTTP);
     return;
   }
 
-  logDebug('HTTP request completed', meta, 'http');
+  logDebug('HTTP request completed', meta, LOG_HTTP);
 }
 
 function createSessionTeardownOptions(
@@ -282,7 +283,7 @@ class McpSessionGateway {
         rpcId: body.id,
         sessionId,
       },
-      'http'
+      LOG_HTTP
     );
 
     const transport = await this.getOrCreateTransport(ctx, requestId);
@@ -314,7 +315,7 @@ class McpSessionGateway {
       return;
     }
 
-    logDebug('MCP GET received', { sessionId }, 'http');
+    logDebug('MCP GET received', { sessionId }, LOG_HTTP);
     this.store.touch(sessionId);
     await session.transport.handleRequest(ctx.req, ctx.res);
   }
@@ -327,7 +328,7 @@ class McpSessionGateway {
     const { sessionId, session } = sessionState;
 
     await session.transport.close();
-    logDebug('MCP DELETE received', { sessionId }, 'http');
+    logDebug('MCP DELETE received', { sessionId }, LOG_HTTP);
     this.cleanupSessionRecord(
       sessionId,
       createSessionTeardownOptions('ended', 'session-delete')
@@ -761,7 +762,7 @@ class McpSessionGateway {
     }
     this.clearSessionInitTimeout(sessionId);
     if (sessionId) this.store.touch(sessionId);
-    logDebug('Session initialized', { sessionId }, 'session');
+    logDebug('Session initialized', { sessionId }, LOG_SESSION);
   }
 
   private createSessionInitTimeout(
@@ -780,7 +781,7 @@ class McpSessionGateway {
           return;
         }
 
-        logWarn('Session init timeout', { sessionId }, 'session');
+        logWarn('Session init timeout', { sessionId }, LOG_SESSION);
         this.cleanupSessionRecord(
           sessionId,
           createSessionTeardownOptions('init-timeout')
@@ -791,7 +792,7 @@ class McpSessionGateway {
       logWarn(
         'Session init timeout before registration completed',
         { sessionId },
-        'session'
+        LOG_SESSION
       );
       tracker.releaseSlot();
       void teardownUnregisteredSessionResources(
@@ -833,7 +834,7 @@ class McpSessionGateway {
           sessionId,
           error: toError(err).message,
         },
-        'session'
+        LOG_SESSION
       );
       clearTimeout(initTimeout);
       tracker.releaseSlot();
@@ -860,7 +861,7 @@ class McpSessionGateway {
           path: ctx.url.pathname,
           method: ctx.method,
         },
-        'session'
+        LOG_SESSION
       );
       sendError(
         ctx.res,
@@ -880,7 +881,7 @@ class McpSessionGateway {
           path: ctx.url.pathname,
           method: ctx.method,
         },
-        'session'
+        LOG_SESSION
       );
       sendError(
         ctx.res,
@@ -903,7 +904,7 @@ class McpSessionGateway {
       logError(
         'Session server creation failed',
         { sessionId: newSessionId, error: toError(error).message },
-        'session'
+        LOG_SESSION
       );
       tracker.releaseSlot();
       throw error;
@@ -937,7 +938,7 @@ class McpSessionGateway {
       logWarn(
         'Session closed before registration completed',
         { sessionId: newSessionId },
-        'session'
+        LOG_SESSION
       );
       void teardownUnregisteredSessionResources(
         unpublishedSession,
@@ -961,7 +962,7 @@ class McpSessionGateway {
     logInfo(
       'Session created',
       { sessionId: newSessionId, negotiatedProtocolVersion },
-      'session'
+      LOG_SESSION
     );
 
     transportImpl.onclose = composeCloseHandlers(transportImpl.onclose, () => {
@@ -982,7 +983,7 @@ class McpSessionGateway {
       teardownOptions.closeTransportReason ??
       teardownOptions.closeServerReason ??
       'session';
-    logDebug('Session cleanup', { sessionId, context }, 'session');
+    logDebug('Session cleanup', { sessionId, context }, LOG_SESSION);
     this.clearSessionInitTimeout(sessionId);
     const session = this.store.remove(sessionId);
     if (!session) return;
@@ -1021,7 +1022,7 @@ class McpSessionGateway {
       logWarn(
         'Session capacity exhausted',
         { maxSessions: config.server.maxSessions },
-        'session'
+        LOG_SESSION
       );
       sendError(
         res,
@@ -1038,7 +1039,7 @@ class McpSessionGateway {
       logWarn(
         'Session capacity exhausted (post-eviction)',
         { maxSessions: config.server.maxSessions },
-        'session'
+        LOG_SESSION
       );
       sendError(
         res,
@@ -1120,7 +1121,7 @@ class HttpDispatcher {
       });
     } catch (err) {
       const error = toError(err);
-      logError('Request failed', error, 'http');
+      logError('Request failed', error, LOG_HTTP);
       if (!ctx.res.writableEnded) {
         sendJson(ctx.res, 500, {
           error: "Something went wrong on our end. We're looking into it!",
@@ -1155,7 +1156,7 @@ class HttpDispatcher {
       logWarn(
         'Authentication failed',
         { message, method: ctx.method, path: ctx.url.pathname },
-        'auth'
+        LOG_AUTH
       );
       if (isInsufficientScopeError(err)) {
         applyInsufficientScopeAuthHeaders(
@@ -1360,10 +1361,10 @@ class HttpRequestPipeline {
         logWarn(
           'The request body is too large. Please send a smaller payload.',
           { method: ctx.method, path: ctx.url.pathname },
-          'http'
+          LOG_HTTP
         );
       } else if (bodyErrorKind === 'read-failed' || bodyErrorKind === null) {
-        logError('Request body parsing failed', toError(error), 'http');
+        logError('Request body parsing failed', toError(error), LOG_HTTP);
       }
 
       sendBodyParseError(ctx, bodyErrorKind, rawReq);
@@ -1394,7 +1395,7 @@ class HttpRequestPipeline {
 // ---------------------------------------------------------------------------
 
 function handlePipelineError(error: unknown, res: ServerResponse): void {
-  logError('Request pipeline failed', toError(error), 'http');
+  logError('Request pipeline failed', toError(error), LOG_HTTP);
 
   if (res.writableEnded) return;
 
@@ -1419,7 +1420,7 @@ function createNetworkServer(
 
   const { keyFile, certFile, caFile } = https;
   if (!keyFile || !certFile) {
-    throw new Error(
+    throw Error(
       'HTTPS enabled but SERVER_TLS_KEY_FILE / SERVER_TLS_CERT_FILE are missing'
     );
   }
@@ -1435,7 +1436,7 @@ function createNetworkServer(
       tlsOptions.ca = readFileSync(caFile);
     }
   } catch (err) {
-    throw new Error(
+    throw Error(
       `Failed to read TLS files (key=${keyFile}, cert=${certFile}): ${err instanceof Error ? err.message : String(err)}`,
       { cause: err }
     );
@@ -1471,7 +1472,7 @@ function createShutdownHandler(options: {
   const closeBatchSize = 10;
 
   return async (signal: string): Promise<void> => {
-    logInfo(`Stopping HTTP server (${signal})...`, undefined, 'http');
+    logInfo(`Stopping HTTP server (${signal})...`, undefined, LOG_HTTP);
 
     options.rateLimiter.stop();
     options.sessionCleanup.abort();
@@ -1495,7 +1496,7 @@ function createShutdownHandler(options: {
           logError(
             'Session teardown failed during shutdown',
             r.reason instanceof Error ? r.reason : undefined,
-            'http'
+            LOG_HTTP
           );
         }
       }
@@ -1555,7 +1556,7 @@ export async function startHttpServer(): Promise<{
       hostname: hostname(),
       nodeVersion: process.version,
     },
-    'http'
+    LOG_HTTP
   );
 
   return {

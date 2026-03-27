@@ -441,7 +441,7 @@ describe('task result failure normalization', () => {
       name: toolName,
       parseArguments: () => ({}),
       execute: async () => {
-        throw new Error('boom');
+        throw Error('boom');
       },
       taskSupport: 'optional',
     });
@@ -486,9 +486,10 @@ describe('task result failure normalization', () => {
       name: toolName,
       parseArguments: () => ({}),
       execute: async () => {
-        throw new McpError(ErrorCode.InternalError, 'broken', {
+        const error = new McpError(ErrorCode.InternalError, 'broken', {
           reason: 'test',
         });
+        throw error;
       },
       taskSupport: 'optional',
     });

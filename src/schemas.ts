@@ -91,7 +91,7 @@ export function normalizePageTitle(value: unknown): string | undefined {
 
 export const fetchUrlInputSchema = z.strictObject({
   url: z
-    .httpUrl('Invalid URL format')
+    .httpUrl()
     .min(1, 'URL required')
     .max(
       config.constants.maxUrlLength,

@@ -3,9 +3,21 @@ import { BlockList, isIP, SocketAddress } from 'node:net';
 import { domainToASCII } from 'node:url';
 
 import { config, logDebug } from './core.js';
+import { VALIDATION_ERROR } from './error-codes.js';
 import {
+  blockedCnameError,
+  blockedHostError,
+  blockedIpError,
+  dnsNoResultsError,
+  dnsTimeoutError,
+  invalidAddressFamilyError,
+  invalidHostnameError,
+  invalidUrlError,
+} from './error-messages.js';
+import { LOG_FETCH } from './logger-names.js';
+import {
+  CodedError,
   composeAbortSignal,
-  createErrorWithCode,
   isError,
   isSystemError,
 } from './utils.js';
@@ -30,7 +42,7 @@ async function withTimeout<T>(
 
   if (raceSignal.aborted) throw classifyError();
 
-  return new Promise<T>((resolve, reject) => {
+  const racePromise = new Promise<T>((resolve, reject) => {
     const handleAbort = (): void => {
       reject(classifyError());
     };
@@ -40,6 +52,7 @@ async function withTimeout<T>(
       raceSignal.removeEventListener('abort', handleAbort);
     });
   });
+  return racePromise;
 }
 function createAbortSignalError(): Error {
   const err = new Error('Request was canceled');
@@ -64,11 +77,9 @@ export class SafeDnsResolver {
     if (!result) return;
 
     const errorTarget = context ?? ip;
-    throw createErrorWithCode(
-      result.reason === 'cloud-metadata'
-        ? `Blocked IP range: ${errorTarget}. Cloud metadata endpoints are not allowed`
-        : `Blocked IP range: ${errorTarget}. Private IPs are not allowed`,
-      'EBLOCKED'
+    throw blockedIpError(
+      errorTarget,
+      result.reason === 'cloud-metadata' ? 'cloud-metadata' : 'private'
     );
   }
 
@@ -81,7 +92,7 @@ export class SafeDnsResolver {
     );
 
     if (!normalizedHostname) {
-      throw createErrorWithCode('Invalid hostname provided', 'EINVAL');
+      throw invalidHostnameError();
     }
 
     if (signal?.aborted) {
@@ -89,10 +100,7 @@ export class SafeDnsResolver {
     }
 
     if (this.isBlockedHostname(normalizedHostname)) {
-      throw createErrorWithCode(
-        `Blocked host: ${normalizedHostname}. Internal hosts are not allowed`,
-        'EBLOCKED'
-      );
+      throw blockedHostError(normalizedHostname);
     }
 
     if (isIP(normalizedHostname)) {
@@ -110,28 +118,18 @@ export class SafeDnsResolver {
     const addresses = await withTimeout(
       resultPromise,
       DNS_LOOKUP_TIMEOUT_MS,
-      () =>
-        createErrorWithCode(
-          `DNS lookup timed out for ${normalizedHostname}`,
-          'ETIMEOUT'
-        ),
+      () => dnsTimeoutError(normalizedHostname),
       signal,
       createAbortSignalError
     );
 
     if (addresses.length === 0 || !addresses[0]) {
-      throw createErrorWithCode(
-        `No DNS results returned for ${normalizedHostname}`,
-        'ENODATA'
-      );
+      throw dnsNoResultsError(normalizedHostname);
     }
 
     for (const addr of addresses) {
       if (addr.family !== 4 && addr.family !== 6) {
-        throw createErrorWithCode(
-          `Invalid address family returned for ${normalizedHostname}`,
-          'EINVAL'
-        );
+        throw invalidAddressFamilyError(normalizedHostname);
       }
       this.assertIpAllowed(addr.address, normalizedHostname);
     }
@@ -159,10 +157,7 @@ export class SafeDnsResolver {
 
       for (const cname of cnames) {
         if (this.isBlockedHostname(cname)) {
-          throw createErrorWithCode(
-            `Blocked DNS CNAME detected for ${hostname}: ${cname}`,
-            'EBLOCKED'
-          );
+          throw blockedCnameError(hostname, cname);
         }
       }
 
@@ -202,7 +197,7 @@ export class SafeDnsResolver {
           hostname,
           ...(isSystemError(error) ? { code: error.code } : {}),
         },
-        'fetch'
+        LOG_FETCH
       );
       return [];
     }
@@ -211,7 +206,7 @@ export class SafeDnsResolver {
 type HostnamePreflight = (url: string, signal?: AbortSignal) => Promise<string>;
 function extractHostname(url: string): string {
   const parsed = URL.parse(url);
-  if (!parsed) throw createErrorWithCode('Invalid URL', 'EINVAL');
+  if (!parsed) throw invalidUrlError();
   return parsed.hostname;
 }
 export function createDnsPreflight(
@@ -598,9 +593,10 @@ export interface Logger {
   warn(message: string, data?: Record<string, unknown>): void;
   error(message: string, data?: Record<string, unknown>): void;
 }
-export const VALIDATION_ERROR_CODE = 'VALIDATION_ERROR';
+export const VALIDATION_ERROR_CODE = VALIDATION_ERROR;
 function createValidationError(message: string): Error {
-  return createErrorWithCode(message, VALIDATION_ERROR_CODE);
+  const error = new CodedError(message, VALIDATION_ERROR);
+  return error;
 }
 export const BLOCKED_HOST_SUFFIXES: readonly string[] = ['.local', '.internal'];
 function isLocalFetchAllowed(): boolean {

@@ -1,6 +1,7 @@
 import { parseHTML } from 'linkedom';
 
 import { config, logDebug } from '../lib/core.js';
+import { LOG_TRANSFORM } from '../lib/logger-names.js';
 import { CharCode, isWhitespaceChar } from '../lib/utils.js';
 
 import type { ExtractedArticle } from './types.js';
@@ -191,10 +192,11 @@ function escapeRegexLiteral(value: string): string {
 }
 function buildTokenRegex(tokens: Set<string>): RegExp {
   if (tokens.size === 0) return NO_MATCH_REGEX;
-  return new RegExp(
+  const pattern = new RegExp(
     `(?:^|[^a-z0-9])(?:${[...tokens].map(escapeRegexLiteral).join('|')})(?:$|[^a-z0-9])`,
     'i'
   );
+  return pattern;
 }
 function getPromoMatchers(
   currentConfig: NoiseRemovalConfig,
@@ -552,7 +554,7 @@ function stripNoise(document: Document, signal?: AbortSignal): void {
       {
         categories: [...(context.flags.navFooter ? ['nav-footer'] : [])],
       },
-      'transform'
+      LOG_TRANSFORM
     );
   }
 
@@ -568,7 +570,7 @@ function stripNoise(document: Document, signal?: AbortSignal): void {
   const candidates = document.querySelectorAll(context.candidateSelector);
   for (let i = candidates.length - 1; i >= 0; i--) {
     if (i % ABORT_CHECK_INTERVAL === 0 && signal?.aborted) {
-      throw new Error('Noise removal aborted');
+      throw Error('Noise removal aborted');
     }
     const node = candidates[i];
     if (!node) continue;
@@ -1536,17 +1538,17 @@ export function evaluateArticleContent(
   document: Document
 ): Document | null {
   if (!passesContentRatioGate(article.textContent.length, document)) {
-    logDebug('FAILED passesContentRatioGate', undefined, 'transform');
+    logDebug('FAILED passesContentRatioGate', undefined, LOG_TRANSFORM);
     return null;
   }
 
   if (!passesRetentionRulesFromHtml(document, article.content)) {
-    logDebug('FAILED passesRetentionRulesFromHtml', undefined, 'transform');
+    logDebug('FAILED passesRetentionRulesFromHtml', undefined, LOG_TRANSFORM);
     return null;
   }
 
   if (hasTruncatedSentences(article.textContent)) {
-    logDebug('FAILED hasTruncatedSentences', undefined, 'transform');
+    logDebug('FAILED hasTruncatedSentences', undefined, LOG_TRANSFORM);
     return null;
   }
 
@@ -1559,13 +1561,13 @@ export function evaluateArticleContent(
     logDebug(
       `FAILED passesEmptySectionRatio: ${headings.length} headings`,
       undefined,
-      'transform'
+      LOG_TRANSFORM
     );
     for (const h of headings) {
       logDebug(
         `H: ${h.textContent} ${String(hasSectionContent(h))}`,
         undefined,
-        'transform'
+        LOG_TRANSFORM
       );
     }
     return null;

@@ -3,11 +3,11 @@ import type {
   ContentBlock,
   ToolAnnotations,
 } from '@modelcontextprotocol/sdk/types.js';
-import { ErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js';
+import { ErrorCode } from '@modelcontextprotocol/sdk/types.js';
 import type { ServerResult } from '@modelcontextprotocol/sdk/types.js';
 import type { z } from 'zod';
 
-import { config, logError, logInfo, logWarn } from '../lib/core.js';
+import { config, logInfo, logWarn } from '../lib/core.js';
 import {
   finalizeInlineMarkdown,
   type InlineContentResult,
@@ -18,21 +18,20 @@ import {
   withSignal,
 } from '../lib/fetch-pipeline.js';
 import type { SharedFetchStage } from '../lib/fetch-pipeline.js';
+import { LOG_FETCH_URL } from '../lib/logger-names.js';
 import {
+  classifyAndLogToolError,
   createMcpError,
   createProgressReporter,
-  handleToolError,
   type ProgressReporter,
   registerToolPresentation,
   type ToolHandlerExtra,
 } from '../lib/mcp-interop.js';
 import {
   composeAbortSignal,
-  FetchError,
   isAbortError,
   isObject,
   parseUrlOrNull,
-  toError,
 } from '../lib/utils.js';
 import { formatZodError } from '../lib/zod.js';
 
@@ -144,7 +143,7 @@ function validateStructuredContent(
       url: inputUrl,
       issues,
     },
-    'fetch-url'
+    LOG_FETCH_URL
   );
   throw createMcpError(ErrorCode.InternalError, 'Output validation failed', {
     issues,
@@ -348,7 +347,7 @@ async function executeFetch(
           ? { taskId: relatedTask['taskId'] }
           : {}),
       },
-      'fetch-url'
+      LOG_FETCH_URL
     );
     progressPlan.reportStart();
     const { pipeline, inlineResult } = await performSharedFetch(
@@ -366,7 +365,7 @@ async function executeFetch(
         durationMs: Math.round(performance.now() - startedAt),
         ...(truncated ? { truncated: true } : {}),
       },
-      'fetch-url'
+      LOG_FETCH_URL
     );
     const response = buildResponse(pipeline, inlineResult, url);
     progressPlan.reportSuccess(inlineResult.contentSize);
@@ -385,33 +384,13 @@ export async function fetchUrlToolHandler(
 
   return executeFetch(input, extra).catch((error: unknown) => {
     const durationMs = Math.round(performance.now() - startedAt);
-    if (error instanceof McpError) {
-      logError(
-        'fetch-url tool failed',
-        { url: input.url, durationMs, error: toError(error) },
-        'fetch-url'
-      );
-    } else if (error instanceof FetchError || isAbortError(error)) {
-      logWarn(
-        'fetch-url request failed',
-        {
-          url: input.url,
-          error: toError(error).message,
-          durationMs,
-        },
-        'fetch-url'
-      );
-    } else {
-      logError(
-        'fetch-url request failed unexpectedly',
-        { url: input.url, error: toError(error).message, durationMs },
-        'fetch-url'
-      );
-    }
-    if (error instanceof McpError) {
-      throw error;
-    }
-    return handleToolError(error, input.url, 'Failed to fetch URL');
+    return classifyAndLogToolError(
+      error,
+      { url: input.url, durationMs },
+      LOG_FETCH_URL,
+      'fetch-url',
+      'Failed to fetch URL'
+    );
   });
 }
 

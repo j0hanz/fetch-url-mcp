@@ -9,6 +9,7 @@ import {
 import { type McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 
 import { config, type LogLevel } from './config.js';
+import { LOG_SESSION } from './logger-names.js';
 import type { SessionEntry } from './session.js';
 import type { SessionStore } from './session.js';
 import {
@@ -304,7 +305,8 @@ function formatMetadata(meta?: LogMetadata): string {
   return ` ${inspect(merged, { breakLength: Infinity, colors: false, compact: true, sorted: true })}`;
 }
 function createTimestamp(): string {
-  return new Date().toISOString();
+  const now = new Date();
+  return now.toISOString();
 }
 function formatLogEntry(
   level: LogLevel,
@@ -684,7 +686,7 @@ function handleSessionCleanupError(error: unknown): void {
   logWarn(
     'Session cleanup loop failed',
     { error: getErrorMessage(error) },
-    'session'
+    LOG_SESSION
   );
 }
 function logRejectedSettledResults(
@@ -693,7 +695,7 @@ function logRejectedSettledResults(
 ): void {
   for (const result of results) {
     if (result.status === 'rejected') {
-      logWarn(message, { error: getErrorMessage(result.reason) }, 'session');
+      logWarn(message, { error: getErrorMessage(result.reason) }, LOG_SESSION);
     }
   }
 }
@@ -748,7 +750,7 @@ class SessionCleanupLoop {
           evicted: evicted.length,
           timestamp: new Date(now).toISOString(),
         },
-        'session'
+        LOG_SESSION
       );
     }
   }
@@ -766,7 +768,7 @@ class SessionCleanupLoop {
           {
             error: getErrorMessage(error),
           },
-          'session'
+          LOG_SESSION
         );
       }
     }
@@ -802,7 +804,7 @@ class SessionCleanupLoop {
         {
           error: getErrorMessage(error),
         },
-        'session'
+        LOG_SESSION
       );
     } finally {
       if (timeoutId) {
@@ -818,7 +820,7 @@ class SessionCleanupLoop {
         {
           error: getErrorMessage(error),
         },
-        'session'
+        LOG_SESSION
       );
     }
   }
@@ -834,7 +836,7 @@ class SessionCleanupLoop {
       {
         error: getErrorMessage(error),
       },
-      'session'
+      LOG_SESSION
     );
   }
 }
@@ -846,10 +848,11 @@ export function startSessionCleanupLoop(
     cleanupIntervalMs?: number;
   }
 ): AbortController {
-  return new SessionCleanupLoop(
+  const loop = new SessionCleanupLoop(
     store,
     sessionTtlMs,
     options?.onEvictSession,
     options?.cleanupIntervalMs
-  ).start();
+  );
+  return loop.start();
 }
