@@ -89,7 +89,7 @@ jobs:
 
           fs.writeFileSync(path, `${JSON.stringify(data, null, 2)}\n`);
           NODE
-          npm install --package-lock-only --ignore-scripts
+          npm install --package-lock-only --ignore-scripts --force
 
       - name: Install & validate
         run: |
