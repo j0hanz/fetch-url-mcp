@@ -155,6 +155,63 @@ type PostRequestBody = {
   method?: string | undefined;
 } & Record<string, unknown>;
 
+function logGatewayRejection(params: {
+  message: string;
+  method?: string | undefined;
+  path: string;
+  reason: string;
+  status?: number;
+  mcpCode?: number;
+  sessionId?: string | null;
+  rpcId?: JsonRpcId;
+  details?: Record<string, unknown>;
+}): void {
+  const { message, details, rpcId, ...rest } = params;
+  logWarn(
+    message,
+    {
+      ...rest,
+      ...(rpcId === null || rpcId === undefined ? {} : { rpcId }),
+      ...(details ?? {}),
+    },
+    'http'
+  );
+}
+
+function resolveRequestPath(req: IncomingMessage): string {
+  return URL.parse(req.url ?? '', 'http://localhost')?.pathname ?? '/';
+}
+
+function logRequestCompletion(params: {
+  method?: string;
+  path: string;
+  statusCode: number;
+  durationMs: number;
+  requestId: string;
+  sessionId?: string;
+}): void {
+  const meta = {
+    method: params.method,
+    path: params.path,
+    statusCode: params.statusCode,
+    durationMs: Math.round(params.durationMs),
+    requestId: params.requestId,
+    ...(params.sessionId ? { sessionId: params.sessionId } : {}),
+  };
+
+  if (params.statusCode >= 500) {
+    logError('HTTP request completed with server error', meta, 'http');
+    return;
+  }
+
+  if (params.statusCode >= 400) {
+    logWarn('HTTP request completed with client error', meta, 'http');
+    return;
+  }
+
+  logDebug('HTTP request completed', meta, 'http');
+}
+
 function createSessionTeardownOptions(
   mode: 'ended' | 'evicted' | 'shutdown',
   context?: string
@@ -209,11 +266,11 @@ class McpSessionGateway {
       return;
     }
 
-    logInfo(
-      '[MCP POST]',
+    logDebug(
+      'MCP POST received',
       {
         method: method ?? 'response',
-        id: body.id,
+        rpcId: body.id,
         sessionId,
       },
       'http'
@@ -234,13 +291,21 @@ class McpSessionGateway {
 
     const acceptHeader = getHeaderValue(ctx.req, 'accept');
     if (!acceptsEventStream(acceptHeader)) {
+      logGatewayRejection({
+        message: 'Rejected MCP GET request',
+        method: ctx.method,
+        path: ctx.url.pathname,
+        reason: 'accept_missing_event_stream',
+        status: 406,
+        sessionId,
+      });
       sendJson(ctx.res, 406, {
         error: 'Not Acceptable: expected text/event-stream',
       });
       return;
     }
 
-    logInfo('[MCP GET]', { sessionId }, 'http');
+    logDebug('MCP GET received', { sessionId }, 'http');
     this.store.touch(sessionId);
     await session.transport.handleRequest(ctx.req, ctx.res);
   }
@@ -253,7 +318,7 @@ class McpSessionGateway {
     const { sessionId, session } = sessionState;
 
     await session.transport.close();
-    logInfo('[MCP DELETE]', { sessionId }, 'http');
+    logDebug('MCP DELETE received', { sessionId }, 'http');
     this.cleanupSessionRecord(sessionId, 'session-delete');
 
     sendJson(ctx.res, 200, { status: 'closed' });
@@ -263,6 +328,13 @@ class McpSessionGateway {
     ctx: AuthenticatedContext
   ): PostRequestBody | null {
     if (!acceptsJsonAndEventStream(getHeaderValue(ctx.req, 'accept'))) {
+      logGatewayRejection({
+        message: 'Rejected MCP POST request',
+        method: ctx.method,
+        path: ctx.url.pathname,
+        reason: 'accept_missing_json_or_event_stream',
+        status: 406,
+      });
       sendJson(ctx.res, 406, {
         error:
           'Not Acceptable: expected application/json and text/event-stream',
@@ -272,10 +344,26 @@ class McpSessionGateway {
 
     const { body } = ctx;
     if (isJsonRpcBatchRequest(body)) {
+      logGatewayRejection({
+        message: 'Rejected MCP POST request',
+        method: ctx.method,
+        path: ctx.url.pathname,
+        reason: 'batch_request_not_supported',
+        status: 400,
+        mcpCode: -32600,
+      });
       sendError(ctx.res, -32600, 'Batch requests not supported');
       return null;
     }
     if (!isMcpMessageBody(body)) {
+      logGatewayRejection({
+        message: 'Rejected MCP POST request',
+        method: ctx.method,
+        path: ctx.url.pathname,
+        reason: 'invalid_request_body',
+        status: 400,
+        mcpCode: -32600,
+      });
       sendError(ctx.res, -32600, 'Invalid request body');
       return null;
     }
@@ -300,6 +388,15 @@ class McpSessionGateway {
     const isInitNotification = isInitializedMethod && body.id === undefined;
 
     if (isInitializedMethod && !isInitNotification) {
+      logGatewayRejection({
+        message: 'Rejected MCP POST request',
+        method: ctx.method,
+        path: ctx.url.pathname,
+        reason: 'initialized_request_must_be_notification',
+        status: 400,
+        mcpCode: -32600,
+        rpcId: requestId,
+      });
       sendError(
         ctx.res,
         -32600,
@@ -351,6 +448,15 @@ class McpSessionGateway {
 
     if (!session) {
       if (isInitNotification) {
+        logGatewayRejection({
+          message: 'Rejected MCP POST request',
+          method: ctx.method,
+          path: ctx.url.pathname,
+          reason: 'missing_session_id_for_initialized_notification',
+          status: 400,
+          mcpCode: -32600,
+          rpcId: requestId,
+        });
         sendError(ctx.res, -32600, 'Missing session ID', 400, requestId);
         return false;
       }
@@ -363,6 +469,16 @@ class McpSessionGateway {
     if (isInitNotification) return true;
     if (method !== null && isPingRequest(method)) return true;
 
+    logGatewayRejection({
+      message: 'Rejected MCP request',
+      method: ctx.method,
+      path: ctx.url.pathname,
+      reason: 'session_not_initialized',
+      status: 400,
+      mcpCode: -32600,
+      sessionId,
+      rpcId: requestId,
+    });
     sendError(ctx.res, -32600, 'Session not initialized', 400, requestId);
     return false;
   }
@@ -397,17 +513,36 @@ class McpSessionGateway {
     requestId: JsonRpcId
   ): string | null {
     if (!isMcpRequestBody(ctx.body)) {
+      logGatewayRejection({
+        message: 'Rejected MCP initialize request',
+        method: ctx.method,
+        path: ctx.url.pathname,
+        reason: 'missing_session_id',
+        status: 400,
+        mcpCode: -32600,
+        rpcId: requestId,
+      });
       sendError(ctx.res, -32600, 'Missing session ID', 400, requestId);
       return null;
     }
 
     if (!isInitializeRequest(ctx.body)) {
+      const invalidInitialize = ctx.body.method === 'initialize';
+      logGatewayRejection({
+        message: 'Rejected MCP initialize request',
+        method: ctx.method,
+        path: ctx.url.pathname,
+        reason: invalidInitialize
+          ? 'invalid_initialize_request'
+          : 'missing_session_id',
+        status: 400,
+        mcpCode: invalidInitialize ? -32602 : -32600,
+        rpcId: requestId,
+      });
       sendError(
         ctx.res,
-        ctx.body.method === 'initialize' ? -32602 : -32600,
-        ctx.body.method === 'initialize'
-          ? 'Invalid initialize request'
-          : 'Missing session ID',
+        invalidInitialize ? -32602 : -32600,
+        invalidInitialize ? 'Invalid initialize request' : 'Missing session ID',
         400,
         requestId
       );
@@ -416,6 +551,15 @@ class McpSessionGateway {
 
     const negotiatedProtocolVersion = resolveRequestedProtocolVersion(ctx.body);
     if (!negotiatedProtocolVersion) {
+      logGatewayRejection({
+        message: 'Rejected MCP initialize request',
+        method: ctx.method,
+        path: ctx.url.pathname,
+        reason: 'unsupported_protocol_version',
+        status: 400,
+        mcpCode: -32602,
+        rpcId: requestId,
+      });
       sendError(
         ctx.res,
         -32602,
@@ -431,6 +575,19 @@ class McpSessionGateway {
       headerProtocolVersion &&
       headerProtocolVersion !== negotiatedProtocolVersion
     ) {
+      logGatewayRejection({
+        message: 'Rejected MCP initialize request',
+        method: ctx.method,
+        path: ctx.url.pathname,
+        reason: 'protocol_version_mismatch',
+        status: 400,
+        mcpCode: -32600,
+        rpcId: requestId,
+        details: {
+          headerProtocolVersion,
+          negotiatedProtocolVersion,
+        },
+      });
       sendError(
         ctx.res,
         -32600,
@@ -512,11 +669,29 @@ class McpSessionGateway {
   ): SessionRecord | null {
     const session = this.store.get(sessionId);
     if (!session) {
+      logGatewayRejection({
+        message: 'Rejected MCP session request',
+        path: '/mcp',
+        reason: 'session_not_found',
+        status: 404,
+        mcpCode: -32600,
+        sessionId,
+        rpcId: requestId,
+      });
       sendError(res, -32600, 'Session not found', 404, requestId);
       return null;
     }
 
     if (!authFingerprint || session.authFingerprint !== authFingerprint) {
+      logGatewayRejection({
+        message: 'Rejected MCP session request',
+        path: '/mcp',
+        reason: 'session_auth_mismatch',
+        status: 404,
+        mcpCode: -32600,
+        sessionId,
+        rpcId: requestId,
+      });
       sendError(res, -32600, 'Session not found', 404, requestId);
       return null;
     }
@@ -566,6 +741,11 @@ class McpSessionGateway {
         return;
       }
 
+      logWarn(
+        'Session init timeout before registration completed',
+        { sessionId },
+        'session'
+      );
       tracker.releaseSlot();
       void teardownUnregisteredSessionResources(
         unpublishedSession,
@@ -600,6 +780,14 @@ class McpSessionGateway {
       const transport = createTransportAdapter(transportImpl);
       await sessionServer.connect(transport);
     } catch (err) {
+      logWarn(
+        'Session transport connect failed',
+        {
+          sessionId,
+          error: toError(err).message,
+        },
+        'session'
+      );
       clearTimeout(initTimeout);
       tracker.releaseSlot();
       void teardownUnregisteredSessionResources(
@@ -619,6 +807,14 @@ class McpSessionGateway {
   ): Promise<StreamableHTTPServerTransport | null> {
     const authFingerprint = buildAuthFingerprint(ctx.auth);
     if (!authFingerprint) {
+      logError(
+        'Session creation failed: missing auth context',
+        {
+          path: ctx.url.pathname,
+          method: ctx.method,
+        },
+        'session'
+      );
       sendError(ctx.res, -32603, 'Missing auth context', 500, requestId);
       return null;
     }
@@ -631,6 +827,11 @@ class McpSessionGateway {
     try {
       sessionServer = await this.createSessionServer();
     } catch (error) {
+      logError(
+        'Session server creation failed',
+        { sessionId: newSessionId, error: toError(error).message },
+        'session'
+      );
       tracker.releaseSlot();
       throw error;
     }
@@ -660,6 +861,11 @@ class McpSessionGateway {
     tracker.releaseSlot();
 
     if (!isConnected) {
+      logWarn(
+        'Session closed before registration completed',
+        { sessionId: newSessionId },
+        'session'
+      );
       void teardownUnregisteredSessionResources(
         unpublishedSession,
         'session-closed-during-connect'
@@ -930,6 +1136,19 @@ class HttpRequestPipeline {
     const requestId = getHeaderValue(rawReq, 'x-request-id') ?? randomUUID();
     const sessionId = getMcpSessionId(rawReq) ?? undefined;
     const { signal, cleanup } = createRequestAbortSignal(rawReq);
+    const path = resolveRequestPath(rawReq);
+    const startTime = performance.now();
+
+    rawRes.once('finish', () => {
+      logRequestCompletion({
+        path,
+        statusCode: rawRes.statusCode,
+        durationMs: performance.now() - startTime,
+        requestId,
+        ...(rawReq.method ? { method: rawReq.method } : {}),
+        ...(sessionId ? { sessionId } : {}),
+      });
+    });
 
     try {
       await runWithRequestContext(
@@ -961,6 +1180,14 @@ class HttpRequestPipeline {
     const duplicateHeader = findDuplicateSingleValueHeader(rawReq);
     if (!duplicateHeader) return false;
 
+    logGatewayRejection({
+      message: 'Rejected HTTP request',
+      method: rawReq.method,
+      path: resolveRequestPath(rawReq),
+      reason: 'duplicate_single_value_header',
+      status: 400,
+      details: { header: duplicateHeader },
+    });
     sendJson(rawRes, 400, {
       error: `Duplicate ${duplicateHeader} header is not allowed`,
     });

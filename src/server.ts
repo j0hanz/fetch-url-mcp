@@ -10,6 +10,7 @@ import {
   getSessionId,
   logError,
   logInfo,
+  logNotice,
   setLogLevel,
   setMcpServer,
 } from './lib/core.js';
@@ -169,14 +170,23 @@ export async function createMcpServerForHttpSession(): Promise<McpServer> {
 
 function registerLoggingSetLevelHandler(server: McpServer): void {
   server.server.setRequestHandler(SetLevelRequestSchema, (request) => {
-    setLogLevel(request.params.level, getSessionId());
+    const sessionId = getSessionId();
+    setLogLevel(request.params.level, sessionId);
+    logNotice(
+      'Logging level updated',
+      {
+        level: request.params.level,
+        scope: sessionId ? 'session' : 'stdio',
+      },
+      'logging'
+    );
     return {};
   });
 }
 
 function attachServerErrorHandler(server: McpServer): void {
   server.server.onerror = (error) => {
-    logError('[MCP Error]', toError(error), 'server');
+    logError('MCP server error', toError(error), 'server');
   };
 }
 

@@ -415,7 +415,8 @@ function forwardMcpLog(
             level: 'warning',
             logger: safeLogger,
             data: {
-              message: `[Rate Limiter] ${droppedCount} log messages were dropped for this session due to high volume.`,
+              message: 'MCP log messages dropped due to high volume',
+              droppedCount,
             },
           },
           sessionId
@@ -428,7 +429,7 @@ function forwardMcpLog(
         {
           level: toMcpLogLevel(level),
           logger: safeLogger,
-          data: buildMcpLogData(message, meta),
+          data: buildMcpLogData(message, mergeMetadata(meta)),
         },
         sessionId
       )

@@ -123,28 +123,30 @@ const ALLOWED_HOSTS = buildAllowedHosts();
 
 class HostOriginPolicy {
   validate(ctx: RequestContext): boolean {
-    const { req, res } = ctx;
+    const { req } = ctx;
     const host = this.resolveHostHeader(req);
 
-    if (!host) return this.reject(res, 400, 'Missing or invalid Host header');
+    if (!host) return this.reject(ctx, 400, 'Missing or invalid Host header');
     if (!ALLOWED_HOSTS.has(host))
-      return this.reject(res, 403, 'Host not allowed');
+      return this.reject(ctx, 403, 'Host not allowed');
 
     const originHeader = getHeaderValue(req, 'origin');
     if (!originHeader) return true;
 
     const requestOrigin = this.resolveRequestOrigin(req);
     const origin = this.resolveOrigin(originHeader);
-    if (!requestOrigin || !origin)
-      return this.reject(res, 403, 'Invalid Origin header');
-    if (!ALLOWED_HOSTS.has(origin.host))
-      return this.reject(res, 403, 'Origin not allowed');
+    if (!requestOrigin || !origin) {
+      return this.reject(ctx, 403, 'Invalid Origin header');
+    }
+    if (!ALLOWED_HOSTS.has(origin.host)) {
+      return this.reject(ctx, 403, 'Origin not allowed');
+    }
 
     const isSameOrigin =
       requestOrigin.scheme === origin.scheme &&
       requestOrigin.host === origin.host &&
       requestOrigin.port === origin.port;
-    if (!isSameOrigin) return this.reject(res, 403, 'Origin not allowed');
+    if (!isSameOrigin) return this.reject(ctx, 403, 'Origin not allowed');
 
     return true;
   }
@@ -203,16 +205,23 @@ class HostOriginPolicy {
   }
 
   private reject(
-    res: ServerResponse,
+    ctx: RequestContext,
     status: number,
     message: string
   ): boolean {
     logWarn(
       'Host/Origin policy rejection',
-      { status, reason: message },
+      {
+        status,
+        reason: message,
+        method: ctx.method,
+        path: ctx.url.pathname,
+        host: getHeaderValue(ctx.req, 'host'),
+        origin: getHeaderValue(ctx.req, 'origin'),
+      },
       'http'
     );
-    sendJson(res, status, { error: message });
+    sendJson(ctx.res, status, { error: message });
     return false;
   }
 }
@@ -279,19 +288,40 @@ export function ensureMcpProtocolVersion(
   options?: McpProtocolVersionCheckOptions
 ): boolean {
   const version = resolveMcpProtocolVersion(req);
+  const path = URL.parse(req.url ?? '', 'http://localhost')?.pathname;
 
   if (!version) {
+    logWarn(
+      'MCP protocol version rejected',
+      { reason: 'missing_header', path },
+      'http'
+    );
     sendError(res, -32600, 'Missing MCP-Protocol-Version header');
     return false;
   }
 
   if (!SUPPORTED_MCP_PROTOCOL_VERSIONS.has(version)) {
+    logWarn(
+      'MCP protocol version rejected',
+      { reason: 'unsupported_version', version, path },
+      'http'
+    );
     sendError(res, -32600, `Unsupported MCP-Protocol-Version: ${version}`);
     return false;
   }
 
   const expectedVersion = options?.expectedVersion;
   if (expectedVersion && version !== expectedVersion) {
+    logWarn(
+      'MCP protocol version rejected',
+      {
+        reason: 'version_mismatch',
+        version,
+        expectedVersion,
+        path,
+      },
+      'http'
+    );
     sendError(
       res,
       -32600,

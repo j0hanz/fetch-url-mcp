@@ -4,7 +4,7 @@ import { setInterval } from 'node:timers';
 
 import { ErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js';
 
-import { config, logWarn } from '../lib/core.js';
+import { config, logInfo, logWarn } from '../lib/core.js';
 import { isObject, timingSafeEqualUtf8 } from '../lib/utils.js';
 
 import {
@@ -136,6 +136,15 @@ class TaskManager {
     const now = Date.now();
     for (const task of this.tasks.values()) {
       if (this.isTaskExpired(task, now)) {
+        logWarn(
+          'Task expired',
+          {
+            taskId: task.taskId,
+            ownerKey: task.ownerKey,
+            status: task.status,
+          },
+          'tasks'
+        );
         this.removeTask(task.taskId);
       }
     }
@@ -237,6 +246,15 @@ class TaskManager {
 
     this.tasks.set(task.taskId, task);
     this.ensureCleanupLoop();
+    logInfo(
+      'Task created',
+      {
+        taskId: task.taskId,
+        ownerKey,
+        ttl: task.ttl,
+      },
+      'tasks'
+    );
     return task;
   }
 
@@ -306,6 +324,14 @@ class TaskManager {
     }
 
     this.cancelActiveTask(task, 'The task was cancelled by request.');
+    logInfo(
+      'Task cancelled by request',
+      {
+        taskId: task.taskId,
+        ownerKey: task.ownerKey,
+      },
+      'tasks'
+    );
     return task;
   }
 
@@ -321,6 +347,16 @@ class TaskManager {
         this.cancelActiveTask(task, statusMessage);
         cancelled.push(task);
       }
+    }
+    if (cancelled.length > 0) {
+      logInfo(
+        'Tasks cancelled for owner',
+        {
+          ownerKey,
+          count: cancelled.length,
+        },
+        'tasks'
+      );
     }
     return cancelled;
   }

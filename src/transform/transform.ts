@@ -1617,6 +1617,7 @@ function resolveWorkerFallback(
   url: string,
   options: TransformExecutionOptions
 ): MarkdownTransformResult {
+  const poolStats = getWorkerPoolStats();
   const isQueueFull =
     error instanceof FetchError && error.details['reason'] === 'queue_full';
 
@@ -1625,6 +1626,7 @@ function resolveWorkerFallback(
       'Transform worker queue full; falling back to in-process',
       {
         url: redactUrl(url),
+        ...(poolStats ?? {}),
       },
       'transform'
     );
@@ -1644,6 +1646,7 @@ function resolveWorkerFallback(
     {
       url: redactUrl(url),
       error: message,
+      ...(poolStats ?? {}),
     },
     'transform'
   );

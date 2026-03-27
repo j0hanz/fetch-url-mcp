@@ -7,7 +7,7 @@ import { ErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js';
 import type { ServerResult } from '@modelcontextprotocol/sdk/types.js';
 import type { z } from 'zod';
 
-import { config, logDebug, logError, logWarn } from '../lib/core.js';
+import { config, logError, logInfo, logWarn } from '../lib/core.js';
 import {
   finalizeInlineMarkdown,
   type InlineContentResult,
@@ -26,6 +26,7 @@ import {
 } from '../lib/mcp-interop.js';
 import {
   composeAbortSignal,
+  FetchError,
   isAbortError,
   isObject,
   parseUrlOrNull,
@@ -303,14 +304,24 @@ async function executeFetch(
     formatUrlForDisplay(url)
   );
 
-  logDebug('Fetching URL', { url }, 'fetch-url');
-
   try {
     progressPlan.reportStart();
     const { pipeline, inlineResult } = await performSharedFetch(
       buildFetchOptions(url, signal, progressPlan)
     );
+    const truncated = inlineResult.truncated ?? pipeline.data.truncated;
 
+    logInfo(
+      'fetch-url completed',
+      {
+        inputUrl: url,
+        resolvedUrl: pipeline.url,
+        ...(pipeline.finalUrl ? { finalUrl: pipeline.finalUrl } : {}),
+        contentSize: inlineResult.contentSize,
+        ...(truncated ? { truncated: true } : {}),
+      },
+      'fetch-url'
+    );
     progressPlan.reportSuccess(inlineResult.contentSize);
     return buildResponse(pipeline, inlineResult, url);
   } catch (error) {
@@ -324,7 +335,24 @@ export async function fetchUrlToolHandler(
   extra?: ToolHandlerExtra
 ): Promise<ToolResponseBase> {
   return executeFetch(input, extra).catch((error: unknown) => {
-    logError('fetch-url tool error', toError(error), 'fetch-url');
+    if (error instanceof McpError) {
+      logError('fetch-url tool failed', toError(error), 'fetch-url');
+    } else if (error instanceof FetchError || isAbortError(error)) {
+      logWarn(
+        'fetch-url request failed',
+        {
+          url: input.url,
+          error: toError(error).message,
+        },
+        'fetch-url'
+      );
+    } else {
+      logError(
+        'fetch-url request failed unexpectedly',
+        { url: input.url, error: toError(error).message },
+        'fetch-url'
+      );
+    }
     if (error instanceof McpError) {
       throw error;
     }

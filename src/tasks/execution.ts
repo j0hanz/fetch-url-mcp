@@ -6,7 +6,12 @@ import {
 } from '@modelcontextprotocol/sdk/types.js';
 
 import { config } from '../lib/core.js';
-import { logError, logWarn, runWithRequestContext } from '../lib/core.js';
+import {
+  logError,
+  logInfo,
+  logWarn,
+  runWithRequestContext,
+} from '../lib/core.js';
 import type { ProgressNotification } from '../lib/mcp-interop.js';
 import { getErrorMessage } from '../lib/utils.js';
 import { isObject } from '../lib/utils.js';
@@ -231,6 +236,7 @@ async function runTaskToolExecution(params: {
       const controller = attachAbortController(taskId);
 
       try {
+        logInfo('Task execution started', { taskId, tool: tool.name }, 'tasks');
         const relatedMeta = buildRelatedTaskMeta(taskId, meta);
 
         const result = await tool.execute(args, {
@@ -253,11 +259,21 @@ async function runTaskToolExecution(params: {
           },
         });
 
-        updateTaskAndEmitStatus(
-          server,
-          taskId,
-          buildTaskCompletionUpdate(result, tool)
-        );
+        const completionUpdate = buildTaskCompletionUpdate(result, tool);
+        updateTaskAndEmitStatus(server, taskId, completionUpdate);
+        if (completionUpdate.status === 'completed') {
+          logInfo(
+            'Task execution completed',
+            { taskId, tool: tool.name },
+            'tasks'
+          );
+        } else {
+          logWarn(
+            'Task execution completed with tool error result',
+            { taskId, tool: tool.name },
+            'tasks'
+          );
+        }
       } catch (error: unknown) {
         logError(
           'Task execution failed',
