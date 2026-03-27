@@ -15,7 +15,7 @@ import {
 
 function makeDummyDescriptor(
   name: string,
-  taskSupport?: 'optional' | 'forbidden'
+  taskSupport?: 'required' | 'optional' | 'forbidden'
 ) {
   return {
     name,
@@ -50,6 +50,11 @@ describe('task-capable tool registry', () => {
     it('preserves explicit "forbidden" taskSupport', () => {
       registerTaskCapableTool(makeDummyDescriptor('alpha', 'forbidden'));
       assert.equal(getTaskCapableToolSupport('alpha'), 'forbidden');
+    });
+
+    it('preserves explicit "required" taskSupport', () => {
+      registerTaskCapableTool(makeDummyDescriptor('alpha', 'required'));
+      assert.equal(getTaskCapableToolSupport('alpha'), 'required');
     });
 
     it('overwrites a previous registration', () => {

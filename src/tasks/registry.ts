@@ -2,7 +2,7 @@ import type { ServerResult } from '@modelcontextprotocol/sdk/types.js';
 
 import type { ToolHandlerExtra } from '../lib/mcp-interop.js';
 
-export type TaskCapableToolSupport = 'optional' | 'forbidden';
+export type TaskCapableToolSupport = 'required' | 'optional' | 'forbidden';
 
 export interface TaskCapableToolDescriptor<TArgs = unknown> {
   name: string;
@@ -10,6 +10,7 @@ export interface TaskCapableToolDescriptor<TArgs = unknown> {
   execute: (args: TArgs, extra?: ToolHandlerExtra) => Promise<ServerResult>;
   getCompletionStatusMessage?: (result: ServerResult) => string | undefined;
   taskSupport?: TaskCapableToolSupport;
+  immediateResponse?: string;
 }
 
 const taskCapableTools = new Map<string, TaskCapableToolDescriptor>();

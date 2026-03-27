@@ -37,8 +37,6 @@ import {
   type TaskCapableToolDescriptor,
 } from './registry.js';
 
-const TASK_NOT_FOUND_ERROR_CODE = -32002;
-
 /* -------------------------------------------------------------------------------------------------
  * Abort-controller management for in-flight task executions
  * ------------------------------------------------------------------------------------------------- */
@@ -140,7 +138,7 @@ export function emitTaskStatusNotification(
 }
 
 export function throwTaskNotFound(): never {
-  throw new McpError(TASK_NOT_FOUND_ERROR_CODE, 'Task not found');
+  throw new McpError(ErrorCode.InvalidParams, 'Task not found');
 }
 
 /* -------------------------------------------------------------------------------------------------
@@ -335,7 +333,24 @@ export async function handleToolCallRequest(
       }),
     });
 
-    return { task: toTaskSummary(task) };
+    return {
+      task: toTaskSummary(task),
+      ...(tool.immediateResponse
+        ? {
+            _meta: {
+              'io.modelcontextprotocol/model-immediate-response':
+                tool.immediateResponse,
+            },
+          }
+        : {}),
+    };
+  }
+
+  if (getTaskCapableToolSupport(params.name) === 'required') {
+    throw new McpError(
+      ErrorCode.MethodNotFound,
+      `Task augmentation is required for tool '${params.name}'`
+    );
   }
 
   const args = tool.parseArguments(params.arguments);

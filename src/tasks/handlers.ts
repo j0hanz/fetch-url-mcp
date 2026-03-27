@@ -3,8 +3,6 @@ import { randomUUID } from 'node:crypto';
 import { type McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import {
   CallToolRequestSchema,
-  ErrorCode,
-  McpError,
   type ServerResult,
 } from '@modelcontextprotocol/sdk/types.js';
 import { z } from 'zod';
@@ -208,11 +206,19 @@ export function registerTaskHandlers(
       }
 
       if (task.status === 'cancelled') {
-        throw new McpError(ErrorCode.InvalidRequest, 'Task was cancelled', {
-          taskId: task.taskId,
-          status: 'cancelled',
-          ...(task.statusMessage ? { statusMessage: task.statusMessage } : {}),
-        });
+        const cancelledResult: ServerResult = {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify({
+                error: task.statusMessage ?? 'Task was cancelled',
+              }),
+            },
+          ],
+          isError: true,
+        };
+
+        return withRelatedTaskMeta(cancelledResult, task.taskId);
       }
 
       const result: ServerResult = isServerResult(task.result)

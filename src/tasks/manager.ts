@@ -12,7 +12,12 @@ import {
   waitForTerminalTask as waitForTerminalTaskWithDeadline,
 } from './waiters.js';
 
-export type TaskStatus = 'working' | 'completed' | 'failed' | 'cancelled';
+export type TaskStatus =
+  | 'working'
+  | 'input_required'
+  | 'completed'
+  | 'failed'
+  | 'cancelled';
 
 export interface TaskError {
   code: number;
@@ -66,13 +71,20 @@ const CLEANUP_INTERVAL_MS = 60_000;
 const RESULT_DELIVERY_GRACE_MS = 10_000;
 const TASK_STATUS_VALUES = new Set<TaskStatus>([
   'working',
+  'input_required',
+  'completed',
+  'failed',
+  'cancelled',
+]);
+
+const TERMINAL_STATUSES = new Set<TaskStatus>([
   'completed',
   'failed',
   'cancelled',
 ]);
 
 function isTerminalStatus(status: TaskStatus): boolean {
-  return status !== 'working';
+  return TERMINAL_STATUSES.has(status);
 }
 
 function resolveNextTaskStatus(

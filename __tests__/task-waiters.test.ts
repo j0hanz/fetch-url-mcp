@@ -28,7 +28,9 @@ function makeTask(overrides?: Partial<TestTask>): TestTask {
 }
 
 function isTerminal(status: string): boolean {
-  return status !== 'working';
+  return (
+    status === 'completed' || status === 'failed' || status === 'cancelled'
+  );
 }
 
 // ── TaskWaiterRegistry ──────────────────────────────────────────────

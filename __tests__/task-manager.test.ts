@@ -178,6 +178,54 @@ describe('taskManager', () => {
       const t = taskManager.getTask(task.taskId);
       assert.equal(t?.status, 'completed');
     });
+
+    it('transitions to input_required from working', () => {
+      const task = createTestTask();
+      try {
+        taskManager.updateTask(task.taskId, {
+          status: 'input_required',
+          statusMessage: 'Waiting for user input',
+        });
+        const updated = taskManager.getTask(task.taskId);
+        assert.equal(updated?.status, 'input_required');
+        assert.equal(updated?.statusMessage, 'Waiting for user input');
+      } finally {
+        cleanupTask(task.taskId);
+      }
+    });
+
+    it('transitions from input_required back to working', () => {
+      const task = createTestTask();
+      try {
+        taskManager.updateTask(task.taskId, { status: 'input_required' });
+        taskManager.updateTask(task.taskId, { status: 'working' });
+        const updated = taskManager.getTask(task.taskId);
+        assert.equal(updated?.status, 'working');
+      } finally {
+        cleanupTask(task.taskId);
+      }
+    });
+
+    it('transitions from input_required to completed', () => {
+      const task = createTestTask();
+      taskManager.updateTask(task.taskId, { status: 'input_required' });
+      taskManager.updateTask(task.taskId, { status: 'completed' });
+      assert.equal(taskManager.getTask(task.taskId)?.status, 'completed');
+    });
+
+    it('transitions from input_required to failed', () => {
+      const task = createTestTask();
+      taskManager.updateTask(task.taskId, { status: 'input_required' });
+      taskManager.updateTask(task.taskId, { status: 'failed' });
+      assert.equal(taskManager.getTask(task.taskId)?.status, 'failed');
+    });
+
+    it('transitions from input_required to cancelled', () => {
+      const task = createTestTask();
+      taskManager.updateTask(task.taskId, { status: 'input_required' });
+      const cancelled = taskManager.cancelTask(task.taskId);
+      assert.equal(cancelled?.status, 'cancelled');
+    });
   });
 
   // ── cancelTask ──────────────────────────────────────────────────
