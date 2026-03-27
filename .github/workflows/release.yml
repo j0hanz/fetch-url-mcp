@@ -93,8 +93,7 @@ jobs:
 
       - name: Install & validate
         run: |
-          npm ci
-          npm install --save-dev typescript-eslint@8.57.2 --force
+          npm ci --force
           npm run lint
           npm run type-check
           npm run test
@@ -136,9 +135,7 @@ jobs:
           registry-url: 'https://registry.npmjs.org'
 
       - name: Install & build
-        run: |
-          npm ci
-          npm install --save-dev typescript-eslint@8.57.2 --force
+        run: npm ci --force
 
       # Trusted Publishing: No NODE_AUTH_TOKEN needed — OIDC handles auth
       - name: Publish
