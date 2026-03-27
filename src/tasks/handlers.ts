@@ -9,7 +9,7 @@ import {
 import { McpError } from '@modelcontextprotocol/sdk/types.js';
 import { z } from 'zod';
 
-import { logWarn, runWithRequestContext } from '../lib/core.js';
+import { logDebug, logWarn, runWithRequestContext } from '../lib/core.js';
 import { getSdkCallToolHandler } from '../lib/mcp-interop.js';
 
 import {
@@ -177,6 +177,16 @@ export function registerTaskHandlers(
               parsedExtra,
               parsed.params._meta
             );
+            logDebug(
+              'Intercepted task-capable tool call',
+              {
+                tool: toolName,
+                taskRequested: parsed.params.task !== undefined,
+                hasProgressToken:
+                  parsed.params._meta?.progressToken !== undefined,
+              },
+              'tasks'
+            );
             return handleToolCallRequest(server, parsed, context);
           }
         );
@@ -187,6 +197,7 @@ export function registerTaskHandlers(
   server.server.setRequestHandler(TaskGetSchema, (request, extra) => {
     const { taskId } = request.params;
     const { ownerKey } = resolveOwnerScopedExtra(extra);
+    logDebug('tasks/get requested', { taskId }, 'tasks');
     const task = taskManager.getTask(taskId, ownerKey);
 
     if (!task) throwTaskNotFound();
@@ -197,6 +208,7 @@ export function registerTaskHandlers(
   server.server.setRequestHandler(TaskResultSchema, async (request, extra) => {
     const { taskId } = request.params;
     const { parsedExtra, ownerKey } = resolveOwnerScopedExtra(extra);
+    logDebug('tasks/result requested', { taskId }, 'tasks');
 
     const task = await taskManager.waitForTerminalTask(
       taskId,
@@ -240,6 +252,11 @@ export function registerTaskHandlers(
   server.server.setRequestHandler(TaskListSchema, (request, extra) => {
     const { ownerKey } = resolveOwnerScopedExtra(extra);
     const cursor = request.params?.cursor;
+    logDebug(
+      'tasks/list requested',
+      { hasCursor: cursor !== undefined },
+      'tasks'
+    );
 
     const { tasks, nextCursor } = taskManager.listTasks(
       cursor === undefined ? { ownerKey } : { ownerKey, cursor }
@@ -254,6 +271,7 @@ export function registerTaskHandlers(
   server.server.setRequestHandler(TaskCancelSchema, (request, extra) => {
     const { taskId } = request.params;
     const { ownerKey } = resolveOwnerScopedExtra(extra);
+    logDebug('tasks/cancel requested', { taskId }, 'tasks');
 
     const task = taskManager.cancelTask(taskId, ownerKey);
     if (!task) throwTaskNotFound();

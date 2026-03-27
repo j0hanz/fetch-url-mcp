@@ -119,6 +119,29 @@ function normalizeTaskTtl(ttl: number | undefined): number {
   return Math.max(MIN_TTL_MS, Math.min(Math.trunc(ttl), MAX_TTL_MS));
 }
 
+function logTaskStatusTransition(
+  task: TaskState,
+  previousStatus: TaskStatus,
+  nextStatus: TaskStatus
+): void {
+  if (previousStatus === nextStatus) return;
+
+  const meta = {
+    taskId: task.taskId,
+    ownerKey: task.ownerKey,
+    previousStatus,
+    nextStatus,
+    ...(task.statusMessage ? { statusMessage: task.statusMessage } : {}),
+  };
+
+  if (nextStatus === 'failed') {
+    logWarn('Task status changed to failed', meta, 'tasks');
+    return;
+  }
+
+  logInfo('Task status changed', meta, 'tasks');
+}
+
 class TaskManager {
   private tasks = new Map<string, InternalTaskState>();
   private ownerCounts = new Map<string, number>();
@@ -313,11 +336,14 @@ class TaskManager {
     }
 
     const nextStatus = resolveNextTaskStatus(task, updates);
+    const previousStatus = task.status;
 
     this.applyTaskUpdate(task, {
       ...updates,
       ...(updates.status === undefined ? {} : { status: nextStatus }),
     });
+
+    logTaskStatusTransition(task, previousStatus, task.status);
 
     this.waiters.notify(task);
   }

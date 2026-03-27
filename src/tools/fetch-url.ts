@@ -330,12 +330,27 @@ async function executeFetch(
 ): Promise<ToolResponseBase> {
   const { url } = input;
   const signal = buildToolAbortSignal(extra?.signal);
+  const startedAt = performance.now();
+  const relatedTaskMeta =
+    extra?._meta?.['io.modelcontextprotocol/related-task'];
+  const relatedTask = isObject(relatedTaskMeta) ? relatedTaskMeta : undefined;
   const progressPlan = new FetchUrlProgressPlan(
     createProgressReporter(extra),
     formatUrlForDisplay(url)
   );
 
   try {
+    logInfo(
+      'fetch-url started',
+      {
+        inputUrl: url,
+        hasProgressToken: extra?._meta?.progressToken !== undefined,
+        ...(isObject(relatedTask) && typeof relatedTask['taskId'] === 'string'
+          ? { taskId: relatedTask['taskId'] }
+          : {}),
+      },
+      'fetch-url'
+    );
     progressPlan.reportStart();
     const { pipeline, inlineResult } = await performSharedFetch(
       buildFetchOptions(url, signal, progressPlan)
@@ -349,6 +364,7 @@ async function executeFetch(
         resolvedUrl: pipeline.url,
         ...(pipeline.finalUrl ? { finalUrl: pipeline.finalUrl } : {}),
         contentSize: inlineResult.contentSize,
+        durationMs: Math.round(performance.now() - startedAt),
         ...(truncated ? { truncated: true } : {}),
       },
       'fetch-url'
@@ -366,22 +382,30 @@ export async function fetchUrlToolHandler(
   input: FetchUrlInput,
   extra?: ToolHandlerExtra
 ): Promise<ToolResponseBase> {
+  const startedAt = performance.now();
+
   return executeFetch(input, extra).catch((error: unknown) => {
+    const durationMs = Math.round(performance.now() - startedAt);
     if (error instanceof McpError) {
-      logError('fetch-url tool failed', toError(error), 'fetch-url');
+      logError(
+        'fetch-url tool failed',
+        { url: input.url, durationMs, error: toError(error) },
+        'fetch-url'
+      );
     } else if (error instanceof FetchError || isAbortError(error)) {
       logWarn(
         'fetch-url request failed',
         {
           url: input.url,
           error: toError(error).message,
+          durationMs,
         },
         'fetch-url'
       );
     } else {
       logError(
         'fetch-url request failed unexpectedly',
-        { url: input.url, error: toError(error).message },
+        { url: input.url, error: toError(error).message, durationMs },
         'fetch-url'
       );
     }

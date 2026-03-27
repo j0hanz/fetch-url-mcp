@@ -12,7 +12,7 @@ import {
 
 import { z } from 'zod';
 
-import { config, logWarn } from '../lib/core.js';
+import { config, logDebug, logInfo, logWarn } from '../lib/core.js';
 import {
   type CancellableTimeout,
   createAbortError,
@@ -398,6 +398,17 @@ class WorkerPool implements TransformWorkerPool {
       throw createAbortError(url, 'transform:enqueue');
 
     if (this.queue.depth >= this.queueMax) {
+      logWarn(
+        'Transform worker queue capacity reached',
+        {
+          queueDepth: this.queue.depth,
+          queueMax: this.queueMax,
+          activeWorkers: this.busyCount,
+          capacity: this.capacity,
+          url,
+        },
+        'transform'
+      );
       throw new FetchError(
         'Transform worker queue is full',
         url,
@@ -449,6 +460,17 @@ class WorkerPool implements TransformWorkerPool {
   async close(): Promise<void> {
     if (this.closed) return;
     this.closed = true;
+
+    logInfo(
+      'Shutting down transform worker pool',
+      {
+        workers: this.workers.length,
+        activeWorkers: this.busyCount,
+        queueDepth: this.queue.depth,
+        inflight: this.inflight.size,
+      },
+      'transform'
+    );
 
     const terminations = this.workers
       .map((slot) => slot?.worker.terminate().catch(() => undefined))
@@ -603,6 +625,15 @@ class WorkerPool implements TransformWorkerPool {
       ...(resourceLimits ? { resourceLimits } : {}),
     });
 
+    logDebug(
+      'Spawned transform worker',
+      {
+        workerIndex,
+        workerName: name,
+      },
+      'transform'
+    );
+
     worker.unref();
 
     worker.on('message', (raw: unknown) => {
@@ -676,6 +707,15 @@ class WorkerPool implements TransformWorkerPool {
 
     if (attempts > 0) {
       const delayMs = Math.min(1000 * 2 ** (attempts - 1), 30_000);
+      logWarn(
+        'Scheduling transform worker restart with backoff',
+        {
+          workerIndex,
+          delayMs,
+          attempt: attempts + 1,
+        },
+        'transform'
+      );
       setTimeout(() => {
         if (this.closed) return;
         this.workers[workerIndex] = this.spawnWorker(workerIndex);
@@ -795,7 +835,17 @@ class WorkerPool implements TransformWorkerPool {
       this.getQueueDepth() > this.capacity * POOL_SCALE_THRESHOLD &&
       this.capacity < this.maxCapacity
     ) {
+      const previousCapacity = this.capacity;
       this.capacity += 1;
+      logInfo(
+        'Scaled transform worker pool',
+        {
+          fromCapacity: previousCapacity,
+          toCapacity: this.capacity,
+          queueDepth: this.getQueueDepth(),
+        },
+        'transform'
+      );
     }
   }
 
@@ -880,6 +930,17 @@ class WorkerPool implements TransformWorkerPool {
         const inflight = this.takeInflight(task.id);
         if (!inflight) return;
 
+        logWarn(
+          'Transform worker task timed out',
+          {
+            taskId: task.id,
+            url: task.url,
+            workerIndex,
+            timeoutMs: this.timeoutMs,
+          },
+          'transform'
+        );
+
         this.abortAndCleanTask(
           inflight,
           new FetchError('Request timeout', task.url, HTTP_GATEWAY_TIMEOUT, {
@@ -954,7 +1015,17 @@ let workerPool: WorkerPool | null = null;
 
 export function getOrCreateWorkerPool(): WorkerPool {
   const size = config.transform.maxWorkerScale === 0 ? 0 : POOL_MIN_WORKERS;
-  workerPool ??= new WorkerPool(size, DEFAULT_TIMEOUT_MS);
+  if (!workerPool) {
+    workerPool = new WorkerPool(size, DEFAULT_TIMEOUT_MS);
+    logInfo(
+      'Initialized transform worker pool',
+      {
+        initialCapacity: workerPool.getCapacity(),
+        timeoutMs: DEFAULT_TIMEOUT_MS,
+      },
+      'transform'
+    );
+  }
   return workerPool;
 }
 

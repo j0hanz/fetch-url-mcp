@@ -391,12 +391,26 @@ class AuthService {
     signal?: AbortSignal
   ): Promise<AuthInfo> {
     const authHeader = getHeaderValue(req, 'authorization');
-    if (!authHeader) {
-      return this.authenticateWithApiKey(req);
-    }
+    const source = authHeader ? 'authorization' : 'api-key';
+    const info = authHeader
+      ? await this.authenticateWithToken(
+          this.resolveBearerToken(authHeader),
+          signal
+        )
+      : this.authenticateWithApiKey(req);
 
-    const token = this.resolveBearerToken(authHeader);
-    return this.authenticateWithToken(token, signal);
+    logDebug(
+      'Authentication succeeded',
+      {
+        mode: config.auth.mode,
+        source,
+        clientId: info.clientId,
+        scopeCount: info.scopes.length,
+      },
+      'auth'
+    );
+
+    return info;
   }
 
   private authenticateWithToken(

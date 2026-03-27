@@ -7,6 +7,7 @@ import {
 
 import { config } from '../lib/core.js';
 import {
+  logDebug,
   logError,
   logInfo,
   logWarn,
@@ -329,6 +330,16 @@ export async function handleToolCallRequest(
       context.ownerKey
     );
 
+    logInfo(
+      'Task execution queued',
+      {
+        taskId: task.taskId,
+        tool: params.name,
+        ...(params.task.ttl !== undefined ? { ttl: params.task.ttl } : {}),
+      },
+      'tasks'
+    );
+
     void runTaskToolExecution({
       server,
       taskId: task.taskId,
@@ -363,6 +374,14 @@ export async function handleToolCallRequest(
 
   const args = tool.parseArguments(params.arguments);
   const progressState = { closed: false };
+  logDebug(
+    'Executing task-capable tool inline',
+    {
+      tool: params.name,
+      hasProgressToken: params._meta?.progressToken !== undefined,
+    },
+    'tasks'
+  );
 
   try {
     return await tool.execute(args, {

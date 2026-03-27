@@ -140,4 +140,40 @@ describe('core logging MCP forwarding', () => {
     });
     assert.equal(capturedLogs[0]?.sessionId, 'sess-2');
   });
+
+  it('redacts URL-like metadata while preserving safe error details', () => {
+    config.logging.level = 'debug';
+    setLogLevel('debug');
+    registerMcpSessionServer('sess-1', fakeServer);
+
+    runWithRequestContext(
+      {
+        requestId: 'req-3',
+        operationId: 'op-3',
+        sessionId: 'sess-1',
+      },
+      () => {
+        logInfo(
+          'redirect followed',
+          {
+            inputUrl: 'https://example.com/docs?token=secret#frag',
+            finalUrl: 'https://example.com/final?q=1',
+            cause: new Error('socket closed'),
+          },
+          'fetch-url'
+        );
+      }
+    );
+
+    assert.equal(capturedLogs.length, 1);
+    assert.deepEqual(capturedLogs[0]?.payload.data, {
+      requestId: 'req-3',
+      operationId: 'op-3',
+      sessionId: 'sess-1',
+      inputUrl: 'https://example.com/docs',
+      finalUrl: 'https://example.com/final',
+      cause: { error: 'socket closed' },
+      message: 'redirect followed',
+    });
+  });
 });

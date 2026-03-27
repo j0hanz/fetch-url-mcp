@@ -38,6 +38,16 @@ interface RequestContext {
 const requestContext = new AsyncLocalStorage<RequestContext>({
   name: 'requestContext',
 });
+const LOG_METADATA_MAX_DEPTH = 5;
+const URL_METADATA_KEY_SUFFIXES = [
+  'url',
+  'uri',
+  'href',
+  'origin',
+  'location',
+  'referer',
+  'referrer',
+] as const;
 let mcpServer: McpServer | undefined;
 const sessionServers = new Map<string, McpServer>();
 const sessionOwnerKeys = new Map<string, string>();
@@ -141,8 +151,154 @@ function mergeMetadata(meta?: LogMetadata): LogMetadata | undefined {
 
   return hasMeta ? { ...contextMeta, ...meta } : contextMeta;
 }
+
+function isUrlLikeKey(key: string): boolean {
+  const normalized = key
+    .replaceAll(/([a-z0-9])([A-Z])/g, '$1_$2')
+    .toLowerCase();
+  return URL_METADATA_KEY_SUFFIXES.some(
+    (suffix) =>
+      normalized === suffix ||
+      normalized.endsWith(`_${suffix}`) ||
+      normalized.endsWith(`-${suffix}`)
+  );
+}
+
+function redactUrlValue(value: string): string {
+  if (!URL.canParse(value)) return value;
+
+  const parsed = URL.parse(value);
+  if (!parsed) return value;
+  if (
+    parsed.username.length === 0 &&
+    parsed.password.length === 0 &&
+    parsed.search.length === 0 &&
+    parsed.hash.length === 0
+  ) {
+    return value;
+  }
+
+  return redactUrl(value);
+}
+
+function sanitizeLogValue(
+  value: unknown,
+  options: {
+    includeStack: boolean;
+    depth?: number;
+    seen?: WeakSet<object>;
+    key?: string;
+  }
+): unknown {
+  const {
+    includeStack,
+    depth = 0,
+    seen = new WeakSet<object>(),
+    key,
+  } = options;
+
+  if (depth >= LOG_METADATA_MAX_DEPTH) {
+    return '[truncated]';
+  }
+
+  if (
+    value === null ||
+    typeof value === 'number' ||
+    typeof value === 'boolean'
+  ) {
+    return value;
+  }
+
+  if (typeof value === 'string') {
+    return key && isUrlLikeKey(key) ? redactUrlValue(value) : value;
+  }
+
+  if (typeof value === 'bigint') return value.toString();
+  if (value instanceof URL) return redactUrl(value.toString());
+  if (value instanceof Error) {
+    const sanitized: Record<string, unknown> = {
+      error: value.message,
+      ...(value.name && value.name !== 'Error'
+        ? { errorName: value.name }
+        : {}),
+    };
+
+    if ('code' in value) {
+      const errorCode = value.code;
+      if (typeof errorCode === 'string' || typeof errorCode === 'number') {
+        sanitized['code'] = errorCode;
+      }
+    }
+
+    if ('errno' in value && typeof value.errno === 'number') {
+      try {
+        const sysMsg = getSystemErrorMessage(value.errno);
+        if (sysMsg) sanitized['sysError'] = sysMsg;
+      } catch {
+        // ignore
+      }
+    }
+
+    if (includeStack && value.stack) {
+      sanitized['stack'] = value.stack;
+    }
+
+    return sanitized;
+  }
+
+  if (Array.isArray(value)) {
+    return value
+      .map((entry) =>
+        sanitizeLogValue(entry, { includeStack, depth: depth + 1, seen })
+      )
+      .filter((entry) => entry !== undefined);
+  }
+
+  if (isPlainLogObject(value)) {
+    if (seen.has(value)) return '[circular]';
+    seen.add(value);
+
+    const sanitized: Record<string, unknown> = {};
+    for (const [entryKey, entryValue] of Object.entries(value)) {
+      if (
+        isSensitiveKey(entryKey) &&
+        (!includeStack || entryKey.toLowerCase() !== 'stack')
+      ) {
+        continue;
+      }
+
+      const normalized = sanitizeLogValue(entryValue, {
+        includeStack,
+        depth: depth + 1,
+        seen,
+        key: entryKey,
+      });
+      if (normalized !== undefined) {
+        sanitized[entryKey] = normalized;
+      }
+    }
+    return sanitized;
+  }
+
+  return undefined;
+}
+
+function sanitizeLogMetadata(
+  meta: LogMetadata | undefined,
+  options: { includeStack: boolean }
+): LogMetadata | undefined {
+  if (!meta || Object.keys(meta).length === 0) return undefined;
+
+  const sanitized = sanitizeLogValue(meta, options);
+  return isPlainLogObject(sanitized) && Object.keys(sanitized).length > 0
+    ? sanitized
+    : undefined;
+}
+
 function formatMetadata(meta?: LogMetadata): string {
-  const merged = mergeMetadata(meta);
+  const merged = sanitizeLogMetadata(mergeMetadata(meta), {
+    includeStack: true,
+  });
   if (!merged) return '';
 
   return ` ${inspect(merged, { breakLength: Infinity, colors: false, compact: true, sorted: true })}`;
@@ -157,7 +313,9 @@ function formatLogEntry(
   logger?: string
 ): string {
   if (config.logging.format === 'json') {
-    const merged = mergeMetadata(meta);
+    const merged = sanitizeLogMetadata(mergeMetadata(meta), {
+      includeStack: true,
+    });
     const entry: Record<string, unknown> = {
       timestamp: createTimestamp(),
       level: level.toUpperCase(),
@@ -249,7 +407,6 @@ const MCP_LOG_SENSITIVE_PATTERNS = [
   'cookie',
   'stack',
 ];
-const MCP_LOG_MAX_DEPTH = 5;
 
 function isSensitiveKey(key: string): boolean {
   const lowerKey = key.toLowerCase();
@@ -260,55 +417,12 @@ function isPlainLogObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-function sanitizeMcpLogValue(value: unknown, depth = 0): unknown {
-  if (depth >= MCP_LOG_MAX_DEPTH) {
-    return '[truncated]';
-  }
-
-  if (
-    value === null ||
-    typeof value === 'string' ||
-    typeof value === 'number' ||
-    typeof value === 'boolean'
-  ) {
-    return value;
-  }
-
-  if (typeof value === 'bigint') return value.toString();
-  if (value instanceof Error) return value.message;
-
-  if (Array.isArray(value)) {
-    return value
-      .map((entry) => sanitizeMcpLogValue(entry, depth + 1))
-      .filter((entry) => entry !== undefined);
-  }
-
-  if (isPlainLogObject(value)) {
-    const sanitized: Record<string, unknown> = {};
-    for (const [key, entry] of Object.entries(value)) {
-      if (isSensitiveKey(key)) continue;
-
-      const normalized = sanitizeMcpLogValue(entry, depth + 1);
-      if (normalized !== undefined) {
-        sanitized[key] = normalized;
-      }
-    }
-    return sanitized;
-  }
-
-  return undefined;
-}
-
 function buildMcpLogData(
   message: string,
   meta?: LogMetadata
 ): Record<string, unknown> {
-  if (!meta || Object.keys(meta).length === 0) {
-    return { message };
-  }
-
-  const sanitized = sanitizeMcpLogValue(meta);
-  if (!isPlainLogObject(sanitized) || Object.keys(sanitized).length === 0) {
+  const sanitized = sanitizeLogMetadata(meta, { includeStack: false });
+  if (!sanitized) {
     return { message };
   }
 

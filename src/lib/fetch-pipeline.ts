@@ -218,6 +218,17 @@ export async function executeFetchPipeline<T>(
       withSignal(options.signal)
     );
 
+  if (finalUrl && finalUrl !== resolvedUrl.normalizedUrl) {
+    logDebug(
+      'Fetch redirected',
+      {
+        fromUrl: resolvedUrl.normalizedUrl,
+        toUrl: finalUrl,
+      },
+      'fetch'
+    );
+  }
+
   options.onStage?.('response_ready');
   options.onStage?.('transform_start');
 
@@ -316,6 +327,18 @@ export async function performSharedFetch(
     pipeline.data.content,
     pipeline.data.truncated
   );
+
+  if (inlineResult.truncated) {
+    logDebug(
+      'Inline markdown truncated for response payload',
+      {
+        url: pipeline.finalUrl ?? pipeline.url,
+        contentSize: inlineResult.contentSize,
+        maxInlineChars: config.constants.maxInlineContentChars,
+      },
+      'fetch'
+    );
+  }
 
   return { pipeline, inlineResult };
 }
