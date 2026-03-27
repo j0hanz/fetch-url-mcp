@@ -305,19 +305,11 @@ function buildToolAbortSignal(extraSignal?: AbortSignal): AbortSignal {
 function buildFetchOptions(
   url: string,
   signal: AbortSignal | undefined,
-  progressPlan: FetchUrlProgressPlan,
-  input?: Pick<FetchUrlInput, 'enableCache' | 'extractMetadata'>
+  progressPlan: FetchUrlProgressPlan
 ): Parameters<typeof performSharedFetch>[0] {
-  const useCache = input?.enableCache !== false;
-  const includeMetadataFooter = input?.extractMetadata !== false;
-
   return {
     url,
     ...withSignal(signal),
-    ...(!useCache ? { useCache: false } : {}),
-    cacheVary: {
-      includeMetadataFooter,
-    },
     onStage: (stage) => {
       progressPlan.reportStage(stage);
     },
@@ -325,8 +317,7 @@ function buildFetchOptions(
       return markdownTransform(
         { buffer, encoding, ...(truncated ? { truncated } : {}) },
         normalizedUrl,
-        signal,
-        includeMetadataFooter
+        signal
       );
     },
     serialize: serializeMarkdownResult,
@@ -350,7 +341,7 @@ async function executeFetch(
   try {
     progressPlan.reportStart();
     const { pipeline, inlineResult } = await performSharedFetch(
-      buildFetchOptions(url, signal, progressPlan, input)
+      buildFetchOptions(url, signal, progressPlan)
     );
 
     progressPlan.reportSuccess(inlineResult.contentSize);

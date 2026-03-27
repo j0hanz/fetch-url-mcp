@@ -172,8 +172,6 @@ interface FetchPipelineOptions<T> {
   url: string;
   cacheNamespace: string;
   signal?: AbortSignal;
-  cacheVary?: Record<string, unknown> | string;
-  useCache?: boolean;
   onStage?: (stage: SharedFetchStage) => void;
   transform: (input: FetchTransformInput, url: string) => T | Promise<T>;
   serialize?: (result: T) => string;
@@ -284,8 +282,6 @@ function restoreCachedPipelineResult<T>(
   resolvedUrl: UrlResolution,
   cacheKey: string | null
 ): PipelineResult<T> | null {
-  if (options.useCache === false) return null;
-
   options.onStage?.('check_cache');
   const cachedResult = attemptCacheRetrieval(
     cacheKey,
@@ -340,11 +336,7 @@ function persistCacheTargets<T>(
   targets.set(cacheKey, finalUrl ?? requestedUrl);
 
   if (finalUrl && finalUrl !== requestedUrl) {
-    const finalCacheKey = createCacheKey(
-      options.cacheNamespace,
-      finalUrl,
-      options.cacheVary
-    );
+    const finalCacheKey = createCacheKey(options.cacheNamespace, finalUrl);
     if (finalCacheKey) {
       targets.set(finalCacheKey, finalUrl);
     }
@@ -372,14 +364,10 @@ export async function executeFetchPipeline<T>(
     });
   }
 
-  const cacheKey =
-    options.useCache === false
-      ? null
-      : createCacheKey(
-          options.cacheNamespace,
-          resolvedUrl.normalizedUrl,
-          options.cacheVary
-        );
+  const cacheKey = createCacheKey(
+    options.cacheNamespace,
+    resolvedUrl.normalizedUrl
+  );
 
   const cachedResult = restoreCachedPipelineResult(
     options,
@@ -406,7 +394,7 @@ export async function executeFetchPipeline<T>(
     resolvedFinalUrl
   );
 
-  if (options.useCache !== false && isEnabled()) {
+  if (isEnabled()) {
     persistCacheTargets(
       resolvedUrl.normalizedUrl,
       finalUrl,
@@ -501,11 +489,10 @@ export function parseCachedMarkdownResult(
 export const markdownTransform = async (
   input: FetchTransformInput,
   url: string,
-  signal?: AbortSignal,
-  includeMetadataFooter = true
+  signal?: AbortSignal
 ): Promise<MarkdownPipelineResult> => {
   const result = await transformBufferToMarkdown(input.buffer, url, {
-    includeMetadataFooter,
+    includeMetadataFooter: true,
     encoding: input.encoding,
     ...withSignal(signal),
     ...(input.truncated ? { inputTruncated: true } : {}),
@@ -528,8 +515,6 @@ export function serializeMarkdownResult(
 interface MarkdownFetchOptions {
   readonly url: string;
   readonly signal?: AbortSignal;
-  readonly cacheVary?: Record<string, unknown> | string;
-  readonly useCache?: boolean;
   readonly onStage?: (stage: SharedFetchStage) => void;
   readonly transform: (
     input: FetchTransformInput,

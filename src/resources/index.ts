@@ -454,9 +454,7 @@ export function buildServerInstructions(): string {
 
 # Workflows
 1. Standard: Call \`${FETCH_URL_TOOL_NAME}\` → read \`markdown\`. \`truncated: true\` means content was cut at server size limit.
-2. No cache: \`enableCache: false\` skips cache reads and writes for that request.
-3. Clean markdown: \`extractMetadata: false\` hides the rendered footer/source block but keeps \`structuredContent.metadata\`.
-4. Async: \`task: { ttl: <ms> }\` in \`tools/call\` → poll \`tasks/get\` → \`tasks/result\`.
+2. Async: \`task: { ttl: <ms> }\` in \`tools/call\` → poll \`tasks/get\` → \`tasks/result\`.
 
 # Constraints
 - Blocked URLs: localhost, private IPs (10.x, 172.16-31.x, 192.168.x), metadata (169.254.169.254), .local/.internal.

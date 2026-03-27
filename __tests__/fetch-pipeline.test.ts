@@ -47,16 +47,12 @@ describe('executeFetchPipeline cache controls', () => {
   async function runFetch(params: {
     url: string;
     namespace: string;
-    useCache?: boolean;
-    cacheVary?: Record<string, unknown>;
   }): Promise<
     Awaited<ReturnType<typeof executeFetchPipeline<{ body: string }>>>
   > {
     return executeFetchPipeline({
       url: params.url,
       cacheNamespace: params.namespace,
-      ...(params.useCache === false ? { useCache: false } : {}),
-      ...(params.cacheVary ? { cacheVary: params.cacheVary } : {}),
       transform: async ({ buffer }) => ({
         body: new TextDecoder('utf-8').decode(buffer),
       }),
@@ -64,27 +60,6 @@ describe('executeFetchPipeline cache controls', () => {
       deserialize: (cached) => JSON.parse(cached) as { body: string },
     });
   }
-
-  it('skips cache reads and writes when useCache is false', async () => {
-    const previousAllowLocalFetch = config.security.allowLocalFetch;
-    config.security.allowLocalFetch = true;
-
-    try {
-      await withLocalServer(async (url, counts) => {
-        const namespace = `nocache-${randomUUID()}`;
-
-        const first = await runFetch({ url, namespace, useCache: false });
-        const second = await runFetch({ url, namespace, useCache: false });
-
-        assert.equal(first.fromCache, false);
-        assert.equal(second.fromCache, false);
-        assert.equal(counts.requests, 2);
-        assert.deepEqual(visibleResourcesForNamespace(namespace), []);
-      });
-    } finally {
-      config.security.allowLocalFetch = previousAllowLocalFetch;
-    }
-  });
 
   it('uses cache entries when caching stays enabled', async () => {
     const previousAllowLocalFetch = config.security.allowLocalFetch;
@@ -101,40 +76,6 @@ describe('executeFetchPipeline cache controls', () => {
         assert.equal(second.fromCache, true);
         assert.equal(counts.requests, 1);
         assert.equal(visibleResourcesForNamespace(namespace).length, 1);
-      });
-    } finally {
-      config.security.allowLocalFetch = previousAllowLocalFetch;
-    }
-  });
-
-  it('separates cache entries by cacheVary value', async () => {
-    const previousAllowLocalFetch = config.security.allowLocalFetch;
-    config.security.allowLocalFetch = true;
-
-    try {
-      await withLocalServer(async (url, counts) => {
-        const namespace = `vary-${randomUUID()}`;
-
-        const withFooter = await runFetch({
-          url,
-          namespace,
-          cacheVary: { includeMetadataFooter: true },
-        });
-        const withoutFooter = await runFetch({
-          url,
-          namespace,
-          cacheVary: { includeMetadataFooter: false },
-        });
-        const withFooterAgain = await runFetch({
-          url,
-          namespace,
-          cacheVary: { includeMetadataFooter: true },
-        });
-
-        assert.equal(withFooter.fromCache, false);
-        assert.equal(withoutFooter.fromCache, false);
-        assert.equal(withFooterAgain.fromCache, true);
-        assert.equal(counts.requests, 2);
       });
     } finally {
       config.security.allowLocalFetch = previousAllowLocalFetch;

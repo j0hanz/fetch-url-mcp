@@ -4,7 +4,7 @@ import { describe, it } from 'node:test';
 import { transformHtmlToMarkdownInProcess } from '../src/transform/transform.js';
 
 describe('transform metadata footer controls', () => {
-  it('hides the rendered footer while preserving extracted metadata', () => {
+  it('includes the rendered footer with extracted metadata', () => {
     const html = `
       <html>
         <head>
@@ -22,35 +22,24 @@ describe('transform metadata footer controls', () => {
     `;
     const url = 'https://example.com/article';
 
-    const withFooter = transformHtmlToMarkdownInProcess(html, url, {
+    const result = transformHtmlToMarkdownInProcess(html, url, {
       includeMetadataFooter: true,
     });
-    const withoutFooter = transformHtmlToMarkdownInProcess(html, url, {
-      includeMetadataFooter: false,
-    });
 
-    assert.ok(withFooter.markdown.includes('Original Source'));
-    assert.ok(withFooter.markdown.includes('Example Author'));
-    assert.ok(!withoutFooter.markdown.includes('Original Source'));
-    assert.ok(!withoutFooter.markdown.includes('Example Author'));
-    assert.equal(withoutFooter.metadata?.author, 'Example Author');
-    assert.equal(withoutFooter.metadata?.description, 'Example description');
+    assert.ok(result.markdown.includes('Original Source'));
+    assert.ok(result.markdown.includes('Example Author'));
+    assert.equal(result.metadata?.author, 'Example Author');
+    assert.equal(result.metadata?.description, 'Example description');
   });
 
-  it('suppresses source injection for raw markdown when footer is disabled', () => {
+  it('includes source injection for raw markdown', () => {
     const rawMarkdown = '# Hello\n\nContent';
     const url = 'https://example.com/raw';
 
-    const withFooter = transformHtmlToMarkdownInProcess(rawMarkdown, url, {
+    const result = transformHtmlToMarkdownInProcess(rawMarkdown, url, {
       includeMetadataFooter: true,
     });
-    const withoutFooter = transformHtmlToMarkdownInProcess(rawMarkdown, url, {
-      includeMetadataFooter: false,
-    });
 
-    assert.ok(withFooter.markdown.includes('Source: https://example.com/raw'));
-    assert.ok(
-      !withoutFooter.markdown.includes('Source: https://example.com/raw')
-    );
+    assert.ok(result.markdown.includes('Source: https://example.com/raw'));
   });
 });

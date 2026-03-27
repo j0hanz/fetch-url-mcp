@@ -162,20 +162,6 @@ export const fetchUrlInputSchema = z.strictObject(
       .describe(
         `Target URL. Max ${config.constants.maxUrlLength} chars. Example: https://example.com`
       ),
-    enableCache: z
-      .boolean('Expected boolean')
-      .meta({ title: 'Enable Cache' })
-      .optional()
-      .describe(
-        'Use the shared fetch cache for this request. When false, skip both cache reads and writes.'
-      ),
-    extractMetadata: z
-      .boolean('Expected boolean')
-      .meta({ title: 'Extract Metadata' })
-      .optional()
-      .describe(
-        'Include the rendered metadata footer/source block in markdown output. Does not affect structuredContent.metadata.'
-      ),
   },
   'Invalid input'
 );

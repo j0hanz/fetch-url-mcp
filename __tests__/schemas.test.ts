@@ -162,24 +162,12 @@ describe('resolveCachedPayloadContent', () => {
 // ── fetchUrlInputSchema ────────────────────────────────────────────
 
 describe('fetchUrlInputSchema', () => {
-  it('accepts new request-level cache and footer controls', () => {
-    const result = fetchUrlInputSchema.parse({
-      url: 'https://example.com',
-      enableCache: false,
-      extractMetadata: false,
-    });
-
-    assert.equal(result.enableCache, false);
-    assert.equal(result.extractMetadata, false);
-  });
-
-  it('allows cache and footer controls to be omitted', () => {
+  it('accepts a valid URL-only input', () => {
     const result = fetchUrlInputSchema.parse({
       url: 'https://example.com',
     });
 
-    assert.equal(result.enableCache, undefined);
-    assert.equal(result.extractMetadata, undefined);
+    assert.equal(result.url, 'https://example.com');
   });
 
   it('rejects removed forceRefresh input', () => {
@@ -203,6 +191,20 @@ describe('fetchUrlInputSchema', () => {
       fetchUrlInputSchema.parse({
         url: 'https://example.com',
         includeMetadataFooter: false,
+      })
+    );
+
+    assert.throws(() =>
+      fetchUrlInputSchema.parse({
+        url: 'https://example.com',
+        enableCache: false,
+      })
+    );
+
+    assert.throws(() =>
+      fetchUrlInputSchema.parse({
+        url: 'https://example.com',
+        extractMetadata: false,
       })
     );
   });
