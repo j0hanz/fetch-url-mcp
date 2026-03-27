@@ -6,7 +6,7 @@
 
 [![Add to LM Studio](https://files.lmstudio.ai/deeplink/mcp-install-light.svg)](https://lmstudio.ai/install-mcp?name=fetch-url&config=eyJjb21tYW5kIjoibnB4IiwiYXJncyI6WyIteSIsIkBqMGhhbnovZmV0Y2gtdXJsLW1jcEBsYXRlc3QiXX0%3D) [![Install in Cursor](https://cursor.com/deeplink/mcp-install-dark.svg)](https://cursor.com/en/install-mcp?name=fetch-url&config=eyJjb21tYW5kIjoibnB4IiwiYXJncyI6WyIteSIsIkBqMGhhbnovZmV0Y2gtdXJsLW1jcEBsYXRlc3QiXX0%3D) [![Install in Goose](https://block.github.io/goose/img/extension-install-dark.svg)](https://block.github.io/goose/extension?cmd=npx&arg=-y&arg=%40j0hanz%2Ffetch-url-mcp%40latest&id=%40j0hanz%2Ffetch-url-mcp&name=fetch-url&description=fetch-url%20MCP%20server)
 
-Fetch web pages and get back clean Markdown, both readable for humans and structured for LLMs.
+An MCP server that fetches web pages and converts them to clean, readable Markdown.
 
 ## Overview
 

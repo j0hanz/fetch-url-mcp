@@ -2,7 +2,7 @@
   "name": "@j0hanz/fetch-url-mcp",
   "version": "1.11.8",
   "mcpName": "io.github.j0hanz/fetch-url-mcp",
-  "description": "A web content fetcher MCP server that converts HTML to clean, AI and human readable markdown.",
+  "description": "An MCP server that fetches web pages and converts them to clean, readable Markdown.",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -42,7 +42,16 @@
     "web-scraper",
     "llm-context",
     "ai-tools",
-    "fetch-url-mcp"
+    "fetch-url-mcp",
+    "typescript",
+    "nodejs",
+    "stdio",
+    "streamable-http",
+    "structured-output",
+    "metadata-extraction",
+    "url-rewriting",
+    "worker-threads",
+    "content-cleanup"
   ],
   "scripts": {
     "clean": "node scripts/tasks.mjs clean",
