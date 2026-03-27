@@ -987,6 +987,11 @@ class HttpRequestPipeline {
       return true;
     } catch (error: unknown) {
       const bodyErrorKind = isJsonBodyError(error) ? error.kind : null;
+
+      if (bodyErrorKind === 'read-failed' || bodyErrorKind === null) {
+        logError('Request body parsing failed', toError(error));
+      }
+
       sendBodyParseError(ctx, bodyErrorKind, rawReq);
       return false;
     }

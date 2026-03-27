@@ -6,7 +6,7 @@ import {
 } from '@modelcontextprotocol/sdk/types.js';
 
 import { config } from '../lib/core.js';
-import { logWarn, runWithRequestContext } from '../lib/core.js';
+import { logError, logWarn, runWithRequestContext } from '../lib/core.js';
 import type { ProgressNotification } from '../lib/mcp-interop.js';
 import { getErrorMessage } from '../lib/utils.js';
 import { isObject } from '../lib/utils.js';
@@ -118,7 +118,7 @@ export function emitTaskStatusNotification(
       params: { ...toTaskSummary(task) },
     })
     .catch((error: unknown) => {
-      logWarn('Failed to send task status notification', {
+      logError('Failed to send task status notification', {
         taskId: task.taskId,
         status: task.status,
         error: getErrorMessage(error),
@@ -251,6 +251,11 @@ async function runTaskToolExecution(params: {
           buildTaskCompletionUpdate(result, tool)
         );
       } catch (error: unknown) {
+        logError('Task execution failed', {
+          taskId,
+          tool: tool.name,
+          error: getErrorMessage(error),
+        });
         updateTaskAndEmitStatus(server, taskId, buildTaskFailureState(error));
       } finally {
         taskAbortControllers.delete(taskId);
