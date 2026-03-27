@@ -95,6 +95,8 @@ type TaskLifecycleProjection = Pick<
   | 'taskId'
   | 'status'
   | 'statusMessage'
+  | 'progress'
+  | 'total'
   | 'createdAt'
   | 'lastUpdatedAt'
   | 'ttl'
@@ -106,6 +108,8 @@ export function toTaskSummary(task: TaskLifecycleProjection): TaskSummary {
     taskId: task.taskId,
     status: task.status,
     ...(task.statusMessage ? { statusMessage: task.statusMessage } : {}),
+    ...(task.progress !== undefined ? { progress: task.progress } : {}),
+    ...(task.total !== undefined ? { total: task.total } : {}),
     createdAt: task.createdAt,
     lastUpdatedAt: task.lastUpdatedAt,
     ttl: task.ttl,
@@ -244,14 +248,18 @@ async function runTaskToolExecution(params: {
           canReportProgress: () =>
             taskManager.getTask(taskId)?.status === 'working',
           ...compact({ sendNotification }),
-          onProgress: (_progress, message) => {
+          onProgress: (progress, message, total) => {
             const current = taskManager.getTask(taskId);
             if (
               current?.status === 'working' &&
-              current.statusMessage !== message
+              (current.statusMessage !== message ||
+                current.progress !== progress ||
+                (total !== undefined && current.total !== total))
             ) {
               updateTaskAndEmitStatus(server, taskId, {
                 statusMessage: message,
+                progress,
+                ...(total !== undefined ? { total } : {}),
               });
             }
           },

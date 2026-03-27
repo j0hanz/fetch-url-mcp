@@ -334,16 +334,16 @@ export interface ToolHandlerExtra {
   requestInfo?: unknown;
   _meta?: RequestMeta;
   sendNotification?: (notification: ProgressNotification) => Promise<void>;
-  onProgress?: (progress: number, message: string) => void;
+  onProgress?: (progress: number, message: string, total?: number) => void;
   canReportProgress?: () => boolean;
 }
 
 export interface ProgressReporter {
-  report: (progress: number, message: string) => void;
+  report: (progress: number, message: string, total?: number) => void;
 }
 
-const DEFAULT_PROGRESS_TOTAL = 8;
 const PROGRESS_NOTIFICATION_TIMEOUT_MS = 5000;
+const PROGRESS_NOTIFICATION_MIN_INTERVAL_MS = 100;
 
 function resolveRelatedTaskMeta(
   meta?: RequestMeta
@@ -358,14 +358,18 @@ class ToolProgressReporter implements ProgressReporter {
   private isTerminal = false;
   private lastProgress = -1;
   private lastMessage?: string;
+  private lastTotal: number | undefined;
   private pendingNotification: ProgressNotification | undefined;
   private isDispatching = false;
+  private lastDispatchedAt = 0;
 
   private constructor(
     private readonly token: ProgressToken | null,
     private readonly handlers: {
       send: ((notification: ProgressNotification) => Promise<void>) | undefined;
-      onProgress: ((progress: number, message: string) => void) | undefined;
+      onProgress:
+        | ((progress: number, message: string, total?: number) => void)
+        | undefined;
       canReport: (() => boolean) | undefined;
     },
     private readonly taskMeta?: { taskId: string }
@@ -396,23 +400,27 @@ class ToolProgressReporter implements ProgressReporter {
    * intermediate steps). Clients should treat progress as "at least this far"
    * rather than expecting every step to fire sequentially.
    */
-  report(progress: number, message: string): void {
+  report(progress: number, message: string, total?: number): void {
     if (this.isTerminal || this.handlers.canReport?.() === false) return;
 
     const effectiveProgress = Math.max(progress, this.lastProgress);
+    const effectiveTotal =
+      total === undefined ? this.lastTotal : Math.max(total, effectiveProgress);
     const isIncreasing = effectiveProgress > this.lastProgress;
     const isMessageChanged = message !== this.lastMessage;
+    const isTotalChanged = effectiveTotal !== this.lastTotal;
 
     this.lastProgress = effectiveProgress;
     this.lastMessage = message;
+    this.lastTotal = effectiveTotal;
 
-    if (effectiveProgress >= DEFAULT_PROGRESS_TOTAL) {
+    if (effectiveTotal !== undefined && effectiveProgress >= effectiveTotal) {
       this.isTerminal = true;
     }
 
-    if (isIncreasing || isMessageChanged) {
+    if (isIncreasing || isMessageChanged || isTotalChanged) {
       try {
-        this.handlers.onProgress?.(effectiveProgress, message);
+        this.handlers.onProgress?.(effectiveProgress, message, effectiveTotal);
       } catch (error: unknown) {
         logError(
           'Progress callback failed',
@@ -428,11 +436,12 @@ class ToolProgressReporter implements ProgressReporter {
 
     if (!isIncreasing || this.token === null || !this.handlers.send) return;
 
-    this.pendingNotification = this.createProgressNotification(
-      this.token,
-      effectiveProgress,
-      message
-    );
+    this.pendingNotification = this.createProgressNotification({
+      token: this.token,
+      progress: effectiveProgress,
+      message,
+      ...(effectiveTotal !== undefined ? { total: effectiveTotal } : {}),
+    });
     this.flushNotifications();
   }
 
@@ -448,9 +457,18 @@ class ToolProgressReporter implements ProgressReporter {
             return;
           }
 
+          const remainingDelay =
+            this.lastDispatchedAt +
+            PROGRESS_NOTIFICATION_MIN_INTERVAL_MS -
+            Date.now();
+          if (remainingDelay > 0) {
+            await setTimeoutPromise(remainingDelay, undefined, { ref: false });
+          }
+
           const notification = this.pendingNotification;
           this.pendingNotification = undefined;
           await this.sendWithTimeout(notification);
+          this.lastDispatchedAt = Date.now();
         }
       } finally {
         this.isDispatching = false;
@@ -505,18 +523,19 @@ class ToolProgressReporter implements ProgressReporter {
     }
   }
 
-  private createProgressNotification(
-    token: ProgressToken,
-    progress: number,
-    message: string
-  ): ProgressNotification {
+  private createProgressNotification(params: {
+    token: ProgressToken;
+    progress: number;
+    message: string;
+    total?: number;
+  }): ProgressNotification {
     return {
       method: 'notifications/progress',
       params: {
-        progressToken: token,
-        progress,
-        total: DEFAULT_PROGRESS_TOTAL,
-        message,
+        progressToken: params.token,
+        progress: params.progress,
+        ...(params.total !== undefined ? { total: params.total } : {}),
+        message: params.message,
         ...(this.taskMeta && {
           _meta: {
             'io.modelcontextprotocol/related-task': this.taskMeta,

@@ -18,7 +18,7 @@ By default it runs over stdio. Pass `--http` if you need a proper HTTP endpoint 
 
 - **HTML to Markdown** — Turns any public web page into clean, readable Markdown with metadata like `title`, `url`, `contentSize`, and `truncated`.
 - **Smart URL handling** — Recognizes GitHub, GitLab, Bitbucket, and Gist page URLs and rewrites them to raw-content endpoints before fetching.
-- **Task mode** — Big or slow pages can run as async MCP tasks with progress updates, instead of blocking.
+- **Task mode** — Big or slow pages can run as async MCP tasks with progress updates, instead of blocking. Polling task state also exposes `progress` and `total` when available.
 - **Self-documenting** — Includes an `internal://instructions` resource and a `get-help` prompt so clients know how to use it.
 - **HTTP mode** — Optionally serves over Streamable HTTP with host/origin validation, bearer or OAuth auth, rate limiting, health checks, and TLS.
 
@@ -484,7 +484,7 @@ For more info, see [Kilo Code docs](https://kilocode.ai/docs).
 
 - **Documentation for LLMs** — Grab a docs page, blog post, or reference article as Markdown and pass it straight into a context window.
 - **Repository content** — Hand it a GitHub, GitLab, or Bitbucket URL and it resolves the raw content endpoint. Works with Gists too.
-- **Slow or large pages** — Task mode lets big fetches run in the background while sending progress updates back to the client.
+- **Slow or large pages** — Task mode lets big fetches run in the background while sending monotonic progress updates back to the client, while `tasks/get` exposes the latest `statusMessage`, `progress`, and `total`.
 
 ## Architecture
 
@@ -530,7 +530,7 @@ For more info, see [Kilo Code docs](https://kilocode.ai/docs).
 
 #### `fetch-url`
 
-Takes a URL and returns Markdown. Read-only — no JavaScript execution. Supports running as a background MCP task for large or slow pages.
+Takes a URL and returns Markdown. Read-only — no JavaScript execution. Supports running as a background MCP task for large or slow pages. When task mode is used, `tasks/get` and `tasks/list` include `statusMessage`, `progress`, and `total` whenever progress has been reported.
 
 | Parameter | Type     | Required | Description                 |
 | --------- | -------- | -------- | --------------------------- |
@@ -560,14 +560,14 @@ You get text content back by default. If output validation passes, the response 
 
 ## MCP Capabilities
 
-| Capability                      | Status    | Notes                                                                                                              |
-| ------------------------------- | --------- | ------------------------------------------------------------------------------------------------------------------ |
-| completions                     | confirmed | Advertised in `createServerCapabilities()`.                                                                        |
-| logging                         | confirmed | Advertised in `createServerCapabilities()` and handled through `SetLevelRequestSchema`.                            |
-| resources subscribe/listChanged | confirmed | Advertised in `createServerCapabilities()`.                                                                        |
-| prompts                         | confirmed | `get-help` is registered during server startup.                                                                    |
-| tasks                           | confirmed | Advertised in `createServerCapabilities()` and backed by registered task handlers plus optional tool task support. |
-| progress notifications          | confirmed | Tool execution reports `notifications/progress` updates during fetch and transform stages.                         |
+| Capability                      | Status    | Notes                                                                                                                                                                        |
+| ------------------------------- | --------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| completions                     | confirmed | Advertised in `createServerCapabilities()`.                                                                                                                                  |
+| logging                         | confirmed | Advertised in `createServerCapabilities()` and handled through `SetLevelRequestSchema`.                                                                                      |
+| resources subscribe/listChanged | confirmed | Advertised in `createServerCapabilities()`.                                                                                                                                  |
+| prompts                         | confirmed | `get-help` is registered during server startup.                                                                                                                              |
+| tasks                           | confirmed | Advertised in `createServerCapabilities()` and backed by registered task handlers plus optional tool task support.                                                           |
+| progress notifications          | confirmed | Tool execution reports monotonic `notifications/progress` updates during fetch and transform stages, and task-mode progress reuses the caller's token for the task lifetime. |
 
 ### Tool Annotations
 

@@ -209,27 +209,37 @@ export function getFetchCompletionStatusMessage(
 }
 
 export class FetchUrlProgressPlan {
+  private readonly total = Step.DONE;
+
   constructor(
     private readonly reporter: ProgressReporter,
     private readonly context: string
   ) {}
 
   reportStart(): void {
-    this.reporter.report(Step.START, 'Preparing request');
+    this.reporter.report(Step.START, 'Preparing request', this.total);
   }
 
   reportStage(stage: SharedFetchStage): void {
     const mapped = this.mapStage(stage);
     if (!mapped) return;
-    this.reporter.report(mapped.step, mapped.message);
+    this.reporter.report(mapped.step, mapped.message, this.total);
   }
 
   reportSuccess(contentSize: number): void {
-    this.reporter.report(Step.DONE, buildFetchSuccessSummary(contentSize));
+    this.reporter.report(
+      Step.DONE,
+      buildFetchSuccessSummary(contentSize),
+      this.total
+    );
   }
 
   reportFailure(cancelled: boolean): void {
-    this.reporter.report(Step.DONE, cancelled ? 'Cancelled' : 'Failed');
+    this.reporter.report(
+      Step.DONE,
+      cancelled ? 'Cancelled' : 'Failed',
+      this.total
+    );
   }
 
   private mapStage(
@@ -237,18 +247,30 @@ export class FetchUrlProgressPlan {
   ): { step: number; message: string } | undefined {
     switch (stage) {
       case 'resolve_url':
-        return { step: Step.RESOLVE_URL, message: 'Resolving URL' };
+        return {
+          step: Step.RESOLVE_URL,
+          message: 'Resolving URL',
+        };
       case 'fetch_remote':
         return {
           step: Step.FETCH,
           message: `Fetching ${this.context}`,
         };
       case 'response_ready':
-        return { step: Step.RESPONSE, message: 'Received response' };
+        return {
+          step: Step.RESPONSE,
+          message: 'Received response',
+        };
       case 'transform_start':
-        return { step: Step.TRANSFORM, message: 'Parsing HTML -> Markdown' };
+        return {
+          step: Step.TRANSFORM,
+          message: 'Parsing HTML -> Markdown',
+        };
       case 'prepare_output':
-        return { step: Step.PREPARE, message: 'Fetch completed' };
+        return {
+          step: Step.PREPARE,
+          message: 'Fetch completed',
+        };
       case 'finalize_output':
         return undefined;
     }

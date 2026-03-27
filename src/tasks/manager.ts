@@ -30,6 +30,8 @@ export interface TaskState {
   ownerKey: string;
   status: TaskStatus;
   statusMessage?: string;
+  progress?: number;
+  total?: number;
   createdAt: string;
   lastUpdatedAt: string;
   ttl: number; // in ms
@@ -53,6 +55,8 @@ export interface CreateTaskResult {
     taskId: string;
     status: TaskStatus;
     statusMessage?: string;
+    progress?: number;
+    total?: number;
     createdAt: string;
     lastUpdatedAt: string;
     ttl: number;

@@ -141,6 +141,23 @@ describe('taskManager', () => {
       }
     });
 
+    it('stores numeric progress and total on a working task', () => {
+      const task = createTestTask();
+      try {
+        taskManager.updateTask(task.taskId, {
+          progress: 2,
+          total: 5,
+          statusMessage: 'In progress',
+        });
+        const updated = taskManager.getTask(task.taskId);
+        assert.equal(updated?.progress, 2);
+        assert.equal(updated?.total, 5);
+        assert.equal(updated?.statusMessage, 'In progress');
+      } finally {
+        cleanupTask(task.taskId);
+      }
+    });
+
     it('transitions to completed', () => {
       const task = createTestTask();
       taskManager.updateTask(task.taskId, {
