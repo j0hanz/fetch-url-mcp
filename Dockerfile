@@ -2,7 +2,7 @@ FROM node:24-alpine AS builder
 RUN apk add --no-cache python3 make g++
 WORKDIR /app
 COPY package.json package-lock.json ./
-RUN npm ci --ignore-scripts && npm rebuild
+RUN npm ci --force --ignore-scripts && npm rebuild
 COPY tsconfig.json tsconfig.build.json ./
 COPY scripts/ ./scripts/
 COPY assets/ ./assets/
@@ -11,7 +11,7 @@ RUN npm run build
 FROM node:24-alpine AS prod-deps
 WORKDIR /app
 COPY package.json package-lock.json ./
-RUN npm ci --omit=dev --ignore-scripts
+RUN npm ci --force --omit=dev --ignore-scripts
 FROM node:24-alpine
 ARG VERSION
 ENV NODE_ENV=production
