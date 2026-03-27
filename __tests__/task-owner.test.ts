@@ -113,44 +113,53 @@ describe('resolveTaskOwnerKey', () => {
     assert.equal(resolveTaskOwnerKey(undefined), 'default');
   });
 
-  it('returns session-based key when sessionId is present', () => {
+  it('returns session-based key when auth context is absent', () => {
     assert.equal(
       resolveTaskOwnerKey({ sessionId: 'sess-1' }),
       'session:sess-1'
     );
   });
 
-  it('returns client-based key when clientId is present', () => {
-    assert.equal(
-      resolveTaskOwnerKey({ authInfo: { clientId: 'c-1' } }),
-      'client:c-1'
-    );
+  it('returns auth-based key when clientId is present', () => {
+    const key = resolveTaskOwnerKey({ authInfo: { clientId: 'c-1' } });
+    assert.ok(key.startsWith('auth:'));
   });
 
-  it('returns token-based key when only token is present', () => {
+  it('returns auth-based key when only token is present', () => {
     const key = resolveTaskOwnerKey({ authInfo: { token: 'secret' } });
-    assert.ok(key.startsWith('token:'));
-    assert.ok(key.length > 'token:'.length);
+    assert.ok(key.startsWith('auth:'));
+    assert.ok(key.length > 'auth:'.length);
   });
 
-  it('is deterministic for the same token', () => {
-    const a = resolveTaskOwnerKey({ authInfo: { token: 'same' } });
-    const b = resolveTaskOwnerKey({ authInfo: { token: 'same' } });
+  it('is deterministic for the same auth context', () => {
+    const a = resolveTaskOwnerKey({
+      authInfo: { clientId: 'client-a', token: 'same' },
+    });
+    const b = resolveTaskOwnerKey({
+      authInfo: { clientId: 'client-a', token: 'same' },
+    });
     assert.equal(a, b);
   });
 
-  it('differs for different tokens', () => {
-    const a = resolveTaskOwnerKey({ authInfo: { token: 'alpha' } });
-    const b = resolveTaskOwnerKey({ authInfo: { token: 'beta' } });
+  it('differs for different tokens even when clientId is shared', () => {
+    const a = resolveTaskOwnerKey({
+      authInfo: { clientId: 'static-token', token: 'alpha' },
+    });
+    const b = resolveTaskOwnerKey({
+      authInfo: { clientId: 'static-token', token: 'beta' },
+    });
     assert.notEqual(a, b);
   });
 
-  it('prefers sessionId over authInfo', () => {
+  it('prefers auth context over sessionId', () => {
     const key = resolveTaskOwnerKey({
       sessionId: 'sess-1',
-      authInfo: { clientId: 'c-1' },
+      authInfo: { clientId: 'c-1', token: 'tok-1' },
     });
-    assert.equal(key, 'session:sess-1');
+    assert.equal(
+      key,
+      resolveTaskOwnerKey({ authInfo: { clientId: 'c-1', token: 'tok-1' } })
+    );
   });
 });
 

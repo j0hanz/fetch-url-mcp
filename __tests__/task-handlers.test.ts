@@ -306,7 +306,7 @@ describe('task progress state', () => {
 });
 
 describe('task result failure normalization', () => {
-  it('returns isError result when a background tool throws', async () => {
+  it('replays a JSON-RPC error when a background tool throws', async () => {
     const server = createTaskTestServer();
     const toolName = `failing-task-tool-${randomUUID()}`;
 
@@ -331,27 +331,27 @@ describe('task result failure normalization', () => {
         { ownerKey: 'default' }
       )) as { task: { taskId: string } };
 
-      const result = (await getTaskResultHandler(server)(
-        { method: 'tasks/result', params: { taskId: taskResult.task.taskId } },
-        undefined
-      )) as {
-        isError?: boolean;
-        content: Array<{ type: string; text: string }>;
-        _meta?: Record<string, unknown>;
-      };
-
-      assert.equal(result.isError, true);
-      assert.equal(JSON.parse(result.content[0]?.text ?? '{}').error, 'boom');
-      assert.deepEqual(result._meta?.['io.modelcontextprotocol/related-task'], {
-        taskId: taskResult.task.taskId,
-      });
+      await assert.rejects(
+        () =>
+          getTaskResultHandler(server)(
+            {
+              method: 'tasks/result',
+              params: { taskId: taskResult.task.taskId },
+            },
+            undefined
+          ),
+        (error: unknown) =>
+          error instanceof McpError &&
+          error.code === ErrorCode.InternalError &&
+          error.message.includes('boom')
+      );
     } finally {
       unregisterTaskCapableTool(server, toolName);
       await server.close();
     }
   });
 
-  it('preserves McpError code in the background failure payload', async () => {
+  it('preserves McpError code and data for background failures', async () => {
     const server = createTaskTestServer();
     const toolName = `mcp-error-task-tool-${randomUUID()}`;
 
@@ -378,21 +378,22 @@ describe('task result failure normalization', () => {
         { ownerKey: 'default' }
       )) as { task: { taskId: string } };
 
-      const result = (await getTaskResultHandler(server)(
-        { method: 'tasks/result', params: { taskId: taskResult.task.taskId } },
-        undefined
-      )) as {
-        isError?: boolean;
-        content: Array<{ type: string; text: string }>;
-      };
-
-      const payload = JSON.parse(result.content[0]?.text ?? '{}') as Record<
-        string,
-        unknown
-      >;
-      assert.equal(result.isError, true);
-      assert.equal(payload['error'], 'broken');
-      assert.equal(payload['code'], ErrorCode.InternalError);
+      await assert.rejects(
+        () =>
+          getTaskResultHandler(server)(
+            {
+              method: 'tasks/result',
+              params: { taskId: taskResult.task.taskId },
+            },
+            undefined
+          ),
+        (error: unknown) =>
+          error instanceof McpError &&
+          error.code === ErrorCode.InternalError &&
+          error.message.includes('broken') &&
+          (error.data as Record<string, unknown> | undefined)?.['reason'] ===
+            'test'
+      );
     } finally {
       unregisterTaskCapableTool(server, toolName);
       await server.close();
@@ -401,7 +402,7 @@ describe('task result failure normalization', () => {
 });
 
 describe('task result for cancelled task', () => {
-  it('returns isError result instead of throwing for cancelled tasks', async () => {
+  it('returns a cancellation JSON-RPC error for cancelled tasks', async () => {
     const server = createTaskTestServer();
     const toolName = `slow-task-tool-${randomUUID()}`;
 
@@ -434,25 +435,22 @@ describe('task result for cancelled task', () => {
         undefined
       );
 
-      // Retrieve result — should NOT throw
-      const result = (await getTaskResultHandler(server)(
-        { method: 'tasks/result', params: { taskId: taskResult.task.taskId } },
-        undefined
-      )) as {
-        isError?: boolean;
-        content: Array<{ type: string; text: string }>;
-        _meta?: Record<string, unknown>;
-      };
-
-      assert.equal(result.isError, true);
-      const payload = JSON.parse(result.content[0]?.text ?? '{}') as Record<
-        string,
-        unknown
-      >;
-      assert.ok(typeof payload['error'] === 'string');
-      assert.deepEqual(result._meta?.['io.modelcontextprotocol/related-task'], {
-        taskId: taskResult.task.taskId,
-      });
+      await assert.rejects(
+        () =>
+          getTaskResultHandler(server)(
+            {
+              method: 'tasks/result',
+              params: { taskId: taskResult.task.taskId },
+            },
+            undefined
+          ),
+        (error: unknown) =>
+          error instanceof McpError &&
+          error.code === ErrorCode.ConnectionClosed &&
+          error.message.includes('The task was cancelled by request.') &&
+          (error.data as Record<string, unknown> | undefined)?.['code'] ===
+            'ABORTED'
+      );
     } finally {
       unregisterTaskCapableTool(server, toolName);
       await server.close();

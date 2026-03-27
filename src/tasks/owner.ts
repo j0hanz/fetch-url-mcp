@@ -3,7 +3,11 @@ import { hash, randomUUID } from 'node:crypto';
 import type { ServerResult } from '@modelcontextprotocol/sdk/types.js';
 import { z } from 'zod';
 
-import { getRequestId, runWithRequestContext } from '../lib/core.js';
+import {
+  getRequestId,
+  resolveMcpSessionOwnerKey,
+  runWithRequestContext,
+} from '../lib/core.js';
 import type {
   ProgressNotification,
   ToolHandlerExtra,
@@ -38,6 +42,11 @@ export interface ToolExecutionContext {
 }
 
 export type ToolCallContext = ToolExecutionContext;
+
+interface AuthIdentity {
+  clientId?: string;
+  token?: string;
+}
 
 /** Strip keys whose value is `undefined`, returning an object with only the
  * present keys. Return type correctly omits the `undefined` union so the result
@@ -111,11 +120,30 @@ export function parseHandlerExtra(extra: unknown): HandlerExtra | undefined {
   return parsed;
 }
 
+export function buildAuthenticatedOwnerKey(
+  authInfo?: AuthIdentity
+): string | undefined {
+  const authClientId =
+    typeof authInfo?.clientId === 'string' ? authInfo.clientId : '';
+  const authToken = typeof authInfo?.token === 'string' ? authInfo.token : '';
+
+  if (authClientId || authToken) {
+    return `auth:${hash('sha256', `${authClientId}:${authToken}`, 'hex')}`;
+  }
+
+  return undefined;
+}
+
 export function resolveTaskOwnerKey(extra?: HandlerExtra): string {
-  if (extra?.sessionId) return `session:${extra.sessionId}`;
-  if (extra?.authInfo?.clientId) return `client:${extra.authInfo.clientId}`;
-  if (extra?.authInfo?.token)
-    return `token:${hash('sha256', extra.authInfo.token, 'hex')}`;
+  const authenticatedOwnerKey = buildAuthenticatedOwnerKey(extra?.authInfo);
+  if (authenticatedOwnerKey) return authenticatedOwnerKey;
+
+  if (extra?.sessionId) {
+    return (
+      resolveMcpSessionOwnerKey(extra.sessionId) ?? `session:${extra.sessionId}`
+    );
+  }
+
   return 'default';
 }
 

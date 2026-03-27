@@ -29,6 +29,7 @@ import {
   logError,
   logInfo,
   logWarn,
+  registerMcpSessionOwnerKey,
   registerMcpSessionServer,
   reserveSessionSlot,
   runWithRequestContext,
@@ -51,6 +52,7 @@ import {
 } from '../lib/utils.js';
 
 import { createMcpServerForHttpSession } from '../server.js';
+import { buildAuthenticatedOwnerKey } from '../tasks/owner.js';
 import {
   applyInsufficientScopeAuthHeaders,
   applyUnauthorizedAuthHeaders,
@@ -812,6 +814,20 @@ class McpSessionGateway {
       return null;
     }
 
+    const ownerKey = buildAuthenticatedOwnerKey(ctx.auth);
+    if (!ownerKey) {
+      logError(
+        'Session creation failed: missing task owner context',
+        {
+          path: ctx.url.pathname,
+          method: ctx.method,
+        },
+        'session'
+      );
+      sendError(ctx.res, -32603, 'Missing auth owner context', 500, requestId);
+      return null;
+    }
+
     if (!this.reserveCapacity(ctx.res, requestId)) return null;
 
     const tracker = createSlotTracker(this.store);
@@ -876,6 +892,7 @@ class McpSessionGateway {
       authFingerprint,
     });
     this.sessionInitTimeouts.set(newSessionId, initTimeout);
+    registerMcpSessionOwnerKey(newSessionId, ownerKey);
     registerMcpSessionServer(newSessionId, sessionServer);
     logInfo(
       'Session created',
@@ -1415,10 +1432,7 @@ export async function startHttpServer(): Promise<{
     config.server.sessionTtlMs,
     {
       onEvictSession: (session) => {
-        teardownSessionRegistration(
-          session.server,
-          'The task was cancelled because the MCP session expired.'
-        );
+        teardownSessionRegistration(session.server);
       },
     }
   );

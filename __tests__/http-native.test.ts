@@ -1,26 +1,15 @@
 import assert from 'node:assert/strict';
 import { after, before, describe, it } from 'node:test';
 
+import type { ServerResult } from '@modelcontextprotocol/sdk/types.js';
+
+import { authService } from '../src/http/auth.js';
+import { startHttpServer } from '../src/http/native.js';
+import { config } from '../src/lib/core.js';
+import { taskManager } from '../src/tasks/manager.js';
+import { resolveTaskOwnerKey } from '../src/tasks/owner.js';
+
 const TEST_API_KEY = 'test-api-key';
-const originalApiKey = process.env['API_KEY'];
-const originalPort = process.env['PORT'];
-
-process.env['API_KEY'] = TEST_API_KEY;
-process.env['PORT'] = '0';
-
-const { startHttpServer } = await import('../src/http/native.js');
-
-if (originalApiKey === undefined) {
-  delete process.env['API_KEY'];
-} else {
-  process.env['API_KEY'] = originalApiKey;
-}
-
-if (originalPort === undefined) {
-  delete process.env['PORT'];
-} else {
-  process.env['PORT'] = originalPort;
-}
 
 type HttpServerHandle = Awaited<ReturnType<typeof startHttpServer>>;
 
@@ -90,17 +79,83 @@ function createSessionHeaders(options?: {
   return headers;
 }
 
+async function initializeSession(baseUrl: string): Promise<string> {
+  const initializeResponse = await fetch(`${baseUrl}/mcp`, {
+    method: 'POST',
+    headers: createSessionHeaders(),
+    body: createInitializeRequestBody(),
+  });
+
+  assert.equal(initializeResponse.status, 200);
+  const sessionId = initializeResponse.headers.get('mcp-session-id');
+  assert.ok(sessionId);
+  await initializeResponse.text();
+
+  const initializedResponse = await fetch(`${baseUrl}/mcp`, {
+    method: 'POST',
+    headers: createSessionHeaders({
+      sessionId,
+      protocolVersion: '2025-11-25',
+    }),
+    body: JSON.stringify({
+      jsonrpc: '2.0',
+      method: 'notifications/initialized',
+    }),
+  });
+
+  assert.equal(initializedResponse.status, 202);
+  return sessionId;
+}
+
+async function postSessionRpc(
+  baseUrl: string,
+  sessionId: string,
+  body: Record<string, unknown>
+): Promise<unknown> {
+  const response = await fetch(`${baseUrl}/mcp`, {
+    method: 'POST',
+    headers: createSessionHeaders({
+      sessionId,
+      protocolVersion: '2025-11-25',
+    }),
+    body: JSON.stringify(body),
+  });
+
+  assert.equal(response.status, 200);
+  return parseFirstSseDataEvent(await response.text());
+}
+
 describe('HTTP native gateway routing', () => {
   let server: HttpServerHandle;
   let baseUrl: string;
+  const originalStaticTokens = [...config.auth.staticTokens];
+  const originalAuthenticate = authService.authenticate.bind(authService);
 
   before(async () => {
+    config.auth.staticTokens.splice(
+      0,
+      config.auth.staticTokens.length,
+      TEST_API_KEY
+    );
+    authService.authenticate = async () => ({
+      token: TEST_API_KEY,
+      clientId: 'static-token',
+      scopes: [],
+      resource: config.auth.resourceUrl,
+    });
+
     server = await startHttpServer();
     baseUrl = `http://${server.host}:${server.port}`;
   });
 
   after(async () => {
     await server.shutdown('test');
+    config.auth.staticTokens.splice(
+      0,
+      config.auth.staticTokens.length,
+      ...originalStaticTokens
+    );
+    authService.authenticate = originalAuthenticate;
   });
 
   it('returns 406 for POST /mcp when Accept omits text/event-stream', async () => {
@@ -295,30 +350,7 @@ describe('HTTP native gateway routing', () => {
   });
 
   it('returns the fetch-url tool contract after session initialization', async () => {
-    const initializeResponse = await fetch(`${baseUrl}/mcp`, {
-      method: 'POST',
-      headers: createSessionHeaders(),
-      body: createInitializeRequestBody(),
-    });
-
-    assert.equal(initializeResponse.status, 200);
-    const sessionId = initializeResponse.headers.get('mcp-session-id');
-    assert.ok(sessionId);
-    await initializeResponse.text();
-
-    const initializedResponse = await fetch(`${baseUrl}/mcp`, {
-      method: 'POST',
-      headers: createSessionHeaders({
-        sessionId,
-        protocolVersion: '2025-11-25',
-      }),
-      body: JSON.stringify({
-        jsonrpc: '2.0',
-        method: 'notifications/initialized',
-      }),
-    });
-
-    assert.equal(initializedResponse.status, 202);
+    const sessionId = await initializeSession(baseUrl);
 
     const listResponse = await fetch(`${baseUrl}/mcp`, {
       method: 'POST',
@@ -351,6 +383,78 @@ describe('HTTP native gateway routing', () => {
       openWorldHint: true,
     });
     assert.equal(Array.isArray(tool['icons']), true);
+  });
+
+  it('keeps auth-bound tasks accessible after the original session closes', async () => {
+    const ownerKey = resolveTaskOwnerKey({
+      authInfo: { clientId: 'static-token', token: TEST_API_KEY },
+    });
+    const task = taskManager.createTask(
+      { ttl: 5_000 },
+      'Task completed',
+      ownerKey
+    );
+    taskManager.updateTask(task.taskId, {
+      status: 'completed',
+      result: {
+        content: [{ type: 'text' as const, text: 'persisted result' }],
+      } satisfies ServerResult,
+    });
+
+    const firstSessionId = await initializeSession(baseUrl);
+    const closeResponse = await fetch(`${baseUrl}/mcp`, {
+      method: 'DELETE',
+      headers: createSessionHeaders({
+        sessionId: firstSessionId,
+        protocolVersion: '2025-11-25',
+      }),
+    });
+    assert.equal(closeResponse.status, 200);
+
+    const secondSessionId = await initializeSession(baseUrl);
+
+    const getBody = asRecord(
+      await postSessionRpc(baseUrl, secondSessionId, {
+        jsonrpc: '2.0',
+        id: 10,
+        method: 'tasks/get',
+        params: { taskId: task.taskId },
+      })
+    );
+    assert.equal(getBody?.['result'] && typeof getBody['result'], 'object');
+    assert.equal(asRecord(getBody?.['result'])?.['taskId'], task.taskId);
+
+    const listBody = asRecord(
+      await postSessionRpc(baseUrl, secondSessionId, {
+        jsonrpc: '2.0',
+        id: 11,
+        method: 'tasks/list',
+        params: {},
+      })
+    );
+    const tasks = Array.isArray(asRecord(listBody?.['result'])?.['tasks'])
+      ? (asRecord(listBody?.['result'])?.['tasks'] as Array<
+          Record<string, unknown>
+        >)
+      : [];
+    assert.ok(tasks.some((entry) => entry['taskId'] === task.taskId));
+
+    const resultBody = asRecord(
+      await postSessionRpc(baseUrl, secondSessionId, {
+        jsonrpc: '2.0',
+        id: 12,
+        method: 'tasks/result',
+        params: { taskId: task.taskId },
+      })
+    );
+    assert.equal(
+      asRecord(resultBody?.['result'])?.['content'] instanceof Array,
+      true
+    );
+    const content = asRecord(resultBody?.['result'])?.['content'] as
+      | Array<Record<string, unknown>>
+      | undefined;
+    assert.equal(content?.[0]?.['text'], 'persisted result');
   });
 
   it('returns 405 for unsupported methods on /mcp', async () => {

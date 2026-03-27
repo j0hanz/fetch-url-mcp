@@ -40,6 +40,7 @@ const requestContext = new AsyncLocalStorage<RequestContext>({
 });
 let mcpServer: McpServer | undefined;
 const sessionServers = new Map<string, McpServer>();
+const sessionOwnerKeys = new Map<string, string>();
 const sessionMcpLogLevels = new Map<string, McpLogLevel>();
 let stdioMcpLogLevel: McpLogLevel | undefined;
 let stderrAvailable = true;
@@ -65,17 +66,31 @@ export function registerMcpSessionServer(
   if (!sessionId) return;
   sessionServers.set(sessionId, server);
 }
+export function registerMcpSessionOwnerKey(
+  sessionId: string,
+  ownerKey: string
+): void {
+  if (!sessionId || !ownerKey) return;
+  sessionOwnerKeys.set(sessionId, ownerKey);
+}
 export function unregisterMcpSessionServer(sessionId: string): void {
   if (!sessionId) return;
   sessionServers.delete(sessionId);
+  sessionOwnerKeys.delete(sessionId);
   sessionMcpLogLevels.delete(sessionId);
 }
 export function unregisterMcpSessionServerByServer(server: McpServer): void {
   for (const [sessionId, mappedServer] of sessionServers.entries()) {
     if (mappedServer !== server) continue;
     sessionServers.delete(sessionId);
+    sessionOwnerKeys.delete(sessionId);
     sessionMcpLogLevels.delete(sessionId);
   }
+}
+export function resolveMcpSessionOwnerKey(
+  sessionId: string
+): string | undefined {
+  return sessionOwnerKeys.get(sessionId);
 }
 export function resolveMcpSessionIdByServer(
   server: McpServer

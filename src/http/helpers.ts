@@ -19,8 +19,6 @@ import type { JsonRpcId } from '../lib/mcp-interop.js';
 import { createDefaultBlockList, normalizeIpForBlockList } from '../lib/url.js';
 import { getErrorMessage, toError } from '../lib/utils.js';
 
-import { cancelTasksForOwner } from '../tasks/handlers.js';
-
 // ---------------------------------------------------------------------------
 // Shared types
 // ---------------------------------------------------------------------------
@@ -510,11 +508,10 @@ type SessionCloseOptions = Pick<
   'closeServerReason' | 'closeTransportReason' | 'awaitClose'
 >;
 
-function cancelSessionTasks(server: McpServer, message: string): string | null {
+function unregisterSessionTaskScope(server: McpServer): string | null {
   const sessionId = resolveMcpSessionIdByServer(server);
   if (!sessionId) return null;
 
-  cancelTasksForOwner(`session:${sessionId}`, message);
   unregisterMcpSessionServer(sessionId);
   return sessionId;
 }
@@ -544,7 +541,7 @@ export async function teardownSessionResources(
   session: SessionRecordLike,
   options: SessionTeardownOptions
 ): Promise<void> {
-  cancelSessionTasks(session.server, options.cancelMessage);
+  unregisterSessionTaskScope(session.server);
 
   if (options.unregisterByServer) {
     unregisterMcpSessionServerByServer(session.server);
@@ -564,9 +561,6 @@ export async function teardownUnregisteredSessionResources(
   });
 }
 
-export function teardownSessionRegistration(
-  server: McpServer,
-  cancelMessage: string
-): void {
-  cancelSessionTasks(server, cancelMessage);
+export function teardownSessionRegistration(server: McpServer): void {
+  unregisterSessionTaskScope(server);
 }

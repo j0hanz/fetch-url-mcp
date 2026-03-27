@@ -82,7 +82,7 @@ export function buildServerInstructions(): string {
 
 # Workflows
 1. Standard: Call \`${FETCH_URL_TOOL_NAME}\` → read \`markdown\`. \`truncated: true\` means content was cut at server size limit.
-2. Async: \`task: { ttl: <ms> }\` in \`tools/call\` → poll \`tasks/get\` for \`statusMessage\`, \`progress\`, and \`total\` → \`tasks/result\`.
+2. Async: \`task: { ttl: <ms> }\` in \`tools/call\` → poll \`tasks/get\` for \`statusMessage\`, \`progress\`, and \`total\` → \`tasks/result\`. In HTTP mode, tasks are bound to the authenticated caller and can be resumed from a new MCP session with the same credentials.
 
 # Constraints
 - Blocked URLs: localhost, private IPs (10.x, 172.16-31.x, 192.168.x), metadata (169.254.169.254), .local/.internal.

@@ -12,10 +12,7 @@ import {
   logWarn,
   runWithRequestContext,
 } from '../lib/core.js';
-import {
-  createToolErrorResponse,
-  type ProgressNotification,
-} from '../lib/mcp-interop.js';
+import { type ProgressNotification } from '../lib/mcp-interop.js';
 import { getErrorMessage } from '../lib/utils.js';
 import { isObject } from '../lib/utils.js';
 
@@ -165,7 +162,11 @@ function updateTaskAndEmitStatus(
 function buildTaskFailureState(error: unknown): {
   status: 'failed';
   statusMessage: string;
-  result: ServerResult;
+  error: {
+    code: number;
+    message: string;
+    data?: unknown;
+  };
 } {
   const mcpErrorMessage =
     error instanceof McpError
@@ -177,19 +178,21 @@ function buildTaskFailureState(error: unknown): {
     return {
       status: 'failed',
       statusMessage,
-      result: createToolErrorResponse(statusMessage, 'task://execution', {
+      error: {
         code: error.code,
         ...(error.data !== undefined ? { data: error.data } : {}),
-      }),
+        message: statusMessage,
+      },
     };
   }
 
   return {
     status: 'failed',
     statusMessage,
-    result: createToolErrorResponse(statusMessage, 'task://execution', {
+    error: {
       code: ErrorCode.InternalError,
-    }),
+      message: statusMessage,
+    },
   };
 }
 

@@ -42,7 +42,6 @@ export interface TaskState {
 
 interface InternalTaskState extends TaskState {
   _createdAtMs: number;
-  _capacityCounted: boolean;
 }
 
 interface CreateTaskOptions {
@@ -122,7 +121,6 @@ function normalizeTaskTtl(ttl: number | undefined): number {
 
 class TaskManager {
   private tasks = new Map<string, InternalTaskState>();
-  private activeTaskCount = 0;
   private ownerCounts = new Map<string, number>();
   private readonly waiters = new TaskWaiterRegistry<InternalTaskState>(
     isTerminalStatus
@@ -194,16 +192,19 @@ class TaskManager {
     task: InternalTaskState,
     statusMessage: string
   ): void {
-    this.applyTaskUpdate(task, { status: 'cancelled', statusMessage });
+    this.applyTaskUpdate(task, {
+      status: 'cancelled',
+      statusMessage,
+      error: {
+        code: ErrorCode.ConnectionClosed,
+        message: statusMessage,
+        data: { code: 'ABORTED' },
+      },
+    });
     this.waiters.notify(task);
-    this.releaseTaskCapacity(task);
   }
 
   private releaseTaskCapacity(task: InternalTaskState | TaskState): void {
-    const internal = task as Partial<InternalTaskState>;
-    if (!internal._capacityCounted) return;
-    internal._capacityCounted = false;
-
     const { ownerKey } = task;
     const nextCount = (this.ownerCounts.get(ownerKey) ?? 0) - 1;
     if (nextCount > 0) {
@@ -211,14 +212,12 @@ class TaskManager {
     } else {
       this.ownerCounts.delete(ownerKey);
     }
-
-    if (this.activeTaskCount > 0) this.activeTaskCount--;
   }
 
   private reserveTaskCapacity(ownerKey: string): void {
     const { maxPerOwner, maxTotal } = config.tasks;
 
-    if (this.activeTaskCount >= maxTotal) {
+    if (this.tasks.size >= maxTotal) {
       throw new McpError(
         ErrorCode.InvalidRequest,
         `Task capacity reached (${maxTotal} total tasks)`
@@ -233,7 +232,6 @@ class TaskManager {
     }
 
     this.ownerCounts.set(ownerKey, (this.ownerCounts.get(ownerKey) ?? 0) + 1);
-    this.activeTaskCount += 1;
   }
 
   createTask(
@@ -257,7 +255,6 @@ class TaskManager {
       ttl: normalizeTaskTtl(options?.ttl),
       pollInterval: DEFAULT_POLL_INTERVAL_MS,
       _createdAtMs: now.getTime(),
-      _capacityCounted: true,
     };
 
     this.tasks.set(task.taskId, task);
@@ -323,9 +320,6 @@ class TaskManager {
     });
 
     this.waiters.notify(task);
-    if (isTerminalStatus(nextStatus)) {
-      this.releaseTaskCapacity(task);
-    }
   }
 
   cancelTask(taskId: string, ownerKey?: string): TaskState | undefined {

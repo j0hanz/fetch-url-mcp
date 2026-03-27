@@ -3,13 +3,14 @@ import { randomUUID } from 'node:crypto';
 import { type McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import {
   CallToolRequestSchema,
+  ErrorCode,
   type ServerResult,
 } from '@modelcontextprotocol/sdk/types.js';
+import { McpError } from '@modelcontextprotocol/sdk/types.js';
 import { z } from 'zod';
 
 import { logWarn, runWithRequestContext } from '../lib/core.js';
 import { getSdkCallToolHandler } from '../lib/mcp-interop.js';
-import { createToolErrorResponse } from '../lib/mcp-interop.js';
 
 import {
   parseExtendedCallToolRequest,
@@ -102,6 +103,23 @@ interface TaskHandlerRegistrationResult {
   interceptedToolsCall: boolean;
   taskCapableToolsRegistered: boolean;
 }
+
+function throwStoredTaskError(task: {
+  taskId: string;
+  statusMessage?: string;
+  error?: { code: number; message: string; data?: unknown };
+}): never {
+  if (task.error) {
+    throw new McpError(task.error.code, task.error.message, task.error.data);
+  }
+
+  throw new McpError(
+    ErrorCode.InternalError,
+    task.statusMessage ?? 'Task execution failed',
+    { taskId: task.taskId }
+  );
+}
+
 export function registerTaskHandlers(
   server: McpServer,
   options?: TaskHandlerRegistrationOptions
@@ -189,26 +207,21 @@ export function registerTaskHandlers(
     if (!task) throwTaskNotFound();
 
     try {
-      if (task.status === 'failed') {
-        const failedResult = (task.result ?? null) as ServerResult | null;
-        const fallback: ServerResult =
-          failedResult ??
-          createToolErrorResponse(
-            task.statusMessage ?? 'Task execution failed',
-            'task://result'
-          );
-
-        return withRelatedTaskMeta(fallback, task.taskId);
+      if (task.status === 'cancelled') {
+        throwStoredTaskError(task);
       }
 
-      if (task.status === 'cancelled') {
-        const cancelledResult: ServerResult = createToolErrorResponse(
-          task.statusMessage ?? 'Task was cancelled',
-          'task://result',
-          { code: 'ABORTED' }
-        );
+      if (task.status === 'failed') {
+        if (task.error) {
+          throwStoredTaskError(task);
+        }
 
-        return withRelatedTaskMeta(cancelledResult, task.taskId);
+        const failedResult = (task.result ?? null) as ServerResult | null;
+        if (failedResult) {
+          return withRelatedTaskMeta(failedResult, task.taskId);
+        }
+
+        throwStoredTaskError(task);
       }
 
       const result: ServerResult = isServerResult(task.result)

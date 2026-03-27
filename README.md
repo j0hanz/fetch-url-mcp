@@ -18,7 +18,7 @@ By default it runs over stdio. Pass `--http` if you need a proper HTTP endpoint 
 
 - **HTML to Markdown** — Turns any public web page into clean, readable Markdown with metadata like `title`, `url`, `contentSize`, and `truncated`.
 - **Smart URL handling** — Recognizes GitHub, GitLab, Bitbucket, and Gist page URLs and rewrites them to raw-content endpoints before fetching.
-- **Task mode** — Big or slow pages can run as async MCP tasks with progress updates, instead of blocking. Polling task state also exposes `progress` and `total` when available.
+- **Task mode** — Big or slow pages can run as async MCP tasks with progress updates, instead of blocking. In HTTP mode, tasks are bound to the authenticated caller rather than a single MCP session, so they can be resumed after reconnecting with the same credentials. Polling task state also exposes `progress` and `total` when available.
 - **Self-documenting** — Includes an `internal://instructions` resource and a `get-help` prompt so clients know how to use it.
 - **HTTP mode** — Optionally serves over Streamable HTTP with host/origin validation, bearer or OAuth auth, rate limiting, health checks, and TLS.
 
@@ -642,12 +642,12 @@ All configuration is through environment variables. For basic stdio usage, nothi
 
 ### Tasks
 
-| Variable                     | Default | Notes                                                  |
-| ---------------------------- | ------- | ------------------------------------------------------ |
-| `TASKS_MAX_TOTAL`            | `5000`  | Total task capacity.                                   |
-| `TASKS_MAX_PER_OWNER`        | `1000`  | Per-owner task cap, clamped to the total cap.          |
-| `TASKS_STATUS_NOTIFICATIONS` | `false` | Enables status notifications for tasks.                |
-| `TASKS_REQUIRE_INTERCEPTION` | `true`  | Requires interception for task-capable tool execution. |
+| Variable                     | Default | Notes                                                                                |
+| ---------------------------- | ------- | ------------------------------------------------------------------------------------ |
+| `TASKS_MAX_TOTAL`            | `5000`  | Total retained task capacity, including completed/cancelled tasks until they expire. |
+| `TASKS_MAX_PER_OWNER`        | `1000`  | Per-owner retained task cap, clamped to the total cap.                               |
+| `TASKS_STATUS_NOTIFICATIONS` | `false` | Enables status notifications for tasks.                                              |
+| `TASKS_REQUIRE_INTERCEPTION` | `true`  | Requires interception for task-capable tool execution.                               |
 
 ### Transform Workers
 

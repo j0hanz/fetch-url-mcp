@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
+import { setTimeout as setTimeoutPromise } from 'node:timers/promises';
 
+import { config } from '../src/lib/core.js';
 import {
   decodeTaskCursor,
   encodeTaskCursor,
@@ -92,6 +94,30 @@ describe('taskManager', () => {
         assert.equal(task.ttl, 60_000);
       } finally {
         cleanupTask(task.taskId);
+      }
+    });
+
+    it('retains terminal tasks against owner capacity until they expire', async () => {
+      const originalMaxPerOwner = config.tasks.maxPerOwner;
+      const ownerKey = `capacity-owner-${Date.now()}`;
+
+      config.tasks.maxPerOwner = 1;
+      try {
+        const first = taskManager.createTask({ ttl: 1_000 }, 'test', ownerKey);
+        taskManager.updateTask(first.taskId, { status: 'completed' });
+
+        assert.throws(
+          () => taskManager.createTask({ ttl: 1_000 }, 'test', ownerKey),
+          (error: unknown) => error instanceof Error
+        );
+
+        await setTimeoutPromise(1_050);
+        assert.equal(taskManager.getTask(first.taskId, ownerKey), undefined);
+
+        const second = taskManager.createTask({ ttl: 1_000 }, 'test', ownerKey);
+        cleanupTask(second.taskId);
+      } finally {
+        config.tasks.maxPerOwner = originalMaxPerOwner;
       }
     });
   });
