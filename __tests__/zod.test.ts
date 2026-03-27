@@ -3,7 +3,7 @@ import { describe, it } from 'node:test';
 
 import { z } from 'zod';
 
-import { formatZodError } from '../dist/lib/zod.js';
+import { formatZodError } from '../src/lib/zod.js';
 
 describe('formatZodError', () => {
   it('formats a single root-level issue', () => {

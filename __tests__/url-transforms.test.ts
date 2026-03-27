@@ -5,8 +5,8 @@ import {
   createDefaultBlockList,
   normalizeIpForBlockList,
   RawUrlTransformer,
-} from '../dist/lib/url.js';
-import { normalizeHost } from '../dist/lib/url.js';
+} from '../src/lib/url.js';
+import { normalizeHost } from '../src/lib/url.js';
 
 // ── normalizeHost ───────────────────────────────────────────────────
 

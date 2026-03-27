@@ -10,7 +10,7 @@ import {
   resolveToolCallContext,
   tryReadToolStructuredError,
   withRequestContextIfMissing,
-} from '../dist/tasks/owner.js';
+} from '../src/tasks/owner.js';
 
 // ── compact ─────────────────────────────────────────────────────────
 

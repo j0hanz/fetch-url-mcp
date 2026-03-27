@@ -7,7 +7,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import {
   getSdkCallToolHandler,
   setTaskToolCallCapability,
-} from '../dist/lib/mcp-interop.js';
+} from '../src/lib/mcp-interop.js';
 
 function assertRecord(
   value: unknown,

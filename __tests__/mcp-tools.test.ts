@@ -9,8 +9,8 @@ import {
   isJsonRpcBatchRequest,
   isMcpMessageBody,
   isMcpRequestBody,
-} from '../dist/lib/mcp-interop.js';
-import { FetchError } from '../dist/lib/utils.js';
+} from '../src/lib/mcp-interop.js';
+import { FetchError } from '../src/lib/utils.js';
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);

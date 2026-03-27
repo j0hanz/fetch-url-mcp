@@ -5,7 +5,7 @@ import {
   detectLanguageFromCode,
   extractLanguageFromClassName,
   resolveLanguageFromAttributes,
-} from '../dist/transform/html-translators.js';
+} from '../src/transform/html-translators.js';
 
 // ── extractLanguageFromClassName ────────────────────────────────────
 

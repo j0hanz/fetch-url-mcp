@@ -5,8 +5,8 @@ import {
   decodeTaskCursor,
   encodeTaskCursor,
   taskManager,
-} from '../dist/tasks/manager.js';
-import type { TaskState } from '../dist/tasks/manager.js';
+} from '../src/tasks/manager.js';
+import type { TaskState } from '../src/tasks/manager.js';
 
 // ── TaskManager ─────────────────────────────────────────────────────
 

@@ -12,7 +12,7 @@ import {
   isRawTextContent,
   mergeMetadata,
   normalizeDocumentTitle,
-} from '../dist/transform/metadata.js';
+} from '../src/transform/metadata.js';
 
 // ── normalizeDocumentTitle ──────────────────────────────────────────
 

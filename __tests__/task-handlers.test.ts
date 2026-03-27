@@ -5,12 +5,12 @@ import { describe, it } from 'node:test';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { ErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js';
 
-import { handleToolCallRequest } from '../dist/tasks/execution.js';
-import { registerTaskHandlers } from '../dist/tasks/handlers.js';
+import { handleToolCallRequest } from '../src/tasks/execution.js';
+import { registerTaskHandlers } from '../src/tasks/handlers.js';
 import {
   registerTaskCapableTool,
   unregisterTaskCapableTool,
-} from '../dist/tasks/registry.js';
+} from '../src/tasks/registry.js';
 
 type UnknownRequestHandler = (
   request: unknown,

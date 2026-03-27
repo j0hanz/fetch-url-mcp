@@ -6,7 +6,7 @@ import { parseHTML } from 'linkedom';
 import {
   removeNoiseFromHtml,
   surfaceCodeEditorContent,
-} from '../dist/transform/dom-prep.js';
+} from '../src/transform/dom-prep.js';
 
 // Padding ensures body innerHTML > 100 chars after cleanup (MIN_BODY_CONTENT_LENGTH).
 const PAD =

@@ -4,7 +4,7 @@ import { describe, it } from 'node:test';
 import {
   TaskWaiterRegistry,
   waitForTerminalTask,
-} from '../dist/tasks/waiters.js';
+} from '../src/tasks/waiters.js';
 
 // ── Helper types ────────────────────────────────────────────────────
 

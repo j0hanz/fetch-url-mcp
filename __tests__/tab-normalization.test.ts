@@ -3,7 +3,7 @@ import { describe, it } from 'node:test';
 
 import { parseHTML } from 'linkedom';
 
-import { normalizeTabContent } from '../dist/transform/dom-prep.js';
+import { normalizeTabContent } from '../src/transform/dom-prep.js';
 
 function normalize(bodyHtml: string): string {
   const { document } = parseHTML(`<html><body>${bodyHtml}</body></html>`);

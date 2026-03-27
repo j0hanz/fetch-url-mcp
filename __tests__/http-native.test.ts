@@ -8,7 +8,7 @@ const originalPort = process.env['PORT'];
 process.env['API_KEY'] = TEST_API_KEY;
 process.env['PORT'] = '0';
 
-const { startHttpServer } = await import('../dist/http/native.js');
+const { startHttpServer } = await import('../src/http/native.js');
 
 if (originalApiKey === undefined) {
   delete process.env['API_KEY'];

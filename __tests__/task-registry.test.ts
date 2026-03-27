@@ -9,7 +9,7 @@ import {
   registerTaskCapableTool,
   setTaskCapableToolSupport,
   unregisterTaskCapableTool,
-} from '../dist/tasks/registry.js';
+} from '../src/tasks/registry.js';
 
 // ── Task-capable tool registry ──────────────────────────────────────
 

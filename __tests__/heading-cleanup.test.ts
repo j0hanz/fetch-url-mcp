@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { removeNoiseFromHtml } from '../dist/transform/dom-prep.js';
+import { removeNoiseFromHtml } from '../src/transform/dom-prep.js';
 
 // Padding ensures body innerHTML > 100 chars after cleanup (MIN_BODY_CONTENT_LENGTH).
 const PAD =

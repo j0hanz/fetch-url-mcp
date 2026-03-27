@@ -6,7 +6,7 @@ import {
   maybePrependSyntheticTitle,
   maybeStripGithubPrimaryHeading,
   shouldPreferPrimaryHeadingTitle,
-} from '../dist/transform/metadata.js';
+} from '../src/transform/metadata.js';
 
 // ── shouldPreferPrimaryHeadingTitle ─────────────────────────────────
 

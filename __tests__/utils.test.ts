@@ -19,7 +19,7 @@ import {
   trimDanglingTagFragment,
   trimUtf8Buffer,
   truncateToUtf8Boundary,
-} from '../dist/lib/utils.js';
+} from '../src/lib/utils.js';
 
 // ── FetchError ──────────────────────────────────────────────────────
 

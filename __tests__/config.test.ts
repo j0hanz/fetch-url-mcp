@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { config, serverVersion } from '../dist/lib/core.js';
+import { config, serverVersion } from '../src/lib/core.js';
 
 // ── Golden Master: config shape & default values ────────────────────
 // Locks the exported config structure so refactors cannot silently
