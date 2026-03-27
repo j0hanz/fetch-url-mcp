@@ -448,7 +448,7 @@ function createTaskCapableDescriptor(): TaskCapableToolDescriptor<FetchUrlInput>
       if (!parsed.success) {
         throw createMcpError(
           ErrorCode.InvalidParams,
-          `Invalid arguments for ${TOOL_DEFINITION.name}: ${formatZodError(parsed.error)}`
+          formatZodError(parsed.error)
         );
       }
       return parsed.data;

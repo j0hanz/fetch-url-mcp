@@ -284,12 +284,9 @@ function isBinaryContent(buffer: Uint8Array, encoding?: string): boolean {
   return hasNullByte(buffer, BINARY_SCAN_LIMIT);
 }
 function createBinaryContentError(url: string): FetchError {
-  return new FetchError(
-    'Detailed content type check failed: binary content detected',
-    url,
-    500,
-    { reason: 'binary_content_detected' }
-  );
+  return new FetchError('Binary content detected', url, 500, {
+    reason: 'binary_content_detected',
+  });
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -326,19 +323,16 @@ type FetchErrorInput =
 function createFetchError(input: FetchErrorInput, url: string): FetchError {
   switch (input.kind) {
     case 'canceled':
-      return new FetchError('Request was canceled', url, 499, {
+      return new FetchError('Request canceled', url, 499, {
         reason: 'aborted',
       });
     case 'aborted':
-      return new FetchError(
-        'Request was aborted during response read',
-        url,
-        499,
-        { reason: 'aborted' }
-      );
+      return new FetchError('Request aborted during response read', url, 499, {
+        reason: 'aborted',
+      });
     case 'timeout':
       return new FetchError(
-        `Request timeout after ${input.timeout}ms`,
+        `Request timed out after ${input.timeout}ms`,
         url,
         504,
         { timeout: input.timeout }
@@ -356,14 +350,11 @@ function createFetchError(input: FetchErrorInput, url: string): FetchError {
     case 'too-many-redirects':
       return new FetchError('Too many redirects', url);
     case 'missing-redirect-location':
-      return new FetchError('Redirect response missing Location header', url);
+      return new FetchError('Redirect missing Location header', url);
     case 'network':
-      return new FetchError(
-        `Network error: Could not reach ${url}`,
-        url,
-        undefined,
-        { message: input.message }
-      );
+      return new FetchError('Network error', url, undefined, {
+        message: input.message,
+      });
     case 'unknown':
       return new FetchError(input.message ?? 'Unexpected error', url);
     default: {

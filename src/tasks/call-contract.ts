@@ -58,10 +58,7 @@ export function parseExtendedCallToolRequest(
   const parsed = extendedCallToolRequestSchema.safeParse(request);
   if (parsed.success) return parsed.data;
 
-  throw createMcpError(
-    ErrorCode.InvalidParams,
-    `Invalid tool request params: ${formatZodError(parsed.error)}`
-  );
+  throw createMcpError(ErrorCode.InvalidParams, formatZodError(parsed.error));
 }
 
 export function sanitizeToolCallMeta(

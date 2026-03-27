@@ -205,8 +205,8 @@ export function handleToolError(
   const code = isAbortError(error) ? 'ABORTED' : 'FETCH_ERROR';
   const message =
     error instanceof Error
-      ? `${fallbackMessage}: ${error.message}`
-      : `${fallbackMessage}: Unknown error`;
+      ? error.message
+      : `${fallbackMessage}: unknown error`;
   return createToolErrorResponse(message, url, { code });
 }
 

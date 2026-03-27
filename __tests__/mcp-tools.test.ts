@@ -222,10 +222,6 @@ describe('handleToolError', () => {
     );
     const parsed = parseToolPayload(result);
     assert.ok(
-      (parsed['error'] as string).includes('Fetch failed'),
-      'Should include fallback message'
-    );
-    assert.ok(
       (parsed['error'] as string).includes('Something broke'),
       'Should include original message'
     );
