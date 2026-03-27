@@ -291,8 +291,8 @@ export function ensureMcpProtocolVersion(
   const path = URL.parse(req.url ?? '', 'http://localhost')?.pathname;
 
   if (!version) {
-    // Allow missing version header only if no specific version is expected,
-    // to avoid breaking older clients that don't send the header yet.
+    // Tolerate missing header on sessioned requests (expectedVersion set)
+    // to avoid breaking older clients that don't send it yet.
     if (options?.expectedVersion) {
       return true;
     }
