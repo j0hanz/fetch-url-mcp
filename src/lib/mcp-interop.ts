@@ -167,12 +167,12 @@ export function handleToolError(
 ): ToolErrorResponse {
   if (error instanceof FetchError) {
     const { code: detailsCode, reason } = error.details;
-    const code =
-      (typeof detailsCode === 'string'
-        ? detailsCode
-        : reason === 'queue_full'
-          ? 'queue_full'
-          : undefined) ?? error.code;
+    let { code } = error;
+    if (typeof detailsCode === 'string') {
+      code = detailsCode;
+    } else if (reason === 'queue_full') {
+      code = 'queue_full';
+    }
     const details = sanitizeToolErrorDetails(error.details);
     return createToolErrorResponse(error.message, url, {
       code,

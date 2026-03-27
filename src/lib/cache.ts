@@ -73,17 +73,16 @@ export function createCacheKey(
 
   if (!vary) return `${namespace}:${urlHash}`;
 
-  const varyString =
-    typeof vary === 'string'
-      ? vary
-      : (() => {
-          try {
-            return stableJsonStringify(vary);
-          } catch {
-            return null;
-          }
-        })();
-  if (varyString === null) return null;
+  let varyString: string;
+  if (typeof vary === 'string') {
+    varyString = vary;
+  } else {
+    try {
+      varyString = stableJsonStringify(vary);
+    } catch {
+      return null;
+    }
+  }
 
   const varyHash = varyString
     ? sha256Hex(varyString).substring(0, VARY_HASH_LENGTH)
@@ -134,7 +133,7 @@ class InMemoryCacheStore {
   }
 
   onUpdate(listener: CacheUpdateListener): () => void {
-    const wrapped = (event: CacheUpdateEvent): void => {
+    const safeListener = (event: CacheUpdateEvent): void => {
       try {
         const result = listener(event);
         if (result instanceof Promise) {
@@ -151,9 +150,9 @@ class InMemoryCacheStore {
       }
     };
 
-    this.updateEmitter.on('update', wrapped);
+    this.updateEmitter.on('update', safeListener);
     return () => {
-      this.updateEmitter.off('update', wrapped);
+      this.updateEmitter.off('update', safeListener);
     };
   }
 
@@ -210,15 +209,6 @@ class InMemoryCacheStore {
     cacheKey: string,
     entrySize: number
   ): { ok: boolean; listChanged: boolean; scopeIds: string[] } {
-    if (entrySize > this.maxBytes) {
-      logWarn('Cache entry exceeds max size', {
-        key: cacheKey,
-        size: entrySize,
-        max: this.maxBytes,
-      });
-      return { ok: false, listChanged: false, scopeIds: [] };
-    }
-
     let listChanged = false;
     const scopeIds = new Set<string>();
     while (this.currentBytes + entrySize > this.maxBytes) {
@@ -260,7 +250,6 @@ class InMemoryCacheStore {
 
     const existingEntry = this.entries.get(cacheKey);
     const isUpdate = existingEntry !== undefined;
-    const existingScopeIds = normalizeScopeIds(existingEntry?.scopeIds);
     if (isUpdate) {
       this.delete(cacheKey);
     }
@@ -270,8 +259,8 @@ class InMemoryCacheStore {
 
     let listChanged = !isUpdate || capacity.listChanged;
     const nextScopeIds = normalizeScopeIds([
-      ...existingScopeIds,
-      ...normalizeScopeIds(metadata.scopeIds),
+      ...(existingEntry?.scopeIds ?? []),
+      ...(metadata.scopeIds ?? []),
     ]);
 
     const entry: StoredCacheEntry = {

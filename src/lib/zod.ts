@@ -7,20 +7,11 @@ function formatPathSegment(segment: string | number | symbol): string {
 }
 
 function formatIssuePath(path: readonly (string | number | symbol)[]): string {
-  if (path.length === 0) return '';
-
-  let result = '';
-  for (const segment of path) {
-    if (typeof segment === 'number') {
-      result += formatPathSegment(segment);
-      continue;
-    }
-
-    const normalized = formatPathSegment(segment);
-    result += result ? `.${normalized}` : normalized;
-  }
-
-  return result;
+  return path.reduce((acc: string, segment) => {
+    const isNum = typeof segment === 'number';
+    const formatted = formatPathSegment(segment);
+    return acc ? `${acc}${isNum ? '' : '.'}${formatted}` : formatted;
+  }, '');
 }
 
 export function formatZodError(error: z.ZodError): string {
@@ -29,9 +20,10 @@ export function formatZodError(error: z.ZodError): string {
     return path ? `${path}: ${issue.message}` : issue.message;
   });
 
-  const unique = [...new Set(parts.filter((value) => value.trim().length > 0))];
-  if (unique.length > 0) return unique.join('; ');
+  const uniqueParts = [
+    ...new Set(parts.filter((val) => val.trim().length > 0)),
+  ];
+  if (uniqueParts.length > 0) return uniqueParts.join('; ');
 
-  const pretty = z.prettifyError(error).replace(/\s+/g, ' ').trim();
-  return pretty || 'Invalid input';
+  return z.prettifyError(error).replace(/\s+/g, ' ').trim() || 'Invalid input';
 }

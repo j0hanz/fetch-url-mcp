@@ -4,7 +4,7 @@ import {
   type TranslatorConfigObject,
 } from 'node-html-markdown';
 
-import { isLikeNode, isObject } from '../lib/utils.js';
+import { isHtmlNode, isObject } from '../lib/utils.js';
 
 import { WP_PHOTON_HOST_PATTERN } from './dom-prep.js';
 
@@ -32,7 +32,7 @@ const MERMAID_TRANSLATOR_CONFIG: TranslatorConfig = {
 // ---------------------------------------------------------------------------
 
 function getTagName(node: unknown): string {
-  if (!isLikeNode(node)) return '';
+  if (!isHtmlNode(node)) return '';
   const raw = node.tagName;
   return typeof raw === 'string' ? raw.toUpperCase() : '';
 }
@@ -48,7 +48,7 @@ function getParent(ctx: unknown): unknown {
 function getNodeAttr(
   node: unknown
 ): ((name: string) => string | null) | undefined {
-  if (!isLikeNode(node) || typeof node.getAttribute !== 'function')
+  if (!isHtmlNode(node) || typeof node.getAttribute !== 'function')
     return undefined;
   return node.getAttribute.bind(node);
 }
@@ -422,12 +422,12 @@ function resolveAttributeLanguage(node: unknown): string | undefined {
 }
 
 function findLanguageFromCodeChild(node: unknown): string | undefined {
-  if (!isLikeNode(node)) return undefined;
+  if (!isHtmlNode(node)) return undefined;
 
   const childNodes = Array.from(node.childNodes ?? []);
 
   for (const child of childNodes) {
-    if (!isLikeNode(child)) continue;
+    if (!isHtmlNode(child)) continue;
 
     const raw = child.rawTagName;
     const tagName = typeof raw === 'string' ? raw.toUpperCase() : '';

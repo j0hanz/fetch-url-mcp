@@ -291,6 +291,14 @@ export function createDefaultBlockList(): BlockList {
   }
   return list;
 }
+function extractMappedIpv4(ip: string): string | null {
+  if (ip.startsWith(IPV6_MAPPED_PREFIX)) {
+    const mapped = ip.slice(IPV6_MAPPED_PREFIX.length);
+    if (isIP(mapped) === 4) return mapped;
+  }
+  return null;
+}
+
 export function normalizeIpForBlockList(
   input: string
 ): { ip: string; family: IpFamily } | null {
@@ -303,20 +311,13 @@ export function normalizeIpForBlockList(
   if (!normalizedInput) return null;
 
   const ipType = isIP(normalizedInput);
-  switch (ipType) {
-    case 4:
-      return { ip: normalizedInput, family: 'ipv4' };
-    case 6: {
-      // Extract mapped IPv4 from ::ffff: prefix
-      if (normalizedInput.startsWith(IPV6_MAPPED_PREFIX)) {
-        const mapped = normalizedInput.slice(IPV6_MAPPED_PREFIX.length);
-        if (isIP(mapped) === 4) return { ip: mapped, family: 'ipv4' };
-      }
-      return { ip: normalizedInput, family: 'ipv6' };
-    }
-    default:
-      return null;
+  if (ipType === 4) return { ip: normalizedInput, family: 'ipv4' };
+  if (ipType === 6) {
+    const mappedIpv4 = extractMappedIpv4(normalizedInput);
+    if (mappedIpv4) return { ip: mappedIpv4, family: 'ipv4' };
+    return { ip: normalizedInput, family: 'ipv6' };
   }
+  return null;
 }
 export interface TransformResult {
   readonly url: string;
@@ -466,23 +467,34 @@ export class RawUrlTransformer {
     );
   }
 
+  private matchAndTransform(
+    pattern: URLPattern,
+    url: string,
+    platform: string,
+    transformFn: (groups: UrlPatternGroups) => string | null
+  ): { url: string; platform: string } | null {
+    const match = pattern.exec(url);
+    if (!match) return null;
+    const transformed = transformFn(match.pathname.groups as UrlPatternGroups);
+    return transformed ? { url: transformed, platform } : null;
+  }
+
   private transformGithubBlob(
     url: string
   ): { url: string; platform: string } | null {
-    const match = GITHUB_BLOB_PATTERN.exec(url);
-    if (!match) return null;
-
-    const groups = match.pathname.groups as UrlPatternGroups;
-    const owner = getPatternGroup(groups, 'owner');
-    const repo = getPatternGroup(groups, 'repo');
-    const branch = getPatternGroup(groups, 'branch');
-    const path = getPatternGroup(groups, 'path');
-    if (!owner || !repo || !branch || !path) return null;
-
-    return {
-      url: `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/${path}`,
-      platform: 'github',
-    };
+    return this.matchAndTransform(
+      GITHUB_BLOB_PATTERN,
+      url,
+      'github',
+      (groups) => {
+        const owner = getPatternGroup(groups, 'owner');
+        const repo = getPatternGroup(groups, 'repo');
+        const branch = getPatternGroup(groups, 'branch');
+        const path = getPatternGroup(groups, 'path');
+        if (!owner || !repo || !branch || !path) return null;
+        return `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/${path}`;
+      }
+    );
   }
 
   private transformGithubGist(
@@ -495,44 +507,44 @@ export class RawUrlTransformer {
   private transformRawGist(
     url: string
   ): { url: string; platform: string } | null {
-    const rawMatch = GITHUB_GIST_RAW_PATTERN.exec(url);
-    if (!rawMatch) return null;
+    return this.matchAndTransform(
+      GITHUB_GIST_RAW_PATTERN,
+      url,
+      'github-gist',
+      (groups) => {
+        const user = getPatternGroup(groups, 'user');
+        const gistId = getPatternGroup(groups, 'gistId');
+        const rawFilePath = getPatternGroup(groups, 'filePath');
+        if (!user || !gistId) return null;
 
-    const groups = rawMatch.pathname.groups as UrlPatternGroups;
-    const user = getPatternGroup(groups, 'user');
-    const gistId = getPatternGroup(groups, 'gistId');
-    const rawFilePath = getPatternGroup(groups, 'filePath');
-    if (!user || !gistId) return null;
-
-    const resolvedFilePath = rawFilePath ? `/${rawFilePath}` : '';
-    return {
-      url: `https://gist.githubusercontent.com/${user}/${gistId}/raw${resolvedFilePath}`,
-      platform: 'github-gist',
-    };
+        const resolvedFilePath = rawFilePath ? `/${rawFilePath}` : '';
+        return `https://gist.githubusercontent.com/${user}/${gistId}/raw${resolvedFilePath}`;
+      }
+    );
   }
 
   private transformStandardGist(
     url: string,
     hash: string
   ): { url: string; platform: string } | null {
-    const match = GITHUB_GIST_PATTERN.exec(url);
-    if (!match) return null;
+    return this.matchAndTransform(
+      GITHUB_GIST_PATTERN,
+      url,
+      'github-gist',
+      (groups) => {
+        const user = getPatternGroup(groups, 'user');
+        const gistId = getPatternGroup(groups, 'gistId');
+        if (!user || !gistId) return null;
 
-    const groups = match.pathname.groups as UrlPatternGroups;
-    const user = getPatternGroup(groups, 'user');
-    const gistId = getPatternGroup(groups, 'gistId');
-    if (!user || !gistId) return null;
+        let filePath = '';
+        if (hash.startsWith('#file-')) {
+          const filename = hash.slice('#file-'.length).replace(/-/g, '.');
+          if (filename) filePath = `/${filename}`;
+        }
 
-    let filePath = '';
-    if (hash.startsWith('#file-')) {
-      const filename = hash.slice('#file-'.length).replace(/-/g, '.');
-      if (filename) filePath = `/${filename}`;
-    }
-
-    return {
-      url: `https://gist.githubusercontent.com/${user}/${gistId}/raw${filePath}`,
-      platform: 'github-gist',
-    };
+        return `https://gist.githubusercontent.com/${user}/${gistId}/raw${filePath}`;
+      }
+    );
   }
 
   private transformGitLab(
@@ -562,20 +574,19 @@ export class RawUrlTransformer {
     url: string,
     origin: string
   ): { url: string; platform: string } | null {
-    const match = BITBUCKET_SRC_PATTERN.exec(url);
-    if (!match) return null;
-
-    const groups = match.pathname.groups as UrlPatternGroups;
-    const owner = getPatternGroup(groups, 'owner');
-    const repo = getPatternGroup(groups, 'repo');
-    const branch = getPatternGroup(groups, 'branch');
-    const path = getPatternGroup(groups, 'path');
-    if (!owner || !repo || !branch || !path) return null;
-
-    return {
-      url: `${origin}/${owner}/${repo}/raw/${branch}/${path}`,
-      platform: 'bitbucket',
-    };
+    return this.matchAndTransform(
+      BITBUCKET_SRC_PATTERN,
+      url,
+      'bitbucket',
+      (groups) => {
+        const owner = getPatternGroup(groups, 'owner');
+        const repo = getPatternGroup(groups, 'repo');
+        const branch = getPatternGroup(groups, 'branch');
+        const path = getPatternGroup(groups, 'path');
+        if (!owner || !repo || !branch || !path) return null;
+        return `${origin}/${owner}/${repo}/raw/${branch}/${path}`;
+      }
+    );
   }
 }
 export interface Logger {
@@ -690,7 +701,10 @@ export class UrlNormalizer {
       );
     }
 
-    const hostname = this.normalizeHostname(url);
+    const hostname = normalizeHostname(url.hostname);
+    if (!hostname) {
+      throw createValidationError('URL must have a valid hostname');
+    }
     this.assertHostnameAllowed(hostname);
 
     url.hostname = hostname;
@@ -709,16 +723,6 @@ export class UrlNormalizer {
     const trimmed = urlString.trim();
     if (!trimmed) throw createValidationError('URL cannot be empty');
     return trimmed;
-  }
-
-  private normalizeHostname(url: URL): string {
-    const hostname = url.hostname.toLowerCase().replace(/\.+$/, '');
-
-    if (!hostname) {
-      throw createValidationError('URL must have a valid hostname');
-    }
-
-    return hostname;
   }
 
   private assertHostnameAllowed(hostname: string): void {

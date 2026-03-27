@@ -194,16 +194,11 @@ export function ensureSessionCapacity({
 }): boolean {
   if (maxSessions <= 0) return false;
 
-  const currentSize = store.size();
-  const inflight = store.inFlight();
+  if (store.size() + store.inFlight() < maxSessions) return true;
 
-  if (currentSize + inflight < maxSessions) return true;
+  if (store.size() > 0 && evictOldest(store)) {
+    return store.size() + store.inFlight() < maxSessions;
+  }
 
-  const canFreeSlot =
-    currentSize >= maxSessions && currentSize - 1 + inflight < maxSessions;
-
-  if (!canFreeSlot) return false;
-  if (!evictOldest(store)) return false;
-
-  return store.size() + store.inFlight() < maxSessions;
+  return false;
 }

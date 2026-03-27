@@ -82,12 +82,13 @@ export class FetchError extends Error {
     this.statusCode = httpStatus ?? DEFAULT_HTTP_STATUS;
     this.details = Object.freeze({ url, httpStatus, ...details });
     const explicitCode = this.details['code'];
-    this.code =
-      typeof explicitCode === 'string'
-        ? explicitCode
-        : httpStatus
-          ? `HTTP_${httpStatus}`
-          : 'FETCH_ERROR';
+    if (typeof explicitCode === 'string') {
+      this.code = explicitCode;
+    } else if (httpStatus) {
+      this.code = `HTTP_${httpStatus}`;
+    } else {
+      this.code = 'FETCH_ERROR';
+    }
   }
 }
 export function getErrorMessage(error: unknown): string {
@@ -313,7 +314,7 @@ export function isError(value: unknown): value is Error {
 
   return value instanceof Error;
 }
-interface LikeNode {
+interface HtmlNode {
   readonly tagName?: string | undefined;
   readonly nodeName?: string | undefined;
   readonly nodeType?: number | undefined;
@@ -324,7 +325,7 @@ interface LikeNode {
   readonly rawTagName?: string | undefined;
   getAttribute?(name: string): string | null;
 }
-export function isLikeNode(value: unknown): value is LikeNode {
+export function isHtmlNode(value: unknown): value is HtmlNode {
   return (
     isObject(value) &&
     ('nodeType' in value || 'nodeName' in value || 'tagName' in value)
