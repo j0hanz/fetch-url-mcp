@@ -6,28 +6,30 @@
 
 [![Add to LM Studio](https://files.lmstudio.ai/deeplink/mcp-install-light.svg)](https://lmstudio.ai/install-mcp?name=fetch-url&config=eyJjb21tYW5kIjoibnB4IiwiYXJncyI6WyIteSIsIkBqMGhhbnovZmV0Y2gtdXJsLW1jcEBsYXRlc3QiXX0%3D) [![Install in Cursor](https://cursor.com/deeplink/mcp-install-dark.svg)](https://cursor.com/en/install-mcp?name=fetch-url&config=eyJjb21tYW5kIjoibnB4IiwiYXJncyI6WyIteSIsIkBqMGhhbnovZmV0Y2gtdXJsLW1jcEBsYXRlc3QiXX0%3D) [![Install in Goose](https://block.github.io/goose/img/extension-install-dark.svg)](https://block.github.io/goose/extension?cmd=npx&arg=-y&arg=%40j0hanz%2Ffetch-url-mcp%40latest&id=%40j0hanz%2Ffetch-url-mcp&name=fetch-url&description=fetch-url%20MCP%20server)
 
-A web content fetcher MCP server that converts HTML to clean, AI and human readable markdown.
+Fetch web pages and get back clean Markdown, both readable for humans and structured for LLMs.
 
 ## Overview
 
-The Fetch URL MCP Server provides a standardized interface for fetching public web content and transforming it into Markdown enriched with structured metadata. It validates URLs and applies noise removal heuristics. The server supports both inline and task-based execution modes, making it suitable for a wide range of client applications and LLM interactions.
+This server takes a URL, fetches the page, and strips away everything you don't need — navigation, sidebars, banners, scripts — leaving just the main content as Markdown. It's perfect for feeding into LLMs, giving them the distilled essence of a page without the noise. It also recognizes GitHub, GitLab, Bitbucket, and Gist URLs and rewrites them to fetch the raw content directly.
+
+By default it runs over stdio. Pass `--http` if you need a proper HTTP endpoint with auth, rate limiting, TLS, and session support.
 
 ## Key Features
 
-- `fetch-url` validates public HTTP(S) URLs, fetches the page, and returns cleaned Markdown plus structured metadata.
-- The tool advertises optional task support and emits progress updates while fetching and transforming larger pages.
-- GitHub, GitLab, Bitbucket, and Gist page URLs are rewritten to raw-content endpoints when possible before fetch.
-- `internal://instructions` exposes built-in guidance as an MCP resource.
-- HTTP mode adds host/origin validation, auth, rate limiting, health checks, OAuth protected-resource metadata, and session-bound URLs.
+- **HTML to Markdown** — Turns any public web page into clean, readable Markdown with metadata like `title`, `url`, `contentSize`, and `truncated`.
+- **Smart URL handling** — Recognizes GitHub, GitLab, Bitbucket, and Gist page URLs and rewrites them to raw-content endpoints before fetching.
+- **Task mode** — Big or slow pages can run as async MCP tasks with progress updates, instead of blocking.
+- **Self-documenting** — Includes an `internal://instructions` resource and a `get-help` prompt so clients know how to use it.
+- **HTTP mode** — Optionally serves over Streamable HTTP with host/origin validation, bearer or OAuth auth, rate limiting, health checks, and TLS.
 
 ## Requirements
 
-- Node.js >=24 (from `package.json`)
-- Docker is optional if you want to run the published container image.
+- **Node.js** >= 24
+- **Docker** (optional) — only needed if you want to run the container image
 
 ## Quick Start
 
-Use this standard MCP client configuration:
+Add this to your MCP client config:
 
 ```json
 {
@@ -474,9 +476,9 @@ For more info, see [Kilo Code docs](https://kilocode.ai/docs).
 
 ## Use Cases
 
-- Fetch documentation pages, blog posts, or reference material into Markdown before sending them to an LLM.
-- Retrieve repository-hosted content from GitHub, GitLab, Bitbucket, or Gists and let the server rewrite page URLs to raw endpoints when possible.
-- Use task mode for large pages or slower sites when the fetch might otherwise be delayed, cancelled, or better handled asynchronously.
+- **Documentation for LLMs** — Grab a docs page, blog post, or reference article as Markdown and pass it straight into a context window.
+- **Repository content** — Hand it a GitHub, GitLab, or Bitbucket URL and it resolves the raw content endpoint. Works with Gists too.
+- **Slow or large pages** — Task mode lets big fetches run in the background while sending progress updates back to the client.
 
 ## Architecture
 
@@ -522,13 +524,13 @@ For more info, see [Kilo Code docs](https://kilocode.ai/docs).
 
 #### `fetch-url`
 
-Fetch public webpages and convert HTML into AI-readable Markdown. The tool is read-only, does not execute page JavaScript, and supports optional task mode for larger or slower fetches.
+Takes a URL and returns Markdown. Read-only — no JavaScript execution. Supports running as a background MCP task for large or slow pages.
 
 | Parameter | Type     | Required | Description                 |
 | --------- | -------- | -------- | --------------------------- |
 | `url`     | `string` | yes      | Target URL. Max 2048 chars. |
 
-The response is returned as MCP text content and, when validation succeeds, as `structuredContent` containing `url`, `resolvedUrl`, `finalUrl`, `title`, `metadata`, `markdown`, `fetchedAt`, `contentSize`, and `truncated`. A `truncated: true` result means the content hit server-enforced fetch or inline limits.
+You get text content back by default. If output validation passes, the response also includes `structuredContent` with typed fields: `url`, `resolvedUrl`, `finalUrl`, `title`, `metadata`, `markdown`, `fetchedAt`, `contentSize`, and `truncated`. A `true` value for `truncated` means the content hit a server-side size limit.
 
 ```text
 1. [Client] -- tools/call {name: "fetch-url", arguments} --> [Server]
@@ -572,57 +574,101 @@ The response is returned as MCP text content and, when validation succeeds, as `
 
 ### Structured Output
 
-- `fetch-url` publishes an explicit `outputSchema` and returns `structuredContent` when the assembled response passes validation.
+The tool declares an `outputSchema` and includes `structuredContent` in the response when validation passes. Clients that support structured output get typed data directly; the rest use the text fallback.
 
 ## Configuration
 
-| Variable                                   | Default                   | Applies To        | Notes                                                                 |
-| ------------------------------------------ | ------------------------- | ----------------- | --------------------------------------------------------------------- |
-| `HOST`                                     | `127.0.0.1`               | HTTP mode         | Bind address. Non-loopback bindings also require `ALLOW_REMOTE=true`. |
-| `PORT`                                     | `3000`                    | HTTP mode         | Listening port for `--http`.                                          |
-| `ALLOW_REMOTE`                             | `false`                   | HTTP mode         | Must be enabled to bind to a non-loopback interface.                  |
-| `ACCESS_TOKENS`                            | unset                     | HTTP mode         | Comma- or space-separated static bearer tokens.                       |
-| `API_KEY`                                  | unset                     | HTTP mode         | Alternate static token source for header auth.                        |
-| `OAUTH_ISSUER_URL`                         | unset                     | HTTP mode         | Enables OAuth mode when combined with the other OAuth URLs.           |
-| `OAUTH_AUTHORIZATION_URL`                  | unset                     | HTTP mode         | Optional explicit authorization endpoint.                             |
-| `OAUTH_TOKEN_URL`                          | unset                     | HTTP mode         | Optional explicit token endpoint.                                     |
-| `OAUTH_REVOCATION_URL`                     | unset                     | HTTP mode         | Optional OAuth revocation endpoint.                                   |
-| `OAUTH_REGISTRATION_URL`                   | unset                     | HTTP mode         | Optional OAuth dynamic client registration endpoint.                  |
-| `OAUTH_INTROSPECTION_URL`                  | unset                     | HTTP mode         | Required for OAuth token introspection.                               |
-| `OAUTH_REQUIRED_SCOPES`                    | empty                     | HTTP mode         | Required scopes enforced after auth.                                  |
-| `OAUTH_CLIENT_ID`                          | unset                     | HTTP mode         | Optional introspection client ID.                                     |
-| `OAUTH_CLIENT_SECRET`                      | unset                     | HTTP mode         | Optional introspection client secret.                                 |
-| `SERVER_TLS_KEY_FILE`                      | unset                     | HTTP mode         | Enable HTTPS when set together with `SERVER_TLS_CERT_FILE`.           |
-| `SERVER_TLS_CERT_FILE`                     | unset                     | HTTP mode         | TLS certificate path.                                                 |
-| `SERVER_TLS_CA_FILE`                       | unset                     | HTTP mode         | Optional custom CA bundle.                                            |
-| `SERVER_MAX_CONNECTIONS`                   | `0`                       | HTTP mode         | Optional connection cap.                                              |
-| `SERVER_HEADERS_TIMEOUT_MS`                | unset                     | HTTP mode         | Optional Node server tuning.                                          |
-| `SERVER_REQUEST_TIMEOUT_MS`                | unset                     | HTTP mode         | Optional Node server tuning.                                          |
-| `SERVER_KEEP_ALIVE_TIMEOUT_MS`             | unset                     | HTTP mode         | Optional keep-alive tuning.                                           |
-| `SERVER_KEEP_ALIVE_TIMEOUT_BUFFER_MS`      | unset                     | HTTP mode         | Optional keep-alive tuning buffer.                                    |
-| `SERVER_MAX_HEADERS_COUNT`                 | unset                     | HTTP mode         | Optional header count limit.                                          |
-| `SERVER_BLOCK_PRIVATE_CONNECTIONS`         | `false`                   | HTTP mode         | Enables inbound private-network protections.                          |
-| `ALLOWED_HOSTS`                            | empty                     | HTTP mode         | Additional allowed `Host` and `Origin` values.                        |
-| `ALLOW_LOCAL_FETCH`                        | `false`                   | Fetching          | Allows loopback and private-network fetch targets.                    |
-| `FETCH_TIMEOUT_MS`                         | `15000`                   | Fetching          | Network fetch timeout in milliseconds.                                |
-| `USER_AGENT`                               | `fetch-url-mcp/<version>` | Fetching          | Override the outbound user agent string.                              |
-| `MAX_INLINE_CONTENT_CHARS`                 | `0`                       | Tool output       | `0` means no explicit inline truncation limit.                        |
-| `TASKS_MAX_TOTAL`                          | `5000`                    | Tasks             | Total task capacity.                                                  |
-| `TASKS_MAX_PER_OWNER`                      | `1000`                    | Tasks             | Per-owner task cap, clamped to the total cap.                         |
-| `TASKS_STATUS_NOTIFICATIONS`               | `false`                   | Tasks             | Enables status notifications for tasks.                               |
-| `TASKS_REQUIRE_INTERCEPTION`               | `true`                    | Tasks             | Requires task interception for task-capable tool execution.           |
-| `TRANSFORM_CANCEL_ACK_TIMEOUT_MS`          | `200`                     | Transform workers | Cancellation acknowledgement timeout.                                 |
-| `TRANSFORM_WORKER_MODE`                    | `threads`                 | Transform workers | Worker execution mode.                                                |
-| `TRANSFORM_WORKER_MAX_OLD_GENERATION_MB`   | unset                     | Transform workers | Optional worker memory limit.                                         |
-| `TRANSFORM_WORKER_MAX_YOUNG_GENERATION_MB` | unset                     | Transform workers | Optional worker memory limit.                                         |
-| `TRANSFORM_WORKER_CODE_RANGE_MB`           | unset                     | Transform workers | Optional worker memory limit.                                         |
-| `TRANSFORM_WORKER_STACK_MB`                | unset                     | Transform workers | Optional worker stack size.                                           |
-| `FETCH_URL_MCP_EXTRA_NOISE_TOKENS`         | empty                     | Content cleanup   | Extra noise-removal tokens.                                           |
-| `FETCH_URL_MCP_EXTRA_NOISE_SELECTORS`      | empty                     | Content cleanup   | Extra DOM selectors for noise removal.                                |
-| `FETCH_URL_MCP_LOCALE`                     | system default            | Content cleanup   | Locale override for extraction heuristics.                            |
-| `MARKDOWN_HEADING_KEYWORDS`                | built-in list             | Markdown cleanup  | Override heading keywords used by cleanup.                            |
-| `LOG_LEVEL`                                | `info`                    | Logging           | `debug`, `info`, `warn`, or `error`.                                  |
-| `LOG_FORMAT`                               | `text`                    | Logging           | Set to `json` for structured logs.                                    |
+All configuration is through environment variables. For basic stdio usage, nothing needs to be set.
+
+### HTTP Server
+
+| Variable                              | Default     | Notes                                                                 |
+| ------------------------------------- | ----------- | --------------------------------------------------------------------- |
+| `HOST`                                | `127.0.0.1` | Bind address. Non-loopback bindings also require `ALLOW_REMOTE=true`. |
+| `PORT`                                | `3000`      | Listening port for `--http`.                                          |
+| `ALLOW_REMOTE`                        | `false`     | Must be enabled to bind to a non-loopback interface.                  |
+| `ALLOWED_HOSTS`                       | empty       | Additional allowed `Host` and `Origin` values.                        |
+| `SERVER_MAX_CONNECTIONS`              | `0`         | Optional connection cap.                                              |
+| `SERVER_HEADERS_TIMEOUT_MS`           | unset       | Optional Node server tuning.                                          |
+| `SERVER_REQUEST_TIMEOUT_MS`           | unset       | Optional Node server tuning.                                          |
+| `SERVER_KEEP_ALIVE_TIMEOUT_MS`        | unset       | Optional keep-alive tuning.                                           |
+| `SERVER_KEEP_ALIVE_TIMEOUT_BUFFER_MS` | unset       | Optional keep-alive tuning buffer.                                    |
+| `SERVER_MAX_HEADERS_COUNT`            | unset       | Optional header count limit.                                          |
+| `SERVER_BLOCK_PRIVATE_CONNECTIONS`    | `false`     | Enables inbound private-network protections.                          |
+
+### Authentication & OAuth
+
+| Variable                  | Default | Notes                                                       |
+| ------------------------- | ------- | ----------------------------------------------------------- |
+| `ACCESS_TOKENS`           | unset   | Comma- or space-separated static bearer tokens.             |
+| `API_KEY`                 | unset   | Alternate static token source for header auth.              |
+| `OAUTH_ISSUER_URL`        | unset   | Enables OAuth mode when combined with the other OAuth URLs. |
+| `OAUTH_AUTHORIZATION_URL` | unset   | Optional explicit authorization endpoint.                   |
+| `OAUTH_TOKEN_URL`         | unset   | Optional explicit token endpoint.                           |
+| `OAUTH_REVOCATION_URL`    | unset   | Optional OAuth revocation endpoint.                         |
+| `OAUTH_REGISTRATION_URL`  | unset   | Optional OAuth dynamic client registration endpoint.        |
+| `OAUTH_INTROSPECTION_URL` | unset   | Required for OAuth token introspection.                     |
+| `OAUTH_REQUIRED_SCOPES`   | empty   | Required scopes enforced after auth.                        |
+| `OAUTH_CLIENT_ID`         | unset   | Optional introspection client ID.                           |
+| `OAUTH_CLIENT_SECRET`     | unset   | Optional introspection client secret.                       |
+
+### TLS
+
+| Variable               | Default | Notes                                                       |
+| ---------------------- | ------- | ----------------------------------------------------------- |
+| `SERVER_TLS_KEY_FILE`  | unset   | Enable HTTPS when set together with `SERVER_TLS_CERT_FILE`. |
+| `SERVER_TLS_CERT_FILE` | unset   | TLS certificate path.                                       |
+| `SERVER_TLS_CA_FILE`   | unset   | Optional custom CA bundle.                                  |
+
+### Fetching
+
+| Variable            | Default                   | Notes                                              |
+| ------------------- | ------------------------- | -------------------------------------------------- |
+| `ALLOW_LOCAL_FETCH` | `false`                   | Allows loopback and private-network fetch targets. |
+| `FETCH_TIMEOUT_MS`  | `15000`                   | Network fetch timeout in milliseconds.             |
+| `USER_AGENT`        | `fetch-url-mcp/<version>` | Override the outbound user agent string.           |
+
+### Tool Output
+
+| Variable                   | Default | Notes                                          |
+| -------------------------- | ------- | ---------------------------------------------- |
+| `MAX_INLINE_CONTENT_CHARS` | `0`     | `0` means no explicit inline truncation limit. |
+
+### Tasks
+
+| Variable                     | Default | Notes                                                  |
+| ---------------------------- | ------- | ------------------------------------------------------ |
+| `TASKS_MAX_TOTAL`            | `5000`  | Total task capacity.                                   |
+| `TASKS_MAX_PER_OWNER`        | `1000`  | Per-owner task cap, clamped to the total cap.          |
+| `TASKS_STATUS_NOTIFICATIONS` | `false` | Enables status notifications for tasks.                |
+| `TASKS_REQUIRE_INTERCEPTION` | `true`  | Requires interception for task-capable tool execution. |
+
+### Transform Workers
+
+| Variable                                   | Default   | Notes                                 |
+| ------------------------------------------ | --------- | ------------------------------------- |
+| `TRANSFORM_CANCEL_ACK_TIMEOUT_MS`          | `200`     | Cancellation acknowledgement timeout. |
+| `TRANSFORM_WORKER_MODE`                    | `threads` | Worker execution mode.                |
+| `TRANSFORM_WORKER_MAX_OLD_GENERATION_MB`   | unset     | Optional worker memory limit.         |
+| `TRANSFORM_WORKER_MAX_YOUNG_GENERATION_MB` | unset     | Optional worker memory limit.         |
+| `TRANSFORM_WORKER_CODE_RANGE_MB`           | unset     | Optional worker memory limit.         |
+| `TRANSFORM_WORKER_STACK_MB`                | unset     | Optional worker stack size.           |
+
+### Content Cleanup
+
+| Variable                              | Default        | Notes                                      |
+| ------------------------------------- | -------------- | ------------------------------------------ |
+| `FETCH_URL_MCP_EXTRA_NOISE_TOKENS`    | empty          | Extra noise-removal tokens.                |
+| `FETCH_URL_MCP_EXTRA_NOISE_SELECTORS` | empty          | Extra DOM selectors for noise removal.     |
+| `FETCH_URL_MCP_LOCALE`                | system default | Locale override for extraction heuristics. |
+| `MARKDOWN_HEADING_KEYWORDS`           | built-in list  | Override heading keywords used by cleanup. |
+
+### Logging
+
+| Variable     | Default | Notes                                |
+| ------------ | ------- | ------------------------------------ |
+| `LOG_LEVEL`  | `info`  | `debug`, `info`, `warn`, or `error`. |
+| `LOG_FORMAT` | `text`  | Set to `json` for structured logs.   |
 
 ## HTTP Endpoints
 
@@ -648,6 +694,24 @@ The response is returned as MCP text content and, when validation succeeds, as `
 | Stdio logging safety       | implemented | Server logs are written to stderr, not stdout, so stdio MCP traffic stays clean.                                                         |
 
 ## Development
+
+### Essential Commands
+
+| Command              | Description                                       |
+| -------------------- | ------------------------------------------------- |
+| `npm run build`      | Clean, compile TypeScript, copy assets.           |
+| `npm run dev`        | Watch mode TypeScript compilation.                |
+| `npm run dev:run`    | Run the server with `--watch` and `.env` support. |
+| `npm start`          | Start the compiled server.                        |
+| `npm test`           | Run the full test suite.                          |
+| `npm run lint`       | Lint with ESLint.                                 |
+| `npm run lint:fix`   | Auto-fix lint issues.                             |
+| `npm run type-check` | Type-check source and tests.                      |
+| `npm run format`     | Format with Prettier.                             |
+| `npm run inspector`  | Build and launch MCP Inspector.                   |
+
+<details>
+<summary><b>All npm scripts</b></summary>
 
 | Script                   | Command                                                                                                             |
 | ------------------------ | ------------------------------------------------------------------------------------------------------------------- |
@@ -675,17 +739,26 @@ The response is returned as MCP text content and, when validation succeeds, as `
 | `inspector`              | `npm run build && npx -y @modelcontextprotocol/inspector node dist/index.js --stdio`                                |
 | `prepublishOnly`         | `npm run lint && npm run type-check && npm run build`                                                               |
 
+</details>
+
 ## Build and Release
 
-- The repository includes release automation under `.github/workflows/`.
-- `Dockerfile` and `docker-compose.yml` are available for container-based packaging and local runs.
-- `npm run prepublishOnly` runs the release gate: lint, type-check, and build.
+- `npm run prepublishOnly` runs lint, type-check, and build as a single release gate.
+- CI workflows are under `.github/workflows/`.
+- `Dockerfile` and `docker-compose.yml` are included for containerized runs.
+- Published on npm as [`@j0hanz/fetch-url-mcp`](https://www.npmjs.com/package/@j0hanz/fetch-url-mcp).
 
 ## Troubleshooting
 
-- For stdio mode, avoid writing logs to stdout; keep logs on stderr.
-- For HTTP mode, verify MCP protocol headers and endpoint routing.
-- Update client snippets when client MCP configuration formats change.
+| Symptom                                       | Likely Cause                        | Fix                                                                           |
+| --------------------------------------------- | ----------------------------------- | ----------------------------------------------------------------------------- |
+| Server output mixes with MCP traffic on stdio | Logs going to stdout                | Ensure all logging writes to stderr; the server does this by default.         |
+| HTTP mode returns `403`                       | Host/origin mismatch                | Add the domain to `ALLOWED_HOSTS` or verify loopback bindings.                |
+| HTTP mode returns `401`                       | Missing or invalid token            | Set `ACCESS_TOKENS` or configure OAuth env vars for remote bindings.          |
+| Fetch returns private-IP error                | SSRF protections blocked the target | Set `ALLOW_LOCAL_FETCH=true` if the target is intentionally local.            |
+| `truncated: true` in response                 | Content exceeded inline limits      | Increase `MAX_INLINE_CONTENT_CHARS` or accept truncated output.               |
+| Transform timeout or worker crash             | Large or complex HTML               | Tune `TRANSFORM_WORKER_MAX_OLD_GENERATION_MB` or increase `FETCH_TIMEOUT_MS`. |
+| Client config not working                     | Wrong config format for the client  | Check the matching `<details>` block above — config keys vary by client.      |
 
 ## Credits
 
@@ -700,5 +773,12 @@ The response is returned as MCP text content and, when validation succeeds, as `
 
 ## Contributing and License
 
-- License: MIT
-- Contributions are welcome via pull requests.
+Pull requests welcome. Please make sure these pass before submitting:
+
+1. `npm run lint` and `npm run type-check`
+2. `npm test`
+3. `npm run format`
+
+## License
+
+MIT License. See [LICENSE](LICENSE) for details.
