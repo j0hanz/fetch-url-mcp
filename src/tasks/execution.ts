@@ -16,6 +16,7 @@ import {
 import { LOG_TASKS } from '../lib/logger-names.js';
 import { createMcpError } from '../lib/mcp-interop.js';
 import { type ProgressNotification } from '../lib/mcp-interop.js';
+import { tryReadToolErrorMessage } from '../lib/tool-errors.js';
 import { getErrorMessage } from '../lib/utils.js';
 import { isObject } from '../lib/utils.js';
 
@@ -32,7 +33,6 @@ import {
   buildToolHandlerExtra,
   compact,
   type ToolCallContext,
-  tryReadToolStructuredError,
 } from './owner.js';
 import {
   getTaskCapableTool,
@@ -210,7 +210,7 @@ function buildTaskCompletionUpdate(
   return {
     status: isError ? 'failed' : 'completed',
     statusMessage: isError
-      ? (tryReadToolStructuredError(result) ?? 'Execution failed')
+      ? (tryReadToolErrorMessage(result) ?? 'Execution failed')
       : (tool.getCompletionStatusMessage?.(result) ??
         'Task completed successfully.'),
     result,

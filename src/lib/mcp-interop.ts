@@ -2,29 +2,15 @@ import { setTimeout as setTimeoutPromise } from 'node:timers/promises';
 
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import {
-  type CallToolResult,
   ListToolsRequestSchema,
   ListToolsResultSchema,
-  McpError,
 } from '@modelcontextprotocol/sdk/types.js';
+import { McpError } from '@modelcontextprotocol/sdk/types.js';
 import { z } from 'zod';
 
 import { logError, logWarn } from './core.js';
-import {
-  ABORTED,
-  FETCH_ERROR,
-  QUEUE_FULL,
-  VALIDATION_ERROR,
-} from './error-codes.js';
 import { LOG_MCP } from './logger-names.js';
-import {
-  FetchError,
-  getErrorMessage,
-  isAbortError,
-  isObject,
-  isSystemError,
-  toError,
-} from './utils.js';
+import { getErrorMessage, isObject } from './utils.js';
 
 export function createMcpError(
   code: number,
@@ -115,146 +101,6 @@ export function acceptsJsonAndEventStream(
   return mediaTypes.some(
     (m) => m === '*/*' || m === 'text/event-stream' || m === 'text/*'
   );
-}
-
-/* =================================================================================================
- * Tool error handling
- * ================================================================================================= */
-
-type ToolErrorResponse = CallToolResult & {
-  isError: true;
-};
-
-const PUBLIC_ERROR_REASONS = new Set(['aborted', QUEUE_FULL, 'timeout']);
-
-function sanitizeToolErrorDetails(
-  details: Readonly<Record<string, unknown>>
-): Record<string, unknown> | undefined {
-  const sanitized: Record<string, unknown> = {};
-
-  const { retryAfter, timeout, reason } = details;
-  if (
-    typeof retryAfter === 'number' ||
-    typeof retryAfter === 'string' ||
-    retryAfter === null
-  ) {
-    sanitized['retryAfter'] = retryAfter;
-  }
-
-  if (typeof timeout === 'number' && Number.isFinite(timeout) && timeout >= 0) {
-    sanitized['timeout'] = timeout;
-  }
-
-  if (typeof reason === 'string' && PUBLIC_ERROR_REASONS.has(reason)) {
-    sanitized['reason'] = reason;
-  }
-
-  return Object.keys(sanitized).length > 0 ? sanitized : undefined;
-}
-
-export function createToolErrorResponse(
-  message: string,
-  url: string,
-  extra?: {
-    code?: string | number;
-    statusCode?: number;
-    details?: Record<string, unknown>;
-    data?: unknown;
-  }
-): ToolErrorResponse {
-  const errorContent: Record<string, unknown> = {
-    error: message,
-    ...(extra?.code !== undefined ? { code: extra.code } : {}),
-    url,
-    ...(extra?.statusCode !== undefined
-      ? { statusCode: extra.statusCode }
-      : {}),
-    ...(extra?.details ? { details: extra.details } : {}),
-    ...(extra?.data !== undefined ? { data: extra.data } : {}),
-  };
-
-  return {
-    content: [{ type: 'text', text: JSON.stringify(errorContent) }],
-    isError: true,
-  };
-}
-function isValidationError(error: unknown): error is NodeJS.ErrnoException {
-  return (
-    error instanceof Error &&
-    isSystemError(error) &&
-    error.code === VALIDATION_ERROR
-  );
-}
-export function handleToolError(
-  error: unknown,
-  url: string,
-  fallbackMessage = 'Operation failed'
-): ToolErrorResponse {
-  if (error instanceof FetchError) {
-    const { code: detailsCode, reason } = error.details;
-    let { code } = error;
-    if (typeof detailsCode === 'string') {
-      code = detailsCode;
-    } else if (reason === QUEUE_FULL) {
-      code = QUEUE_FULL;
-    }
-    const details = sanitizeToolErrorDetails(error.details);
-    return createToolErrorResponse(error.message, url, {
-      code,
-      statusCode: error.statusCode,
-      ...(details ? { details } : {}),
-    });
-  }
-  if (isValidationError(error)) {
-    return createToolErrorResponse(error.message, url, {
-      code: VALIDATION_ERROR,
-    });
-  }
-  const code = isAbortError(error) ? ABORTED : FETCH_ERROR;
-  const message =
-    error instanceof Error
-      ? error.message
-      : `${fallbackMessage}: unknown error`;
-  return createToolErrorResponse(message, url, { code });
-}
-
-export function classifyAndLogToolError(
-  error: unknown,
-  meta: { url: string; durationMs: number },
-  loggerName: string,
-  toolName: string,
-  fallbackMessage: string
-): ToolErrorResponse {
-  if (error instanceof McpError) {
-    logError(
-      `${toolName} tool failed`,
-      { url: meta.url, durationMs: meta.durationMs, error: toError(error) },
-      loggerName
-    );
-    throw error;
-  }
-  if (error instanceof FetchError || isAbortError(error)) {
-    logWarn(
-      `${toolName} request failed`,
-      {
-        url: meta.url,
-        error: toError(error).message,
-        durationMs: meta.durationMs,
-      },
-      loggerName
-    );
-  } else {
-    logError(
-      `${toolName} request failed unexpectedly`,
-      {
-        url: meta.url,
-        error: toError(error).message,
-        durationMs: meta.durationMs,
-      },
-      loggerName
-    );
-  }
-  return handleToolError(error, meta.url, fallbackMessage);
 }
 
 /* =================================================================================================

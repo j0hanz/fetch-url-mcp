@@ -4,12 +4,15 @@ import { describe, it } from 'node:test';
 import {
   acceptsEventStream,
   acceptsJsonAndEventStream,
-  createToolErrorResponse,
-  handleToolError,
   isJsonRpcBatchRequest,
   isMcpMessageBody,
   isMcpRequestBody,
 } from '../src/lib/mcp-interop.js';
+import {
+  createToolErrorResponse,
+  handleToolError,
+  tryReadToolErrorPayload,
+} from '../src/lib/tool-errors.js';
 import { FetchError } from '../src/lib/utils.js';
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -161,16 +164,66 @@ describe('createToolErrorResponse', () => {
     const parsed = parseToolPayload(result);
     assert.equal(parsed['error'], 'Something failed');
     assert.equal(parsed['url'], 'https://example.com');
+    assertRecord(
+      result.structuredContent,
+      'Expected structuredContent payload'
+    );
+    assert.equal(result.structuredContent['error'], 'Something failed');
   });
 
   it('includes code and statusCode when provided', () => {
     const result = createToolErrorResponse('Not found', 'https://example.com', {
+      category: 'upstream_http_error',
       code: 'NOT_FOUND',
       statusCode: 404,
+      upstreamMessage: 'HTTP 404: Not Found',
     });
     const parsed = parseToolPayload(result);
+    assert.equal(parsed['category'], 'upstream_http_error');
     assert.equal(parsed['code'], 'NOT_FOUND');
     assert.equal(parsed['statusCode'], 404);
+    assert.equal(parsed['upstreamMessage'], 'HTTP 404: Not Found');
+  });
+});
+
+describe('tryReadToolErrorPayload', () => {
+  it('prefers structuredContent when present', () => {
+    const result = createToolErrorResponse(
+      'Something failed',
+      'https://example.com',
+      {
+        category: 'upstream_http_error',
+        code: 'HTTP_404',
+        statusCode: 404,
+        upstreamMessage: 'HTTP 404: Not Found',
+      }
+    );
+    const payload = tryReadToolErrorPayload(result);
+    assertRecord(payload, 'Expected parsed tool error payload');
+    assert.equal(payload['error'], 'Something failed');
+    assert.equal(payload['category'], 'upstream_http_error');
+    assert.equal(payload['code'], 'HTTP_404');
+    assert.equal(payload['statusCode'], 404);
+    assert.equal(payload['upstreamMessage'], 'HTTP 404: Not Found');
+  });
+
+  it('falls back to parsing the text block', () => {
+    const payload = tryReadToolErrorPayload({
+      content: [
+        {
+          type: 'text',
+          text: JSON.stringify({
+            error: 'Legacy payload',
+            url: 'https://example.com',
+            category: 'fetch_error',
+          }),
+        },
+      ],
+    });
+    assertRecord(payload, 'Expected parsed legacy payload');
+    assert.equal(payload['error'], 'Legacy payload');
+    assert.equal(payload['url'], 'https://example.com');
+    assert.equal(payload['category'], 'fetch_error');
   });
 });
 
@@ -187,6 +240,9 @@ describe('handleToolError', () => {
     assert.equal(result.isError, true);
 
     const parsed = parseToolPayload(result);
+    assert.equal(parsed['error'], 'The target page returned 404 Not Found.');
+    assert.equal(parsed['category'], 'upstream_http_error');
+    assert.equal(parsed['upstreamMessage'], 'HTTP 404: Not Found');
     assert.equal(parsed['statusCode'], 404);
   });
 
@@ -199,6 +255,9 @@ describe('handleToolError', () => {
     );
     const result = handleToolError(error, 'https://example.com');
     const parsed = parseToolPayload(result);
+    assert.equal(parsed['error'], 'The request to the target timed out.');
+    assert.equal(parsed['category'], 'upstream_timeout');
+    assert.equal(parsed['upstreamMessage'], 'Request timeout');
     assert.equal(parsed['statusCode'], 504);
     const details = getOptionalRecord(parsed['details']);
     assert.equal(details?.['reason'], 'timeout');
@@ -210,6 +269,7 @@ describe('handleToolError', () => {
     error.name = 'AbortError';
     const result = handleToolError(error, 'https://example.com');
     const parsed = parseToolPayload(result);
+    assert.equal(parsed['category'], 'upstream_aborted');
     assert.equal(parsed['code'], 'ABORTED');
   });
 
@@ -235,6 +295,7 @@ describe('handleToolError', () => {
     );
     assert.equal(result.isError, true);
     const parsed = parseToolPayload(result);
+    assert.equal(parsed['category'], 'fetch_error');
     assert.equal(parsed['code'], 'FETCH_ERROR');
   });
 
@@ -244,6 +305,7 @@ describe('handleToolError', () => {
     });
     const result = handleToolError(error, 'https://example.com');
     const parsed = parseToolPayload(result);
+    assert.equal(parsed['category'], 'queue_full');
     assert.equal(parsed['code'], 'queue_full');
     const details = getOptionalRecord(parsed['details']);
     assert.equal(details?.['reason'], 'queue_full');

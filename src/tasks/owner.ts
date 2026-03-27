@@ -1,7 +1,6 @@
 import { hash, randomUUID } from 'node:crypto';
 
 import type { ServerResult } from '@modelcontextprotocol/sdk/types.js';
-import { z } from 'zod';
 
 import {
   getRequestId,
@@ -244,30 +243,4 @@ export function withRequestContextIfMissing<TParams, TResult, TExtra = unknown>(
 
 export function isServerResult(value: unknown): value is ServerResult {
   return isObject(value) && Array.isArray(value['content']);
-}
-
-const toolErrorContentSchema = z.strictObject({
-  error: z.string(),
-});
-
-const toolErrorBlockSchema = z.strictObject({
-  type: z.literal('text'),
-  text: z.string(),
-});
-
-export function tryReadToolStructuredError(value: unknown): string | undefined {
-  if (!isObject(value)) return undefined;
-  const { content } = value;
-  if (!Array.isArray(content) || content.length === 0) return undefined;
-  const parsedBlock = toolErrorBlockSchema.safeParse(content[0]);
-  if (!parsedBlock.success) return undefined;
-
-  try {
-    const parsed = toolErrorContentSchema.safeParse(
-      JSON.parse(parsedBlock.data.text)
-    );
-    return parsed.success ? parsed.data.error : undefined;
-  } catch {
-    return undefined;
-  }
 }

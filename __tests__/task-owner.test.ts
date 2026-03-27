@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
+import { tryReadToolErrorMessage } from '../src/lib/tool-errors.js';
 import {
   buildToolHandlerExtra,
   compact,
@@ -8,7 +9,6 @@ import {
   parseHandlerExtra,
   resolveTaskOwnerKey,
   resolveToolCallContext,
-  tryReadToolStructuredError,
   withRequestContextIfMissing,
 } from '../src/tasks/owner.js';
 
@@ -219,41 +219,68 @@ describe('isServerResult', () => {
   });
 });
 
-// ── tryReadToolStructuredError ──────────────────────────────────────
+// ── tryReadToolErrorMessage ─────────────────────────────────────────
 
-describe('tryReadToolStructuredError', () => {
+describe('tryReadToolErrorMessage', () => {
+  it('extracts error string from structuredContent first', () => {
+    const value = {
+      structuredContent: {
+        error: 'Structured failure',
+        url: 'https://example.com',
+        code: 'HTTP_404',
+        statusCode: 404,
+      },
+      content: [
+        { type: 'text', text: JSON.stringify({ error: 'Legacy failure' }) },
+      ],
+    };
+    assert.equal(tryReadToolErrorMessage(value), 'Structured failure');
+  });
+
   it('extracts error string from valid error shape', () => {
     const value = {
       content: [
-        { type: 'text', text: JSON.stringify({ error: 'Something failed' }) },
+        {
+          type: 'text',
+          text: JSON.stringify({
+            error: 'Something failed',
+            url: 'https://example.com',
+          }),
+        },
       ],
     };
-    assert.equal(tryReadToolStructuredError(value), 'Something failed');
+    assert.equal(tryReadToolErrorMessage(value), 'Something failed');
   });
 
   it('returns undefined for non-object input', () => {
-    assert.equal(tryReadToolStructuredError(null), undefined);
-    assert.equal(tryReadToolStructuredError('str'), undefined);
+    assert.equal(tryReadToolErrorMessage(null), undefined);
+    assert.equal(tryReadToolErrorMessage('str'), undefined);
   });
 
   it('returns undefined for empty content', () => {
-    assert.equal(tryReadToolStructuredError({ content: [] }), undefined);
+    assert.equal(tryReadToolErrorMessage({ content: [] }), undefined);
   });
 
   it('returns undefined for non-JSON text', () => {
     const value = {
       content: [{ type: 'text', text: 'not json' }],
     };
-    assert.equal(tryReadToolStructuredError(value), undefined);
+    assert.equal(tryReadToolErrorMessage(value), undefined);
   });
 
   it('returns undefined when error key is missing', () => {
     const value = {
       content: [
-        { type: 'text', text: JSON.stringify({ message: 'no error key' }) },
+        {
+          type: 'text',
+          text: JSON.stringify({
+            message: 'no error key',
+            url: 'https://example.com',
+          }),
+        },
       ],
     };
-    assert.equal(tryReadToolStructuredError(value), undefined);
+    assert.equal(tryReadToolErrorMessage(value), undefined);
   });
 });
 

@@ -20,13 +20,13 @@ import {
 import type { SharedFetchStage } from '../lib/fetch-pipeline.js';
 import { LOG_FETCH_URL } from '../lib/logger-names.js';
 import {
-  classifyAndLogToolError,
   createMcpError,
   createProgressReporter,
   type ProgressReporter,
   registerToolPresentation,
   type ToolHandlerExtra,
 } from '../lib/mcp-interop.js';
+import { classifyAndLogToolError } from '../lib/tool-errors.js';
 import {
   composeAbortSignal,
   isAbortError,
