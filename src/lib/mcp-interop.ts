@@ -296,11 +296,11 @@ export function setTaskToolCallCapability(
   if (!requests) return;
 
   if (enabled) {
-    requests.tools = { call: {} };
+    requests['tools'] = { call: {} };
     return;
   }
 
-  delete requests.tools;
+  delete requests['tools'];
 }
 
 /* =================================================================================================

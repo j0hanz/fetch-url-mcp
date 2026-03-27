@@ -2,24 +2,24 @@ import assert from 'node:assert/strict';
 import { after, before, describe, it } from 'node:test';
 
 const TEST_API_KEY = 'test-api-key';
-const originalApiKey = process.env.API_KEY;
-const originalPort = process.env.PORT;
+const originalApiKey = process.env['API_KEY'];
+const originalPort = process.env['PORT'];
 
-process.env.API_KEY = TEST_API_KEY;
-process.env.PORT = '0';
+process.env['API_KEY'] = TEST_API_KEY;
+process.env['PORT'] = '0';
 
 const { startHttpServer } = await import('../dist/http/native.js');
 
 if (originalApiKey === undefined) {
-  delete process.env.API_KEY;
+  delete process.env['API_KEY'];
 } else {
-  process.env.API_KEY = originalApiKey;
+  process.env['API_KEY'] = originalApiKey;
 }
 
 if (originalPort === undefined) {
-  delete process.env.PORT;
+  delete process.env['PORT'];
 } else {
-  process.env.PORT = originalPort;
+  process.env['PORT'] = originalPort;
 }
 
 type HttpServerHandle = Awaited<ReturnType<typeof startHttpServer>>;

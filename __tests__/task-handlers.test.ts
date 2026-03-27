@@ -131,8 +131,8 @@ describe('task result failure normalization', () => {
         unknown
       >;
       assert.equal(result.isError, true);
-      assert.equal(payload.error, 'broken');
-      assert.equal(payload.code, ErrorCode.InternalError);
+      assert.equal(payload['error'], 'broken');
+      assert.equal(payload['code'], ErrorCode.InternalError);
     } finally {
       unregisterTaskCapableTool(toolName);
       await server.close();

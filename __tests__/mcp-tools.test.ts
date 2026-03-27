@@ -159,8 +159,8 @@ describe('createToolErrorResponse', () => {
     assert.equal(result.content.length, 1);
 
     const parsed = parseToolPayload(result);
-    assert.equal(parsed.error, 'Something failed');
-    assert.equal(parsed.url, 'https://example.com');
+    assert.equal(parsed['error'], 'Something failed');
+    assert.equal(parsed['url'], 'https://example.com');
   });
 
   it('includes code and statusCode when provided', () => {
@@ -169,8 +169,8 @@ describe('createToolErrorResponse', () => {
       statusCode: 404,
     });
     const parsed = parseToolPayload(result);
-    assert.equal(parsed.code, 'NOT_FOUND');
-    assert.equal(parsed.statusCode, 404);
+    assert.equal(parsed['code'], 'NOT_FOUND');
+    assert.equal(parsed['statusCode'], 404);
   });
 });
 
@@ -187,7 +187,7 @@ describe('handleToolError', () => {
     assert.equal(result.isError, true);
 
     const parsed = parseToolPayload(result);
-    assert.equal(parsed.statusCode, 404);
+    assert.equal(parsed['statusCode'], 404);
   });
 
   it('handles FetchError with timeout details', () => {
@@ -199,10 +199,10 @@ describe('handleToolError', () => {
     );
     const result = handleToolError(error, 'https://example.com');
     const parsed = parseToolPayload(result);
-    assert.equal(parsed.statusCode, 504);
-    const details = getOptionalRecord(parsed.details);
-    assert.equal(details?.reason, 'timeout');
-    assert.equal(details?.timeout, 15000);
+    assert.equal(parsed['statusCode'], 504);
+    const details = getOptionalRecord(parsed['details']);
+    assert.equal(details?.['reason'], 'timeout');
+    assert.equal(details?.['timeout'], 15000);
   });
 
   it('handles AbortError with ABORTED code', () => {
@@ -210,7 +210,7 @@ describe('handleToolError', () => {
     error.name = 'AbortError';
     const result = handleToolError(error, 'https://example.com');
     const parsed = parseToolPayload(result);
-    assert.equal(parsed.code, 'ABORTED');
+    assert.equal(parsed['code'], 'ABORTED');
   });
 
   it('handles generic Error with fallback message', () => {
@@ -222,11 +222,11 @@ describe('handleToolError', () => {
     );
     const parsed = parseToolPayload(result);
     assert.ok(
-      (parsed.error as string).includes('Fetch failed'),
+      (parsed['error'] as string).includes('Fetch failed'),
       'Should include fallback message'
     );
     assert.ok(
-      (parsed.error as string).includes('Something broke'),
+      (parsed['error'] as string).includes('Something broke'),
       'Should include original message'
     );
   });
@@ -239,7 +239,7 @@ describe('handleToolError', () => {
     );
     assert.equal(result.isError, true);
     const parsed = parseToolPayload(result);
-    assert.equal(parsed.code, 'FETCH_ERROR');
+    assert.equal(parsed['code'], 'FETCH_ERROR');
   });
 
   it('handles FetchError with queue_full reason', () => {
@@ -248,8 +248,8 @@ describe('handleToolError', () => {
     });
     const result = handleToolError(error, 'https://example.com');
     const parsed = parseToolPayload(result);
-    assert.equal(parsed.code, 'queue_full');
-    const details = getOptionalRecord(parsed.details);
-    assert.equal(details?.reason, 'queue_full');
+    assert.equal(parsed['code'], 'queue_full');
+    const details = getOptionalRecord(parsed['details']);
+    assert.equal(details?.['reason'], 'queue_full');
   });
 });

@@ -93,10 +93,10 @@ export function getErrorMessage(error: unknown): string {
   if (typeof error === 'string' && error.length > 0) return error;
   if (
     isObject(error) &&
-    typeof error.message === 'string' &&
-    error.message.length > 0
+    typeof error['message'] === 'string' &&
+    error['message'].length > 0
   ) {
-    return error.message;
+    return error['message'];
   }
   if (error === null || error === undefined) return UNKNOWN_ERROR_MESSAGE;
   try {

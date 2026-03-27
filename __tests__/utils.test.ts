@@ -32,7 +32,7 @@ describe('FetchError', () => {
     assert.equal(err.url, 'https://example.com');
     assert.equal(err.statusCode, 404);
     assert.equal(err.name, 'FetchError');
-    assert.equal(err.details.custom, true);
+    assert.equal(err.details['custom'], true);
     assert.equal(err.code, 'HTTP_404');
   });
 
