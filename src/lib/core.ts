@@ -18,17 +18,6 @@ import {
 } from './utils.js';
 
 export { config, enableHttpMode, serverVersion } from './config.js';
-export {
-  createCacheKey,
-  get,
-  getEntryMeta,
-  isCacheEntryVisibleToScope,
-  isEnabled,
-  keys,
-  onCacheUpdate,
-  parseCacheKey,
-  set,
-} from './cache.js';
 
 type McpLogLevel =
   | 'debug'

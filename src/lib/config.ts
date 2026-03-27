@@ -618,22 +618,6 @@ function buildTasksConfig(): AppTasksConfig {
   };
 }
 
-interface AppCacheConfig {
-  enabled: boolean;
-  ttl: number;
-  maxKeys: number;
-  maxSizeBytes: number;
-}
-
-function buildCacheConfig(): AppCacheConfig {
-  return {
-    enabled: EnvParser.boolean(env['CACHE_ENABLED'], true, 'CACHE_ENABLED'),
-    ttl: 86400,
-    maxKeys: 100,
-    maxSizeBytes: 50 * 1024 * 1024,
-  };
-}
-
 interface AppNoiseRemovalConfig {
   extraTokens: string[];
   extraSelectors: string[];
@@ -707,7 +691,6 @@ export const config = {
     timeoutMs: DEFAULT_TOOL_TIMEOUT_MS,
   },
   tasks: buildTasksConfig(),
-  cache: buildCacheConfig(),
   extraction: {
     maxBlockLength: 5000,
     minParagraphLength: 10,

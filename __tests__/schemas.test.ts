@@ -5,8 +5,6 @@ import {
   fetchUrlInputSchema,
   normalizeExtractedMetadata,
   normalizePageTitle,
-  parseCachedPayload,
-  resolveCachedPayloadContent,
 } from '../src/schemas.js';
 
 // ── normalizePageTitle ──────────────────────────────────────────────
@@ -88,77 +86,6 @@ describe('normalizeExtractedMetadata', () => {
   });
 });
 
-// ── parseCachedPayload ──────────────────────────────────────────────
-
-describe('parseCachedPayload', () => {
-  it('parses a valid cached payload', () => {
-    const raw = JSON.stringify({ markdown: '# Hello' });
-    const result = parseCachedPayload(raw);
-    assert.ok(result);
-    assert.equal(result.markdown, '# Hello');
-  });
-
-  it('parses payload with title and metadata', () => {
-    const raw = JSON.stringify({
-      markdown: 'Content',
-      title: 'Title',
-      metadata: { title: 'Meta Title' },
-    });
-    const result = parseCachedPayload(raw);
-    assert.ok(result);
-    assert.equal(result.title, 'Title');
-    assert.ok(result.metadata);
-    assert.equal(result.metadata.title, 'Meta Title');
-  });
-
-  it('parses payload with truncated flag', () => {
-    const raw = JSON.stringify({ markdown: 'Content', truncated: true });
-    const result = parseCachedPayload(raw);
-    assert.ok(result);
-    assert.equal(result.truncated, true);
-  });
-
-  it('returns null for invalid JSON', () => {
-    assert.equal(parseCachedPayload('not json'), null);
-  });
-
-  it('returns null when markdown is missing', () => {
-    const raw = JSON.stringify({ title: 'No Markdown' });
-    assert.equal(parseCachedPayload(raw), null);
-  });
-
-  it('returns null for non-string markdown', () => {
-    const raw = JSON.stringify({ markdown: 42 });
-    assert.equal(parseCachedPayload(raw), null);
-  });
-});
-
-// ── resolveCachedPayloadContent ─────────────────────────────────────
-
-describe('resolveCachedPayloadContent', () => {
-  it('returns markdown string when present', () => {
-    assert.equal(
-      resolveCachedPayloadContent({ markdown: '# Hello' }),
-      '# Hello'
-    );
-  });
-
-  it('returns null when markdown is null', () => {
-    const payload = {
-      markdown: null,
-    } as Parameters<typeof resolveCachedPayloadContent>[0];
-    assert.equal(resolveCachedPayloadContent(payload), null);
-  });
-
-  it('returns null when markdown is undefined', () => {
-    assert.equal(resolveCachedPayloadContent({}), null);
-  });
-
-  it('returns empty string for empty markdown', () => {
-    assert.equal(resolveCachedPayloadContent({ markdown: '' }), '');
-  });
-});
-
 // ── fetchUrlInputSchema ────────────────────────────────────────────
 
 describe('fetchUrlInputSchema', () => {
@@ -168,44 +95,5 @@ describe('fetchUrlInputSchema', () => {
     });
 
     assert.equal(result.url, 'https://example.com');
-  });
-
-  it('rejects removed forceRefresh input', () => {
-    assert.throws(() =>
-      fetchUrlInputSchema.parse({
-        url: 'https://example.com',
-        forceRefresh: true,
-      })
-    );
-  });
-
-  it('rejects removed legacy cache and metadata input names', () => {
-    assert.throws(() =>
-      fetchUrlInputSchema.parse({
-        url: 'https://example.com',
-        useCache: false,
-      })
-    );
-
-    assert.throws(() =>
-      fetchUrlInputSchema.parse({
-        url: 'https://example.com',
-        includeMetadataFooter: false,
-      })
-    );
-
-    assert.throws(() =>
-      fetchUrlInputSchema.parse({
-        url: 'https://example.com',
-        enableCache: false,
-      })
-    );
-
-    assert.throws(() =>
-      fetchUrlInputSchema.parse({
-        url: 'https://example.com',
-        extractMetadata: false,
-      })
-    );
   });
 });

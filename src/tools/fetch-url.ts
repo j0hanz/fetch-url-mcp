@@ -13,10 +13,8 @@ import {
   type InlineContentResult,
   type MarkdownPipelineResult,
   markdownTransform,
-  parseCachedMarkdownResult,
   performSharedFetch,
   type PipelineResult,
-  serializeMarkdownResult,
   withSignal,
 } from '../lib/fetch-pipeline.js';
 import type { SharedFetchStage } from '../lib/fetch-pipeline.js';
@@ -123,7 +121,6 @@ function buildStructuredContent(
     ...(title ? { title } : {}),
     ...(metadata ? { metadata } : {}),
     markdown,
-    fromCache: pipeline.fromCache,
     fetchedAt: pipeline.fetchedAt,
     contentSize: inlineResult.contentSize,
     ...(truncated ? { truncated: true } : {}),
@@ -172,17 +169,14 @@ function buildResponse(
   };
 }
 
-type CacheStatus = 'unknown' | 'cache_hit' | 'cache_miss';
-
 const Step = {
   START: 1,
   RESOLVE_URL: 2,
-  CHECK_CACHE: 3,
-  CACHE_OR_FETCH: 4,
-  RESTORE_OR_RESPONSE: 5,
-  TRANSFORM: 6,
-  PREPARE: 7,
-  DONE: 8,
+  FETCH: 3,
+  RESPONSE: 4,
+  TRANSFORM: 5,
+  PREPARE: 6,
+  DONE: 7,
 } as const;
 
 function formatContentSize(contentSize: number): string {
@@ -210,8 +204,6 @@ export function getFetchCompletionStatusMessage(
 }
 
 export class FetchUrlProgressPlan {
-  private cacheStatus: CacheStatus = 'unknown';
-
   constructor(
     private readonly reporter: ProgressReporter,
     private readonly context: string
@@ -222,7 +214,6 @@ export class FetchUrlProgressPlan {
   }
 
   reportStage(stage: SharedFetchStage): void {
-    this.updateCacheStatus(stage);
     const mapped = this.mapStage(stage);
     if (!mapped) return;
     this.reporter.report(mapped.step, mapped.message);
@@ -236,51 +227,25 @@ export class FetchUrlProgressPlan {
     this.reporter.report(Step.DONE, cancelled ? 'Cancelled' : 'Failed');
   }
 
-  private updateCacheStatus(stage: SharedFetchStage): void {
-    if (stage === 'cache_hit' || stage === 'cache_restore') {
-      this.cacheStatus = 'cache_hit';
-    } else if (
-      stage === 'fetch_remote' ||
-      stage === 'response_ready' ||
-      stage === 'transform_start'
-    ) {
-      this.cacheStatus = 'cache_miss';
-    }
-  }
-
   private mapStage(
     stage: SharedFetchStage
   ): { step: number; message: string } | undefined {
     switch (stage) {
       case 'resolve_url':
         return { step: Step.RESOLVE_URL, message: 'Resolving URL' };
-      case 'check_cache':
-        return { step: Step.CHECK_CACHE, message: 'Checking cache' };
-      case 'cache_hit':
-        return { step: Step.CACHE_OR_FETCH, message: 'Loaded from cache' };
-      case 'cache_restore':
-        return {
-          step: Step.RESTORE_OR_RESPONSE,
-          message: 'Restoring cached content',
-        };
       case 'fetch_remote':
         return {
-          step: Step.CACHE_OR_FETCH,
+          step: Step.FETCH,
           message: `Fetching ${this.context}`,
         };
       case 'response_ready':
-        return { step: Step.RESTORE_OR_RESPONSE, message: 'Received response' };
+        return { step: Step.RESPONSE, message: 'Received response' };
       case 'transform_start':
         return { step: Step.TRANSFORM, message: 'Parsing HTML -> Markdown' };
       case 'prepare_output':
-        return {
-          step:
-            this.cacheStatus === 'cache_miss' ? Step.PREPARE : Step.TRANSFORM,
-          message: 'Fetch completed',
-        };
+        return { step: Step.PREPARE, message: 'Fetch completed' };
       case 'finalize_output':
-        if (this.cacheStatus === 'cache_miss') return undefined;
-        return { step: Step.PREPARE, message: 'Finalizing output' };
+        return undefined;
     }
   }
 }
@@ -320,8 +285,6 @@ function buildFetchOptions(
         signal
       );
     },
-    serialize: serializeMarkdownResult,
-    deserialize: parseCachedMarkdownResult,
   };
 }
 

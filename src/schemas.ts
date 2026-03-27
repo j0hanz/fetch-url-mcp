@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-import { config, logWarn } from './lib/core.js';
+import { config } from './lib/core.js';
 
 import type { ExtractedMetadata } from './transform/types.js';
 
@@ -89,67 +89,6 @@ export function normalizePageTitle(value: unknown): string | undefined {
   return normalizeWithSchema(pageTitleSchema, value);
 }
 
-function normalizeString(value: unknown): string | undefined {
-  return typeof value === 'string' ? value : undefined;
-}
-
-function normalizeBoolean(value: unknown): boolean | undefined {
-  return typeof value === 'boolean' ? value : undefined;
-}
-
-export interface CachedPayload {
-  markdown: string;
-  title?: string | undefined;
-  metadata?: ExtractedMetadata | undefined;
-  truncated?: boolean | undefined;
-}
-
-export const cachedPayloadValueSchema: z.ZodType<CachedPayload> =
-  z.strictObject({
-    markdown: z.string(),
-    title: pageTitleSchema.optional(),
-    metadata: extractedMetadataSchema.optional(),
-    truncated: z.boolean().optional(),
-  });
-
-const cachedPayloadCompatSchema = z.object({
-  markdown: z.unknown().transform((value) => normalizeString(value)),
-  title: z
-    .unknown()
-    .transform((value) => normalizePageTitle(value))
-    .optional(),
-  metadata: z
-    .unknown()
-    .transform((value) => normalizeExtractedMetadata(value))
-    .optional(),
-  truncated: z
-    .unknown()
-    .transform((value) => normalizeBoolean(value))
-    .optional(),
-});
-
-const cachedPayloadSchema = cachedPayloadCompatSchema
-  .superRefine((value, ctx) => {
-    if (typeof value.markdown === 'string') return;
-
-    ctx.addIssue({
-      code: 'custom',
-      message: 'Missing markdown',
-      path: ['markdown'],
-    });
-  })
-  .transform(
-    (value): CachedPayload =>
-      cachedPayloadValueSchema.parse({
-        markdown: value.markdown,
-        ...(value.title !== undefined ? { title: value.title } : {}),
-        ...(value.metadata ? { metadata: value.metadata } : {}),
-        ...(value.truncated !== undefined
-          ? { truncated: value.truncated }
-          : {}),
-      })
-  );
-
 export const fetchUrlInputSchema = z.strictObject(
   {
     url: z
@@ -193,7 +132,6 @@ export const fetchUrlOutputSchema = z.strictObject({
   )
     .optional()
     .describe('Extracted Markdown. May be truncated (check truncated field).'),
-  fromCache: z.boolean().optional().describe('True if served from cache.'),
   fetchedAt: z.iso.datetime().optional().describe('ISO timestamp of fetch.'),
   contentSize: z
     .number()
@@ -204,35 +142,3 @@ export const fetchUrlOutputSchema = z.strictObject({
     .describe('Markdown fragment size before final inline truncation.'),
   truncated: z.boolean().optional().describe('True if markdown was truncated.'),
 });
-
-export function parseCachedPayload(raw: string): CachedPayload | null {
-  try {
-    const parsed = JSON.parse(raw) as unknown;
-    const result = cachedPayloadSchema.safeParse(parsed);
-    if (!result.success) {
-      logWarn('Rejected invalid cached payload', {
-        issues: result.error.issues.map((issue) => ({
-          path: issue.path,
-          message: issue.message,
-          code: issue.code,
-        })),
-      });
-      return null;
-    }
-    return result.data;
-  } catch {
-    return null;
-  }
-}
-
-export function stringifyCachedPayload(
-  payload: z.input<typeof cachedPayloadValueSchema>
-): string {
-  return JSON.stringify(cachedPayloadValueSchema.parse(payload));
-}
-
-export function resolveCachedPayloadContent(payload: {
-  markdown?: string | null;
-}): string | null {
-  return typeof payload.markdown === 'string' ? payload.markdown : null;
-}

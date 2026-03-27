@@ -19,7 +19,6 @@ import { toError } from './lib/utils.js';
 
 import {
   buildServerInstructions,
-  registerCacheResourceTemplate,
   registerGetHelpPrompt,
   registerInstructionResource,
 } from './resources/index.js';
@@ -146,7 +145,6 @@ async function createMcpServerWithOptions(
   const toolControls = registerFetchUrlTool(server);
   registerGetHelpPrompt(server, serverInstructions, localIcon);
   registerInstructionResource(server, serverInstructions, localIcon);
-  registerCacheResourceTemplate(server, localIcon);
   const taskRegistration = registerTaskHandlers(server, {
     requireInterception: config.tasks.requireInterception,
   });

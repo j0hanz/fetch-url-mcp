@@ -1,25 +1,13 @@
-import { z } from 'zod';
-
-import {
-  type CachedPayload,
-  cachedPayloadValueSchema,
-  extractedMetadataSchema,
-  normalizeExtractedMetadata,
-  normalizePageTitle,
-  parseCachedPayload,
-  stringifyCachedPayload,
-} from '../schemas.js';
+import type { normalizeExtractedMetadata } from '../schemas.js';
 import { transformBufferToMarkdown } from '../transform/transform.js';
 import { type MarkdownTransformResult } from '../transform/types.js';
-import { createCacheKey, get, isEnabled, set } from './cache.js';
-import { toCacheScopeId } from './cache.js';
-import { config, getSessionId, logDebug, logError, logWarn } from './core.js';
+import { config, logDebug } from './core.js';
 import {
   fetchNormalizedUrlBuffer,
   normalizeUrl,
   transformToRawUrl,
 } from './http.js';
-import { getErrorMessage, isObject, withSignal } from './utils.js';
+import { withSignal } from './utils.js';
 
 export { withSignal };
 
@@ -170,27 +158,19 @@ function applyInlineContentLimit(
 
 interface FetchPipelineOptions<T> {
   url: string;
-  cacheNamespace: string;
   signal?: AbortSignal;
   onStage?: (stage: SharedFetchStage) => void;
   transform: (input: FetchTransformInput, url: string) => T | Promise<T>;
-  serialize?: (result: T) => string;
-  deserialize?: (cached: string) => T | undefined;
 }
 export interface PipelineResult<T> {
   data: T;
-  fromCache: boolean;
   url: string;
   originalUrl?: string;
   finalUrl?: string;
   fetchedAt: string;
-  cacheKey?: string | null;
 }
 export type SharedFetchStage =
   | 'resolve_url'
-  | 'check_cache'
-  | 'cache_hit'
-  | 'cache_restore'
   | 'fetch_remote'
   | 'response_ready'
   | 'transform_start'
@@ -214,145 +194,6 @@ function resolveNormalizedUrl(url: string): UrlResolution {
     transformed: transformedResult.transformed,
   };
 }
-function logCacheMiss(
-  reason: string,
-  cacheNamespace: string,
-  normalizedUrl: string,
-  error?: unknown
-): void {
-  // Deserialize exceptions indicate data corruption or schema drift —
-  // use logError so they surface in monitoring, not just debug logs.
-  const log =
-    reason === 'deserialize exception'
-      ? logError
-      : reason.startsWith('deserialize')
-        ? logWarn
-        : logDebug;
-  log(`Cache miss due to ${reason}`, {
-    namespace: cacheNamespace,
-    url: normalizedUrl,
-    ...(error ? { error: getErrorMessage(error) } : {}),
-  });
-}
-function attemptCacheRetrieval<T>(
-  cacheKey: string | null,
-  deserialize: ((cached: string) => T | undefined) | undefined,
-  cacheNamespace: string,
-  normalizedUrl: string
-): PipelineResult<T> | null {
-  if (!cacheKey) return null;
-
-  const cached = get(cacheKey, { scopeId: toCacheScopeId(getSessionId()) });
-  if (!cached) return null;
-
-  if (!deserialize) {
-    logCacheMiss('missing deserializer', cacheNamespace, normalizedUrl);
-    return null;
-  }
-
-  let data: T | undefined;
-  try {
-    data = deserialize(cached.content);
-  } catch (error: unknown) {
-    logCacheMiss('deserialize exception', cacheNamespace, normalizedUrl, error);
-    return null;
-  }
-
-  if (data === undefined) {
-    logCacheMiss('deserialize failure', cacheNamespace, normalizedUrl);
-    return null;
-  }
-
-  logDebug('Cache hit', { namespace: cacheNamespace, url: normalizedUrl });
-
-  const finalUrl = cached.url !== normalizedUrl ? cached.url : undefined;
-
-  return {
-    data,
-    fromCache: true,
-    url: normalizedUrl,
-    ...(finalUrl ? { finalUrl } : {}),
-    fetchedAt: cached.fetchedAt,
-    cacheKey,
-  };
-}
-
-function restoreCachedPipelineResult<T>(
-  options: FetchPipelineOptions<T>,
-  resolvedUrl: UrlResolution,
-  cacheKey: string | null
-): PipelineResult<T> | null {
-  options.onStage?.('check_cache');
-  const cachedResult = attemptCacheRetrieval(
-    cacheKey,
-    options.deserialize,
-    options.cacheNamespace,
-    resolvedUrl.normalizedUrl
-  );
-  if (!cachedResult) return null;
-
-  options.onStage?.('cache_hit');
-  options.onStage?.('cache_restore');
-  return { ...cachedResult, originalUrl: resolvedUrl.originalUrl };
-}
-
-function persistCacheEntry<T>(
-  cacheKey: string,
-  data: T,
-  serialize: ((result: T) => string) | undefined,
-  normalizedUrl: string,
-  cacheNamespace: string
-): void {
-  const serializer = serialize ?? JSON.stringify;
-  const dataRecord = isObject(data) ? data : undefined;
-  const title =
-    typeof dataRecord?.['title'] === 'string' ? dataRecord['title'] : undefined;
-  const metadata = {
-    url: normalizedUrl,
-    scopeIds: [toCacheScopeId(getSessionId())],
-    ...(title === undefined ? {} : { title }),
-  };
-
-  try {
-    set(cacheKey, serializer(data), metadata);
-  } catch (error: unknown) {
-    logWarn('Failed to persist cache entry', {
-      namespace: cacheNamespace,
-      url: normalizedUrl,
-      error: getErrorMessage(error),
-    });
-  }
-}
-function persistCacheTargets<T>(
-  requestedUrl: string,
-  finalUrl: string | undefined,
-  cacheKey: string | null,
-  data: T,
-  options: FetchPipelineOptions<T>
-): void {
-  if (!cacheKey) return;
-
-  const targets = new Map<string, string>();
-  targets.set(cacheKey, finalUrl ?? requestedUrl);
-
-  if (finalUrl && finalUrl !== requestedUrl) {
-    const finalCacheKey = createCacheKey(options.cacheNamespace, finalUrl);
-    if (finalCacheKey) {
-      targets.set(finalCacheKey, finalUrl);
-    }
-  }
-
-  for (const [key, url] of targets) {
-    persistCacheEntry(
-      key,
-      data,
-      options.serialize,
-      url,
-      options.cacheNamespace
-    );
-  }
-}
-
 export async function executeFetchPipeline<T>(
   options: FetchPipelineOptions<T>
 ): Promise<PipelineResult<T>> {
@@ -363,18 +204,6 @@ export async function executeFetchPipeline<T>(
       original: resolvedUrl.originalUrl,
     });
   }
-
-  const cacheKey = createCacheKey(
-    options.cacheNamespace,
-    resolvedUrl.normalizedUrl
-  );
-
-  const cachedResult = restoreCachedPipelineResult(
-    options,
-    resolvedUrl,
-    cacheKey
-  );
-  if (cachedResult) return cachedResult;
 
   options.onStage?.('fetch_remote');
   logDebug('Fetching URL', { url: resolvedUrl.normalizedUrl });
@@ -394,38 +223,18 @@ export async function executeFetchPipeline<T>(
     resolvedFinalUrl
   );
 
-  if (isEnabled()) {
-    persistCacheTargets(
-      resolvedUrl.normalizedUrl,
-      finalUrl,
-      cacheKey,
-      data,
-      options
-    );
-  }
-
   return {
     data,
-    fromCache: false,
     url: resolvedUrl.normalizedUrl,
     originalUrl: resolvedUrl.originalUrl,
     ...(finalUrl ? { finalUrl } : {}),
     fetchedAt: new Date().toISOString(),
-    cacheKey,
   };
 }
 
 export type MarkdownPipelineResult = MarkdownTransformResult & {
   readonly content: string;
 };
-
-const markdownPipelineResultSchema = z.strictObject({
-  markdown: z.string(),
-  content: z.string(),
-  title: z.union([z.string(), z.undefined()]),
-  metadata: extractedMetadataSchema.optional(),
-  truncated: z.boolean(),
-});
 
 function createMarkdownPipelineResult({
   markdown: rawMarkdown,
@@ -449,43 +258,6 @@ function createMarkdownPipelineResult({
   };
 }
 
-const markdownPipelineCacheCodec = z.codec(
-  cachedPayloadValueSchema,
-  markdownPipelineResultSchema,
-  {
-    decode: (payload) =>
-      createMarkdownPipelineResult({
-        markdown: payload.markdown,
-        title: payload.title,
-        metadata: payload.metadata,
-        truncated: payload.truncated ?? false,
-      }),
-    encode: (result): CachedPayload => {
-      const title = normalizePageTitle(result.title);
-      const metadata = normalizeExtractedMetadata(result.metadata);
-
-      return {
-        markdown: normalizeMarkdownForTruncation(
-          result.markdown,
-          result.truncated
-        ),
-        ...(title !== undefined ? { title } : {}),
-        ...(metadata ? { metadata } : {}),
-        truncated: result.truncated,
-      };
-    },
-  }
-);
-
-export function parseCachedMarkdownResult(
-  cached: string
-): MarkdownPipelineResult | undefined {
-  const payload = parseCachedPayload(cached);
-  if (!payload) return undefined;
-
-  return z.decode(markdownPipelineCacheCodec, payload);
-}
-
 export const markdownTransform = async (
   input: FetchTransformInput,
   url: string,
@@ -506,12 +278,6 @@ export const markdownTransform = async (
   });
 };
 
-export function serializeMarkdownResult(
-  result: MarkdownPipelineResult
-): string {
-  return stringifyCachedPayload(z.encode(markdownPipelineCacheCodec, result));
-}
-
 interface MarkdownFetchOptions {
   readonly url: string;
   readonly signal?: AbortSignal;
@@ -520,8 +286,6 @@ interface MarkdownFetchOptions {
     input: FetchTransformInput,
     normalizedUrl: string
   ) => MarkdownPipelineResult | Promise<MarkdownPipelineResult>;
-  readonly serialize?: (result: MarkdownPipelineResult) => string;
-  readonly deserialize?: (cached: string) => MarkdownPipelineResult | undefined;
 }
 interface SharedFetchDeps {
   readonly executeFetchPipeline?: typeof executeFetchPipeline;
@@ -529,10 +293,7 @@ interface SharedFetchDeps {
 function buildSharedFetchPipelineOptions(
   options: MarkdownFetchOptions
 ): FetchPipelineOptions<MarkdownPipelineResult> {
-  return {
-    ...options,
-    cacheNamespace: 'markdown',
-  };
+  return { ...options };
 }
 export async function performSharedFetch(
   options: MarkdownFetchOptions,

@@ -9,7 +9,7 @@ A web content fetcher MCP server that converts HTML to clean, AI and human reada
 - **Build**: TypeScript compiles through `scripts/tasks.mjs`, which cleans `dist/`, runs `tsc -p tsconfig.build.json`, copies `assets/`, and marks the CLI executable
 - **MCP SDK**: `@modelcontextprotocol/sdk` powers the stdio server, Streamable HTTP transport, prompts, resources, logging, completions, and task-capable tool wiring
 - **Fetch + transform stack**: `undici` for HTTP fetches, `linkedom` plus `@mozilla/readability` for DOM parsing/extraction, `node-html-markdown` for Markdown conversion
-- **Schemas**: Zod v4 schemas validate tool input/output and cached payloads, and are also converted to JSON Schema for MCP tool registration
+- **Schemas**: Zod v4 schemas validate tool input/output, and are also converted to JSON Schema for MCP tool registration
 - **Lint + format**: flat ESLint config with `typescript-eslint` strict/stylistic rules, `eslint-plugin-depend`, `eslint-plugin-unused-imports`, `eslint-plugin-de-morgan`, plus Prettier with import sorting
 - **Tests + diagnostics**: Node's built-in test runner executes TypeScript tests through `tsx/esm`; dedicated scripts exist for coverage, extended type-check diagnostics, and trace generation
 - **Repo maintenance**: `knip` is available for unused-code audits, and Docker/Docker Compose files support containerized packaging and local runs
@@ -17,20 +17,19 @@ A web content fetcher MCP server that converts HTML to clean, AI and human reada
 ## Architecture
 
 - **Bootstrap**: `src/index.ts` parses CLI flags, serves `--help` / `--version`, and starts either stdio mode or HTTP mode with fatal-error handling and graceful shutdown paths
-- **Server composition**: `src/server.ts` creates the MCP server, advertises capabilities, registers the `fetch-url` tool, `get-help` prompt, instruction resource, cache resource template, logging level handler, and shutdown cleanup
+- **Server composition**: `src/server.ts` creates the MCP server, advertises capabilities, registers the `fetch-url` tool, `get-help` prompt, instruction resource, logging level handler, and shutdown cleanup
 - **Transport split**: stdio mode uses one long-lived `McpServer`; HTTP mode creates one `McpServer` per authenticated session and serves it through `StreamableHTTPServerTransport`
-- **Fetch pipeline**: `src/tools/fetch-url.ts` validates arguments with Zod, emits progress updates, and delegates execution to `performSharedFetch()` for normalization, cache lookup, remote fetch, transform, and response assembly
-- **URL + cache layer**: `src/lib/fetch-pipeline.ts` normalizes URLs, rewrites supported code-host pages to raw endpoints, serializes cached Markdown payloads, and applies inline truncation safeguards for links and code fences
-- **Cache**: `src/lib/cache.ts` provides an LRU in-memory cache store with TTL expiration, byte-budget eviction, and update event notifications; `src/lib/core.ts` re-exports the cache API for backward compatibility
+- **Fetch pipeline**: `src/tools/fetch-url.ts` validates arguments with Zod, emits progress updates, and delegates execution to `performSharedFetch()` for normalization, remote fetch, transform, and response assembly
+- **URL layer**: `src/lib/fetch-pipeline.ts` normalizes URLs, rewrites supported code-host pages to raw endpoints, and applies inline truncation safeguards for links and code fences
 - **Transform isolation**: `src/transform/worker-pool.ts` runs HTML-to-Markdown work in worker threads with queue backpressure, dynamic pool scaling, cancellation, per-task timeouts, and worker restart on failure
-- **HTTP gateway**: `src/http/native.ts` wraps MCP over HTTP with host/origin validation, auth, rate limiting, health and download routes, protocol-version negotiation, session TTL cleanup, and shutdown draining
+- **HTTP gateway**: `src/http/native.ts` wraps MCP over HTTP with host/origin validation, auth, rate limiting, health routes, protocol-version negotiation, session TTL cleanup, and shutdown draining
 - **Task system**: `src/tasks/manager.ts` keeps owner-scoped task state with TTLs, capacity limits, cancellation, signed pagination cursors, and waiter-based delivery for terminal task results
-- **Resource surface**: `src/resources/index.ts` exposes `internal://instructions` and `internal://cache/{namespace}/{hash}`, including completions and resource update notifications backed by the in-memory cache
+- **Resource surface**: `src/resources/index.ts` exposes `internal://instructions`, the `get-help` prompt, and server instruction generation
 
 ## Testing Strategy
 
-- Unit tests cover core logic in isolation, such as URL normalization, cache key generation, and transform correctness with various HTML inputs
-- Integration tests validate the full fetch pipeline, including cache hits/misses, transform outcomes, and end-to-end behavior.
+- Unit tests cover core logic in isolation, such as URL normalization and transform correctness with various HTML inputs
+- Integration tests validate the full fetch pipeline, including transform outcomes and end-to-end behavior.
 
 ## Commands
 

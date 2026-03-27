@@ -20,7 +20,6 @@ describe('config shape', () => {
       'transform',
       'tools',
       'tasks',
-      'cache',
       'extraction',
       'noiseRemoval',
       'markdownCleanup',
@@ -69,14 +68,6 @@ describe('config shape', () => {
     assert.equal(typeof tasks.maxPerOwner, 'number');
     assert.equal(typeof tasks.emitStatusNotifications, 'boolean');
     assert.equal(typeof tasks.requireInterception, 'boolean');
-  });
-
-  it('cache section has required keys', () => {
-    const { cache } = config;
-    assert.equal(typeof cache.enabled, 'boolean');
-    assert.equal(typeof cache.ttl, 'number');
-    assert.equal(typeof cache.maxKeys, 'number');
-    assert.equal(typeof cache.maxSizeBytes, 'number');
   });
 
   it('constants section has required keys', () => {

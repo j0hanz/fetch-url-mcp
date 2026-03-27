@@ -3,7 +3,6 @@ import { freemem, hostname, totalmem } from 'node:os';
 import { monitorEventLoopDelay, performance } from 'node:perf_hooks';
 import process from 'node:process';
 
-import { keys as cacheKeys } from '../lib/cache.js';
 import { config, serverVersion } from '../lib/core.js';
 import type { SessionStore } from '../lib/core.js';
 
@@ -121,7 +120,6 @@ interface HealthResponse {
   activeResources?: string[];
   stats?: {
     activeSessions: number;
-    cacheKeys: number;
     workerPool: {
       queueDepth: number;
       activeWorkers: number;
@@ -172,7 +170,6 @@ function buildHealthResponse(
       : {}),
     stats: {
       activeSessions: store.size(),
-      cacheKeys: cacheKeys().length,
       workerPool: poolStats ?? {
         queueDepth: 0,
         activeWorkers: 0,

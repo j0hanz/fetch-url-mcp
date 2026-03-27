@@ -10,15 +10,15 @@ A web content fetcher MCP server that converts HTML to clean, AI and human reada
 
 ## Overview
 
-The Fetch URL MCP Server provides a standardized interface for fetching public web content and transforming it into Markdown enriched with structured metadata. It validates URLs, applies noise removal heuristics, and caches results for reuse. The server supports both inline and task-based execution modes, making it suitable for a wide range of client applications and LLM interactions.
+The Fetch URL MCP Server provides a standardized interface for fetching public web content and transforming it into Markdown enriched with structured metadata. It validates URLs and applies noise removal heuristics. The server supports both inline and task-based execution modes, making it suitable for a wide range of client applications and LLM interactions.
 
 ## Key Features
 
 - `fetch-url` validates public HTTP(S) URLs, fetches the page, and returns cleaned Markdown plus structured metadata.
 - The tool advertises optional task support and emits progress updates while fetching and transforming larger pages.
 - GitHub, GitLab, Bitbucket, and Gist page URLs are rewritten to raw-content endpoints when possible before fetch.
-- `internal://instructions` and `internal://cache/{namespace}/{hash}` expose built-in guidance and cached Markdown as MCP resources.
-- HTTP mode adds host/origin validation, auth, rate limiting, health checks, OAuth protected-resource metadata, and session-bound cached-download URLs.
+- `internal://instructions` exposes built-in guidance as an MCP resource.
+- HTTP mode adds host/origin validation, auth, rate limiting, health checks, OAuth protected-resource metadata, and session-bound URLs.
 
 ## Requirements
 
@@ -476,7 +476,6 @@ For more info, see [Kilo Code docs](https://kilocode.ai/docs).
 
 - Fetch documentation pages, blog posts, or reference material into Markdown before sending them to an LLM.
 - Retrieve repository-hosted content from GitHub, GitLab, Bitbucket, or Gists and let the server rewrite page URLs to raw endpoints when possible.
-- Reuse cached Markdown through `internal://cache/{namespace}/{hash}`.
 - Use task mode for large pages or slower sites when the fetch might otherwise be delayed, cancelled, or better handled asynchronously.
 
 ## Architecture
@@ -488,7 +487,6 @@ For more info, see [Kilo Code docs](https://kilocode.ai/docs).
        ├─ `GET /health`
        ├─ `GET /.well-known/oauth-protected-resource`
        ├─ `GET /.well-known/oauth-protected-resource/mcp`
-       ├─ `GET /mcp/downloads/{namespace}/{hash}`
        └─ `POST|GET|DELETE /mcp`
 
 `createMcpServer()`
@@ -496,15 +494,14 @@ For more info, see [Kilo Code docs](https://kilocode.ai/docs).
   ├─ registers prompt: `get-help`
   ├─ registers resources:
   │    - `internal://instructions`
-  │    - `internal://cache/{namespace}/{hash}`
-  ├─ enables capabilities: completions, logging, resources, prompts, tasks
+  ├─ enables capabilities: logging, resources, prompts, tasks
   └─ installs task handlers, log-level handling, and shutdown cleanup
 
 `fetch-url` execution
   ├─ validate input with `fetchUrlInputSchema`
   ├─ normalize URL and block local/private targets unless allowed
   ├─ rewrite supported code-host URLs to raw endpoints when possible
-  ├─ fetch and cache content via the shared pipeline
+  ├─ fetch content via the shared pipeline
   ├─ transform HTML into Markdown in the transform worker path
   └─ validate `structuredContent` with `fetchUrlOutputSchema`
 ```
@@ -531,7 +528,7 @@ Fetch public webpages and convert HTML into AI-readable Markdown. The tool is re
 | --------- | -------- | -------- | --------------------------- |
 | `url`     | `string` | yes      | Target URL. Max 2048 chars. |
 
-The response is returned as MCP text content and, when validation succeeds, as `structuredContent` containing `url`, `resolvedUrl`, `finalUrl`, `title`, `metadata`, `markdown`, `fromCache`, `fetchedAt`, `contentSize`, and `truncated`. A `truncated: true` result means the content hit server-enforced fetch or inline limits.
+The response is returned as MCP text content and, when validation succeeds, as `structuredContent` containing `url`, `resolvedUrl`, `finalUrl`, `title`, `metadata`, `markdown`, `fetchedAt`, `contentSize`, and `truncated`. A `truncated: true` result means the content hit server-enforced fetch or inline limits.
 
 ```text
 1. [Client] -- tools/call {name: "fetch-url", arguments} --> [Server]
@@ -543,27 +540,26 @@ The response is returned as MCP text content and, when validation succeeds, as `
 
 ### Resources
 
-| Resource                     | URI                                   | MIME Type       | Description                                                   |
-| ---------------------------- | ------------------------------------- | --------------- | ------------------------------------------------------------- |
-| `fetch-url-mcp-instructions` | `internal://instructions`             | `text/markdown` | Guidance for using the Fetch URL MCP server.                  |
-| `fetch-url-mcp-cache-entry`  | `internal://cache/{namespace}/{hash}` | `text/markdown` | Read cached markdown generated by previous `fetch-url` calls. |
+| Resource                     | URI                       | MIME Type       | Description                                  |
+| ---------------------------- | ------------------------- | --------------- | -------------------------------------------- |
+| `fetch-url-mcp-instructions` | `internal://instructions` | `text/markdown` | Guidance for using the Fetch URL MCP server. |
 
 ### Prompts
 
-| Prompt     | Arguments | Description                                                                                  |
-| ---------- | --------- | -------------------------------------------------------------------------------------------- |
-| `get-help` | none      | Return Fetch URL server instructions: workflows, cache usage, task mode, and error handling. |
+| Prompt     | Arguments | Description                                                                     |
+| ---------- | --------- | ------------------------------------------------------------------------------- |
+| `get-help` | none      | Return Fetch URL server instructions: workflows, task mode, and error handling. |
 
 ## MCP Capabilities
 
-| Capability                      | Status    | Notes                                                                                                                     |
-| ------------------------------- | --------- | ------------------------------------------------------------------------------------------------------------------------- |
-| completions                     | confirmed | Advertised in `createServerCapabilities()` and used by the cache resource template for `namespace` and `hash` completion. |
-| logging                         | confirmed | Advertised in `createServerCapabilities()` and handled through `SetLevelRequestSchema`.                                   |
-| resources subscribe/listChanged | confirmed | Advertised in `createServerCapabilities()` and implemented for cache resource subscriptions and list changes.             |
-| prompts                         | confirmed | `get-help` is registered during server startup.                                                                           |
-| tasks                           | confirmed | Advertised in `createServerCapabilities()` and backed by registered task handlers plus optional tool task support.        |
-| progress notifications          | confirmed | Tool execution reports `notifications/progress` updates during fetch and transform stages.                                |
+| Capability                      | Status    | Notes                                                                                                              |
+| ------------------------------- | --------- | ------------------------------------------------------------------------------------------------------------------ |
+| completions                     | confirmed | Advertised in `createServerCapabilities()`.                                                                        |
+| logging                         | confirmed | Advertised in `createServerCapabilities()` and handled through `SetLevelRequestSchema`.                            |
+| resources subscribe/listChanged | confirmed | Advertised in `createServerCapabilities()`.                                                                        |
+| prompts                         | confirmed | `get-help` is registered during server startup.                                                                    |
+| tasks                           | confirmed | Advertised in `createServerCapabilities()` and backed by registered task handlers plus optional tool task support. |
+| progress notifications          | confirmed | Tool execution reports `notifications/progress` updates during fetch and transform stages.                         |
 
 ### Tool Annotations
 
@@ -611,7 +607,6 @@ The response is returned as MCP text content and, when validation succeeds, as `
 | `FETCH_TIMEOUT_MS`                         | `15000`                   | Fetching          | Network fetch timeout in milliseconds.                                |
 | `USER_AGENT`                               | `fetch-url-mcp/<version>` | Fetching          | Override the outbound user agent string.                              |
 | `MAX_INLINE_CONTENT_CHARS`                 | `0`                       | Tool output       | `0` means no explicit inline truncation limit.                        |
-| `CACHE_ENABLED`                            | `true`                    | Caching           | Enables in-memory fetch result caching.                               |
 | `TASKS_MAX_TOTAL`                          | `5000`                    | Tasks             | Total task capacity.                                                  |
 | `TASKS_MAX_PER_OWNER`                      | `1000`                    | Tasks             | Per-owner task cap, clamped to the total cap.                         |
 | `TASKS_STATUS_NOTIFICATIONS`               | `false`                   | Tasks             | Enables status notifications for tasks.                               |
@@ -639,7 +634,6 @@ The response is returned as MCP text content and, when validation succeeds, as `
 | `POST`   | `/mcp`                                      | yes                                        | Session initialization and JSON-RPC requests.           |
 | `GET`    | `/mcp`                                      | yes                                        | Session-bound server-to-client stream handling.         |
 | `DELETE` | `/mcp`                                      | yes                                        | Session shutdown.                                       |
-| `GET`    | `/mcp/downloads/{namespace}/{hash}`         | yes, plus owning `MCP-Session-ID`          | Download route for session-scoped cached Markdown.      |
 
 ## Security
 

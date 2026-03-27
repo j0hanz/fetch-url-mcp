@@ -1,8 +1,6 @@
 import { isUtf8 } from 'node:buffer';
-import { hash, randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import diagnosticsChannel from 'node:diagnostics_channel';
-import { type ServerResponse } from 'node:http';
-import { posix as pathPosix } from 'node:path';
 import { PassThrough, Readable } from 'node:stream';
 import { finished, pipeline } from 'node:stream/promises';
 import { type ReadableStream as NodeReadableStream } from 'node:stream/web';
@@ -10,16 +8,11 @@ import tls from 'node:tls';
 import { createBrotliDecompress, createGunzip, createInflate } from 'node:zlib';
 
 import { Agent, type Dispatcher } from 'undici';
-import { z } from 'zod';
 
-import { parseCachedPayload, resolveCachedPayloadContent } from '../schemas.js';
 import {
-  get as cacheGet,
   config,
-  getEntryMeta,
   getOperationId,
   getRequestId,
-  isCacheEntryVisibleToScope,
   logDebug,
   logError,
   logWarn,
@@ -47,154 +40,6 @@ import {
   isSystemError,
   toError,
 } from './utils.js';
-import { formatZodError } from './zod.js';
-
-// ═══════════════════════════════════════════════════════════════════
-// FILENAME GENERATION & DOWNLOAD
-// ═══════════════════════════════════════════════════════════════════
-
-const FILENAME_RULES = {
-  MAX_LEN: 200,
-  UNSAFE_CHARS: /[<>:"/\\|?*\p{C}]/gu,
-  WHITESPACE: /\s+/g,
-  EXTENSIONS: /\.(html?|php|aspx?|jsp)$/i,
-} as const;
-function sanitizeString(input: string): string {
-  return input
-    .toLowerCase()
-    .replace(FILENAME_RULES.UNSAFE_CHARS, '')
-    .replace(FILENAME_RULES.WHITESPACE, '-')
-    .replace(/-+/g, '-')
-    .replace(/(?:^-|-$)/g, '');
-}
-function resolveUrlFilenameCandidate(url: string): string | null {
-  const parsed = new URL(url);
-  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return null;
-
-  const basename = pathPosix.basename(parsed.pathname);
-  if (!basename || basename === 'index') return null;
-
-  const cleaned = basename.replace(FILENAME_RULES.EXTENSIONS, '');
-  const sanitized = sanitizeString(cleaned);
-
-  if (sanitized === 'index') return null;
-  return sanitized || null;
-}
-function truncateFilenameBase(name: string, extension: string): string {
-  const maxBase = FILENAME_RULES.MAX_LEN - extension.length;
-  return name.length > maxBase ? name.substring(0, maxBase) : name;
-}
-function resolveTitleFilenameCandidate(title?: string): string | null {
-  if (!title) return null;
-  return sanitizeString(title) || null;
-}
-function resolveFilenameBase(
-  url: string,
-  title?: string,
-  hashFallback?: string
-): string {
-  try {
-    const fromUrl = resolveUrlFilenameCandidate(url);
-    if (fromUrl) return fromUrl;
-  } catch {
-    // Ignore URL parsing errors and continue fallbacks.
-  }
-
-  const fromTitle = resolveTitleFilenameCandidate(title);
-  if (fromTitle) return fromTitle;
-
-  if (hashFallback) return hashFallback.substring(0, 16);
-  return `download-${hash('sha256', url, 'hex').substring(0, 16)}`;
-}
-export function generateSafeFilename(
-  url: string,
-  title?: string,
-  hashFallback?: string,
-  extension = '.md'
-): string {
-  const name = resolveFilenameBase(url, title, hashFallback);
-
-  return `${truncateFilenameBase(name, extension)}${extension}`;
-}
-const DownloadParamsSchema = z.strictObject({
-  namespace: z.literal('markdown'),
-  hash: z
-    .string()
-    .regex(/^[a-f0-9.]+$/i)
-    .min(8)
-    .max(64),
-});
-function writeJsonError(
-  res: ServerResponse,
-  status: number,
-  message: string,
-  code: string
-): void {
-  res.writeHead(status, { 'Content-Type': 'application/json' });
-  res.end(JSON.stringify({ error: message, code }));
-}
-export function handleDownload(
-  res: ServerResponse,
-  namespace: string,
-  hash: string,
-  options?: {
-    scopeId?: string;
-  }
-): void {
-  const parsed = DownloadParamsSchema.safeParse({ namespace, hash });
-  if (!parsed.success) {
-    writeJsonError(
-      res,
-      400,
-      `Invalid download parameters: ${formatZodError(parsed.error)}`,
-      'BAD_REQUEST'
-    );
-    return;
-  }
-
-  const cacheKey = `${parsed.data.namespace}:${parsed.data.hash}`;
-  const scopeId = options?.scopeId;
-  if (scopeId) {
-    const meta = getEntryMeta(cacheKey);
-    if (!meta || !isCacheEntryVisibleToScope(scopeId, meta)) {
-      writeJsonError(res, 404, 'Not found or expired', 'NOT_FOUND');
-      return;
-    }
-  }
-
-  const entry = cacheGet(cacheKey, { force: true });
-
-  if (!entry) {
-    writeJsonError(res, 404, 'Not found or expired', 'NOT_FOUND');
-    return;
-  }
-
-  const payload = parseCachedPayload(entry.content);
-  const content = payload ? resolveCachedPayloadContent(payload) : null;
-
-  if (!content) {
-    writeJsonError(res, 404, 'Content missing', 'NOT_FOUND');
-    return;
-  }
-
-  const fileName = generateSafeFilename(
-    entry.url,
-    payload?.title,
-    parsed.data.hash
-  );
-
-  // Safe header generation — RFC 5987 encoding for non-ASCII filenames
-  const encoded = encodeURIComponent(fileName).replace(/'/g, '%27');
-
-  res.setHeader('Content-Type', 'text/markdown; charset=utf-8');
-  res.setHeader(
-    'Content-Disposition',
-    `attachment; filename="${fileName}"; filename*=UTF-8''${encoded}`
-  );
-  res.setHeader('Cache-Control', `private, max-age=${config.cache.ttl}`);
-  res.setHeader('X-Content-Type-Options', 'nosniff');
-  res.end(content);
-}
 
 // ═══════════════════════════════════════════════════════════════════
 // ENCODING DETECTION
