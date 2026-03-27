@@ -22,6 +22,12 @@ By default it runs over stdio. Pass `--http` if you need a proper HTTP endpoint 
 - **Self-documenting** — Includes an `internal://instructions` resource and a `get-help` prompt so clients know how to use it.
 - **HTTP mode** — Optionally serves over Streamable HTTP with host/origin validation, bearer or OAuth auth, rate limiting, health checks, and TLS.
 
+## Web Client
+
+A browser-based client is available if you want to use the server without any MCP setup.
+
+**[Live app](https://fetch-url-client.vercel.app)** · [Source code](https://github.com/j0hanz/fetch-url)
+
 ## Requirements
 
 - **Node.js** >= 24
