@@ -379,14 +379,6 @@ export function logError(message: string, error?: Error | LogMetadata): void {
     error instanceof Error ? formatErrorMeta(error) : (error ?? {});
   writeLog('error', message, errorMeta);
 }
-export function getMcpLogLevel(sessionId?: string): McpLogLevel {
-  if (sessionId) {
-    return (
-      sessionMcpLogLevels.get(sessionId) ?? toMcpLogLevel(config.logging.level)
-    );
-  }
-  return stdioMcpLogLevel ?? toMcpLogLevel(config.logging.level);
-}
 export function setLogLevel(level: string, sessionId?: string): void {
   const normalized = normalizeLogLevel(level);
   if (!normalized) return;

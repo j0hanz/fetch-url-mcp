@@ -7,7 +7,6 @@ import {
   createToolErrorResponse,
   handleToolError,
   isJsonRpcBatchRequest,
-  isJsonRpcResponseBody,
   isMcpMessageBody,
   isMcpRequestBody,
 } from '../dist/lib/mcp-interop.js';
@@ -83,29 +82,6 @@ describe('isMcpRequestBody', () => {
 
   it('rejects non-object', () => {
     assert.equal(isMcpRequestBody('not an object'), false);
-  });
-});
-
-describe('isJsonRpcResponseBody', () => {
-  it('accepts result response', () => {
-    const body = { jsonrpc: '2.0', id: 1, result: {} };
-    assert.equal(isJsonRpcResponseBody(body), true);
-  });
-
-  it('accepts error response', () => {
-    const body = {
-      jsonrpc: '2.0',
-      id: 1,
-      error: { code: -32600, message: 'Invalid Request' },
-    };
-    assert.equal(isJsonRpcResponseBody(body), true);
-  });
-
-  it('rejects request body', () => {
-    assert.equal(
-      isJsonRpcResponseBody({ jsonrpc: '2.0', method: 'test', id: 1 }),
-      false
-    );
   });
 });
 

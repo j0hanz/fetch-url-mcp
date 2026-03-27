@@ -1,5 +1,5 @@
 import { Buffer } from 'node:buffer';
-import { createHmac, hash as oneShotHash, timingSafeEqual } from 'node:crypto';
+import { createHmac, timingSafeEqual } from 'node:crypto';
 import {
   setInterval as setIntervalPromise,
   setTimeout as setTimeoutPromise,
@@ -54,9 +54,6 @@ export function timingSafeEqualUtf8(a: string, b: string): boolean {
   const bBuf = textEncoder.encode(b);
   if (aBuf.byteLength !== bBuf.byteLength) return false;
   return timingSafeEqual(aBuf, bBuf);
-}
-export function sha256Hex(input: string | Uint8Array): string {
-  return oneShotHash('sha256', input, 'hex');
 }
 export function hmacSha256Hex(
   key: string | Uint8Array,
@@ -133,39 +130,6 @@ export function isSystemError(error: unknown): error is NodeJS.ErrnoException {
   if (!('code' in error)) return false;
   const { code } = error;
   return typeof code === 'string';
-}
-const MAX_DEPTH = 20;
-const CIRCULAR_ERROR = 'stableStringify: Circular reference detected';
-export function stableStringify(obj: unknown): string {
-  const seen = new WeakSet<object>();
-
-  const process = (value: unknown, depth: number): unknown => {
-    if (typeof value !== 'object' || value === null) return value;
-    if (depth > MAX_DEPTH) {
-      throw new Error(`stableStringify: Max depth (${MAX_DEPTH}) exceeded`);
-    }
-    if (seen.has(value)) {
-      throw new Error(CIRCULAR_ERROR);
-    }
-    seen.add(value);
-
-    try {
-      if (Array.isArray(value)) {
-        return value.map((item) => process(item, depth + 1));
-      }
-
-      const sorted: Record<string, unknown> = {};
-      if (!isObject(value)) return value;
-      for (const key of Object.keys(value).sort()) {
-        sorted[key] = process(value[key], depth + 1);
-      }
-      return sorted;
-    } finally {
-      seen.delete(value);
-    }
-  };
-
-  return JSON.stringify(process(obj, 0));
 }
 interface TunableHttpServer {
   headersTimeout?: number;

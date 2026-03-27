@@ -14,8 +14,6 @@ import {
   isObject,
   isSystemError,
   isWhitespaceChar,
-  sha256Hex,
-  stableStringify,
   timingSafeEqualUtf8,
   toError,
   trimDanglingTagFragment,
@@ -140,39 +138,6 @@ describe('createErrorWithCode', () => {
     assert.equal(err.message, 'not found');
     assert.equal(err.code, 'ENOENT');
     assert.ok(err instanceof Error);
-  });
-});
-
-// ── stableStringify ────────────────────────────────────────────────
-
-describe('stableStringify', () => {
-  it('sorts object keys', () => {
-    assert.equal(
-      stableStringify({ b: 2, a: 1 }),
-      JSON.stringify({ a: 1, b: 2 })
-    );
-  });
-
-  it('handles nested objects', () => {
-    const result = stableStringify({ b: { d: 4, c: 3 }, a: 1 });
-    assert.equal(result, '{"a":1,"b":{"c":3,"d":4}}');
-  });
-
-  it('handles arrays', () => {
-    assert.equal(stableStringify([3, 1, 2]), '[3,1,2]');
-  });
-
-  it('handles primitives', () => {
-    assert.equal(stableStringify('hello'), '"hello"');
-    assert.equal(stableStringify(42), '42');
-    assert.equal(stableStringify(null), 'null');
-    assert.equal(stableStringify(true), 'true');
-  });
-
-  it('throws on circular reference', () => {
-    const obj: Record<string, unknown> = {};
-    obj.self = obj;
-    assert.throws(() => stableStringify(obj), /[Cc]ircular/);
   });
 });
 
@@ -320,24 +285,6 @@ describe('truncateToUtf8Boundary', () => {
     const result = truncateToUtf8Boundary(html, 20);
     assert.ok(result.length <= html.length);
     assert.ok(!result.includes('�'));
-  });
-});
-
-// ── sha256Hex ──────────────────────────────────────────────────────
-
-describe('sha256Hex', () => {
-  it('returns 64-char hex string for string input', () => {
-    const result = sha256Hex('test');
-    assert.equal(result.length, 64);
-    assert.ok(/^[a-f0-9]+$/.test(result));
-  });
-
-  it('is deterministic', () => {
-    assert.equal(sha256Hex('data'), sha256Hex('data'));
-  });
-
-  it('produces different hashes for different inputs', () => {
-    assert.notEqual(sha256Hex('a'), sha256Hex('b'));
   });
 });
 
