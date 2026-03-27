@@ -258,6 +258,15 @@ describe('taskManager', () => {
       });
       assert.equal(result.tasks.length, 0);
     });
+
+    it('throws for a cursor whose anchor task no longer exists', () => {
+      const cursor = encodeTaskCursor('missing-anchor-task');
+
+      assert.throws(
+        () => taskManager.listTasks({ ownerKey: 'cursor-owner', cursor }),
+        (error: unknown) => error instanceof Error
+      );
+    });
   });
 
   // ── shrinkTtlAfterDelivery ──────────────────────────────────────

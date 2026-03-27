@@ -12,7 +12,8 @@ import {
 import { transformBufferToMarkdown } from '../transform/transform.js';
 import { type MarkdownTransformResult } from '../transform/types.js';
 import { createCacheKey, get, isEnabled, set } from './cache.js';
-import { config, logDebug, logError, logWarn } from './core.js';
+import { toCacheScopeId } from './cache.js';
+import { config, getSessionId, logDebug, logError, logWarn } from './core.js';
 import {
   fetchNormalizedUrlBuffer,
   normalizeUrl,
@@ -243,7 +244,7 @@ function attemptCacheRetrieval<T>(
 ): PipelineResult<T> | null {
   if (!cacheKey) return null;
 
-  const cached = get(cacheKey);
+  const cached = get(cacheKey, { scopeId: toCacheScopeId(getSessionId()) });
   if (!cached) return null;
 
   if (!deserialize) {
@@ -314,6 +315,7 @@ function persistCacheEntry<T>(
     typeof dataRecord?.title === 'string' ? dataRecord.title : undefined;
   const metadata = {
     url: normalizedUrl,
+    scopeIds: [toCacheScopeId(getSessionId())],
     ...(title === undefined ? {} : { title }),
   };
 

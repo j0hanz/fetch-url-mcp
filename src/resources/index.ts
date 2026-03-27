@@ -19,8 +19,9 @@ import {
   keys as listCacheKeys,
   onCacheUpdate,
   parseCacheKey,
+  toCacheScopeId,
 } from '../lib/cache.js';
-import { config, logWarn } from '../lib/core.js';
+import { config, logWarn, resolveMcpSessionIdByServer } from '../lib/core.js';
 import { registerServerLifecycleCleanup } from '../lib/mcp-interop.js';
 import { buildOptionalIcons, type IconInfo } from '../lib/utils.js';
 import { isObject } from '../lib/utils.js';
@@ -46,6 +47,10 @@ const CACHE_RESOURCE_PREFIX = 'internal://cache/';
 const CACHE_NAMESPACE_PATTERN = /^[a-z0-9_-]{1,64}$/i;
 const CACHE_HASH_PATTERN = /^[a-f0-9.]{8,64}$/i;
 const MAX_COMPLETION_VALUES = 100;
+
+interface CacheEntryMetaView {
+  scopeIds: string[];
+}
 
 function normalizeCompletionPrefix(value: string): string {
   return value.trim().toLowerCase();
@@ -134,82 +139,51 @@ function toCacheResourceUri(parts: CacheResourceParts): string {
   return `${CACHE_RESOURCE_PREFIX}${namespace}/${hash}`;
 }
 
-class CompletionIndex {
-  private namespaces: string[] | null = null;
-  private hashIndex: Map<string, string[]> | null = null;
-
-  invalidate(): void {
-    this.namespaces = null;
-    this.hashIndex = null;
-  }
-
-  getNamespaces(): string[] {
-    if (!this.namespaces) {
-      const seen = new Set<string>();
-      for (const key of listCacheKeys()) {
-        const parsed = parseCacheKey(key);
-        if (parsed) seen.add(parsed.namespace);
-      }
-      this.namespaces = [...seen].sort((a, b) => a.localeCompare(b));
-    }
-    return this.namespaces;
-  }
-
-  getHashes(namespace: string | undefined): string[] {
-    if (!this.hashIndex) {
-      const index = new Map<string, Set<string>>();
-      for (const key of listCacheKeys()) {
-        const parsed = parseCacheKey(key);
-        if (!parsed) continue;
-        let set = index.get(parsed.namespace);
-        if (!set) {
-          set = new Set<string>();
-          index.set(parsed.namespace, set);
-        }
-        set.add(parsed.urlHash);
-      }
-      this.hashIndex = new Map<string, string[]>();
-      for (const [ns, set] of index) {
-        this.hashIndex.set(
-          ns,
-          [...set].sort((a, b) => a.localeCompare(b))
-        );
-      }
-    }
-
-    if (namespace) return this.hashIndex.get(namespace) ?? [];
-
-    const all: string[] = [];
-    for (const hashes of this.hashIndex.values()) {
-      all.push(...hashes);
-    }
-    return all.sort((a, b) => a.localeCompare(b));
-  }
+export function isCacheEntryVisibleToScope(
+  scopeId: string,
+  meta: CacheEntryMetaView
+): boolean {
+  return meta.scopeIds.includes(scopeId);
 }
 
-const completionIndex = new CompletionIndex();
+function getVisibleCacheEntries(scopeId: string): CacheResourceParts[] {
+  return listCacheKeys()
+    .map((key) => parseCacheKey(key))
+    .filter((parts): parts is NonNullable<typeof parts> => parts !== null)
+    .map((parts) => ({ namespace: parts.namespace, hash: parts.urlHash }))
+    .filter((parts) => {
+      const meta = getEntryMeta(`${parts.namespace}:${parts.hash}`);
+      return meta ? isCacheEntryVisibleToScope(scopeId, meta) : false;
+    });
+}
 
-function completeCacheNamespaces(value: string): string[] {
+function completeCacheNamespaces(value: string, scopeId: string): string[] {
   const normalized = normalizeCompletionPrefix(value);
-  const namespaces = completionIndex
-    .getNamespaces()
-    .filter((ns) => ns.toLowerCase().startsWith(normalized));
+  const namespaces = [
+    ...new Set(getVisibleCacheEntries(scopeId).map((entry) => entry.namespace)),
+  ].filter((ns) => ns.toLowerCase().startsWith(normalized));
   return sortAndLimitValues(namespaces);
 }
 
 function completeCacheHashes(
   value: string,
+  scopeId: string,
   context?: CompletionContext
 ): string[] {
   const normalized = normalizeCompletionPrefix(value);
   const namespace = context?.arguments?.['namespace']?.trim();
-  const hashes = completionIndex
-    .getHashes(namespace)
+  const hashes = getVisibleCacheEntries(scopeId)
+    .filter((entry) => namespace === undefined || entry.namespace === namespace)
+    .map((entry) => entry.hash)
     .filter((h) => h.toLowerCase().startsWith(normalized));
   return sortAndLimitValues(hashes);
 }
 
-function listCacheResources(): {
+function getServerCacheScopeId(server: McpServer): string {
+  return toCacheScopeId(resolveMcpSessionIdByServer(server));
+}
+
+export function listCacheResourcesForScope(scopeId: string): {
   resources: {
     uri: string;
     name: string;
@@ -219,20 +193,18 @@ function listCacheResources(): {
     annotations: { audience: ['assistant']; priority: number };
   }[];
 } {
-  const resources = listCacheKeys()
-    .map((key) => parseCacheKey(key))
-    .filter((parts): parts is NonNullable<typeof parts> => Boolean(parts))
+  const resources = getVisibleCacheEntries(scopeId)
     .map((parts) => {
       const cacheParts: CacheResourceParts = {
         namespace: parts.namespace,
-        hash: parts.urlHash,
+        hash: parts.hash,
       };
-      const cacheKey = `${parts.namespace}:${parts.urlHash}`;
+      const cacheKey = `${parts.namespace}:${parts.hash}`;
       const meta = getEntryMeta(cacheKey);
       if (!meta) return null; // expired between keys() and meta read — skip
       return {
         uri: toCacheResourceUri(cacheParts),
-        name: `${parts.namespace}:${parts.urlHash}`,
+        name: `${parts.namespace}:${parts.hash}`,
         title: meta.title ?? 'Cached Markdown',
         description: 'Cached markdown output generated by fetch-url',
         mimeType: 'text/markdown',
@@ -286,14 +258,19 @@ function registerCacheResourceNotifications(server: McpServer): void {
   });
 
   const unsubscribe = onCacheUpdate((event) => {
-    completionIndex.invalidate();
-
+    const scopeId = getServerCacheScopeId(server);
     const changedUri = toCacheResourceUri({
       namespace: event.namespace,
       hash: event.urlHash,
     });
 
-    if (server.isConnected() && subscribedResourceUris.has(changedUri)) {
+    const isVisibleToServer = event.scopeIds.includes(scopeId);
+
+    if (
+      isVisibleToServer &&
+      server.isConnected() &&
+      subscribedResourceUris.has(changedUri)
+    ) {
       void server.server
         .sendResourceUpdated({ uri: changedUri })
         .catch((error: unknown) => {
@@ -306,7 +283,7 @@ function registerCacheResourceNotifications(server: McpServer): void {
 
     if (!event.listChanged) return;
 
-    if (!server.isConnected()) return;
+    if (!server.isConnected() || !isVisibleToServer) return;
 
     try {
       server.sendResourceListChanged();
@@ -364,12 +341,20 @@ function resolveCacheResourceParts(
   );
 }
 
-function readCacheResource(
+export function readCacheResourceForScope(
   uri: URL,
-  variables: Record<string, TemplateVariableValue>
+  variables: Record<string, TemplateVariableValue>,
+  scopeId: string
 ): ReadResourceResult {
   const parts = resolveCacheResourceParts(uri, variables);
   const cacheKey = `${parts.namespace}:${parts.hash}`;
+  const meta = getEntryMeta(cacheKey);
+  if (!meta || !isCacheEntryVisibleToScope(scopeId, meta)) {
+    throw new McpError(RESOURCE_NOT_FOUND_ERROR_CODE, 'Resource not found', {
+      uri: uri.href,
+    });
+  }
+
   const entry = getCacheEntry(cacheKey);
   if (!entry) {
     throw new McpError(RESOURCE_NOT_FOUND_ERROR_CODE, 'Resource not found', {
@@ -427,10 +412,12 @@ export function registerCacheResourceTemplate(
   iconInfo?: IconInfo
 ): void {
   const template = new ResourceTemplate(CACHE_RESOURCE_TEMPLATE_URI, {
-    list: () => listCacheResources(),
+    list: () => listCacheResourcesForScope(getServerCacheScopeId(server)),
     complete: {
-      namespace: (value) => completeCacheNamespaces(value),
-      hash: (value, context) => completeCacheHashes(value, context),
+      namespace: (value) =>
+        completeCacheNamespaces(value, getServerCacheScopeId(server)),
+      hash: (value, context) =>
+        completeCacheHashes(value, getServerCacheScopeId(server), context),
     },
   });
 
@@ -449,7 +436,11 @@ export function registerCacheResourceTemplate(
       ...buildOptionalIcons(iconInfo),
     },
     (uri, variables): ReadResourceResult =>
-      readCacheResource(uri, normalizeTemplateVariables(variables))
+      readCacheResourceForScope(
+        uri,
+        normalizeTemplateVariables(variables),
+        getServerCacheScopeId(server)
+      )
   );
 
   registerCacheResourceNotifications(server);

@@ -147,20 +147,40 @@ function updateTaskAndEmitStatus(
 function buildTaskFailureState(error: unknown): {
   status: 'failed';
   statusMessage: string;
-  error: { code: number; message: string; data?: unknown };
+  result: ServerResult;
 } {
-  const statusMessage = getErrorMessage(error);
+  const mcpErrorMessage =
+    error instanceof McpError
+      ? (/^MCP error -?\d+:\s*(.*)$/s.exec(error.message)?.[1] ?? error.message)
+      : undefined;
+  const statusMessage = mcpErrorMessage ?? getErrorMessage(error);
+  const payload: Record<string, unknown> = { error: statusMessage };
+
   if (error instanceof McpError) {
+    payload['code'] = error.code;
+    if (error.data !== undefined) {
+      payload['data'] = error.data;
+    }
+
     return {
       status: 'failed',
       statusMessage,
-      error: { code: error.code, message: statusMessage, data: error.data },
+      result: {
+        content: [{ type: 'text', text: JSON.stringify(payload) }],
+        isError: true,
+      },
     };
   }
+
+  payload['code'] = ErrorCode.InternalError;
+
   return {
     status: 'failed',
     statusMessage,
-    error: { code: ErrorCode.InternalError, message: statusMessage },
+    result: {
+      content: [{ type: 'text', text: JSON.stringify(payload) }],
+      isError: true,
+    },
   };
 }
 

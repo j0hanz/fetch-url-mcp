@@ -10,6 +10,21 @@ import {
 
 const PRIMARY_HASH_LENGTH = 32;
 const VARY_HASH_LENGTH = 16;
+const STDIO_CACHE_SCOPE_ID = 'stdio';
+
+export function toCacheScopeId(sessionId?: string): string {
+  return sessionId ? `session:${sessionId}` : STDIO_CACHE_SCOPE_ID;
+}
+
+function normalizeScopeIds(scopeIds?: readonly string[]): string[] {
+  const normalized = (scopeIds ?? [STDIO_CACHE_SCOPE_ID]).filter(
+    (value): value is string => typeof value === 'string' && value.length > 0
+  );
+
+  return normalized.length > 0
+    ? [...new Set(normalized)]
+    : [STDIO_CACHE_SCOPE_ID];
+}
 
 interface CacheEntry {
   url: string;
@@ -17,6 +32,7 @@ interface CacheEntry {
   content: string;
   fetchedAt: string;
   expiresAt: string;
+  scopeIds?: string[];
 }
 interface CacheKeyParts {
   namespace: string;
@@ -27,10 +43,12 @@ interface CacheSetOptions {
 }
 interface CacheGetOptions {
   force?: boolean;
+  scopeId?: string;
 }
 interface CacheEntryMetadata {
   url: string;
   title?: string;
+  scopeIds?: string[];
 }
 interface StoredCacheEntry extends CacheEntry {
   expiresAtMs: number;
@@ -40,6 +58,7 @@ interface CacheUpdateEvent {
   namespace: string;
   urlHash: string;
   listChanged: boolean;
+  scopeIds: string[];
 }
 type CacheUpdateListener = (event: CacheUpdateEvent) => unknown;
 
@@ -149,11 +168,20 @@ class InMemoryCacheStore {
 
     const now = Date.now();
     if (this.isExpired(entry, now)) {
-      this.delete(cacheKey);
+      const removed = this.delete(cacheKey);
       // listChanged=false: lazy eviction on read is silent — only writes change
       // the list. Clients must not rely on list-changed events from reads.
-      this.notify(cacheKey, false);
+      this.notify(cacheKey, false, removed?.scopeIds);
       return undefined;
+    }
+
+    const scopeId = options?.scopeId;
+    if (scopeId && !normalizeScopeIds(entry.scopeIds).includes(scopeId)) {
+      entry.scopeIds = normalizeScopeIds([
+        ...normalizeScopeIds(entry.scopeIds),
+        scopeId,
+      ]);
+      this.notify(cacheKey, true, [scopeId]);
     }
 
     // Refresh LRU position
@@ -163,43 +191,48 @@ class InMemoryCacheStore {
     return entry;
   }
 
-  private delete(cacheKey: string): boolean {
+  private delete(cacheKey: string): StoredCacheEntry | undefined {
     const entry = this.entries.get(cacheKey);
     if (entry) {
       this.currentBytes -= entry.content.length;
       this.entries.delete(cacheKey);
-      return true;
+      return entry;
     }
-    return false;
+    return undefined;
   }
 
-  private evictOldestEntry(): boolean {
+  private evictOldestEntry(): StoredCacheEntry | undefined {
     const firstKey = this.entries.keys().next();
-    return !firstKey.done && this.delete(firstKey.value);
+    return !firstKey.done ? this.delete(firstKey.value) : undefined;
   }
 
   private ensureCapacity(
     cacheKey: string,
     entrySize: number
-  ): { ok: boolean; listChanged: boolean } {
+  ): { ok: boolean; listChanged: boolean; scopeIds: string[] } {
     if (entrySize > this.maxBytes) {
       logWarn('Cache entry exceeds max size', {
         key: cacheKey,
         size: entrySize,
         max: this.maxBytes,
       });
-      return { ok: false, listChanged: false };
+      return { ok: false, listChanged: false, scopeIds: [] };
     }
 
     let listChanged = false;
+    const scopeIds = new Set<string>();
     while (this.currentBytes + entrySize > this.maxBytes) {
-      if (this.evictOldestEntry()) {
+      const evicted = this.evictOldestEntry();
+      if (evicted) {
         listChanged = true;
+        for (const scopeId of normalizeScopeIds(evicted.scopeIds)) {
+          scopeIds.add(scopeId);
+        }
       } else {
         break;
       }
     }
-    return { ok: true, listChanged };
+    return { ok: true, listChanged, scopeIds: [...scopeIds] };
   }
 
   set(
@@ -225,7 +258,9 @@ class InMemoryCacheStore {
       return;
     }
 
-    const isUpdate = this.entries.has(cacheKey);
+    const existingEntry = this.entries.get(cacheKey);
+    const isUpdate = existingEntry !== undefined;
+    const existingScopeIds = normalizeScopeIds(existingEntry?.scopeIds);
     if (isUpdate) {
       this.delete(cacheKey);
     }
@@ -234,6 +269,10 @@ class InMemoryCacheStore {
     if (!capacity.ok) return;
 
     let listChanged = !isUpdate || capacity.listChanged;
+    const nextScopeIds = normalizeScopeIds([
+      ...existingScopeIds,
+      ...normalizeScopeIds(metadata.scopeIds),
+    ]);
 
     const entry: StoredCacheEntry = {
       url: metadata.url,
@@ -241,6 +280,7 @@ class InMemoryCacheStore {
       fetchedAt: new Date(now).toISOString(),
       expiresAt: new Date(expiresAtMs).toISOString(),
       expiresAtMs,
+      scopeIds: nextScopeIds,
       ...(metadata.title ? { title: metadata.title } : {}),
     };
 
@@ -252,14 +292,25 @@ class InMemoryCacheStore {
       listChanged = true;
     }
 
-    this.notify(cacheKey, listChanged);
+    this.notify(cacheKey, listChanged, [
+      ...new Set([...capacity.scopeIds, ...nextScopeIds]),
+    ]);
   }
 
-  private notify(cacheKey: string, listChanged: boolean): void {
+  private notify(
+    cacheKey: string,
+    listChanged: boolean,
+    scopeIds?: readonly string[]
+  ): void {
     if (this.updateEmitter.listenerCount('update') === 0) return;
     const parts = parseCacheKey(cacheKey);
     if (!parts) return;
-    this.updateEmitter.emit('update', { cacheKey, ...parts, listChanged });
+    this.updateEmitter.emit('update', {
+      cacheKey,
+      ...parts,
+      listChanged,
+      scopeIds: normalizeScopeIds(scopeIds),
+    });
   }
 
   /**
@@ -307,11 +358,14 @@ export function keys(): readonly string[] {
 }
 export function getEntryMeta(
   cacheKey: string
-): { url: string; title?: string; fetchedAt?: string } | undefined {
+):
+  | { url: string; title?: string; fetchedAt?: string; scopeIds: string[] }
+  | undefined {
   const entry = store.peek(cacheKey);
   if (!entry) return undefined;
   return {
     url: entry.url,
+    scopeIds: normalizeScopeIds(entry.scopeIds),
     ...(entry.title !== undefined ? { title: entry.title } : {}),
     ...(entry.fetchedAt ? { fetchedAt: entry.fetchedAt } : {}),
   };

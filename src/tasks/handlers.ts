@@ -190,20 +190,14 @@ export function registerTaskHandlers(
 
     try {
       if (task.status === 'failed') {
-        if (task.error) {
-          throw new McpError(
-            task.error.code,
-            task.error.message,
-            task.error.data
-          );
-        }
-
         const failedResult = (task.result ?? null) as ServerResult | null;
         const fallback: ServerResult = failedResult ?? {
           content: [
             {
               type: 'text',
-              text: task.statusMessage ?? 'Task execution failed',
+              text: JSON.stringify({
+                error: task.statusMessage ?? 'Task execution failed',
+              }),
             },
           ],
           isError: true,

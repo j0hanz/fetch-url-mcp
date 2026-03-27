@@ -342,7 +342,7 @@ class TaskManager {
 
     const anchorIndex = validTasks.findIndex((t) => t.taskId === anchorTaskId);
     if (anchorIndex === -1) {
-      return [];
+      throw new McpError(ErrorCode.InvalidParams, 'Invalid cursor');
     }
 
     return validTasks.slice(anchorIndex + 1, anchorIndex + 1 + pageSize + 1);

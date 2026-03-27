@@ -9,6 +9,12 @@ process.env.API_KEY = TEST_API_KEY;
 process.env.PORT = '0';
 
 const { startHttpServer } = await import('../dist/http/native.js');
+const {
+  createCacheKey,
+  set: setCacheEntry,
+  toCacheScopeId,
+} = await import('../dist/lib/cache.js');
+const { stringifyCachedPayload } = await import('../dist/schemas.js');
 
 if (originalApiKey === undefined) {
   delete process.env.API_KEY;
@@ -46,6 +52,69 @@ function createAuthHeaders(accept: string): HeadersInit {
     'content-type': 'application/json',
     'x-api-key': TEST_API_KEY,
   };
+}
+
+function createSessionHeaders(
+  sessionId: string,
+  requestId: number | string
+): HeadersInit {
+  return {
+    ...createAuthHeaders('application/json, text/event-stream'),
+    'mcp-protocol-version': '2025-11-25',
+    'mcp-session-id': sessionId,
+    'x-request-id': String(requestId),
+  };
+}
+
+async function parseMcpResponse<T>(response: Response): Promise<T> {
+  const body = await response.text();
+  const trimmed = body.trim();
+
+  if (trimmed.startsWith('{')) {
+    return JSON.parse(trimmed) as T;
+  }
+
+  const dataLines = trimmed
+    .split(/\r?\n/)
+    .filter((line) => line.startsWith('data:'));
+  const jsonText = dataLines
+    .map((line) => line.slice(5).trim())
+    .find((line) => line.startsWith('{'));
+
+  assert.ok(
+    jsonText,
+    `Expected JSON or SSE-framed JSON response, got: ${trimmed}`
+  );
+  return JSON.parse(jsonText) as T;
+}
+
+async function initializeSession(baseUrl: string): Promise<string> {
+  const response = await fetch(`${baseUrl}/mcp`, {
+    method: 'POST',
+    headers: {
+      ...createAuthHeaders('application/json, text/event-stream'),
+      'mcp-protocol-version': '2025-11-25',
+    },
+    body: createInitializeRequestBody(),
+  });
+
+  assert.equal(response.status, 200);
+  const sessionId = response.headers.get('mcp-session-id');
+  assert.ok(sessionId);
+
+  const initializedResponse = await fetch(`${baseUrl}/mcp`, {
+    method: 'POST',
+    headers: createSessionHeaders(sessionId, `init-${sessionId}`),
+    body: JSON.stringify({
+      jsonrpc: '2.0',
+      method: 'notifications/initialized',
+      params: {},
+    }),
+  });
+
+  assert.equal(initializedResponse.status, 202);
+
+  return sessionId;
 }
 
 describe('HTTP native gateway routing', () => {
@@ -106,5 +175,81 @@ describe('HTTP native gateway routing', () => {
       },
       id: null,
     });
+  });
+
+  it('keeps cache resources scoped to the owning MCP session', async () => {
+    const sessionA = await initializeSession(baseUrl);
+    const sessionB = await initializeSession(baseUrl);
+    const namespace = `http-cache-${Date.now()}`;
+    const cacheKeyA = createCacheKey(namespace, 'https://example.com/a');
+    const cacheKeyB = createCacheKey(namespace, 'https://example.com/b');
+
+    assert.ok(cacheKeyA);
+    assert.ok(cacheKeyB);
+
+    setCacheEntry(
+      cacheKeyA,
+      stringifyCachedPayload({ markdown: '# Session A' }),
+      {
+        url: 'https://example.com/a',
+        title: 'Session A',
+        scopeIds: [toCacheScopeId(sessionA)],
+      }
+    );
+    setCacheEntry(
+      cacheKeyB,
+      stringifyCachedPayload({ markdown: '# Session B' }),
+      {
+        url: 'https://example.com/b',
+        title: 'Session B',
+        scopeIds: [toCacheScopeId(sessionB)],
+      }
+    );
+
+    const listResponseA = await fetch(`${baseUrl}/mcp`, {
+      method: 'POST',
+      headers: createSessionHeaders(sessionA, 2),
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id: 2,
+        method: 'resources/list',
+        params: {},
+      }),
+    });
+    const listPayloadA = (await parseMcpResponse(listResponseA)) as {
+      result?: { resources?: Array<{ uri: string }> };
+    };
+
+    assert.equal(listResponseA.status, 200);
+    const urisA = (listPayloadA.result?.resources ?? []).map(
+      (resource) => resource.uri
+    );
+    assert.ok(
+      urisA.includes(`internal://cache/${namespace}/${cacheKeyA.split(':')[1]}`)
+    );
+    assert.ok(
+      !urisA.includes(
+        `internal://cache/${namespace}/${cacheKeyB.split(':')[1]}`
+      )
+    );
+
+    const readResponseB = await fetch(`${baseUrl}/mcp`, {
+      method: 'POST',
+      headers: createSessionHeaders(sessionB, 3),
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id: 3,
+        method: 'resources/read',
+        params: {
+          uri: `internal://cache/${namespace}/${cacheKeyA.split(':')[1]}`,
+        },
+      }),
+    });
+    const readPayloadB = (await parseMcpResponse(readResponseB)) as {
+      error?: { code?: number };
+    };
+
+    assert.equal(readResponseB.status, 200);
+    assert.equal(readPayloadB.error?.code, -32002);
   });
 });
