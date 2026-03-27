@@ -106,17 +106,18 @@ export const fetchUrlInputSchema = z.strictObject(
 );
 
 export const fetchUrlOutputSchema = z.strictObject({
-  url: z.httpUrl().max(config.constants.maxUrlLength).describe('Fetched URL.'),
+  url: z
+    .httpUrl()
+    .max(config.constants.maxUrlLength)
+    .describe('Normalized requested URL after validation.'),
   inputUrl: z
     .httpUrl()
     .max(config.constants.maxUrlLength)
-    .optional()
     .describe('Original requested URL.'),
   resolvedUrl: z
     .httpUrl()
     .max(config.constants.maxUrlLength)
-    .optional()
-    .describe('Final URL after raw-content transformations.'),
+    .describe('Resolved fetch URL after raw-content transformations.'),
   finalUrl: z
     .httpUrl()
     .max(config.constants.maxUrlLength)
@@ -129,16 +130,13 @@ export const fetchUrlOutputSchema = z.strictObject({
   markdown: (config.constants.maxInlineContentChars > 0
     ? z.string().max(config.constants.maxInlineContentChars)
     : z.string()
-  )
-    .optional()
-    .describe('Extracted Markdown. May be truncated (check truncated field).'),
-  fetchedAt: z.iso.datetime().optional().describe('ISO timestamp of fetch.'),
+  ).describe('Extracted Markdown. May be truncated (check truncated field).'),
+  fetchedAt: z.iso.datetime().describe('ISO timestamp of fetch.'),
   contentSize: z
     .number()
     .int()
     .min(0)
     .max(config.constants.maxHtmlBytes * 4)
-    .optional()
     .describe('Markdown fragment size before final inline truncation.'),
   truncated: z.boolean().optional().describe('True if markdown was truncated.'),
 });

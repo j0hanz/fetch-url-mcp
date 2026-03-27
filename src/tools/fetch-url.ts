@@ -22,6 +22,7 @@ import {
   createProgressReporter,
   handleToolError,
   type ProgressReporter,
+  registerToolPresentation,
   type ToolHandlerExtra,
 } from '../lib/mcp-interop.js';
 import {
@@ -151,10 +152,18 @@ function validateStructuredContent(
   );
 }
 
-function buildContentBlocks(
+export function buildFetchUrlContentBlocks(
   structuredContent: Record<string, unknown>
 ): ContentBlock[] {
-  return [{ type: 'text', text: JSON.stringify(structuredContent) }];
+  const markdown =
+    typeof structuredContent['markdown'] === 'string'
+      ? structuredContent['markdown']
+      : '';
+
+  return [
+    { type: 'text', text: markdown },
+    { type: 'text', text: JSON.stringify(structuredContent) },
+  ];
 }
 
 function buildResponse(
@@ -169,7 +178,7 @@ function buildResponse(
   );
   validateStructuredContent(structuredContent, inputUrl);
   return {
-    content: buildContentBlocks(structuredContent),
+    content: buildFetchUrlContentBlocks(structuredContent),
     structuredContent,
   };
 }
@@ -426,14 +435,14 @@ function createTaskCapableDescriptor(): TaskCapableToolDescriptor<FetchUrlInput>
 
 export function registerTools(server: McpServer): ToolRegistrationControls {
   if (!config.tools.enabled.includes(FETCH_URL_TOOL_NAME)) {
-    unregisterTaskCapableTool(FETCH_URL_TOOL_NAME);
+    unregisterTaskCapableTool(server, FETCH_URL_TOOL_NAME);
     return {
       setTaskSupport: () => {},
     };
   }
 
   const descriptor = createTaskCapableDescriptor();
-  registerTaskCapableTool(descriptor);
+  registerTaskCapableTool(server, descriptor);
 
   const registeredTool = server.registerTool(
     TOOL_DEFINITION.name,
@@ -451,9 +460,12 @@ export function registerTools(server: McpServer): ToolRegistrationControls {
     } & Record<string, unknown>,
     withRequestContextIfMissing(TOOL_DEFINITION.handler)
   );
+  registerToolPresentation(server, TOOL_DEFINITION.name, {
+    icons: [TOOL_ICON],
+  });
 
   const updateTaskSupport = (support: TaskCapableToolSupport): void => {
-    setTaskCapableToolSupport(FETCH_URL_TOOL_NAME, support);
+    setTaskCapableToolSupport(server, FETCH_URL_TOOL_NAME, support);
     registeredTool.execution = { taskSupport: support };
   };
 

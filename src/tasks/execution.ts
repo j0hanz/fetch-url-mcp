@@ -12,7 +12,10 @@ import {
   logWarn,
   runWithRequestContext,
 } from '../lib/core.js';
-import type { ProgressNotification } from '../lib/mcp-interop.js';
+import {
+  createToolErrorResponse,
+  type ProgressNotification,
+} from '../lib/mcp-interop.js';
 import { getErrorMessage } from '../lib/utils.js';
 import { isObject } from '../lib/utils.js';
 
@@ -169,33 +172,24 @@ function buildTaskFailureState(error: unknown): {
       ? (/^MCP error -?\d+:\s*(.*)$/s.exec(error.message)?.[1] ?? error.message)
       : undefined;
   const statusMessage = mcpErrorMessage ?? getErrorMessage(error);
-  const payload: Record<string, unknown> = { error: statusMessage };
 
   if (error instanceof McpError) {
-    payload['code'] = error.code;
-    if (error.data !== undefined) {
-      payload['data'] = error.data;
-    }
-
     return {
       status: 'failed',
       statusMessage,
-      result: {
-        content: [{ type: 'text', text: JSON.stringify(payload) }],
-        isError: true,
-      },
+      result: createToolErrorResponse(statusMessage, 'task://execution', {
+        code: error.code,
+        ...(error.data !== undefined ? { data: error.data } : {}),
+      }),
     };
   }
-
-  payload['code'] = ErrorCode.InternalError;
 
   return {
     status: 'failed',
     statusMessage,
-    result: {
-      content: [{ type: 'text', text: JSON.stringify(payload) }],
-      isError: true,
-    },
+    result: createToolErrorResponse(statusMessage, 'task://execution', {
+      code: ErrorCode.InternalError,
+    }),
   };
 }
 
@@ -306,7 +300,7 @@ export async function handleToolCallRequest(
   const { params } = request;
 
   // Validate the tool name first so an unknown tool always produces MethodNotFound
-  const tool = getTaskCapableTool(params.name);
+  const tool = getTaskCapableTool(server, params.name);
   if (!tool) {
     throw new McpError(
       ErrorCode.MethodNotFound,
@@ -315,7 +309,7 @@ export async function handleToolCallRequest(
   }
 
   if (params.task) {
-    if (getTaskCapableToolSupport(params.name) === 'forbidden') {
+    if (getTaskCapableToolSupport(server, params.name) === 'forbidden') {
       throw new McpError(
         ErrorCode.MethodNotFound,
         `Task augmentation is forbidden for tool '${params.name}'`
@@ -354,7 +348,7 @@ export async function handleToolCallRequest(
     };
   }
 
-  if (getTaskCapableToolSupport(params.name) === 'required') {
+  if (getTaskCapableToolSupport(server, params.name) === 'required') {
     throw new McpError(
       ErrorCode.MethodNotFound,
       `Task augmentation is required for tool '${params.name}'`

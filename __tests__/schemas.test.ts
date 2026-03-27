@@ -3,6 +3,7 @@ import { describe, it } from 'node:test';
 
 import {
   fetchUrlInputSchema,
+  fetchUrlOutputSchema,
   normalizeExtractedMetadata,
   normalizePageTitle,
 } from '../src/schemas.js';
@@ -95,5 +96,29 @@ describe('fetchUrlInputSchema', () => {
     });
 
     assert.equal(result.url, 'https://example.com');
+  });
+});
+
+describe('fetchUrlOutputSchema', () => {
+  it('accepts the full success payload shape returned by fetch-url', () => {
+    const result = fetchUrlOutputSchema.parse({
+      url: 'https://example.com',
+      inputUrl: 'https://example.com',
+      resolvedUrl: 'https://example.com',
+      markdown: '# Example',
+      fetchedAt: '2026-03-27T12:00:00.000Z',
+      contentSize: 9,
+    });
+
+    assert.equal(result.markdown, '# Example');
+    assert.equal(result.contentSize, 9);
+  });
+
+  it('requires markdown, fetchedAt, contentSize, inputUrl, and resolvedUrl', () => {
+    const result = fetchUrlOutputSchema.safeParse({
+      url: 'https://example.com',
+    });
+
+    assert.equal(result.success, false);
   });
 });

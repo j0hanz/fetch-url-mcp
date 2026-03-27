@@ -1,7 +1,11 @@
 import { setTimeout as setTimeoutPromise } from 'node:timers/promises';
 
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { type CallToolResult } from '@modelcontextprotocol/sdk/types.js';
+import {
+  type CallToolResult,
+  ListToolsRequestSchema,
+  ListToolsResultSchema,
+} from '@modelcontextprotocol/sdk/types.js';
 import { z } from 'zod';
 
 import { logError, logWarn } from './core.js';
@@ -133,19 +137,21 @@ export function createToolErrorResponse(
   message: string,
   url: string,
   extra?: {
-    code?: string;
+    code?: string | number;
     statusCode?: number;
     details?: Record<string, unknown>;
+    data?: unknown;
   }
 ): ToolErrorResponse {
   const errorContent: Record<string, unknown> = {
     error: message,
-    ...(extra?.code ? { code: extra.code } : {}),
+    ...(extra?.code !== undefined ? { code: extra.code } : {}),
     url,
     ...(extra?.statusCode !== undefined
       ? { statusCode: extra.statusCode }
       : {}),
     ...(extra?.details ? { details: extra.details } : {}),
+    ...(extra?.data !== undefined ? { data: extra.data } : {}),
   };
 
   return {
@@ -199,6 +205,9 @@ export function handleToolError(
 
 type CleanupCallback = () => void;
 type RequestHandlerFn = (request: unknown, extra?: unknown) => Promise<unknown>;
+interface ToolPresentation {
+  icons?: { src: string; mimeType?: string; sizes?: string[] }[];
+}
 
 function getNestedRecord(
   value: Record<PropertyKey, unknown>,
@@ -276,6 +285,14 @@ export function getSdkCallToolHandler(
   return typeof handler === 'function' ? (handler as RequestHandlerFn) : null;
 }
 
+function getSdkListToolsHandler(server: McpServer): RequestHandlerFn | null {
+  const maybeHandlers: unknown = Reflect.get(server.server, '_requestHandlers');
+  if (!(maybeHandlers instanceof Map)) return null;
+
+  const handler: unknown = maybeHandlers.get('tools/list');
+  return typeof handler === 'function' ? (handler as RequestHandlerFn) : null;
+}
+
 /**
  * Patches the SDK's internal capabilities to enable/disable task-mode tool calls.
  *
@@ -301,6 +318,70 @@ export function setTaskToolCallCapability(
   }
 
   delete requests['tools'];
+}
+
+const toolPresentationByServer = new WeakMap<
+  McpServer,
+  Map<string, ToolPresentation>
+>();
+const patchedToolListServers = new WeakSet<McpServer>();
+
+function getServerToolPresentationMap(
+  server: McpServer
+): Map<string, ToolPresentation> {
+  let toolMap = toolPresentationByServer.get(server);
+  if (toolMap) return toolMap;
+
+  toolMap = new Map<string, ToolPresentation>();
+  toolPresentationByServer.set(server, toolMap);
+  registerServerLifecycleCleanup(server, () => {
+    toolPresentationByServer.delete(server);
+  });
+  return toolMap;
+}
+
+function patchSdkToolListHandler(server: McpServer): void {
+  if (patchedToolListServers.has(server)) return;
+
+  const sdkListToolsHandler = getSdkListToolsHandler(server);
+  if (!sdkListToolsHandler) return;
+
+  patchedToolListServers.add(server);
+  server.server.setRequestHandler(
+    ListToolsRequestSchema,
+    async (request, extra): Promise<z.infer<typeof ListToolsResultSchema>> => {
+      const parsed = ListToolsResultSchema.parse(
+        await sdkListToolsHandler(request, extra)
+      );
+
+      const presentations = getServerToolPresentationMap(server);
+      return {
+        ...parsed,
+        tools: parsed.tools.map((tool) => {
+          if (typeof tool.name !== 'string') {
+            return tool;
+          }
+
+          const presentation = presentations.get(tool.name);
+          if (!presentation?.icons?.length) return tool;
+
+          return {
+            ...tool,
+            icons: presentation.icons,
+          };
+        }),
+      };
+    }
+  );
+}
+
+export function registerToolPresentation(
+  server: McpServer,
+  name: string,
+  presentation: ToolPresentation
+): void {
+  getServerToolPresentationMap(server).set(name, presentation);
+  patchSdkToolListHandler(server);
 }
 
 /* =================================================================================================

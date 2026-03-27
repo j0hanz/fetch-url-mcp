@@ -100,7 +100,7 @@ describe('progress notifications', () => {
     const server = createTaskTestServer();
     const toolName = `inline-progress-tool-${randomUUID()}`;
 
-    registerTaskCapableTool({
+    registerTaskCapableTool(server, {
       name: toolName,
       parseArguments: () => ({}),
       execute: async (_args, extra) => {
@@ -153,7 +153,7 @@ describe('progress notifications', () => {
         )
       );
     } finally {
-      unregisterTaskCapableTool(toolName);
+      unregisterTaskCapableTool(server, toolName);
       await server.close();
     }
   });
@@ -162,7 +162,7 @@ describe('progress notifications', () => {
     const server = createTaskTestServer();
     const toolName = `task-progress-tool-${randomUUID()}`;
 
-    registerTaskCapableTool({
+    registerTaskCapableTool(server, {
       name: toolName,
       parseArguments: () => ({}),
       execute: async (_args, extra) => {
@@ -237,7 +237,7 @@ describe('progress notifications', () => {
         { taskId: createTask.task.taskId }
       );
     } finally {
-      unregisterTaskCapableTool(toolName);
+      unregisterTaskCapableTool(server, toolName);
       await server.close();
     }
   });
@@ -249,7 +249,7 @@ describe('task progress state', () => {
     const toolName = `task-progress-state-tool-${randomUUID()}`;
     const gate = createDeferred();
 
-    registerTaskCapableTool({
+    registerTaskCapableTool(server, {
       name: toolName,
       parseArguments: () => ({}),
       execute: async (_args, extra) => {
@@ -299,7 +299,7 @@ describe('task progress state', () => {
         undefined
       );
     } finally {
-      unregisterTaskCapableTool(toolName);
+      unregisterTaskCapableTool(server, toolName);
       await server.close();
     }
   });
@@ -310,7 +310,7 @@ describe('task result failure normalization', () => {
     const server = createTaskTestServer();
     const toolName = `failing-task-tool-${randomUUID()}`;
 
-    registerTaskCapableTool({
+    registerTaskCapableTool(server, {
       name: toolName,
       parseArguments: () => ({}),
       execute: async () => {
@@ -346,7 +346,7 @@ describe('task result failure normalization', () => {
         taskId: taskResult.task.taskId,
       });
     } finally {
-      unregisterTaskCapableTool(toolName);
+      unregisterTaskCapableTool(server, toolName);
       await server.close();
     }
   });
@@ -355,7 +355,7 @@ describe('task result failure normalization', () => {
     const server = createTaskTestServer();
     const toolName = `mcp-error-task-tool-${randomUUID()}`;
 
-    registerTaskCapableTool({
+    registerTaskCapableTool(server, {
       name: toolName,
       parseArguments: () => ({}),
       execute: async () => {
@@ -394,7 +394,7 @@ describe('task result failure normalization', () => {
       assert.equal(payload['error'], 'broken');
       assert.equal(payload['code'], ErrorCode.InternalError);
     } finally {
-      unregisterTaskCapableTool(toolName);
+      unregisterTaskCapableTool(server, toolName);
       await server.close();
     }
   });
@@ -405,7 +405,7 @@ describe('task result for cancelled task', () => {
     const server = createTaskTestServer();
     const toolName = `slow-task-tool-${randomUUID()}`;
 
-    registerTaskCapableTool({
+    registerTaskCapableTool(server, {
       name: toolName,
       parseArguments: () => ({}),
       execute: () =>
@@ -454,7 +454,7 @@ describe('task result for cancelled task', () => {
         taskId: taskResult.task.taskId,
       });
     } finally {
-      unregisterTaskCapableTool(toolName);
+      unregisterTaskCapableTool(server, toolName);
       await server.close();
     }
   });
@@ -465,7 +465,7 @@ describe('required task support enforcement', () => {
     const server = createTaskTestServer();
     const toolName = `required-task-tool-${randomUUID()}`;
 
-    registerTaskCapableTool({
+    registerTaskCapableTool(server, {
       name: toolName,
       parseArguments: () => ({}),
       execute: async () => ({
@@ -491,7 +491,7 @@ describe('required task support enforcement', () => {
           err instanceof McpError && err.code === ErrorCode.MethodNotFound
       );
     } finally {
-      unregisterTaskCapableTool(toolName);
+      unregisterTaskCapableTool(server, toolName);
       await server.close();
     }
   });
@@ -502,7 +502,7 @@ describe('model-immediate-response in CreateTaskResult', () => {
     const server = createTaskTestServer();
     const toolName = `immediate-response-tool-${randomUUID()}`;
 
-    registerTaskCapableTool({
+    registerTaskCapableTool(server, {
       name: toolName,
       parseArguments: () => ({}),
       execute: async () => ({
@@ -533,7 +533,7 @@ describe('model-immediate-response in CreateTaskResult', () => {
         'Fetching is in progress, please wait.'
       );
     } finally {
-      unregisterTaskCapableTool(toolName);
+      unregisterTaskCapableTool(server, toolName);
       await server.close();
     }
   });
@@ -542,7 +542,7 @@ describe('model-immediate-response in CreateTaskResult', () => {
     const server = createTaskTestServer();
     const toolName = `no-immediate-response-tool-${randomUUID()}`;
 
-    registerTaskCapableTool({
+    registerTaskCapableTool(server, {
       name: toolName,
       parseArguments: () => ({}),
       execute: async () => ({
@@ -569,7 +569,7 @@ describe('model-immediate-response in CreateTaskResult', () => {
       assert.ok(result.task.taskId);
       assert.equal(result._meta, undefined);
     } finally {
-      unregisterTaskCapableTool(toolName);
+      unregisterTaskCapableTool(server, toolName);
       await server.close();
     }
   });

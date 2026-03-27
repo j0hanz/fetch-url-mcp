@@ -1013,6 +1013,10 @@ class HttpDispatcher {
       if (isMcpRoute(ctx.url.pathname)) {
         const handled = await this.handleMcpRoutes(authCtx);
         if (handled) return;
+
+        ctx.res.setHeader('Allow', 'DELETE, GET, OPTIONS, POST');
+        sendJson(ctx.res, 405, { error: 'Method Not Allowed' });
+        return;
       }
 
       sendJson(ctx.res, 404, { error: 'Not Found' });

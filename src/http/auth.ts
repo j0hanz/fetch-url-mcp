@@ -291,6 +291,12 @@ export function ensureMcpProtocolVersion(
   const path = URL.parse(req.url ?? '', 'http://localhost')?.pathname;
 
   if (!version) {
+    // Allow missing version header only if no specific version is expected,
+    // to avoid breaking older clients that don't send the header yet.
+    if (options?.expectedVersion) {
+      return true;
+    }
+
     logWarn(
       'MCP protocol version rejected',
       { reason: 'missing_header', path },

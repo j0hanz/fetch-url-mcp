@@ -93,6 +93,16 @@ describe('SDK compatibility guard', () => {
       );
     });
 
+    it('contains a tools/list handler after tool registration', () => {
+      const handlers = getPrivateHandlerMap(server);
+      const handler = handlers.get('tools/list');
+      assert.equal(
+        typeof handler,
+        'function',
+        'tools/list handler should be a function'
+      );
+    });
+
     it('getSdkCallToolHandler returns the handler function', () => {
       const handler = getSdkCallToolHandler(server);
       assert.equal(

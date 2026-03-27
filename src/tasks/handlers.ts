@@ -9,6 +9,7 @@ import { z } from 'zod';
 
 import { logWarn, runWithRequestContext } from '../lib/core.js';
 import { getSdkCallToolHandler } from '../lib/mcp-interop.js';
+import { createToolErrorResponse } from '../lib/mcp-interop.js';
 
 import {
   parseExtendedCallToolRequest,
@@ -106,7 +107,7 @@ export function registerTaskHandlers(
   options?: TaskHandlerRegistrationOptions
 ): TaskHandlerRegistrationResult {
   const sdkCallToolHandler = getSdkCallToolHandler(server);
-  const taskCapableToolsRegistered = hasRegisteredTaskCapableTools();
+  const taskCapableToolsRegistered = hasRegisteredTaskCapableTools(server);
   const requireInterception = options?.requireInterception ?? true;
 
   if (!sdkCallToolHandler) {
@@ -146,7 +147,7 @@ export function registerTaskHandlers(
 
             // Only intercept task-capable tools managed by the local task registry.
             // Delegate all other tools to the SDK handler to avoid shadowing future tools.
-            if (!hasTaskCapableTool(toolName)) {
+            if (!hasTaskCapableTool(server, toolName)) {
               return sdkCallToolHandler(
                 request,
                 extra
@@ -190,33 +191,22 @@ export function registerTaskHandlers(
     try {
       if (task.status === 'failed') {
         const failedResult = (task.result ?? null) as ServerResult | null;
-        const fallback: ServerResult = failedResult ?? {
-          content: [
-            {
-              type: 'text',
-              text: JSON.stringify({
-                error: task.statusMessage ?? 'Task execution failed',
-              }),
-            },
-          ],
-          isError: true,
-        };
+        const fallback: ServerResult =
+          failedResult ??
+          createToolErrorResponse(
+            task.statusMessage ?? 'Task execution failed',
+            'task://result'
+          );
 
         return withRelatedTaskMeta(fallback, task.taskId);
       }
 
       if (task.status === 'cancelled') {
-        const cancelledResult: ServerResult = {
-          content: [
-            {
-              type: 'text',
-              text: JSON.stringify({
-                error: task.statusMessage ?? 'Task was cancelled',
-              }),
-            },
-          ],
-          isError: true,
-        };
+        const cancelledResult: ServerResult = createToolErrorResponse(
+          task.statusMessage ?? 'Task was cancelled',
+          'task://result',
+          { code: 'ABORTED' }
+        );
 
         return withRelatedTaskMeta(cancelledResult, task.taskId);
       }
