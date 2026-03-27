@@ -233,6 +233,7 @@ async function runTaskToolExecution(params: {
     },
     async () => {
       const controller = attachAbortController(taskId);
+      const progressState = { closed: false };
 
       try {
         logInfo('Task execution started', { taskId, tool: tool.name }, 'tasks');
@@ -242,6 +243,7 @@ async function runTaskToolExecution(params: {
           signal: controller.signal,
           requestId: taskId,
           _meta: relatedMeta,
+          progressState,
           canReportProgress: () =>
             taskManager.getTask(taskId)?.status === 'working',
           ...compact({ sendNotification }),
@@ -289,6 +291,7 @@ async function runTaskToolExecution(params: {
         );
         updateTaskAndEmitStatus(server, taskId, buildTaskFailureState(error));
       } finally {
+        progressState.closed = true;
         taskAbortControllers.delete(taskId);
       }
     }
@@ -359,5 +362,14 @@ export async function handleToolCallRequest(
   }
 
   const args = tool.parseArguments(params.arguments);
-  return tool.execute(args, buildToolHandlerExtra(context, params._meta));
+  const progressState = { closed: false };
+
+  try {
+    return await tool.execute(args, {
+      ...buildToolHandlerExtra(context, params._meta),
+      progressState,
+    });
+  } finally {
+    progressState.closed = true;
+  }
 }

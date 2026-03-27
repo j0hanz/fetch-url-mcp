@@ -158,6 +158,63 @@ describe('progress notifications', () => {
     }
   });
 
+  it('stops inline notifications after the request lifetime ends', async () => {
+    const server = createTaskTestServer();
+    const toolName = `inline-progress-lifetime-tool-${randomUUID()}`;
+
+    registerTaskCapableTool(server, {
+      name: toolName,
+      parseArguments: () => ({}),
+      execute: async (_args, extra) => {
+        const reporter = createProgressReporter(extra);
+        reporter.report(1, 'Done', 1);
+        setTimeout(() => {
+          reporter.report(2, 'Too late', 2);
+        }, 0);
+        return {
+          content: [{ type: 'text' as const, text: 'ok' }],
+        };
+      },
+      taskSupport: 'optional',
+    });
+
+    const notifications: ProgressNotification[] = [];
+
+    try {
+      registerTaskHandlers(server, { requireInterception: false });
+
+      await handleToolCallRequest(
+        server,
+        {
+          method: 'tools/call',
+          params: {
+            name: toolName,
+            arguments: {},
+            _meta: { progressToken: 'tok-inline-lifetime' },
+          },
+        },
+        {
+          ownerKey: 'default',
+          sendNotification: async (notification) => {
+            notifications.push(notification);
+          },
+        }
+      );
+
+      await setTimeoutPromise(250);
+
+      assert.equal(notifications.length, 1);
+      assert.equal(notifications[0]?.params.progress, 1);
+      assert.equal(
+        notifications[0]?.params.progressToken,
+        'tok-inline-lifetime'
+      );
+    } finally {
+      unregisterTaskCapableTool(server, toolName);
+      await server.close();
+    }
+  });
+
   it('reuses the same task progress token and stops notifying after terminal completion', async () => {
     const server = createTaskTestServer();
     const toolName = `task-progress-tool-${randomUUID()}`;
@@ -235,6 +292,76 @@ describe('progress notifications', () => {
           'io.modelcontextprotocol/related-task'
         ],
         { taskId: createTask.task.taskId }
+      );
+    } finally {
+      unregisterTaskCapableTool(server, toolName);
+      await server.close();
+    }
+  });
+
+  it('accepts numeric progress tokens and floating-point progress without closing early at total', async () => {
+    const server = createTaskTestServer();
+    const toolName = `task-progress-float-tool-${randomUUID()}`;
+
+    registerTaskCapableTool(server, {
+      name: toolName,
+      parseArguments: () => ({}),
+      execute: async (_args, extra) => {
+        const reporter = createProgressReporter(extra);
+        reporter.report(0.5, 'Halfway through phase one', 0.5);
+        await setTimeoutPromise(125);
+        reporter.report(1.5, 'Still running after the first total', 1.5);
+        return {
+          content: [{ type: 'text' as const, text: 'done' }],
+        };
+      },
+      taskSupport: 'optional',
+    });
+
+    const notifications: ProgressNotification[] = [];
+
+    try {
+      registerTaskHandlers(server, { requireInterception: false });
+
+      const createTask = (await handleToolCallRequest(
+        server,
+        {
+          method: 'tools/call',
+          params: {
+            name: toolName,
+            arguments: {},
+            task: { ttl: 5_000 },
+            _meta: { progressToken: 7 },
+          },
+        },
+        {
+          ownerKey: 'default',
+          sendNotification: async (notification) => {
+            notifications.push(notification);
+          },
+        }
+      )) as { task: { taskId: string } };
+
+      await getTaskResultHandler(server)(
+        { method: 'tasks/result', params: { taskId: createTask.task.taskId } },
+        undefined
+      );
+
+      await setTimeoutPromise(250);
+
+      assert.equal(notifications.length, 2);
+      assert.deepEqual(
+        notifications.map((notification) => notification.params.progress),
+        [0.5, 1.5]
+      );
+      assert.deepEqual(
+        notifications.map((notification) => notification.params.total),
+        [0.5, 1.5]
+      );
+      assert.ok(
+        notifications.every(
+          (notification) => notification.params.progressToken === 7
+        )
       );
     } finally {
       unregisterTaskCapableTool(server, toolName);

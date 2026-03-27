@@ -67,6 +67,18 @@ describe('parseExtendedCallToolRequest', () => {
     assert.equal(parsed.params._meta?.progressToken, 'tok-1');
   });
 
+  it('accepts numeric _meta progressToken values', () => {
+    const request = {
+      method: 'tools/call',
+      params: {
+        name: 'fetch-url',
+        _meta: { progressToken: 42 },
+      },
+    };
+    const parsed = parseExtendedCallToolRequest(request);
+    assert.equal(parsed.params._meta?.progressToken, 42);
+  });
+
   it('accepts _meta with related-task', () => {
     const request = {
       method: 'tools/call',

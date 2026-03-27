@@ -414,6 +414,7 @@ export interface ToolHandlerExtra {
   sessionId?: unknown;
   requestInfo?: unknown;
   _meta?: RequestMeta;
+  progressState?: { closed: boolean };
   sendNotification?: (notification: ProgressNotification) => Promise<void>;
   onProgress?: (progress: number, message: string, total?: number) => void;
   canReportProgress?: () => boolean;
@@ -436,7 +437,6 @@ function resolveRelatedTaskMeta(
 }
 
 class ToolProgressReporter implements ProgressReporter {
-  private isTerminal = false;
   private lastProgress = -1;
   private lastMessage?: string;
   private lastTotal: number | undefined;
@@ -453,6 +453,7 @@ class ToolProgressReporter implements ProgressReporter {
         | undefined;
       canReport: (() => boolean) | undefined;
     },
+    private readonly progressState?: { closed: boolean },
     private readonly taskMeta?: { taskId: string }
   ) {}
 
@@ -471,6 +472,7 @@ class ToolProgressReporter implements ProgressReporter {
         onProgress,
         canReport: extra.canReportProgress,
       },
+      extra.progressState,
       resolveRelatedTaskMeta(extra._meta)
     );
   }
@@ -482,7 +484,12 @@ class ToolProgressReporter implements ProgressReporter {
    * rather than expecting every step to fire sequentially.
    */
   report(progress: number, message: string, total?: number): void {
-    if (this.isTerminal || this.handlers.canReport?.() === false) return;
+    if (
+      this.progressState?.closed === true ||
+      this.handlers.canReport?.() === false
+    ) {
+      return;
+    }
 
     const effectiveProgress = Math.max(progress, this.lastProgress);
     const effectiveTotal =
@@ -494,10 +501,6 @@ class ToolProgressReporter implements ProgressReporter {
     this.lastProgress = effectiveProgress;
     this.lastMessage = message;
     this.lastTotal = effectiveTotal;
-
-    if (effectiveTotal !== undefined && effectiveProgress >= effectiveTotal) {
-      this.isTerminal = true;
-    }
 
     if (isIncreasing || isMessageChanged || isTotalChanged) {
       try {

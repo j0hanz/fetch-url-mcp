@@ -353,8 +353,9 @@ async function executeFetch(
       },
       'fetch-url'
     );
+    const response = buildResponse(pipeline, inlineResult, url);
     progressPlan.reportSuccess(inlineResult.contentSize);
-    return buildResponse(pipeline, inlineResult, url);
+    return response;
   } catch (error) {
     progressPlan.reportFailure(isAbortError(error));
     throw error;

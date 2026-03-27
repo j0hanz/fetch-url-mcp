@@ -538,6 +538,23 @@ Takes a URL and returns Markdown. Read-only — no JavaScript execution. Support
 
 You get text content back by default. If output validation passes, the response also includes `structuredContent` with typed fields: `url`, `resolvedUrl`, `finalUrl`, `title`, `metadata`, `markdown`, `fetchedAt`, `contentSize`, and `truncated`. A `true` value for `truncated` means the content hit a server-side size limit.
 
+To opt into progress updates, include `_meta.progressToken` in the tool call. The token may be a string or number. The server may then emit monotonic `notifications/progress` updates, and task mode reuses the same token until the task reaches a terminal state.
+
+```json
+{
+  "method": "tools/call",
+  "params": {
+    "name": "fetch-url",
+    "arguments": {
+      "url": "https://example.com/docs"
+    },
+    "_meta": {
+      "progressToken": 7
+    }
+  }
+}
+```
+
 ```text
 1. [Client] -- tools/call {name: "fetch-url", arguments} --> [Server]
 2. [Server] -- dispatch("fetch-url") --> [src/tools/fetch-url.ts]
@@ -560,14 +577,14 @@ You get text content back by default. If output validation passes, the response 
 
 ## MCP Capabilities
 
-| Capability                      | Status    | Notes                                                                                                                                                                        |
-| ------------------------------- | --------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| completions                     | confirmed | Advertised in `createServerCapabilities()`.                                                                                                                                  |
-| logging                         | confirmed | Advertised in `createServerCapabilities()` and handled through `SetLevelRequestSchema`.                                                                                      |
-| resources subscribe/listChanged | confirmed | Advertised in `createServerCapabilities()`.                                                                                                                                  |
-| prompts                         | confirmed | `get-help` is registered during server startup.                                                                                                                              |
-| tasks                           | confirmed | Advertised in `createServerCapabilities()` and backed by registered task handlers plus optional tool task support.                                                           |
-| progress notifications          | confirmed | Tool execution reports monotonic `notifications/progress` updates during fetch and transform stages, and task-mode progress reuses the caller's token for the task lifetime. |
+| Capability                      | Status    | Notes                                                                                                                                                                                                          |
+| ------------------------------- | --------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| completions                     | confirmed | Advertised in `createServerCapabilities()`.                                                                                                                                                                    |
+| logging                         | confirmed | Advertised in `createServerCapabilities()` and handled through `SetLevelRequestSchema`.                                                                                                                        |
+| resources subscribe/listChanged | confirmed | Advertised in `createServerCapabilities()`.                                                                                                                                                                    |
+| prompts                         | confirmed | `get-help` is registered during server startup.                                                                                                                                                                |
+| tasks                           | confirmed | Advertised in `createServerCapabilities()` and backed by registered task handlers plus optional tool task support.                                                                                             |
+| progress notifications          | confirmed | Opt-in via `_meta.progressToken`. Tool execution reports monotonic `notifications/progress` updates during fetch and transform stages, and task-mode progress reuses the caller's token for the task lifetime. |
 
 ### Tool Annotations
 
