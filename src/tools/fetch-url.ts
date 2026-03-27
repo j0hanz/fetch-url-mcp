@@ -146,11 +146,9 @@ function validateStructuredContent(
     },
     'fetch-url'
   );
-  throw createMcpError(
-    ErrorCode.InternalError,
-    'fetch-url produced output that does not match its declared outputSchema',
-    { issues }
-  );
+  throw createMcpError(ErrorCode.InternalError, 'Output validation failed', {
+    issues,
+  });
 }
 
 export function buildFetchUrlContentBlocks(
@@ -298,7 +296,7 @@ function buildToolAbortSignal(extraSignal?: AbortSignal): AbortSignal {
   if (!signal) {
     throw createMcpError(
       ErrorCode.InternalError,
-      'Tool timeout signal could not be created'
+      'Failed to create timeout signal'
     );
   }
   return signal;

@@ -101,14 +101,14 @@ function resolveNextTaskStatus(
   if (!TASK_STATUS_VALUES.has(nextStatus)) {
     throw createMcpError(
       ErrorCode.InternalError,
-      `Invalid task status '${nextStatus}'`
+      `Invalid task status: ${nextStatus}`
     );
   }
 
   if (isTerminalStatus(task.status)) {
     throw createMcpError(
       ErrorCode.InternalError,
-      `Invalid task status transition: '${task.status}' -> '${nextStatus}'`
+      `Cannot transition task from ${task.status} to ${nextStatus}`
     );
   }
 
@@ -244,14 +244,14 @@ class TaskManager {
     if (this.tasks.size >= maxTotal) {
       throw createMcpError(
         ErrorCode.InvalidRequest,
-        `Task capacity reached (${maxTotal} total tasks)`
+        `Server task limit reached (${maxTotal})`
       );
     }
 
     if ((this.ownerCounts.get(ownerKey) ?? 0) >= maxPerOwner) {
       throw createMcpError(
         ErrorCode.InvalidRequest,
-        `Task capacity reached for owner (${maxPerOwner} tasks)`
+        `Task limit reached for this session (${maxPerOwner})`
       );
     }
 
@@ -356,7 +356,7 @@ class TaskManager {
     if (isTerminalStatus(task.status)) {
       throw createMcpError(
         ErrorCode.InvalidParams,
-        `Cannot cancel task: already in terminal status '${task.status}'`
+        `Cannot cancel task: already ${task.status}`
       );
     }
 

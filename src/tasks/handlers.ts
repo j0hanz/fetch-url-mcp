@@ -114,7 +114,7 @@ function throwStoredTaskError(task: {
 
   throw createMcpError(
     ErrorCode.InternalError,
-    task.statusMessage ?? 'Task execution failed',
+    task.statusMessage ?? 'Execution failed',
     { taskId: task.taskId }
   );
 }

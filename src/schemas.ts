@@ -89,21 +89,16 @@ export function normalizePageTitle(value: unknown): string | undefined {
   return normalizeWithSchema(pageTitleSchema, value);
 }
 
-export const fetchUrlInputSchema = z.strictObject(
-  {
-    url: z
-      .httpUrl('Expected HTTP or HTTPS URL')
-      .min(1, 'URL required')
-      .max(
-        config.constants.maxUrlLength,
-        `URL exceeds ${config.constants.maxUrlLength} chars`
-      )
-      .describe(
-        `Target URL. Max ${config.constants.maxUrlLength} chars. Example: https://example.com`
-      ),
-  },
-  'Invalid input'
-);
+export const fetchUrlInputSchema = z.strictObject({
+  url: z
+    .httpUrl('Invalid URL format')
+    .min(1, 'URL required')
+    .max(
+      config.constants.maxUrlLength,
+      `URL exceeds ${config.constants.maxUrlLength} chars`
+    )
+    .describe(`Target URL. Max ${config.constants.maxUrlLength} chars`),
+});
 
 export const fetchUrlOutputSchema = z.strictObject({
   url: z

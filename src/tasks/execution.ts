@@ -172,7 +172,8 @@ function buildTaskFailureState(error: unknown): {
 } {
   const mcpErrorMessage =
     error instanceof McpError
-      ? (/^MCP error -?\d+:\s*(.*)$/s.exec(error.message)?.[1] ?? error.message)
+      ? (/^(?:MCP )?[Ee]rror -?\d+:\s*(.*)$/s.exec(error.message)?.[1] ??
+        error.message)
       : undefined;
   const statusMessage = mcpErrorMessage ?? getErrorMessage(error);
 
@@ -208,7 +209,7 @@ function buildTaskCompletionUpdate(
   return {
     status: isError ? 'failed' : 'completed',
     statusMessage: isError
-      ? (tryReadToolStructuredError(result) ?? 'Tool execution failed')
+      ? (tryReadToolStructuredError(result) ?? 'Execution failed')
       : (tool.getCompletionStatusMessage?.(result) ??
         'Task completed successfully.'),
     result,
@@ -312,7 +313,7 @@ export async function handleToolCallRequest(
   if (!tool) {
     throw createMcpError(
       ErrorCode.MethodNotFound,
-      `Unknown tool: '${params.name}'`
+      `Unknown tool: ${params.name}`
     );
   }
 
@@ -320,7 +321,7 @@ export async function handleToolCallRequest(
     if (getTaskCapableToolSupport(server, params.name) === 'forbidden') {
       throw createMcpError(
         ErrorCode.MethodNotFound,
-        `Task augmentation is forbidden for tool '${params.name}'`
+        `Task mode is not supported for tool: ${params.name}`
       );
     }
 
@@ -369,7 +370,7 @@ export async function handleToolCallRequest(
   if (getTaskCapableToolSupport(server, params.name) === 'required') {
     throw createMcpError(
       ErrorCode.MethodNotFound,
-      `Task augmentation is required for tool '${params.name}'`
+      `Task mode is required for tool: ${params.name}`
     );
   }
 
