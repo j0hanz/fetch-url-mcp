@@ -2,11 +2,12 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 import {
+  fetchUrlInputSchema,
   normalizeExtractedMetadata,
   normalizePageTitle,
   parseCachedPayload,
   resolveCachedPayloadContent,
-} from '../dist/schemas.js';
+} from '../src/schemas.js';
 
 // ── normalizePageTitle ──────────────────────────────────────────────
 
@@ -155,5 +156,54 @@ describe('resolveCachedPayloadContent', () => {
 
   it('returns empty string for empty markdown', () => {
     assert.equal(resolveCachedPayloadContent({ markdown: '' }), '');
+  });
+});
+
+// ── fetchUrlInputSchema ────────────────────────────────────────────
+
+describe('fetchUrlInputSchema', () => {
+  it('accepts new request-level cache and footer controls', () => {
+    const result = fetchUrlInputSchema.parse({
+      url: 'https://example.com',
+      enableCache: false,
+      extractMetadata: false,
+    });
+
+    assert.equal(result.enableCache, false);
+    assert.equal(result.extractMetadata, false);
+  });
+
+  it('allows cache and footer controls to be omitted', () => {
+    const result = fetchUrlInputSchema.parse({
+      url: 'https://example.com',
+    });
+
+    assert.equal(result.enableCache, undefined);
+    assert.equal(result.extractMetadata, undefined);
+  });
+
+  it('rejects removed forceRefresh input', () => {
+    assert.throws(() =>
+      fetchUrlInputSchema.parse({
+        url: 'https://example.com',
+        forceRefresh: true,
+      })
+    );
+  });
+
+  it('rejects removed legacy cache and metadata input names', () => {
+    assert.throws(() =>
+      fetchUrlInputSchema.parse({
+        url: 'https://example.com',
+        useCache: false,
+      })
+    );
+
+    assert.throws(() =>
+      fetchUrlInputSchema.parse({
+        url: 'https://example.com',
+        includeMetadataFooter: false,
+      })
+    );
   });
 });

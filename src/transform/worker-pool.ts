@@ -90,7 +90,7 @@ interface PendingTask {
   htmlBuffer?: Uint8Array;
   encoding?: string;
   url: string;
-  includeMetadata: boolean;
+  includeMetadataFooter: boolean;
   inputTruncated?: boolean;
   signal: AbortSignal | undefined;
   abortListener: (() => void) | undefined;
@@ -127,7 +127,7 @@ function buildWorkerDispatchPayload(task: PendingTask): WorkerDispatchPayload {
     type: 'transform',
     id: task.id,
     url: task.url,
-    includeMetadata: task.includeMetadata,
+    includeMetadataFooter: task.includeMetadataFooter,
     ...(task.inputTruncated ? { inputTruncated: true } : {}),
   };
 
@@ -169,7 +169,7 @@ interface TransformWorkerPool {
     html: string,
     url: string,
     options: {
-      includeMetadata: boolean;
+      includeMetadataFooter: boolean;
       signal?: AbortSignal;
       inputTruncated?: boolean;
     }
@@ -368,7 +368,7 @@ class WorkerPool implements TransformWorkerPool {
     html: string,
     url: string,
     options: {
-      includeMetadata: boolean;
+      includeMetadataFooter: boolean;
       signal?: AbortSignal;
       inputTruncated?: boolean;
     }
@@ -377,7 +377,7 @@ class WorkerPool implements TransformWorkerPool {
     htmlBuffer: Uint8Array,
     url: string,
     options: {
-      includeMetadata: boolean;
+      includeMetadataFooter: boolean;
       signal?: AbortSignal;
       inputTruncated?: boolean;
       encoding?: string;
@@ -387,7 +387,7 @@ class WorkerPool implements TransformWorkerPool {
     htmlOrBuffer: string | Uint8Array,
     url: string,
     options: {
-      includeMetadata: boolean;
+      includeMetadataFooter: boolean;
       signal?: AbortSignal;
       inputTruncated?: boolean;
       encoding?: string;
@@ -480,7 +480,7 @@ class WorkerPool implements TransformWorkerPool {
     htmlOrBuffer: string | Uint8Array,
     url: string,
     options: {
-      includeMetadata: boolean;
+      includeMetadataFooter: boolean;
       signal?: AbortSignal;
       inputTruncated?: boolean;
       encoding?: string;
@@ -505,7 +505,7 @@ class WorkerPool implements TransformWorkerPool {
     const task: PendingTask = {
       id,
       url,
-      includeMetadata: options.includeMetadata,
+      includeMetadataFooter: options.includeMetadataFooter,
       ...(options.inputTruncated
         ? { inputTruncated: options.inputTruncated }
         : {}),

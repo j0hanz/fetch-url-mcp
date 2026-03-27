@@ -306,12 +306,18 @@ function buildFetchOptions(
   url: string,
   signal: AbortSignal | undefined,
   progressPlan: FetchUrlProgressPlan,
-  forceRefresh?: boolean
+  input?: Pick<FetchUrlInput, 'enableCache' | 'extractMetadata'>
 ): Parameters<typeof performSharedFetch>[0] {
+  const useCache = input?.enableCache !== false;
+  const includeMetadataFooter = input?.extractMetadata !== false;
+
   return {
     url,
     ...withSignal(signal),
-    ...(forceRefresh ? { forceRefresh: true } : {}),
+    ...(!useCache ? { useCache: false } : {}),
+    cacheVary: {
+      includeMetadataFooter,
+    },
     onStage: (stage) => {
       progressPlan.reportStage(stage);
     },
@@ -319,7 +325,8 @@ function buildFetchOptions(
       return markdownTransform(
         { buffer, encoding, ...(truncated ? { truncated } : {}) },
         normalizedUrl,
-        signal
+        signal,
+        includeMetadataFooter
       );
     },
     serialize: serializeMarkdownResult,
@@ -343,7 +350,7 @@ async function executeFetch(
   try {
     progressPlan.reportStart();
     const { pipeline, inlineResult } = await performSharedFetch(
-      buildFetchOptions(url, signal, progressPlan, input.forceRefresh)
+      buildFetchOptions(url, signal, progressPlan, input)
     );
 
     progressPlan.reportSuccess(inlineResult.contentSize);

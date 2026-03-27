@@ -173,7 +173,7 @@ interface FetchPipelineOptions<T> {
   cacheNamespace: string;
   signal?: AbortSignal;
   cacheVary?: Record<string, unknown> | string;
-  forceRefresh?: boolean;
+  useCache?: boolean;
   onStage?: (stage: SharedFetchStage) => void;
   transform: (input: FetchTransformInput, url: string) => T | Promise<T>;
   serialize?: (result: T) => string;
@@ -284,7 +284,7 @@ function restoreCachedPipelineResult<T>(
   resolvedUrl: UrlResolution,
   cacheKey: string | null
 ): PipelineResult<T> | null {
-  if (options.forceRefresh) return null;
+  if (options.useCache === false) return null;
 
   options.onStage?.('check_cache');
   const cachedResult = attemptCacheRetrieval(
@@ -372,11 +372,14 @@ export async function executeFetchPipeline<T>(
     });
   }
 
-  const cacheKey = createCacheKey(
-    options.cacheNamespace,
-    resolvedUrl.normalizedUrl,
-    options.cacheVary
-  );
+  const cacheKey =
+    options.useCache === false
+      ? null
+      : createCacheKey(
+          options.cacheNamespace,
+          resolvedUrl.normalizedUrl,
+          options.cacheVary
+        );
 
   const cachedResult = restoreCachedPipelineResult(
     options,
@@ -403,7 +406,7 @@ export async function executeFetchPipeline<T>(
     resolvedFinalUrl
   );
 
-  if (isEnabled()) {
+  if (options.useCache !== false && isEnabled()) {
     persistCacheTargets(
       resolvedUrl.normalizedUrl,
       finalUrl,
@@ -498,10 +501,11 @@ export function parseCachedMarkdownResult(
 export const markdownTransform = async (
   input: FetchTransformInput,
   url: string,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  includeMetadataFooter = true
 ): Promise<MarkdownPipelineResult> => {
   const result = await transformBufferToMarkdown(input.buffer, url, {
-    includeMetadata: true,
+    includeMetadataFooter,
     encoding: input.encoding,
     ...withSignal(signal),
     ...(input.truncated ? { inputTruncated: true } : {}),
@@ -525,7 +529,7 @@ interface MarkdownFetchOptions {
   readonly url: string;
   readonly signal?: AbortSignal;
   readonly cacheVary?: Record<string, unknown> | string;
-  readonly forceRefresh?: boolean;
+  readonly useCache?: boolean;
   readonly onStage?: (stage: SharedFetchStage) => void;
   readonly transform: (
     input: FetchTransformInput,

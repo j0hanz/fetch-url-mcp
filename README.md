@@ -476,7 +476,8 @@ For more info, see [Kilo Code docs](https://kilocode.ai/docs).
 
 - Fetch documentation pages, blog posts, or reference material into Markdown before sending them to an LLM.
 - Retrieve repository-hosted content from GitHub, GitLab, Bitbucket, or Gists and let the server rewrite page URLs to raw endpoints when possible.
-- Reuse cached Markdown through `internal://cache/{namespace}/{hash}` or bypass the cache with `forceRefresh` for time-sensitive pages.
+- Reuse cached Markdown through `internal://cache/{namespace}/{hash}` or bypass cache entirely with `enableCache: false`.
+- Hide the rendered metadata/source footer with `extractMetadata: false` when you want cleaner markdown but still need `structuredContent.metadata`.
 - Use task mode for large pages or slower sites when the fetch might otherwise be delayed, cancelled, or better handled asynchronously.
 
 ## Architecture
@@ -525,14 +526,15 @@ For more info, see [Kilo Code docs](https://kilocode.ai/docs).
 
 #### `fetch-url`
 
-Fetch public webpages and convert HTML into AI-readable Markdown. The tool is read-only, does not execute page JavaScript, can bypass the cache with `forceRefresh`, and supports optional task mode for larger or slower fetches. `forceRefresh` refreshes cached content only; it does not bypass fetch or inline truncation limits.
+Fetch public webpages and convert HTML into AI-readable Markdown. The tool is read-only, does not execute page JavaScript, supports request-level cache control with `enableCache`, can hide the rendered metadata footer with `extractMetadata`, and supports optional task mode for larger or slower fetches.
 
-| Parameter      | Type      | Required | Description                           |
-| -------------- | --------- | -------- | ------------------------------------- |
-| `url`          | `string`  | yes      | Target URL. Max 2048 chars.           |
-| `forceRefresh` | `boolean` | no       | Bypass cache and fetch fresh content. |
+| Parameter         | Type      | Required | Description                                                                            |
+| ----------------- | --------- | -------- | -------------------------------------------------------------------------------------- |
+| `url`             | `string`  | yes      | Target URL. Max 2048 chars.                                                            |
+| `enableCache`     | `boolean` | no       | Default `true`. When `false`, skip both cache reads and cache writes for this request. |
+| `extractMetadata` | `boolean` | no       | Default `true`. When `false`, hide the rendered markdown footer/source block only.     |
 
-The response is returned as MCP text content and, when validation succeeds, as `structuredContent` containing `url`, `resolvedUrl`, `finalUrl`, `title`, `metadata`, `markdown`, `fromCache`, `fetchedAt`, `contentSize`, and `truncated`. A `truncated: true` result means the content hit server-enforced fetch or inline limits; `forceRefresh` does not remove that limit.
+The response is returned as MCP text content and, when validation succeeds, as `structuredContent` containing `url`, `resolvedUrl`, `finalUrl`, `title`, `metadata`, `markdown`, `fromCache`, `fetchedAt`, `contentSize`, and `truncated`. `extractMetadata: false` hides only the footer/source block in `markdown`; it does not remove `structuredContent.metadata`. A `truncated: true` result means the content hit server-enforced fetch or inline limits.
 
 ```text
 1. [Client] -- tools/call {name: "fetch-url", arguments} --> [Server]

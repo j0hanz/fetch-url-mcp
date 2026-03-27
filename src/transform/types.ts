@@ -66,7 +66,7 @@ export interface MarkdownTransformResult extends MarkdownPayload {
  * Options for transform operations.
  */
 export interface TransformOptions {
-  includeMetadata: boolean;
+  includeMetadataFooter: boolean;
   signal?: AbortSignal;
   inputTruncated?: boolean;
 }
@@ -106,7 +106,7 @@ export interface TransformWorkerTransformMessage {
   htmlBuffer?: Uint8Array | undefined;
   encoding?: string | undefined;
   url: string;
-  includeMetadata: boolean;
+  includeMetadataFooter: boolean;
   inputTruncated?: boolean | undefined;
 }
 

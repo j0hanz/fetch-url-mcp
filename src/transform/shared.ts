@@ -30,14 +30,14 @@ function isTransformMessage(
     html,
     htmlBuffer,
     encoding,
-    includeMetadata,
+    includeMetadataFooter,
     inputTruncated,
   } = value;
 
   return (
     typeof id === 'string' &&
     typeof url === 'string' &&
-    typeof includeMetadata === 'boolean' &&
+    typeof includeMetadataFooter === 'boolean' &&
     (html === undefined || typeof html === 'string') &&
     (htmlBuffer === undefined || htmlBuffer instanceof Uint8Array) &&
     (encoding === undefined || typeof encoding === 'string') &&
@@ -152,7 +152,7 @@ function executeTransformMessage(params: {
     html,
     htmlBuffer,
     encoding,
-    includeMetadata,
+    includeMetadataFooter,
     inputTruncated,
   } = message;
 
@@ -178,7 +178,7 @@ function executeTransformMessage(params: {
   try {
     const content = decodeHtml(html, htmlBuffer, encoding, decoder);
     const result = runTransform(content, url, {
-      includeMetadata,
+      includeMetadataFooter,
       signal: controller.signal,
       ...(inputTruncated ? { inputTruncated: true } : {}),
     });

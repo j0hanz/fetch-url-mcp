@@ -961,10 +961,10 @@ function shouldPreserveRawContent(url: string, content: string): boolean {
 function buildRawMarkdownPayload(params: {
   rawContent: string;
   url: string;
-  includeMetadata: boolean;
+  includeMetadataFooter: boolean;
 }): { content: string; title: string | undefined } {
   const title = extractTitleFromRawMarkdown(params.rawContent);
-  let content = params.includeMetadata
+  let content = params.includeMetadataFooter
     ? addSourceToMarkdown(params.rawContent, params.url)
     : params.rawContent;
 
@@ -978,7 +978,7 @@ function buildRawMarkdownPayload(params: {
 function tryTransformRawContent(params: {
   html: string;
   url: string;
-  includeMetadata: boolean;
+  includeMetadataFooter: boolean;
   inputTruncated?: boolean | undefined;
 }): MarkdownTransformResult | null {
   if (!shouldPreserveRawContent(params.url, params.html)) return null;
@@ -990,7 +990,7 @@ function tryTransformRawContent(params: {
   const { content, title } = buildRawMarkdownPayload({
     rawContent: params.html,
     url: params.url,
-    includeMetadata: params.includeMetadata,
+    includeMetadataFooter: params.includeMetadataFooter,
   });
 
   return {
@@ -1030,9 +1030,9 @@ export function createContentMetadataBlock(
   article: ExtractedArticle | null,
   extractedMeta: ExtractedMetadata,
   shouldExtractFromArticle: boolean,
-  includeMetadata: boolean
+  includeMetadataFooter: boolean
 ): MetadataBlock | undefined {
-  if (!includeMetadata) return undefined;
+  if (!includeMetadataFooter) return undefined;
 
   const metadata: MetadataBlock = {
     type: 'metadata',
@@ -1277,7 +1277,7 @@ interface BuildContentSourceInput {
   readonly url: string;
   readonly article: ExtractedArticle | null;
   readonly extractedMeta: ExtractedMetadata;
-  readonly includeMetadata: boolean;
+  readonly includeMetadataFooter: boolean;
   readonly evaluatedArticleDoc: Document | null;
   readonly document?: Document;
   readonly truncated: boolean;
@@ -1293,7 +1293,7 @@ function resolveBaseContentSource(input: BuildContentSourceInput): {
     url,
     article,
     extractedMeta,
-    includeMetadata,
+    includeMetadataFooter,
     evaluatedArticleDoc,
     document,
     truncated,
@@ -1305,7 +1305,7 @@ function resolveBaseContentSource(input: BuildContentSourceInput): {
     article,
     extractedMeta,
     evaluatedArticleDoc !== null,
-    includeMetadata
+    includeMetadataFooter
   );
   const preparedDocument = document
     ? prepareContentSourceDocument(document, url, signal)
@@ -1354,7 +1354,7 @@ function buildContentSource(input: BuildContentSourceInput): ContentSource {
 function resolveContentSource(params: {
   html: string;
   url: string;
-  includeMetadata: boolean;
+  includeMetadataFooter: boolean;
   signal?: AbortSignal | undefined;
   inputTruncated?: boolean | undefined;
 }): ContentSource {
@@ -1378,7 +1378,7 @@ function resolveContentSource(params: {
     url: params.url,
     article,
     extractedMeta,
-    includeMetadata: params.includeMetadata,
+    includeMetadataFooter: params.includeMetadataFooter,
     evaluatedArticleDoc,
     document,
     truncated: truncated ?? false,
@@ -1458,7 +1458,7 @@ function resolveTransformContentResult(
     tryTransformRawContent({
       html,
       url,
-      includeMetadata: options.includeMetadata,
+      includeMetadataFooter: options.includeMetadataFooter,
       inputTruncated: options.inputTruncated,
     })
   );
@@ -1468,7 +1468,7 @@ function resolveTransformContentResult(
     resolveContentSource({
       html,
       url,
-      includeMetadata: options.includeMetadata,
+      includeMetadataFooter: options.includeMetadataFooter,
       signal,
       inputTruncated: options.inputTruncated,
     })
@@ -1551,12 +1551,12 @@ function transformInputInProcess(
 }
 
 function workerTransformOptions(options: TransformOptions): {
-  includeMetadata: boolean;
+  includeMetadataFooter: boolean;
   signal?: AbortSignal;
   inputTruncated?: boolean;
 } {
   return {
-    includeMetadata: options.includeMetadata,
+    includeMetadataFooter: options.includeMetadataFooter,
     ...(options.signal ? { signal: options.signal } : {}),
     ...(options.inputTruncated
       ? { inputTruncated: options.inputTruncated }
