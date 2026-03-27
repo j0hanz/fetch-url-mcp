@@ -547,9 +547,13 @@ function stripNoise(document: Document, signal?: AbortSignal): void {
   const context = getContext();
 
   if (config.noiseRemoval.debug) {
-    logDebug('Noise removal audit enabled', {
-      categories: [...(context.flags.navFooter ? ['nav-footer'] : [])],
-    });
+    logDebug(
+      'Noise removal audit enabled',
+      {
+        categories: [...(context.flags.navFooter ? ['nav-footer'] : [])],
+      },
+      'transform'
+    );
   }
 
   // Structural Removal
@@ -1532,17 +1536,17 @@ export function evaluateArticleContent(
   document: Document
 ): Document | null {
   if (!passesContentRatioGate(article.textContent.length, document)) {
-    logDebug('FAILED passesContentRatioGate');
+    logDebug('FAILED passesContentRatioGate', undefined, 'transform');
     return null;
   }
 
   if (!passesRetentionRulesFromHtml(document, article.content)) {
-    logDebug('FAILED passesRetentionRulesFromHtml');
+    logDebug('FAILED passesRetentionRulesFromHtml', undefined, 'transform');
     return null;
   }
 
   if (hasTruncatedSentences(article.textContent)) {
-    logDebug('FAILED hasTruncatedSentences');
+    logDebug('FAILED hasTruncatedSentences', undefined, 'transform');
     return null;
   }
 
@@ -1552,9 +1556,17 @@ export function evaluateArticleContent(
 
   if (!passesEmptySectionRatio(articleDoc)) {
     const headings = articleDoc.querySelectorAll('h1,h2,h3,h4,h5,h6');
-    logDebug(`FAILED passesEmptySectionRatio: ${headings.length} headings`);
+    logDebug(
+      `FAILED passesEmptySectionRatio: ${headings.length} headings`,
+      undefined,
+      'transform'
+    );
     for (const h of headings) {
-      logDebug(`H: ${h.textContent} ${String(hasSectionContent(h))}`);
+      logDebug(
+        `H: ${h.textContent} ${String(hasSectionContent(h))}`,
+        undefined,
+        'transform'
+      );
     }
     return null;
   }

@@ -159,12 +159,16 @@ class StageTracker {
       const warnThresholdMs =
         context.totalBudgetMs * config.transform.stageWarnRatio;
       if (durationMs > warnThresholdMs) {
-        logWarn('Transform stage exceeded warning threshold', {
-          stage: context.stage,
-          durationMs: Math.round(durationMs),
-          thresholdMs: Math.round(warnThresholdMs),
-          url: context.url,
-        });
+        logWarn(
+          'Transform stage exceeded warning threshold',
+          {
+            stage: context.stage,
+            durationMs: Math.round(durationMs),
+            thresholdMs: Math.round(warnThresholdMs),
+            url: context.url,
+          },
+          'transform'
+        );
       }
     }
 
@@ -240,10 +244,14 @@ class StageTracker {
     try {
       this.channel.publish(event);
     } catch (error: unknown) {
-      logDebug('Diagnostic channel publish failed', {
-        stage: event.stage,
-        error: getErrorMessage(error),
-      });
+      logDebug(
+        'Diagnostic channel publish failed',
+        {
+          stage: event.stage,
+          error: getErrorMessage(error),
+        },
+        'transform'
+      );
     }
   }
 
@@ -330,11 +338,15 @@ function truncateHtml(
 
   const content = truncateToUtf8Boundary(sliced, maxSize);
 
-  logWarn('HTML content exceeds maximum size, truncating', {
-    size: getUtf8ByteLength(html),
-    maxSize,
-    truncatedSize: getUtf8ByteLength(content),
-  });
+  logWarn(
+    'HTML content exceeds maximum size, truncating',
+    {
+      size: getUtf8ByteLength(html),
+      maxSize,
+      truncatedSize: getUtf8ByteLength(content),
+    },
+    'transform'
+  );
   return { html: content, truncated: true };
 }
 
@@ -503,7 +515,8 @@ function validateReaderability(
       'Very minimal server-rendered content detected (< 100 chars). ' +
         'This might be a client-side rendered (SPA) application. ' +
         'Content extraction may be incomplete.',
-      { textLength }
+      { textLength },
+      'transform'
     );
   }
 
@@ -575,7 +588,7 @@ function extractArticle(
   signal?: AbortSignal
 ): ExtractedArticle | null {
   if (!isReadabilityCompatible(document)) {
-    logWarn('Document not compatible with Readability');
+    logWarn('Document not compatible with Readability', undefined, 'transform');
     return null;
   }
 
@@ -591,7 +604,8 @@ function extractArticle(
   } catch (error: unknown) {
     logError(
       'Failed to extract article with Readability',
-      error instanceof Error ? error : undefined
+      error instanceof Error ? error : undefined,
+      'transform'
     );
     return null;
   }
@@ -599,11 +613,15 @@ function extractArticle(
 
 function isValidInput(html: string, url: string): boolean {
   if (typeof html !== 'string' || html.length === 0) {
-    logWarn('extractContent called with invalid HTML input');
+    logWarn(
+      'extractContent called with invalid HTML input',
+      undefined,
+      'transform'
+    );
     return false;
   }
   if (typeof url !== 'string' || url.length === 0) {
-    logWarn('extractContent called with invalid URL');
+    logWarn('extractContent called with invalid URL', undefined, 'transform');
     return false;
   }
   return true;
@@ -613,10 +631,14 @@ function applyBaseUri(document: Document, url: string): void {
   try {
     Object.defineProperty(document, 'baseURI', { value: url, writable: true });
   } catch (error: unknown) {
-    logInfo('Failed to set baseURI (non-critical)', {
-      url: url.substring(0, 100),
-      error: getErrorMessage(error),
-    });
+    logInfo(
+      'Failed to set baseURI (non-critical)',
+      {
+        url: url.substring(0, 100),
+        error: getErrorMessage(error),
+      },
+      'transform'
+    );
   }
 }
 
@@ -727,7 +749,8 @@ function extractContentContext(
 
     logError(
       'Failed to extract content',
-      error instanceof Error ? error : undefined
+      error instanceof Error ? error : undefined,
+      'transform'
     );
 
     return createEmptyExtractionContext();
@@ -938,7 +961,8 @@ export function htmlToMarkdown(
 
     logError(
       'Failed to convert HTML to markdown',
-      error instanceof Error ? error : undefined
+      error instanceof Error ? error : undefined,
+      'transform'
     );
     throw new FetchError('Failed to convert HTML to markdown', url, 500, {
       reason: 'markdown_convert_failed',
@@ -983,9 +1007,13 @@ function tryTransformRawContent(params: {
 }): MarkdownTransformResult | null {
   if (!shouldPreserveRawContent(params.url, params.html)) return null;
 
-  logDebug('Preserving raw markdown content', {
-    url: params.url.substring(0, 80),
-  });
+  logDebug(
+    'Preserving raw markdown content',
+    {
+      url: params.url.substring(0, 80),
+    },
+    'transform'
+  );
 
   const { content, title } = buildRawMarkdownPayload({
     rawContent: params.html,
@@ -1593,9 +1621,13 @@ function resolveWorkerFallback(
     error instanceof FetchError && error.details['reason'] === 'queue_full';
 
   if (isQueueFull) {
-    logWarn('Transform worker queue full; falling back to in-process', {
-      url: redactUrl(url),
-    });
+    logWarn(
+      'Transform worker queue full; falling back to in-process',
+      {
+        url: redactUrl(url),
+      },
+      'transform'
+    );
 
     return transformInputInProcess(htmlOrBuffer, url, options);
   }
@@ -1607,10 +1639,14 @@ function resolveWorkerFallback(
   if (!(error instanceof Error)) throw toError(error);
 
   const message = getErrorMessage(error);
-  logWarn('Transform worker failed; falling back to in-process', {
-    url: redactUrl(url),
-    error: message,
-  });
+  logWarn(
+    'Transform worker failed; falling back to in-process',
+    {
+      url: redactUrl(url),
+      error: message,
+    },
+    'transform'
+  );
 
   return transformInputInProcess(htmlOrBuffer, url, options);
 }

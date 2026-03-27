@@ -230,7 +230,7 @@ function drainServerCleanupCallbacks(server: McpServer): void {
     try {
       callback();
     } catch (error: unknown) {
-      logWarn('Server cleanup callback failed', { error });
+      logWarn('Server cleanup callback failed', { error }, 'mcp');
     }
   }
 }
@@ -414,11 +414,15 @@ class ToolProgressReporter implements ProgressReporter {
       try {
         this.handlers.onProgress?.(effectiveProgress, message);
       } catch (error: unknown) {
-        logError('Progress callback failed', {
-          error: getErrorMessage(error),
-          progress: effectiveProgress,
-          message,
-        });
+        logError(
+          'Progress callback failed',
+          {
+            error: getErrorMessage(error),
+            progress: effectiveProgress,
+            message,
+          },
+          'mcp'
+        );
       }
     }
 
@@ -479,17 +483,25 @@ class ToolProgressReporter implements ProgressReporter {
       ]);
 
       if ('timeout' in outcome) {
-        logWarn('Progress notification timed out', {
-          progress: notification.params.progress,
-          message: notification.params.message,
-        });
+        logWarn(
+          'Progress notification timed out',
+          {
+            progress: notification.params.progress,
+            message: notification.params.message,
+          },
+          'mcp'
+        );
       }
     } catch (error: unknown) {
-      logWarn('Failed to send progress notification', {
-        error: getErrorMessage(error),
-        progress: notification.params.progress,
-        message: notification.params.message,
-      });
+      logWarn(
+        'Failed to send progress notification',
+        {
+          error: getErrorMessage(error),
+          progress: notification.params.progress,
+          message: notification.params.message,
+        },
+        'mcp'
+      );
     }
   }
 

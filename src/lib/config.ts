@@ -50,9 +50,22 @@ export const serverVersion: string = readServerVersion(import.meta.url);
 
 // ── Types ───────────────────────────────────────────────────────────
 
-export type LogLevel = 'debug' | 'info' | 'warn' | 'error';
+export type LogLevel =
+  | 'debug'
+  | 'info'
+  | 'notice'
+  | 'warn'
+  | 'error'
+  | 'critical';
 
-const LOG_LEVELS: readonly LogLevel[] = ['debug', 'info', 'warn', 'error'];
+const LOG_LEVELS: readonly LogLevel[] = [
+  'debug',
+  'info',
+  'notice',
+  'warn',
+  'error',
+  'critical',
+];
 const ALLOWED_LOG_LEVELS: ReadonlySet<string> = new Set(LOG_LEVELS);
 
 const DEFAULT_HEADING_KEYWORDS = [

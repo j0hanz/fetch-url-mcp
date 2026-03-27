@@ -120,7 +120,8 @@ export function registerTaskHandlers(
 
     logWarn(
       'Task call interception disabled: SDK tools/call handler unavailable; task-capable tools require MCP SDK compatibility update',
-      { sdkVersion: 'unknown' }
+      { sdkVersion: 'unknown' },
+      'tasks'
     );
   }
 

@@ -266,14 +266,18 @@ class TaskManager {
   ): void {
     const task = this.tasks.get(taskId);
     if (!task) {
-      logWarn('updateTask called for unknown task', { taskId });
+      logWarn('updateTask called for unknown task', { taskId }, 'tasks');
       return;
     }
     if (isTerminalStatus(task.status)) {
-      logWarn('updateTask called for terminal task', {
-        taskId,
-        currentStatus: task.status,
-      });
+      logWarn(
+        'updateTask called for terminal task',
+        {
+          taskId,
+          currentStatus: task.status,
+        },
+        'tasks'
+      );
       return;
     }
 

@@ -135,10 +135,14 @@ function validateStructuredContent(
   if (validation.success) return;
 
   const issues = formatZodError(validation.error);
-  logWarn('Tool output schema validation failed', {
-    url: inputUrl,
-    issues,
-  });
+  logWarn(
+    'Tool output schema validation failed',
+    {
+      url: inputUrl,
+      issues,
+    },
+    'fetch-url'
+  );
   throw new McpError(
     ErrorCode.InternalError,
     'fetch-url produced output that does not match its declared outputSchema',
@@ -299,7 +303,7 @@ async function executeFetch(
     formatUrlForDisplay(url)
   );
 
-  logDebug('Fetching URL', { url });
+  logDebug('Fetching URL', { url }, 'fetch-url');
 
   try {
     progressPlan.reportStart();
@@ -320,7 +324,7 @@ export async function fetchUrlToolHandler(
   extra?: ToolHandlerExtra
 ): Promise<ToolResponseBase> {
   return executeFetch(input, extra).catch((error: unknown) => {
-    logError('fetch-url tool error', toError(error));
+    logError('fetch-url tool error', toError(error), 'fetch-url');
     if (error instanceof McpError) {
       throw error;
     }

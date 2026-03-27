@@ -138,13 +138,15 @@ function createTimestamp(): string {
 function formatLogEntry(
   level: LogLevel,
   message: string,
-  meta?: LogMetadata
+  meta?: LogMetadata,
+  logger?: string
 ): string {
   if (config.logging.format === 'json') {
     const merged = mergeMetadata(meta);
     const entry: Record<string, unknown> = {
       timestamp: createTimestamp(),
       level: level.toUpperCase(),
+      ...(logger ? { logger } : {}),
       message,
     };
     if (merged) {
@@ -152,13 +154,16 @@ function formatLogEntry(
     }
     return JSON.stringify(entry);
   }
-  return `[${createTimestamp()}] ${level.toUpperCase()}: ${message}${formatMetadata(meta)}`;
+  const loggerTag = logger ? ` [${logger}]` : '';
+  return `[${createTimestamp()}] ${level.toUpperCase()}${loggerTag}: ${message}${formatMetadata(meta)}`;
 }
 const LEVEL_PRIORITY: Readonly<Record<LogLevel, number>> = {
   debug: 0,
   info: 1,
-  warn: 2,
-  error: 3,
+  notice: 2,
+  warn: 3,
+  error: 4,
+  critical: 5,
 };
 function shouldLog(level: LogLevel): boolean {
   return LEVEL_PRIORITY[level] >= LEVEL_PRIORITY[config.logging.level];
@@ -189,7 +194,8 @@ function normalizeLogLevel(level: string): McpLogLevel | undefined {
 }
 // Map internal log levels to standard RFC 5424 severities
 function toMcpLogLevel(level: LogLevel): McpLogLevel {
-  return level === 'warn' ? 'warning' : level;
+  if (level === 'warn') return 'warning';
+  return level;
 }
 function shouldForwardMcpLog(level: LogLevel, sessionId?: string): boolean {
   const emittedLevel = toMcpLogLevel(level);
@@ -296,14 +302,21 @@ function safeWriteStderr(line: string): void {
     stderrAvailable = false;
   }
 }
-function writeLog(level: LogLevel, message: string, meta?: LogMetadata): void {
+const DEFAULT_LOGGER = 'fetch-url-mcp';
+
+function writeLog(
+  level: LogLevel,
+  message: string,
+  meta?: LogMetadata,
+  logger?: string
+): void {
   const sessionId = getSessionId();
   if (shouldLog(level)) {
-    const line = formatLogEntry(level, message, meta);
+    const line = formatLogEntry(level, message, meta, logger);
     safeWriteStderr(`${stripVTControlCharacters(line)}\n`);
   }
 
-  forwardMcpLog(level, message, meta, sessionId);
+  forwardMcpLog(level, message, meta, sessionId, logger);
 }
 function resolveLogServer(
   sessionId: string | undefined
@@ -317,7 +330,8 @@ function forwardMcpLog(
   level: LogLevel,
   message: string,
   meta: LogMetadata | undefined,
-  sessionId: string | undefined
+  sessionId: string | undefined,
+  logger?: string
 ): void {
   const server = resolveLogServer(sessionId);
   if (!server) return;
@@ -327,8 +341,8 @@ function forwardMcpLog(
     server.server
       .sendLoggingMessage(
         {
-          level: level === 'warn' ? 'warning' : level,
-          logger: 'fetch-url-mcp',
+          level: toMcpLogLevel(level),
+          logger: logger ?? DEFAULT_LOGGER,
           data: buildMcpLogData(message, meta),
         },
         sessionId
@@ -352,14 +366,33 @@ function forwardMcpLog(
     );
   }
 }
-export function logInfo(message: string, meta?: LogMetadata): void {
-  writeLog('info', message, meta);
+export function logInfo(
+  message: string,
+  meta?: LogMetadata,
+  logger?: string
+): void {
+  writeLog('info', message, meta, logger);
 }
-export function logDebug(message: string, meta?: LogMetadata): void {
-  writeLog('debug', message, meta);
+export function logDebug(
+  message: string,
+  meta?: LogMetadata,
+  logger?: string
+): void {
+  writeLog('debug', message, meta, logger);
 }
-export function logWarn(message: string, meta?: LogMetadata): void {
-  writeLog('warn', message, meta);
+export function logNotice(
+  message: string,
+  meta?: LogMetadata,
+  logger?: string
+): void {
+  writeLog('notice', message, meta, logger);
+}
+export function logWarn(
+  message: string,
+  meta?: LogMetadata,
+  logger?: string
+): void {
+  writeLog('warn', message, meta, logger);
 }
 function formatErrorMeta(error: Error): LogMetadata {
   const meta: LogMetadata = { error: error.message, stack: error.stack };
@@ -374,10 +407,23 @@ function formatErrorMeta(error: Error): LogMetadata {
   return meta;
 }
 
-export function logError(message: string, error?: Error | LogMetadata): void {
+export function logError(
+  message: string,
+  error?: Error | LogMetadata,
+  logger?: string
+): void {
   const errorMeta: LogMetadata =
     error instanceof Error ? formatErrorMeta(error) : (error ?? {});
-  writeLog('error', message, errorMeta);
+  writeLog('error', message, errorMeta, logger);
+}
+export function logCritical(
+  message: string,
+  error?: Error | LogMetadata,
+  logger?: string
+): void {
+  const errorMeta: LogMetadata =
+    error instanceof Error ? formatErrorMeta(error) : (error ?? {});
+  writeLog('critical', message, errorMeta, logger);
 }
 export function setLogLevel(level: string, sessionId?: string): void {
   const normalized = normalizeLogLevel(level);
@@ -420,7 +466,11 @@ function getCleanupIntervalMs(sessionTtlMs: number): number {
 }
 function handleSessionCleanupError(error: unknown): void {
   if (isAbortError(error)) return;
-  logWarn('Session cleanup loop failed', { error: getErrorMessage(error) });
+  logWarn(
+    'Session cleanup loop failed',
+    { error: getErrorMessage(error) },
+    'session'
+  );
 }
 function logRejectedSettledResults(
   results: readonly PromiseSettledResult<unknown>[],
@@ -428,7 +478,7 @@ function logRejectedSettledResults(
 ): void {
   for (const result of results) {
     if (result.status === 'rejected') {
-      logWarn(message, { error: getErrorMessage(result.reason) });
+      logWarn(message, { error: getErrorMessage(result.reason) }, 'session');
     }
   }
 }
@@ -477,10 +527,14 @@ class SessionCleanupLoop {
     }
 
     if (evicted.length > 0) {
-      logInfo('Expired sessions evicted', {
-        evicted: evicted.length,
-        timestamp: new Date(now).toISOString(),
-      });
+      logInfo(
+        'Expired sessions evicted',
+        {
+          evicted: evicted.length,
+          timestamp: new Date(now).toISOString(),
+        },
+        'session'
+      );
     }
   }
 
@@ -492,9 +546,13 @@ class SessionCleanupLoop {
       try {
         await this.onEvictSession(session);
       } catch (error) {
-        logWarn('Expired session pre-close hook failed', {
-          error: getErrorMessage(error),
-        });
+        logWarn(
+          'Expired session pre-close hook failed',
+          {
+            error: getErrorMessage(error),
+          },
+          'session'
+        );
       }
     }
 
@@ -524,9 +582,13 @@ class SessionCleanupLoop {
         this.logCloseFailure('server', serverResult.reason);
       }
     } catch (error) {
-      logWarn('Session close operation failed or timed out', {
-        error: getErrorMessage(error),
-      });
+      logWarn(
+        'Session close operation failed or timed out',
+        {
+          error: getErrorMessage(error),
+        },
+        'session'
+      );
     } finally {
       if (timeoutId) {
         clearTimeout(timeoutId);
@@ -536,9 +598,13 @@ class SessionCleanupLoop {
     try {
       unregisterMcpSessionServer(sessionId);
     } catch (error) {
-      logWarn('Failed to unregister session server', {
-        error: getErrorMessage(error),
-      });
+      logWarn(
+        'Failed to unregister session server',
+        {
+          error: getErrorMessage(error),
+        },
+        'session'
+      );
     }
   }
 
@@ -548,9 +614,13 @@ class SessionCleanupLoop {
   ): void {
     if (error == null) return;
 
-    logWarn(`Failed to close expired session ${target}`, {
-      error: getErrorMessage(error),
-    });
+    logWarn(
+      `Failed to close expired session ${target}`,
+      {
+        error: getErrorMessage(error),
+      },
+      'session'
+    );
   }
 }
 export function startSessionCleanupLoop(

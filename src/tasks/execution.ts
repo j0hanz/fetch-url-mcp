@@ -46,10 +46,14 @@ function attachAbortController(taskId: string): AbortController {
   taskAbortControllers.get(taskId)?.abort();
 
   if (taskAbortControllers.size >= config.tasks.maxTotal) {
-    logWarn('Abort controller map reached task capacity — possible leak', {
-      size: taskAbortControllers.size,
-      maxTotal: config.tasks.maxTotal,
-    });
+    logWarn(
+      'Abort controller map reached task capacity — possible leak',
+      {
+        size: taskAbortControllers.size,
+        maxTotal: config.tasks.maxTotal,
+      },
+      'tasks'
+    );
   }
 
   const controller = new AbortController();
@@ -118,11 +122,15 @@ export function emitTaskStatusNotification(
       params: { ...toTaskSummary(task) },
     })
     .catch((error: unknown) => {
-      logError('Failed to send task status notification', {
-        taskId: task.taskId,
-        status: task.status,
-        error: getErrorMessage(error),
-      });
+      logError(
+        'Failed to send task status notification',
+        {
+          taskId: task.taskId,
+          status: task.status,
+          error: getErrorMessage(error),
+        },
+        'tasks'
+      );
     });
 }
 
@@ -251,11 +259,15 @@ async function runTaskToolExecution(params: {
           buildTaskCompletionUpdate(result, tool)
         );
       } catch (error: unknown) {
-        logError('Task execution failed', {
-          taskId,
-          tool: tool.name,
-          error: getErrorMessage(error),
-        });
+        logError(
+          'Task execution failed',
+          {
+            taskId,
+            tool: tool.name,
+            error: getErrorMessage(error),
+          },
+          'tasks'
+        );
         updateTaskAndEmitStatus(server, taskId, buildTaskFailureState(error));
       } finally {
         taskAbortControllers.delete(taskId);

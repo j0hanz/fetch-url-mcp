@@ -175,11 +175,15 @@ export function applyHttpServerTuning(server: TunableHttpServer): void {
         const now = Date.now();
         if (now - lastLoggedAt < DROP_LOG_INTERVAL_MS) return;
 
-        logWarn('Incoming connection dropped (maxConnections reached)', {
-          maxConnections,
-          dropped: droppedSinceLastLog,
-          data,
-        });
+        logWarn(
+          'Incoming connection dropped (maxConnections reached)',
+          {
+            maxConnections,
+            dropped: droppedSinceLastLog,
+            data,
+          },
+          'http'
+        );
 
         lastLoggedAt = now;
         droppedSinceLastLog = 0;
@@ -192,7 +196,7 @@ export function applyHttpServerTuning(server: TunableHttpServer): void {
 export function drainConnectionsOnShutdown(server: TunableHttpServer): void {
   if (typeof server.closeIdleConnections === 'function') {
     server.closeIdleConnections();
-    logDebug('Closed idle HTTP connections during shutdown');
+    logDebug('Closed idle HTTP connections during shutdown', undefined, 'http');
   }
 }
 export interface CancellableTimeout<T> {

@@ -200,13 +200,17 @@ export async function executeFetchPipeline<T>(
   options.onStage?.('resolve_url');
   const resolvedUrl = resolveNormalizedUrl(options.url);
   if (resolvedUrl.transformed) {
-    logDebug('Using transformed raw content URL', {
-      original: resolvedUrl.originalUrl,
-    });
+    logDebug(
+      'Using transformed raw content URL',
+      {
+        original: resolvedUrl.originalUrl,
+      },
+      'fetch'
+    );
   }
 
   options.onStage?.('fetch_remote');
-  logDebug('Fetching URL', { url: resolvedUrl.normalizedUrl });
+  logDebug('Fetching URL', { url: resolvedUrl.normalizedUrl }, 'fetch');
 
   const { buffer, encoding, truncated, finalUrl } =
     await fetchNormalizedUrlBuffer(

@@ -25,8 +25,10 @@ import {
   createSlotTracker,
   enableHttpMode,
   ensureSessionCapacity,
+  logDebug,
   logError,
   logInfo,
+  logWarn,
   registerMcpSessionServer,
   reserveSessionSlot,
   runWithRequestContext,
@@ -207,11 +209,15 @@ class McpSessionGateway {
       return;
     }
 
-    logInfo('[MCP POST]', {
-      method: method ?? 'response',
-      id: body.id,
-      sessionId,
-    });
+    logInfo(
+      '[MCP POST]',
+      {
+        method: method ?? 'response',
+        id: body.id,
+        sessionId,
+      },
+      'http'
+    );
 
     const transport = await this.getOrCreateTransport(ctx, requestId);
     if (!transport) return;
@@ -234,6 +240,7 @@ class McpSessionGateway {
       return;
     }
 
+    logInfo('[MCP GET]', { sessionId }, 'http');
     this.store.touch(sessionId);
     await session.transport.handleRequest(ctx.req, ctx.res);
   }
@@ -246,6 +253,7 @@ class McpSessionGateway {
     const { sessionId, session } = sessionState;
 
     await session.transport.close();
+    logInfo('[MCP DELETE]', { sessionId }, 'http');
     this.cleanupSessionRecord(sessionId, 'session-delete');
 
     sendJson(ctx.res, 200, { status: 'closed' });
@@ -534,6 +542,7 @@ class McpSessionGateway {
     }
     this.clearSessionInitTimeout(sessionId);
     if (sessionId) this.store.touch(sessionId);
+    logDebug('Session initialized', { sessionId }, 'session');
   }
 
   private createSessionInitTimeout(
@@ -552,6 +561,7 @@ class McpSessionGateway {
           return;
         }
 
+        logWarn('Session init timeout', { sessionId }, 'session');
         this.cleanupSessionRecord(sessionId, 'session-init-timeout');
         return;
       }
@@ -668,6 +678,11 @@ class McpSessionGateway {
     });
     this.sessionInitTimeouts.set(newSessionId, initTimeout);
     registerMcpSessionServer(newSessionId, sessionServer);
+    logInfo(
+      'Session created',
+      { sessionId: newSessionId, negotiatedProtocolVersion },
+      'session'
+    );
 
     transportImpl.onclose = composeCloseHandlers(transportImpl.onclose, () => {
       this.cleanupSessionRecord(newSessionId, 'session-close');
@@ -677,6 +692,7 @@ class McpSessionGateway {
   }
 
   private cleanupSessionRecord(sessionId: string, context: string): void {
+    logDebug('Session cleanup', { sessionId, context }, 'session');
     this.clearSessionInitTimeout(sessionId);
     const session = this.store.remove(sessionId);
     if (!session) return;
@@ -715,12 +731,22 @@ class McpSessionGateway {
     });
 
     if (!allowed) {
+      logWarn(
+        'Session capacity exhausted',
+        { maxSessions: config.server.maxSessions },
+        'session'
+      );
       sendError(res, -32000, 'Server busy', 503, requestId);
       return false;
     }
 
     // Double-check: capacity may have changed during the async eviction window above.
     if (!reserveSessionSlot(this.store, config.server.maxSessions)) {
+      logWarn(
+        'Session capacity exhausted (post-eviction)',
+        { maxSessions: config.server.maxSessions },
+        'session'
+      );
       sendError(res, -32000, 'Server busy', 503, requestId);
       return false;
     }
@@ -786,7 +812,7 @@ class HttpDispatcher {
       sendJson(ctx.res, 404, { error: 'Not Found' });
     } catch (err) {
       const error = toError(err);
-      logError('Request failed', error);
+      logError('Request failed', error, 'http');
       if (!ctx.res.writableEnded) {
         sendJson(ctx.res, 500, { error: 'Internal Server Error' });
       }
@@ -816,6 +842,11 @@ class HttpDispatcher {
       return await authService.authenticate(ctx.req, ctx.signal);
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Unauthorized';
+      logWarn(
+        'Authentication failed',
+        { message, method: ctx.method, path: ctx.url.pathname },
+        'auth'
+      );
       if (isInsufficientScopeError(err)) {
         applyInsufficientScopeAuthHeaders(
           ctx.req,
@@ -988,8 +1019,14 @@ class HttpRequestPipeline {
     } catch (error: unknown) {
       const bodyErrorKind = isJsonBodyError(error) ? error.kind : null;
 
-      if (bodyErrorKind === 'read-failed' || bodyErrorKind === null) {
-        logError('Request body parsing failed', toError(error));
+      if (bodyErrorKind === 'payload-too-large') {
+        logWarn(
+          'Request body too large',
+          { method: ctx.method, path: ctx.url.pathname },
+          'http'
+        );
+      } else if (bodyErrorKind === 'read-failed' || bodyErrorKind === null) {
+        logError('Request body parsing failed', toError(error), 'http');
       }
 
       sendBodyParseError(ctx, bodyErrorKind, rawReq);
@@ -1020,7 +1057,7 @@ class HttpRequestPipeline {
 // ---------------------------------------------------------------------------
 
 function handlePipelineError(error: unknown, res: ServerResponse): void {
-  logError('Request pipeline failed', toError(error));
+  logError('Request pipeline failed', toError(error), 'http');
 
   if (res.writableEnded) return;
 
@@ -1095,7 +1132,7 @@ function createShutdownHandler(options: {
   const closeBatchSize = 10;
 
   return async (signal: string): Promise<void> => {
-    logInfo(`Stopping HTTP server (${signal})...`);
+    logInfo(`Stopping HTTP server (${signal})...`, undefined, 'http');
 
     options.rateLimiter.stop();
     options.sessionCleanup.abort();
@@ -1118,7 +1155,8 @@ function createShutdownHandler(options: {
         if (r.status === 'rejected') {
           logError(
             'Session teardown failed during shutdown',
-            r.reason instanceof Error ? r.reason : undefined
+            r.reason instanceof Error ? r.reason : undefined,
+            'http'
           );
         }
       }
@@ -1173,12 +1211,16 @@ export async function startHttpServer(): Promise<{
 
   const port = resolveListeningPort(server, config.server.port);
   const protocol = config.server.https.enabled ? 'https' : 'http';
-  logInfo(`${protocol.toUpperCase()} server listening on port ${port}`, {
-    platform: process.platform,
-    arch: process.arch,
-    hostname: hostname(),
-    nodeVersion: process.version,
-  });
+  logInfo(
+    `${protocol.toUpperCase()} server listening on port ${port}`,
+    {
+      platform: process.platform,
+      arch: process.arch,
+      hostname: hostname(),
+      nodeVersion: process.version,
+    },
+    'http'
+  );
 
   return {
     port,

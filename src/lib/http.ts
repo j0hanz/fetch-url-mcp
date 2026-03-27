@@ -715,9 +715,13 @@ function assertSupportedContentType(
 ): void {
   const mediaType = resolveMediaType(contentType);
   if (!mediaType) {
-    logDebug('No Content-Type header; relying on binary-content detection', {
-      url: redactUrl(url),
-    });
+    logDebug(
+      'No Content-Type header; relying on binary-content detection',
+      {
+        url: redactUrl(url),
+      },
+      'fetch'
+    );
     return;
   }
 

@@ -176,7 +176,7 @@ function registerLoggingSetLevelHandler(server: McpServer): void {
 
 function attachServerErrorHandler(server: McpServer): void {
   server.server.onerror = (error) => {
-    logError('[MCP Error]', toError(error));
+    logError('[MCP Error]', toError(error), 'server');
   };
 }
 
@@ -200,7 +200,7 @@ async function shutdownServer(
 
   for (const result of results) {
     if (result.status === 'rejected') {
-      logError('Shutdown step failed', toError(result.reason));
+      logError('Shutdown step failed', toError(result.reason), 'server');
     }
   }
 }
@@ -211,10 +211,14 @@ function createShutdownHandler(server: McpServer): (signal: string) => void {
 
   return (signal: string): void => {
     if (shuttingDown) {
-      logInfo('Shutdown already in progress; ignoring signal', {
-        signal,
-        initialSignal,
-      });
+      logInfo(
+        'Shutdown already in progress; ignoring signal',
+        {
+          signal,
+          initialSignal,
+        },
+        'server'
+      );
       return;
     }
 
@@ -225,7 +229,7 @@ function createShutdownHandler(server: McpServer): (signal: string) => void {
       .then(() => shutdownServer(server, signal))
       .catch((err: unknown) => {
         const error = toError(err);
-        logError('Error during shutdown', error);
+        logError('Error during shutdown', error, 'server');
         process.exitCode = 1;
       })
       .finally(() => {
@@ -248,7 +252,7 @@ async function connectStdioServer(
 ): Promise<void> {
   try {
     await server.connect(transport);
-    logInfo('Fetch URL MCP server running on stdio');
+    logInfo('Fetch URL MCP server running on stdio', undefined, 'server');
   } catch (error: unknown) {
     const err = toError(error);
     throw new Error(`Failed to start stdio server: ${err.message}`, {

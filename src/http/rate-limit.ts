@@ -46,7 +46,7 @@ class RateLimiter implements RateLimitManagerImpl {
       },
       onError: (err) => {
         if (!isAbortError(err)) {
-          logWarn('Rate limit cleanup failed', { error: err });
+          logWarn('Rate limit cleanup failed', { error: err }, 'rate-limit');
         }
       },
     });
@@ -100,6 +100,7 @@ class RateLimiter implements RateLimitManagerImpl {
     }
 
     if (entry.count > this.options.maxRequests) {
+      logWarn('Rate limit exceeded', { ip: key }, 'rate-limit');
       const retryAfter = Math.max(1, Math.ceil((entry.resetTime - now) / 1000));
       ctx.res.setHeader('Retry-After', String(retryAfter));
       sendJson(ctx.res, 429, { error: 'Rate limit exceeded', retryAfter });

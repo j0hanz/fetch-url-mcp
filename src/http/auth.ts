@@ -7,7 +7,7 @@ import {
 } from '@modelcontextprotocol/sdk/server/auth/errors.js';
 import type { AuthInfo } from '@modelcontextprotocol/sdk/server/auth/types.js';
 
-import { config } from '../lib/core.js';
+import { config, logDebug, logWarn } from '../lib/core.js';
 import { normalizeHost } from '../lib/url.js';
 import {
   composeAbortSignal,
@@ -207,6 +207,11 @@ class HostOriginPolicy {
     status: number,
     message: string
   ): boolean {
+    logWarn(
+      'Host/Origin policy rejection',
+      { status, reason: message },
+      'http'
+    );
     sendJson(res, status, { error: message });
     return false;
   }
@@ -374,9 +379,15 @@ class AuthService {
       return this.verifyStaticToken(apiKey);
     }
     if (apiKey && config.auth.mode === 'oauth') {
+      logWarn('Auth failed: X-API-Key not supported for OAuth', {}, 'auth');
       throw new InvalidTokenError('X-API-Key not supported for OAuth');
     }
 
+    logWarn(
+      'Auth failed: missing credentials',
+      { authMode: config.auth.mode },
+      'auth'
+    );
     throw new InvalidTokenError(
       config.auth.mode === 'static'
         ? 'Missing Authorization or X-API-Key header'
@@ -413,7 +424,10 @@ class AuthService {
     const tokenDigest = hmacSha256Hex(STATIC_TOKEN_HMAC_KEY, token);
     const matched = hasConstantTimeMatch(this.staticTokenDigests, tokenDigest);
 
-    if (!matched) throw new InvalidTokenError('Invalid token');
+    if (!matched) {
+      logWarn('Auth failed: invalid static token', {}, 'auth');
+      throw new InvalidTokenError('Invalid token');
+    }
     return this.buildStaticAuthInfo(token);
   }
 
@@ -469,9 +483,11 @@ class AuthService {
       .filter((value): value is string => value !== null);
 
     if (audiences.length === 0) {
+      logWarn('Auth failed: token missing audience binding', {}, 'auth');
       throw new InvalidTokenError('Token missing audience binding');
     }
     if (!audiences.includes(expected)) {
+      logWarn('Auth failed: audience mismatch', {}, 'auth');
       throw new InvalidTokenError(
         'Token audience does not match this MCP server'
       );
@@ -532,6 +548,11 @@ class AuthService {
       if (response.body) {
         await response.body.cancel();
       }
+      logWarn(
+        'Token introspection HTTP error',
+        { status: response.status },
+        'auth'
+      );
       throw new ServerError(`Token introspection failed: ${response.status}`);
     }
 
@@ -564,6 +585,11 @@ class AuthService {
     const tokenScopeSet = new Set(tokenScopes);
     const missing = requiredScopes.filter((s) => !tokenScopeSet.has(s));
     if (missing.length > 0) {
+      logWarn(
+        'Auth failed: insufficient scopes',
+        { missingCount: missing.length },
+        'auth'
+      );
       throw new InsufficientScopeError(missing);
     }
   }
@@ -581,6 +607,7 @@ class AuthService {
     if (cached && cached.expiresAt > Date.now()) {
       this.introspectionCache.delete(cacheKey);
       this.introspectionCache.set(cacheKey, cached);
+      logDebug('Token introspection cache hit', {}, 'auth');
       return cached.info;
     }
 
@@ -600,6 +627,7 @@ class AuthService {
 
     if (!isObject(payload) || payload['active'] !== true) {
       this.introspectionCache.delete(cacheKey);
+      logWarn('Auth failed: token inactive', {}, 'auth');
       throw new InvalidTokenError('Token is inactive');
     }
 
@@ -607,6 +635,12 @@ class AuthService {
 
     const info = this.buildIntrospectionAuthInfo(token, payload);
     this.assertRequiredScopes(info.scopes);
+
+    logDebug(
+      'Token introspection successful',
+      { clientId: info.clientId },
+      'auth'
+    );
 
     this.evictStaleEntries();
     this.introspectionCache.set(cacheKey, {

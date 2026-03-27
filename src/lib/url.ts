@@ -196,10 +196,14 @@ export class SafeDnsResolver {
         return [];
       }
 
-      logDebug('DNS CNAME lookup failed; continuing with address lookup', {
-        hostname,
-        ...(isSystemError(error) ? { code: error.code } : {}),
-      });
+      logDebug(
+        'DNS CNAME lookup failed; continuing with address lookup',
+        {
+          hostname,
+          ...(isSystemError(error) ? { code: error.code } : {}),
+        },
+        'fetch'
+      );
       return [];
     }
   }

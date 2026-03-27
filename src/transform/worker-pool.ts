@@ -636,12 +636,16 @@ class WorkerPool implements TransformWorkerPool {
     const slot = this.workers[workerIndex];
     if (!slot) return;
 
-    logWarn('Transform worker unavailable; restarting', {
-      reason: message,
-      workerIndex,
-      workerName: slot.name,
-      threadId: slot.worker.threadId,
-    });
+    logWarn(
+      'Transform worker unavailable; restarting',
+      {
+        reason: message,
+        workerIndex,
+        workerName: slot.name,
+        threadId: slot.worker.threadId,
+      },
+      'transform'
+    );
 
     if (slot.busy && slot.currentTaskId) {
       try {

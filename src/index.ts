@@ -83,14 +83,14 @@ function registerHttpSignalHandlers(): void {
 }
 
 function writeStartupError(error: Error): void {
-  logError('Failed to start server', error);
+  logError('Failed to start server', error, 'server');
   process.stderr.write(`Failed to start server: ${error.message}\n`);
   process.exitCode = 1;
   scheduleForcedExit('Startup failure');
 }
 
 function handleFatalError(label: string, error: Error, signal: string): void {
-  logError(label, error);
+  logError(label, error, 'server');
   process.stderr.write(`${label}: ${error.message}\n`);
   process.exitCode = 1;
 

@@ -223,10 +223,14 @@ export function registerInboundBlockList(server: NetworkServer): void {
     if (!normalized) return;
 
     if (blockList.check(normalized.ip, normalized.family)) {
-      logWarn('Blocked inbound connection', {
-        remoteAddress: normalized.ip,
-        family: normalized.family,
-      });
+      logWarn(
+        'Blocked inbound connection',
+        {
+          remoteAddress: normalized.ip,
+          family: normalized.family,
+        },
+        'http'
+      );
       socket.destroy();
     }
   });
@@ -269,7 +273,7 @@ export async function closeTransportBestEffort(
   try {
     await transport.close();
   } catch (error) {
-    logWarn('Transport close failed', { context, error });
+    logWarn('Transport close failed', { context, error }, 'http');
   }
 }
 
@@ -280,7 +284,7 @@ export async function closeMcpServerBestEffort(
   try {
     await server.close();
   } catch (error) {
-    logWarn('MCP server close failed', { context, error });
+    logWarn('MCP server close failed', { context, error }, 'http');
   }
 }
 
