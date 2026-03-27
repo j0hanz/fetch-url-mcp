@@ -224,8 +224,22 @@ function resolveErrorText(err: unknown): string {
   return 'unknown error';
 }
 
-const MCP_LOG_META_BLOCKLIST = new Set(['stack']);
+const MCP_LOG_SENSITIVE_PATTERNS = [
+  'password',
+  'secret',
+  'token',
+  'authorization',
+  'credential',
+  'key',
+  'cookie',
+  'stack',
+];
 const MCP_LOG_MAX_DEPTH = 5;
+
+function isSensitiveKey(key: string): boolean {
+  const lowerKey = key.toLowerCase();
+  return MCP_LOG_SENSITIVE_PATTERNS.some((p) => lowerKey.includes(p));
+}
 
 function isPlainLogObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -257,7 +271,7 @@ function sanitizeMcpLogValue(value: unknown, depth = 0): unknown {
   if (isPlainLogObject(value)) {
     const sanitized: Record<string, unknown> = {};
     for (const [key, entry] of Object.entries(value)) {
-      if (MCP_LOG_META_BLOCKLIST.has(key)) continue;
+      if (isSensitiveKey(key)) continue;
 
       const normalized = sanitizeMcpLogValue(entry, depth + 1);
       if (normalized !== undefined) {
@@ -273,9 +287,9 @@ function sanitizeMcpLogValue(value: unknown, depth = 0): unknown {
 function buildMcpLogData(
   message: string,
   meta?: LogMetadata
-): string | Record<string, unknown> {
+): Record<string, unknown> {
   if (!meta || Object.keys(meta).length === 0) {
-    return message;
+    return { message };
   }
 
   const sanitized = sanitizeMcpLogValue(meta);
@@ -283,10 +297,15 @@ function buildMcpLogData(
     return { message };
   }
 
-  return {
-    ...sanitized,
-    message,
-  };
+  // Ensure `message` from system isn't overwritten by `meta.message`,
+  // but keep the original meta message around if present.
+  const payload = { ...sanitized };
+  if ('message' in payload) {
+    payload['_message'] = payload['message'];
+  }
+  payload['message'] = message;
+
+  return payload;
 }
 
 function safeWriteStderr(line: string): void {
@@ -303,6 +322,52 @@ function safeWriteStderr(line: string): void {
   }
 }
 const DEFAULT_LOGGER = 'fetch-url-mcp';
+
+interface RateLimiter {
+  tokens: number;
+  lastRefill: number;
+  dropped: number;
+}
+const MCP_RATE_LIMIT_CAPACITY = 200;
+const MCP_RATE_LIMIT_REFILL_RATE = 50; // per second
+const mcpRateLimiters = new Map<string, RateLimiter>();
+
+// Returns true if allowed, false if dropped.
+function checkMcpRateLimit(sessionId = ''): {
+  allowed: boolean;
+  droppedCount: number;
+} {
+  const now = Date.now();
+  let limit = mcpRateLimiters.get(sessionId);
+  if (!limit) {
+    limit = { tokens: MCP_RATE_LIMIT_CAPACITY, lastRefill: now, dropped: 0 };
+    mcpRateLimiters.set(sessionId, limit);
+  }
+
+  const elapsed = now - limit.lastRefill;
+  if (elapsed >= 1000) {
+    const refillTokens = Math.floor(
+      (elapsed / 1000) * MCP_RATE_LIMIT_REFILL_RATE
+    );
+    limit.tokens = Math.min(
+      MCP_RATE_LIMIT_CAPACITY,
+      limit.tokens + refillTokens
+    );
+    limit.lastRefill = now;
+  }
+
+  if (limit.tokens > 0) {
+    limit.tokens--;
+    const droppedCount = limit.dropped;
+    if (droppedCount > 0) {
+      limit.dropped = 0;
+    }
+    return { allowed: true, droppedCount };
+  }
+
+  limit.dropped++;
+  return { allowed: false, droppedCount: 0 };
+}
 
 function writeLog(
   level: LogLevel,
@@ -337,12 +402,32 @@ function forwardMcpLog(
   if (!server) return;
   if (!shouldForwardMcpLog(level, sessionId)) return;
 
+  const { allowed, droppedCount } = checkMcpRateLimit(sessionId);
+  if (!allowed) return;
+
   try {
+    const safeLogger = logger ?? DEFAULT_LOGGER;
+
+    if (droppedCount > 0) {
+      server.server
+        .sendLoggingMessage(
+          {
+            level: 'warning',
+            logger: safeLogger,
+            data: {
+              message: `[Rate Limiter] ${droppedCount} log messages were dropped for this session due to high volume.`,
+            },
+          },
+          sessionId
+        )
+        .catch(() => {});
+    }
+
     server.server
       .sendLoggingMessage(
         {
           level: toMcpLogLevel(level),
-          logger: logger ?? DEFAULT_LOGGER,
+          logger: safeLogger,
           data: buildMcpLogData(message, meta),
         },
         sessionId
