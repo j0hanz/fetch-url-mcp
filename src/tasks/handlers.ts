@@ -6,11 +6,10 @@ import {
   ErrorCode,
   type ServerResult,
 } from '@modelcontextprotocol/sdk/types.js';
-import { McpError } from '@modelcontextprotocol/sdk/types.js';
 import { z } from 'zod';
 
 import { logDebug, logWarn, runWithRequestContext } from '../lib/core.js';
-import { getSdkCallToolHandler } from '../lib/mcp-interop.js';
+import { createMcpError, getSdkCallToolHandler } from '../lib/mcp-interop.js';
 
 import {
   parseExtendedCallToolRequest,
@@ -110,10 +109,10 @@ function throwStoredTaskError(task: {
   error?: { code: number; message: string; data?: unknown };
 }): never {
   if (task.error) {
-    throw new McpError(task.error.code, task.error.message, task.error.data);
+    throw createMcpError(task.error.code, task.error.message, task.error.data);
   }
 
-  throw new McpError(
+  throw createMcpError(
     ErrorCode.InternalError,
     task.statusMessage ?? 'Task execution failed',
     { taskId: task.taskId }

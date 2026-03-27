@@ -2,9 +2,10 @@ import { randomUUID } from 'node:crypto';
 import { createHmac, randomBytes } from 'node:crypto';
 import { setInterval } from 'node:timers';
 
-import { ErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js';
+import { ErrorCode } from '@modelcontextprotocol/sdk/types.js';
 
 import { config, logInfo, logWarn } from '../lib/core.js';
+import { createMcpError } from '../lib/mcp-interop.js';
 import { isObject, timingSafeEqualUtf8 } from '../lib/utils.js';
 
 import {
@@ -98,14 +99,14 @@ function resolveNextTaskStatus(
   if (!nextStatus || nextStatus === task.status) return task.status;
 
   if (!TASK_STATUS_VALUES.has(nextStatus)) {
-    throw new McpError(
+    throw createMcpError(
       ErrorCode.InternalError,
       `Invalid task status '${nextStatus}'`
     );
   }
 
   if (isTerminalStatus(task.status)) {
-    throw new McpError(
+    throw createMcpError(
       ErrorCode.InternalError,
       `Invalid task status transition: '${task.status}' -> '${nextStatus}'`
     );
@@ -241,14 +242,14 @@ class TaskManager {
     const { maxPerOwner, maxTotal } = config.tasks;
 
     if (this.tasks.size >= maxTotal) {
-      throw new McpError(
+      throw createMcpError(
         ErrorCode.InvalidRequest,
         `Task capacity reached (${maxTotal} total tasks)`
       );
     }
 
     if ((this.ownerCounts.get(ownerKey) ?? 0) >= maxPerOwner) {
-      throw new McpError(
+      throw createMcpError(
         ErrorCode.InvalidRequest,
         `Task capacity reached for owner (${maxPerOwner} tasks)`
       );
@@ -353,7 +354,7 @@ class TaskManager {
     if (!task) return undefined;
 
     if (isTerminalStatus(task.status)) {
-      throw new McpError(
+      throw createMcpError(
         ErrorCode.InvalidParams,
         `Cannot cancel task: already in terminal status '${task.status}'`
       );
@@ -418,7 +419,7 @@ class TaskManager {
 
     const anchorIndex = validTasks.findIndex((t) => t.taskId === anchorTaskId);
     if (anchorIndex === -1) {
-      throw new McpError(ErrorCode.InvalidParams, 'Invalid cursor');
+      throw createMcpError(ErrorCode.InvalidParams, 'Invalid cursor');
     }
 
     return validTasks.slice(anchorIndex + 1, anchorIndex + 1 + pageSize + 1);
@@ -446,7 +447,8 @@ class TaskManager {
   private resolveAnchorTaskId(cursor?: string): string | null {
     if (!cursor) return null;
     const decoded = decodeTaskCursor(cursor);
-    if (!decoded) throw new McpError(ErrorCode.InvalidParams, 'Invalid cursor');
+    if (!decoded)
+      throw createMcpError(ErrorCode.InvalidParams, 'Invalid cursor');
     return decoded.anchorTaskId;
   }
 

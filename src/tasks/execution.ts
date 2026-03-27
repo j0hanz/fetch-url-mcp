@@ -13,6 +13,7 @@ import {
   logWarn,
   runWithRequestContext,
 } from '../lib/core.js';
+import { createMcpError } from '../lib/mcp-interop.js';
 import { type ProgressNotification } from '../lib/mcp-interop.js';
 import { getErrorMessage } from '../lib/utils.js';
 import { isObject } from '../lib/utils.js';
@@ -143,7 +144,7 @@ export function emitTaskStatusNotification(
 }
 
 export function throwTaskNotFound(): never {
-  throw new McpError(ErrorCode.InvalidParams, 'Task not found');
+  throw createMcpError(ErrorCode.InvalidParams, 'Task not found');
 }
 
 /* -------------------------------------------------------------------------------------------------
@@ -309,7 +310,7 @@ export async function handleToolCallRequest(
   // Validate the tool name first so an unknown tool always produces MethodNotFound
   const tool = getTaskCapableTool(server, params.name);
   if (!tool) {
-    throw new McpError(
+    throw createMcpError(
       ErrorCode.MethodNotFound,
       `Unknown tool: '${params.name}'`
     );
@@ -317,7 +318,7 @@ export async function handleToolCallRequest(
 
   if (params.task) {
     if (getTaskCapableToolSupport(server, params.name) === 'forbidden') {
-      throw new McpError(
+      throw createMcpError(
         ErrorCode.MethodNotFound,
         `Task augmentation is forbidden for tool '${params.name}'`
       );
@@ -366,7 +367,7 @@ export async function handleToolCallRequest(
   }
 
   if (getTaskCapableToolSupport(server, params.name) === 'required') {
-    throw new McpError(
+    throw createMcpError(
       ErrorCode.MethodNotFound,
       `Task augmentation is required for tool '${params.name}'`
     );

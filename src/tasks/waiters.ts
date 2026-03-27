@@ -1,7 +1,8 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 
-import { ErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js';
+import { ErrorCode } from '@modelcontextprotocol/sdk/types.js';
 
+import { createMcpError } from '../lib/mcp-interop.js';
 import { toError } from '../lib/utils.js';
 import { type CancellableTimeout, createUnrefTimeout } from '../lib/utils.js';
 
@@ -107,7 +108,7 @@ export async function waitForTerminalTask<TTask extends WaitableTask>(options: {
       cleanup();
       options.registry.remove(options.taskId, waiter);
       rejectInContext(
-        new McpError(ErrorCode.ConnectionClosed, 'Request was cancelled')
+        createMcpError(ErrorCode.ConnectionClosed, 'Request was cancelled')
       );
     });
   };
@@ -144,7 +145,7 @@ export async function waitForTerminalTask<TTask extends WaitableTask>(options: {
         options.registry.remove(options.taskId, waiter);
         options.removeTask(options.taskId);
         rejectInContext(
-          new McpError(ErrorCode.InvalidParams, 'Task expired', {
+          createMcpError(ErrorCode.InvalidParams, 'Task expired', {
             taskId: options.taskId,
           })
         );

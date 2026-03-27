@@ -19,6 +19,7 @@ import {
 } from '../lib/fetch-pipeline.js';
 import type { SharedFetchStage } from '../lib/fetch-pipeline.js';
 import {
+  createMcpError,
   createProgressReporter,
   handleToolError,
   type ProgressReporter,
@@ -145,7 +146,7 @@ function validateStructuredContent(
     },
     'fetch-url'
   );
-  throw new McpError(
+  throw createMcpError(
     ErrorCode.InternalError,
     'fetch-url produced output that does not match its declared outputSchema',
     { issues }
@@ -295,7 +296,7 @@ function buildToolAbortSignal(extraSignal?: AbortSignal): AbortSignal {
     config.tools.timeoutMs > 0 ? config.tools.timeoutMs : HARD_TOOL_TIMEOUT_MS;
   const signal = composeAbortSignal(extraSignal, timeout);
   if (!signal) {
-    throw new McpError(
+    throw createMcpError(
       ErrorCode.InternalError,
       'Tool timeout signal could not be created'
     );
@@ -445,7 +446,7 @@ function createTaskCapableDescriptor(): TaskCapableToolDescriptor<FetchUrlInput>
     parseArguments: (args: unknown) => {
       const parsed = TOOL_DEFINITION.inputSchema.safeParse(args);
       if (!parsed.success) {
-        throw new McpError(
+        throw createMcpError(
           ErrorCode.InvalidParams,
           `Invalid arguments for ${TOOL_DEFINITION.name}: ${formatZodError(parsed.error)}`
         );

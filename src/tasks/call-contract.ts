@@ -1,7 +1,8 @@
 import type { ServerResult } from '@modelcontextprotocol/sdk/types.js';
-import { ErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js';
+import { ErrorCode } from '@modelcontextprotocol/sdk/types.js';
 import { z } from 'zod';
 
+import { createMcpError } from '../lib/mcp-interop.js';
 import { formatZodError } from '../lib/zod.js';
 
 const MIN_TASK_TTL_MS = 1_000;
@@ -57,7 +58,7 @@ export function parseExtendedCallToolRequest(
   const parsed = extendedCallToolRequestSchema.safeParse(request);
   if (parsed.success) return parsed.data;
 
-  throw new McpError(
+  throw createMcpError(
     ErrorCode.InvalidParams,
     `Invalid tool request params: ${formatZodError(parsed.error)}`
   );

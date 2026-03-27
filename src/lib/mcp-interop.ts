@@ -5,6 +5,7 @@ import {
   type CallToolResult,
   ListToolsRequestSchema,
   ListToolsResultSchema,
+  McpError,
 } from '@modelcontextprotocol/sdk/types.js';
 import { z } from 'zod';
 
@@ -16,6 +17,16 @@ import {
   isObject,
   isSystemError,
 } from './utils.js';
+
+export function createMcpError(
+  code: number,
+  message: string,
+  data?: unknown
+): McpError {
+  const error = new McpError(code, message, data);
+  error.message = message;
+  return error;
+}
 
 /* =================================================================================================
  * JSON-RPC / Media type parsing
