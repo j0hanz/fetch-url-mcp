@@ -208,22 +208,14 @@ function isValidationError(error: unknown): error is NodeJS.ErrnoException {
   );
 }
 
-function extractHttpStatusText(message: string, statusCode: number): string {
-  const prefix = `HTTP ${statusCode}:`;
-  if (!message.startsWith(prefix)) return '';
-  return message.slice(prefix.length).trim();
-}
-
 function buildUpstreamHttpMessage(error: FetchError): string {
   const { statusCode } = error;
-  const statusText = extractHttpStatusText(error.message, statusCode);
-  const suffix = statusText ? ` ${statusText}` : '';
 
   if (statusCode === 404) {
-    return `The target page returned 404${suffix}.`;
+    return `We couldn't find the resource at the target URL.`;
   }
 
-  return `The target server returned ${statusCode}${suffix}.`;
+  return `An error occurred when communicating with the target URL.`;
 }
 
 function mapFetchToolError(

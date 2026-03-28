@@ -236,7 +236,10 @@ describe('handleToolError', () => {
     assert.equal(result.isError, true);
 
     const parsed = parseToolPayload(result);
-    assert.equal(parsed['error'], 'The target page returned 404 Not Found.');
+    assert.equal(
+      parsed['error'],
+      "We couldn't find the resource at the target URL."
+    );
     assert.equal(parsed['category'], 'upstream_http_error');
     assert.equal(parsed['upstreamMessage'], 'HTTP 404: Not Found');
     assert.equal(parsed['statusCode'], 404);
@@ -333,6 +336,9 @@ describe('handleToolError', () => {
     assert.equal(parsed['category'], 'upstream_http_error');
     assert.equal(parsed['code'], 'HTTP_404');
     assert.equal(parsed['statusCode'], 404);
-    assert.equal(parsed['error'], 'The target page returned 404 Not Found.');
+    assert.equal(
+      parsed['error'],
+      "We couldn't find the resource at the target URL."
+    );
   });
 });
