@@ -1,15 +1,14 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import type {
-  ContentBlock,
-  ToolAnnotations,
+import {
+  type ContentBlock,
+  ErrorCode,
+  type ServerResult,
+  type ToolAnnotations,
 } from '@modelcontextprotocol/sdk/types.js';
-import { ErrorCode } from '@modelcontextprotocol/sdk/types.js';
-import type { ServerResult } from '@modelcontextprotocol/sdk/types.js';
 import type { z } from 'zod';
 
 import { config, logInfo } from '../lib/core.js';
-import { isAbortError } from '../lib/error/index.js';
-import { classifyAndLogToolError } from '../lib/error/index.js';
+import { classifyAndLogToolError, isAbortError } from '../lib/error/index.js';
 import { Loggers } from '../lib/logger-names.js';
 import {
   createMcpError,
@@ -37,13 +36,13 @@ import {
   normalizeExtractedMetadata,
   normalizePageTitle,
 } from '../schemas.js';
-import { withRequestContextIfMissing } from '../tasks/index.js';
 import {
   registerTaskCapableTool,
   setTaskCapableToolSupport,
   type TaskCapableToolDescriptor,
   type TaskCapableToolSupport,
   unregisterTaskCapableTool,
+  withRequestContextIfMissing,
 } from '../tasks/index.js';
 
 type FetchUrlInput = z.infer<typeof fetchUrlInputSchema>;

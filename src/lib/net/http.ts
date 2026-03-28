@@ -20,24 +20,22 @@ import {
 } from '../core.js';
 import {
   FetchError,
+  invalidRedirectError,
   isAbortError,
   isError,
   isSystemError,
-  toError,
-} from '../error/index.js';
-import { SystemErrors } from '../error/index.js';
-import {
-  invalidRedirectError,
   redirectCredentialsError,
+  SystemErrors,
+  toError,
   unsupportedProtocolError,
 } from '../error/index.js';
 import { Loggers } from '../logger-names.js';
 import { composeAbortSignal, isObject } from '../utils.js';
-import { isIP } from './url.js';
 import {
   BLOCKED_HOST_SUFFIXES,
   createDnsPreflight,
   IpBlocker,
+  isIP,
   type Logger,
   RawUrlTransformer,
   SafeDnsResolver,

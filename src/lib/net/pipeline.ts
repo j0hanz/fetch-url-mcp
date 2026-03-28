@@ -1,6 +1,8 @@
 import type { normalizeExtractedMetadata } from '../../schemas.js';
-import { transformBufferToMarkdown } from '../../transform/index.js';
-import { type MarkdownTransformResult } from '../../transform/index.js';
+import {
+  type MarkdownTransformResult,
+  transformBufferToMarkdown,
+} from '../../transform/index.js';
 import { config, logDebug } from '../core.js';
 import { Loggers } from '../logger-names.js';
 import { withSignal } from '../utils.js';

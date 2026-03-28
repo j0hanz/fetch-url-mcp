@@ -4,8 +4,8 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import {
   ListToolsRequestSchema,
   ListToolsResultSchema,
+  McpError,
 } from '@modelcontextprotocol/sdk/types.js';
-import { McpError } from '@modelcontextprotocol/sdk/types.js';
 import { z } from 'zod';
 
 import { logError, logWarn } from './core.js';

@@ -1,8 +1,7 @@
 #!/usr/bin/env node
 import process from 'node:process';
 
-import { serverVersion } from './lib/core.js';
-import { logError } from './lib/core.js';
+import { logError, serverVersion } from './lib/core.js';
 import { toError } from './lib/error/index.js';
 import { Loggers } from './lib/logger-names.js';
 

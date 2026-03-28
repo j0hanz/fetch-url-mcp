@@ -3,10 +3,10 @@ import { describe, it } from 'node:test';
 
 import { ErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js';
 
-import { FetchError } from '../src/lib/error/index.js';
-import { handleToolError } from '../src/lib/error/index.js';
 import {
   createToolErrorResponse,
+  FetchError,
+  handleToolError,
   tryReadToolErrorPayload,
 } from '../src/lib/error/index.js';
 import {

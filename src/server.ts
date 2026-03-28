@@ -5,8 +5,8 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { SetLevelRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 
-import { config } from './lib/core.js';
 import {
+  config,
   getSessionId,
   logError,
   logInfo,

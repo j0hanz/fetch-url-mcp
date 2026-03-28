@@ -93,8 +93,6 @@ import {
   sendEmpty,
   sendError,
   sendJson,
-} from './helpers.js';
-import {
   teardownSessionRegistration,
   teardownSessionResources,
   teardownUnregisteredSessionResources,

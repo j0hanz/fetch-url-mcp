@@ -5,9 +5,9 @@ import { parseHTML } from 'linkedom';
 
 import {
   evaluateArticleContent,
+  type ExtractedArticle,
   getVisibleTextLength,
 } from '../src/transform/index.js';
-import type { ExtractedArticle } from '../src/transform/index.js';
 
 function makeArticle(content: string, textContent?: string): ExtractedArticle {
   return {

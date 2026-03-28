@@ -1,8 +1,10 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { ServerResult } from '@modelcontextprotocol/sdk/types.js';
 
-import { registerServerLifecycleCleanup } from '../lib/mcp-interop.js';
-import type { ToolHandlerExtra } from '../lib/mcp-interop.js';
+import {
+  registerServerLifecycleCleanup,
+  type ToolHandlerExtra,
+} from '../lib/mcp-interop.js';
 
 export type TaskCapableToolSupport = 'required' | 'optional' | 'forbidden';
 

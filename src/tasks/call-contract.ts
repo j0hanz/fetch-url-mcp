@@ -1,5 +1,7 @@
-import type { ServerResult } from '@modelcontextprotocol/sdk/types.js';
-import { ErrorCode } from '@modelcontextprotocol/sdk/types.js';
+import {
+  ErrorCode,
+  type ServerResult,
+} from '@modelcontextprotocol/sdk/types.js';
 import { z } from 'zod';
 
 import { createMcpError } from '../lib/mcp-interop.js';

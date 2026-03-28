@@ -16,10 +16,10 @@ import {
 import {
   FetchError,
   getErrorMessage,
+  SystemErrors,
   throwIfAborted,
   toError,
 } from '../lib/error/index.js';
-import { SystemErrors } from '../lib/error/index.js';
 import { Loggers } from '../lib/logger-names.js';
 import { isRawTextContentUrl } from '../lib/net/index.js';
 import {
@@ -43,8 +43,10 @@ import {
   stripScreenReaderText,
   surfaceCodeEditorContent,
 } from './dom-prep.js';
-import { extractLanguageFromClassName } from './html-translators.js';
-import { translateHtmlFragmentToMarkdown } from './html-translators.js';
+import {
+  extractLanguageFromClassName,
+  translateHtmlFragmentToMarkdown,
+} from './html-translators.js';
 import {
   cleanupMarkdownArtifacts,
   finalizeMarkdownSections,
@@ -53,13 +55,11 @@ import {
 import {
   addSourceToMarkdown,
   buildMetadataFooter,
-  extractTitleFromRawMarkdown,
-  isRawTextContent,
-} from './metadata.js';
-import {
   extractMetadata,
   extractMetadataFromHead,
+  extractTitleFromRawMarkdown,
   isGithubRepositoryRootUrl,
+  isRawTextContent,
   maybePrependSyntheticTitle,
   maybeStripGithubPrimaryHeading,
   mergeMetadata,

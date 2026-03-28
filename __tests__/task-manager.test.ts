@@ -7,8 +7,8 @@ import {
   decodeTaskCursor,
   encodeTaskCursor,
   taskManager,
+  type TaskState,
 } from '../src/tasks/index.js';
-import type { TaskState } from '../src/tasks/index.js';
 
 // ── TaskManager ─────────────────────────────────────────────────────
 
