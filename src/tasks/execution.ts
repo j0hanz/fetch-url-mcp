@@ -16,7 +16,10 @@ import {
 import { Loggers } from '../lib/logger-names.js';
 import { createMcpError } from '../lib/mcp-interop.js';
 import { type ProgressNotification } from '../lib/mcp-interop.js';
-import { tryReadToolErrorMessage } from '../lib/tool-errors.js';
+import {
+  handleToolError,
+  tryReadToolErrorMessage,
+} from '../lib/tool-errors.js';
 import { getErrorMessage } from '../lib/utils.js';
 import { isObject } from '../lib/utils.js';
 
@@ -306,6 +309,28 @@ async function runTaskToolExecution(params: {
   );
 }
 
+function extractRawUrl(args: Record<string, unknown> | undefined): string {
+  const url = args?.['url'];
+  return typeof url === 'string' ? url : 'unknown';
+}
+
+function tryParseArguments(
+  tool: TaskCapableToolDescriptor,
+  args: Record<string, unknown> | undefined
+): { ok: true; value: unknown } | { ok: false; response: ServerResult } {
+  try {
+    return { ok: true, value: tool.parseArguments(args) };
+  } catch (error: unknown) {
+    if (error instanceof McpError) {
+      return {
+        ok: false,
+        response: handleToolError(error, extractRawUrl(args)),
+      };
+    }
+    throw error;
+  }
+}
+
 export async function handleToolCallRequest(
   server: McpServer,
   request: ExtendedCallToolRequest,
@@ -330,7 +355,9 @@ export async function handleToolCallRequest(
       );
     }
 
-    const args = tool.parseArguments(params.arguments);
+    const parsed = tryParseArguments(tool, params.arguments);
+    if (!parsed.ok) return parsed.response;
+
     const task = taskManager.createTask(
       params.task.ttl !== undefined ? { ttl: params.task.ttl } : undefined,
       'Task started',
@@ -350,7 +377,7 @@ export async function handleToolCallRequest(
     void runTaskToolExecution({
       server,
       taskId: task.taskId,
-      args,
+      args: parsed.value,
       tool,
       ...compact({
         meta: params._meta,
@@ -379,7 +406,9 @@ export async function handleToolCallRequest(
     );
   }
 
-  const args = tool.parseArguments(params.arguments);
+  const parsed = tryParseArguments(tool, params.arguments);
+  if (!parsed.ok) return parsed.response;
+
   const progressState = { closed: false };
   logDebug(
     'Executing task-capable tool inline',
@@ -391,7 +420,7 @@ export async function handleToolCallRequest(
   );
 
   try {
-    return await tool.execute(args, {
+    return await tool.execute(parsed.value, {
       ...buildToolHandlerExtra(context, params._meta),
       progressState,
     });

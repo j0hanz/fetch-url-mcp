@@ -321,6 +321,23 @@ function mapGenericToolError(
   };
 }
 
+const mcpErrorPrefixPattern = /^MCP error -?\d+:\s*/;
+
+function stripMcpErrorPrefix(message: string): string {
+  return message.replace(mcpErrorPrefixPattern, '');
+}
+
+function mapMcpToolError(error: McpError, url: string): ToolErrorPresentation {
+  return {
+    message: stripMcpErrorPrefix(error.message),
+    url,
+    category: 'mcp_error',
+    code: error.code,
+    statusCode: error.code,
+    ...(error.data !== undefined ? { data: error.data } : {}),
+  };
+}
+
 function resolveToolErrorPresentation(
   error: unknown,
   url: string,
@@ -328,6 +345,10 @@ function resolveToolErrorPresentation(
 ): ToolErrorPresentation {
   if (error instanceof FetchError) {
     return mapFetchToolError(error, url);
+  }
+
+  if (error instanceof McpError) {
+    return mapMcpToolError(error, url);
   }
 
   return mapGenericToolError(error, url, fallbackMessage);
@@ -351,10 +372,7 @@ export function classifyAndLogToolError(
   fallbackMessage: string
 ): ToolErrorResponse {
   if (error instanceof McpError) {
-    if (
-      error.code === (ErrorCode.InvalidParams as number) ||
-      error.code === (ErrorCode.MethodNotFound as number)
-    ) {
+    if (error.code === (ErrorCode.MethodNotFound as number)) {
       logError(
         `${toolName} tool protocol error`,
         { url: meta.url, durationMs: meta.durationMs, error },
@@ -363,7 +381,7 @@ export function classifyAndLogToolError(
       throw error;
     }
     logWarn(
-      `${toolName} tool domain error`,
+      `${toolName} tool error`,
       { url: meta.url, durationMs: meta.durationMs, error },
       loggerName
     );

@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
+import { ErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js';
+
 import {
   acceptsEventStream,
   acceptsJsonAndEventStream,
@@ -340,5 +342,42 @@ describe('handleToolError', () => {
       parsed['error'],
       "We couldn't find the resource at the target URL."
     );
+  });
+
+  it('handles McpError with statusCode and strips SDK prefix', () => {
+    const error = new McpError(
+      ErrorCode.InternalError,
+      'Task execution failed'
+    );
+    const result = handleToolError(error, 'https://example.com');
+    assert.equal(result.isError, true);
+    const parsed = parseToolPayload(result);
+    assert.equal(parsed['error'], 'Task execution failed');
+    assert.equal(parsed['category'], 'mcp_error');
+    assert.equal(parsed['code'], -32603);
+    assert.equal(parsed['statusCode'], -32603);
+  });
+
+  it('handles McpError and surfaces data payload', () => {
+    const error = new McpError(ErrorCode.InternalError, 'Validation failed', {
+      issues: ['field required'],
+    });
+    const result = handleToolError(error, 'https://example.com');
+    const parsed = parseToolPayload(result);
+    assert.equal(parsed['error'], 'Validation failed');
+    assert.equal(parsed['statusCode'], -32603);
+    assert.deepEqual(parsed['data'], { issues: ['field required'] });
+  });
+
+  it('handles McpError with clean message (no SDK prefix)', () => {
+    const error = new McpError(
+      ErrorCode.InternalError,
+      'Output validation failed'
+    );
+    error.message = 'Output validation failed';
+    const result = handleToolError(error, 'https://example.com');
+    const parsed = parseToolPayload(result);
+    assert.equal(parsed['error'], 'Output validation failed');
+    assert.equal(parsed['statusCode'], -32603);
   });
 });
