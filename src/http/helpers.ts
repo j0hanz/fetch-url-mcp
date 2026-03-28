@@ -18,7 +18,10 @@ import {
 import { getErrorMessage, toError } from '../lib/error/index.js';
 import { Loggers } from '../lib/logger-names.js';
 import type { JsonRpcId } from '../lib/mcp-interop.js';
-import { createDefaultBlockList, normalizeIpForBlockList } from '../lib/url.js';
+import {
+  createDefaultBlockList,
+  normalizeIpForBlockList,
+} from '../lib/net/index.js';
 
 // ---------------------------------------------------------------------------
 // Shared types

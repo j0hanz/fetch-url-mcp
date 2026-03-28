@@ -2,9 +2,9 @@ import dns from 'node:dns';
 import { BlockList, isIP, SocketAddress } from 'node:net';
 import { domainToASCII } from 'node:url';
 
-import { config, logDebug } from './core.js';
-import { CodedError, isError, isSystemError } from './error/index.js';
-import { SystemErrors } from './error/index.js';
+import { config, logDebug } from '../core.js';
+import { CodedError, isError, isSystemError } from '../error/index.js';
+import { SystemErrors } from '../error/index.js';
 import {
   blockedCnameError,
   blockedHostError,
@@ -14,9 +14,9 @@ import {
   invalidAddressFamilyError,
   invalidHostnameError,
   invalidUrlError,
-} from './error/index.js';
-import { Loggers } from './logger-names.js';
-import { composeAbortSignal } from './utils.js';
+} from '../error/index.js';
+import { Loggers } from '../logger-names.js';
+import { composeAbortSignal } from '../utils.js';
 
 const DNS_LOOKUP_TIMEOUT_MS = 5000;
 const CNAME_LOOKUP_MAX_DEPTH = 5;

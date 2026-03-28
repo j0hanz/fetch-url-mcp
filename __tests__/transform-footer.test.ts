@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { transformHtmlToMarkdownInProcess } from '../src/transform/transform.js';
+import { transformHtmlToMarkdownInProcess } from '../src/transform/index.js';
 
 describe('transform metadata footer controls', () => {
   it('includes the rendered footer with extracted metadata', () => {

@@ -24,12 +24,9 @@ import {
   registerGetHelpPrompt,
   registerInstructionResource,
 } from './resources/index.js';
-import {
-  abortAllTaskExecutions,
-  registerTaskHandlers,
-} from './tasks/handlers.js';
+import { abortAllTaskExecutions, registerTaskHandlers } from './tasks/index.js';
 import { registerTools as registerFetchUrlTool } from './tools/fetch-url.js';
-import { shutdownTransformWorkerPool } from './transform/transform.js';
+import { shutdownTransformWorkerPool } from './transform/index.js';
 
 /* -------------------------------------------------------------------------------------------------
  * Icons + server info

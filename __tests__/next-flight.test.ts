@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { supplementMarkdownFromNextFlight } from '../src/transform/next-flight.js';
+import { supplementMarkdownFromNextFlight } from '../src/transform/index.js';
 
 describe('supplementMarkdownFromNextFlight', () => {
   it('returns markdown unchanged when no flight payloads present', () => {

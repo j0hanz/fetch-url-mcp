@@ -10,16 +10,6 @@ import type { z } from 'zod';
 import { config, logInfo } from '../lib/core.js';
 import { isAbortError } from '../lib/error/index.js';
 import { classifyAndLogToolError } from '../lib/error/index.js';
-import {
-  finalizeInlineMarkdown,
-  type InlineContentResult,
-  type MarkdownPipelineResult,
-  markdownTransform,
-  performSharedFetch,
-  type PipelineResult,
-  withSignal,
-} from '../lib/fetch-pipeline.js';
-import type { SharedFetchStage } from '../lib/fetch-pipeline.js';
 import { Loggers } from '../lib/logger-names.js';
 import {
   createMcpError,
@@ -29,6 +19,16 @@ import {
   type ToolHandlerExtra,
   validateOrThrow,
 } from '../lib/mcp-interop.js';
+import {
+  finalizeInlineMarkdown,
+  type InlineContentResult,
+  type MarkdownPipelineResult,
+  markdownTransform,
+  performSharedFetch,
+  type PipelineResult,
+  type SharedFetchStage,
+  withSignal,
+} from '../lib/net/index.js';
 import { composeAbortSignal, isObject, parseUrlOrNull } from '../lib/utils.js';
 
 import {
@@ -37,14 +37,14 @@ import {
   normalizeExtractedMetadata,
   normalizePageTitle,
 } from '../schemas.js';
-import { withRequestContextIfMissing } from '../tasks/owner.js';
+import { withRequestContextIfMissing } from '../tasks/index.js';
 import {
   registerTaskCapableTool,
   setTaskCapableToolSupport,
   type TaskCapableToolDescriptor,
   type TaskCapableToolSupport,
   unregisterTaskCapableTool,
-} from '../tasks/registry.js';
+} from '../tasks/index.js';
 
 type FetchUrlInput = z.infer<typeof fetchUrlInputSchema>;
 

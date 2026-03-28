@@ -20,8 +20,8 @@ import {
   toError,
 } from '../lib/error/index.js';
 import { SystemErrors } from '../lib/error/index.js';
-import { isRawTextContentUrl } from '../lib/http.js';
 import { Loggers } from '../lib/logger-names.js';
+import { isRawTextContentUrl } from '../lib/net/index.js';
 import {
   composeAbortSignal,
   getUtf8ByteLength,

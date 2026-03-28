@@ -2,7 +2,7 @@ import { z } from 'zod';
 
 import { config } from './lib/core.js';
 
-import type { ExtractedMetadata } from './transform/types.js';
+import type { ExtractedMetadata } from './transform/index.js';
 
 const URL_FIELD_MAX_LENGTH = 2048;
 

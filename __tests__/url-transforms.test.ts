@@ -3,10 +3,10 @@ import { describe, it } from 'node:test';
 
 import {
   createDefaultBlockList,
+  normalizeHost,
   normalizeIpForBlockList,
   RawUrlTransformer,
-} from '../src/lib/url.js';
-import { normalizeHost } from '../src/lib/url.js';
+} from '../src/lib/net/index.js';
 
 // ── normalizeHost ───────────────────────────────────────────────────
 

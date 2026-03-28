@@ -51,7 +51,7 @@ import {
 } from '../lib/utils.js';
 
 import { createMcpServerForHttpSession } from '../server.js';
-import { buildAuthenticatedOwnerKey } from '../tasks/owner.js';
+import { buildAuthenticatedOwnerKey } from '../tasks/index.js';
 import {
   applyInsufficientScopeAuthHeaders,
   applyUnauthorizedAuthHeaders,

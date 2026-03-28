@@ -10,7 +10,7 @@ import {
   resolveTaskOwnerKey,
   resolveToolCallContext,
   withRequestContextIfMissing,
-} from '../src/tasks/owner.js';
+} from '../src/tasks/index.js';
 
 // ── compact ─────────────────────────────────────────────────────────
 

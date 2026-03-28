@@ -17,21 +17,22 @@ import {
   logError,
   logWarn,
   redactUrl,
-} from './core.js';
+} from '../core.js';
 import {
   FetchError,
   isAbortError,
   isError,
   isSystemError,
   toError,
-} from './error/index.js';
-import { SystemErrors } from './error/index.js';
+} from '../error/index.js';
+import { SystemErrors } from '../error/index.js';
 import {
   invalidRedirectError,
   redirectCredentialsError,
   unsupportedProtocolError,
-} from './error/index.js';
-import { Loggers } from './logger-names.js';
+} from '../error/index.js';
+import { Loggers } from '../logger-names.js';
+import { composeAbortSignal, isObject } from '../utils.js';
 import { isIP } from './url.js';
 import {
   BLOCKED_HOST_SUFFIXES,
@@ -43,7 +44,6 @@ import {
   type TransformResult,
   UrlNormalizer,
 } from './url.js';
-import { composeAbortSignal, isObject } from './utils.js';
 
 // ═══════════════════════════════════════════════════════════════════
 // ENCODING DETECTION

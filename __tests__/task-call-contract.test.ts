@@ -6,7 +6,7 @@ import {
   parseExtendedCallToolRequest,
   sanitizeToolCallMeta,
   withRelatedTaskMeta,
-} from '../src/tasks/call-contract.js';
+} from '../src/tasks/index.js';
 
 function getRelatedTaskId(value: unknown): string | undefined {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) {

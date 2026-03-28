@@ -3,11 +3,11 @@ import { after, before, describe, it } from 'node:test';
 
 import type { ServerResult } from '@modelcontextprotocol/sdk/types.js';
 
-import { authService } from '../src/http/auth.js';
-import { startHttpServer } from '../src/http/native.js';
+import { authService } from '../src/http/index.js';
+import { startHttpServer } from '../src/http/index.js';
 import { config } from '../src/lib/core.js';
-import { taskManager } from '../src/tasks/manager.js';
-import { resolveTaskOwnerKey } from '../src/tasks/owner.js';
+import { taskManager } from '../src/tasks/index.js';
+import { resolveTaskOwnerKey } from '../src/tasks/index.js';
 
 const TEST_API_KEY = 'test-api-key';
 

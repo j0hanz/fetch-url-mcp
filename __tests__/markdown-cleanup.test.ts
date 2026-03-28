@@ -5,7 +5,7 @@ import {
   cleanupMarkdownArtifacts,
   finalizeMarkdownSections,
   processFencedContent,
-} from '../src/transform/markdown-cleanup.js';
+} from '../src/transform/index.js';
 
 // ── processFencedContent ────────────────────────────────────────────
 

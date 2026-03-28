@@ -6,7 +6,7 @@ import process from 'node:process';
 import { config, serverVersion } from '../lib/core.js';
 import type { SessionStore } from '../lib/core.js';
 
-import { getTransformPoolStats } from '../transform/transform.js';
+import { getTransformPoolStats } from '../transform/index.js';
 import { type RequestContext, sendJson } from './helpers.js';
 
 // ---------------------------------------------------------------------------

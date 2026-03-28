@@ -7,7 +7,7 @@ import { toError } from './lib/error/index.js';
 import { Loggers } from './lib/logger-names.js';
 
 import { parseCliArgs, renderCliUsage } from './cli.js';
-import { startHttpServer } from './http/native.js';
+import { startHttpServer } from './http/index.js';
 import { startStdioServer } from './server.js';
 
 const FORCE_EXIT_TIMEOUT_MS = 10_000;

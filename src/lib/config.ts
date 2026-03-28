@@ -10,7 +10,7 @@ import {
   isIP,
   normalizeHostname,
   stripTrailingDots,
-} from './url.js';
+} from './net/url.js';
 
 // ── Version ─────────────────────────────────────────────────────────
 

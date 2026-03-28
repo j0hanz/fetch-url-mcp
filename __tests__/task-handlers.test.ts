@@ -10,12 +10,12 @@ import {
   createProgressReporter,
   type ProgressNotification,
 } from '../src/lib/mcp-interop.js';
-import { handleToolCallRequest } from '../src/tasks/execution.js';
-import { registerTaskHandlers } from '../src/tasks/handlers.js';
+import { handleToolCallRequest } from '../src/tasks/index.js';
+import { registerTaskHandlers } from '../src/tasks/index.js';
 import {
   registerTaskCapableTool,
   unregisterTaskCapableTool,
-} from '../src/tasks/registry.js';
+} from '../src/tasks/index.js';
 
 type UnknownRequestHandler = (
   request: unknown,

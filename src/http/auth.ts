@@ -9,7 +9,7 @@ import type { AuthInfo } from '@modelcontextprotocol/sdk/server/auth/types.js';
 
 import { config, logDebug, logWarn } from '../lib/core.js';
 import { Loggers } from '../lib/logger-names.js';
-import { normalizeHost } from '../lib/url.js';
+import { normalizeHost } from '../lib/net/index.js';
 import {
   composeAbortSignal,
   hmacSha256Hex,
