@@ -198,13 +198,8 @@ describe('HTTP native gateway routing', () => {
 
     assert.equal(response.status, 400);
     assert.deepEqual(await response.json(), {
-      jsonrpc: '2.0',
-      error: {
-        code: -32700,
-        message:
-          "We couldn't parse the request body. Please ensure it's valid JSON.",
-      },
-      id: null,
+      error:
+        "We couldn't parse the request body. Please ensure it's valid JSON.",
     });
   });
 
@@ -250,13 +245,8 @@ describe('HTTP native gateway routing', () => {
 
     assert.equal(response.status, 400);
     assert.deepEqual(await response.json(), {
-      jsonrpc: '2.0',
-      error: {
-        code: -32600,
-        message:
-          "Your session hasn't been initialized yet. Please wait a moment and try again.",
-      },
-      id: 2,
+      error:
+        "Your session hasn't been initialized yet. Please wait a moment and try again.",
     });
   });
 
@@ -344,13 +334,8 @@ describe('HTTP native gateway routing', () => {
 
     assert.equal(pingResponse.status, 400);
     assert.deepEqual(await pingResponse.json(), {
-      jsonrpc: '2.0',
-      error: {
-        code: -32600,
-        message:
-          "The protocol version '1999-01-01' isn't supported right now. Please check and try again.",
-      },
-      id: null,
+      error:
+        "The protocol version '1999-01-01' isn't supported right now. Please check and try again.",
     });
   });
 

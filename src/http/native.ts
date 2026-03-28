@@ -40,8 +40,6 @@ import { Loggers } from '../lib/logger-names.js';
 import {
   acceptsEventStream,
   acceptsJsonAndEventStream,
-  isJsonRpcBatchRequest,
-  isMcpMessageBody,
   isMcpRequestBody,
   type JsonRpcId,
 } from '../lib/mcp-interop.js';
@@ -356,40 +354,11 @@ class McpSessionGateway {
     }
 
     const { body } = ctx;
-    if (isJsonRpcBatchRequest(body)) {
-      logGatewayRejection({
-        message: 'Rejected MCP POST request',
-        method: ctx.method,
-        path: ctx.url.pathname,
-        reason: 'batch_request_not_supported',
-        status: 400,
-        mcpCode: -32600,
-      });
-      sendError(
-        ctx.res,
-        -32600,
-        "We don't support batch requests yet. Please send one request at a time."
-      );
-      return null;
-    }
-    if (!isMcpMessageBody(body)) {
-      logGatewayRejection({
-        message: 'Rejected MCP POST request',
-        method: ctx.method,
-        path: ctx.url.pathname,
-        reason: 'invalid_request_body',
-        status: 400,
-        mcpCode: -32600,
-      });
-      sendError(
-        ctx.res,
-        -32600,
-        "The request body isn't quite right. Please check the format and try again."
-      );
-      return null;
+    if (isObject(body) && !Array.isArray(body)) {
+      return body as PostRequestBody;
     }
 
-    return body as PostRequestBody;
+    return { id: undefined, method: undefined };
   }
 
   private resolvePostRequestState(

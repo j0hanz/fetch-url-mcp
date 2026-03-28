@@ -80,16 +80,13 @@ export function sendEmpty(res: ServerResponse, status: number): void {
 
 export function sendError(
   res: ServerResponse,
-  code: number,
+  _code: number,
   message: string,
   status = 400,
-  id: JsonRpcId = null
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  _id: JsonRpcId | null = null
 ): void {
-  sendJson(res, status, {
-    jsonrpc: '2.0',
-    error: { code, message },
-    id,
-  });
+  sendJson(res, status, { error: message });
 }
 
 // ---------------------------------------------------------------------------
