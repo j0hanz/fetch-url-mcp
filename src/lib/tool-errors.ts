@@ -276,7 +276,9 @@ function mapFetchToolError(
     };
   }
 
-  if (typeof error.statusCode === 'number' && error.statusCode >= 400) {
+  const isRealHttpError = typeof error.details['httpStatus'] === 'number';
+
+  if (isRealHttpError && error.statusCode >= 400) {
     return {
       message: buildUpstreamHttpMessage(error),
       url,
