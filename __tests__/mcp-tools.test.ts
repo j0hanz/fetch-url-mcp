@@ -160,6 +160,7 @@ describe('createToolErrorResponse', () => {
     );
     assert.equal(result.isError, true);
     assert.equal(result.content.length, 1);
+    assert.equal('structuredContent' in result, false);
 
     const parsed = parseToolPayload(result);
     assert.equal(parsed['error'], 'Something failed');
@@ -304,5 +305,37 @@ describe('handleToolError', () => {
     assert.equal(parsed['code'], 'queue_full');
     const details = getOptionalRecord(parsed['details']);
     assert.equal(details?.['reason'], 'queue_full');
+  });
+
+  it('classifies network FetchError (no httpStatus) as fetch_error, not upstream_http_error', () => {
+    const error = new FetchError(
+      'Network error',
+      'https://example.com',
+      undefined,
+      { message: 'getaddrinfo ENOTFOUND example.com' }
+    );
+    const result = handleToolError(error, 'https://example.com');
+    const parsed = parseToolPayload(result);
+    assert.equal(parsed['category'], 'fetch_error');
+    assert.equal(parsed['code'], 'FETCH_ERROR');
+    assert.equal(parsed['statusCode'], 502);
+    assert.equal(parsed['error'], 'Network error');
+  });
+
+  it('classifies real HTTP 404 FetchError as upstream_http_error', () => {
+    const error = new FetchError(
+      'HTTP 404: Not Found',
+      'https://example.com',
+      404
+    );
+    const result = handleToolError(error, 'https://example.com');
+    const parsed = parseToolPayload(result);
+    assert.equal(parsed['category'], 'upstream_http_error');
+    assert.equal(parsed['code'], 'HTTP_404');
+    assert.equal(parsed['statusCode'], 404);
+    assert.equal(
+      parsed['error'],
+      'The target page returned 404 Not Found.'
+    );
   });
 });
