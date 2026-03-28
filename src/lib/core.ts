@@ -9,14 +9,11 @@ import {
 import { type McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 
 import { config, type LogLevel } from './config.js';
+import { getErrorMessage, isAbortError } from './error-classes.js';
 import { Loggers } from './logger-names.js';
 import type { SessionEntry } from './session.js';
 import type { SessionStore } from './session.js';
-import {
-  getErrorMessage,
-  isAbortError,
-  startAbortableIntervalLoop,
-} from './utils.js';
+import { startAbortableIntervalLoop } from './utils.js';
 
 export { config, enableHttpMode, serverVersion } from './config.js';
 

@@ -3,8 +3,8 @@ import process from 'node:process';
 
 import { serverVersion } from './lib/core.js';
 import { logError } from './lib/core.js';
+import { toError } from './lib/error-classes.js';
 import { Loggers } from './lib/logger-names.js';
-import { toError } from './lib/utils.js';
 
 import { parseCliArgs, renderCliUsage } from './cli.js';
 import { startHttpServer } from './http/native.js';

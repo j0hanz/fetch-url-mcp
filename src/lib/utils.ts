@@ -4,14 +4,12 @@ import {
   setInterval as setIntervalPromise,
   setTimeout as setTimeoutPromise,
 } from 'node:timers/promises';
-import { inspect } from 'node:util';
 
 import { config, logDebug, logWarn } from './core.js';
-import { SystemErrors } from './error-codes.js';
+import { isAbortError } from './error-classes.js';
 import { Loggers } from './logger-names.js';
 
 const textEncoder = new TextEncoder();
-const UNKNOWN_ERROR_MESSAGE = 'Unknown error';
 
 export function composeAbortSignal(
   signal?: AbortSignal,
@@ -29,30 +27,6 @@ export function parseUrlOrNull(input: string, base?: string): URL | null {
   return URL.parse(input, base);
 }
 
-export function throwIfAborted(
-  signal: AbortSignal | undefined,
-  url: string,
-  stage: string
-): void {
-  if (!signal?.aborted) return;
-
-  if (signal.reason instanceof Error && signal.reason.name === 'TimeoutError') {
-    const error = new FetchError('Request timeout', url, 504, {
-      reason: 'timeout',
-      stage,
-    });
-    throw error;
-  }
-
-  throw createAbortError(url, stage);
-}
-export function createAbortError(url: string, stage: string): FetchError {
-  const error = new FetchError('Request was canceled', url, 499, {
-    reason: 'aborted',
-    stage,
-  });
-  return error;
-}
 export function timingSafeEqualUtf8(a: string, b: string): boolean {
   const aBuf = textEncoder.encode(a);
   const bBuf = textEncoder.encode(b);
@@ -64,76 +38,6 @@ export function hmacSha256Hex(
   input: string | Uint8Array
 ): string {
   return createHmac('sha256', key).update(input).digest('hex');
-}
-const DEFAULT_HTTP_STATUS = 502;
-export class FetchError extends Error {
-  readonly statusCode: number;
-  readonly code: string;
-  readonly details: Readonly<Record<string, unknown>>;
-
-  constructor(
-    message: string,
-    readonly url: string,
-    httpStatus?: number,
-    details: Record<string, unknown> = {},
-    options?: ErrorOptions
-  ) {
-    super(message, options);
-    this.name = 'FetchError';
-    this.statusCode = httpStatus ?? DEFAULT_HTTP_STATUS;
-    this.details = Object.freeze({ url, httpStatus, ...details });
-    const explicitCode = this.details['code'];
-    if (typeof explicitCode === 'string') {
-      this.code = explicitCode;
-    } else if (httpStatus) {
-      this.code = `HTTP_${httpStatus}`;
-    } else {
-      this.code = SystemErrors.FETCH_ERROR;
-    }
-  }
-}
-export function getErrorMessage(error: unknown): string {
-  if (isError(error)) return error.message;
-  if (typeof error === 'string' && error.length > 0) return error;
-  if (
-    isObject(error) &&
-    typeof error['message'] === 'string' &&
-    error['message'].length > 0
-  ) {
-    return error['message'];
-  }
-  if (error === null || error === undefined) return UNKNOWN_ERROR_MESSAGE;
-  try {
-    return inspect(error, {
-      depth: 2,
-      maxStringLength: 200,
-      breakLength: Infinity,
-      compact: true,
-      colors: false,
-    });
-  } catch {
-    return UNKNOWN_ERROR_MESSAGE;
-  }
-}
-export function toError(error: unknown): Error {
-  return isError(error) ? error : new Error(getErrorMessage(error));
-}
-export function isAbortError(error: unknown): boolean {
-  return isError(error) && error.name === 'AbortError';
-}
-export class CodedError extends Error {
-  readonly code: string;
-  constructor(message: string, code: string, options?: ErrorOptions) {
-    super(message, options);
-    this.code = code;
-    this.name = 'CodedError';
-  }
-}
-export function isSystemError(error: unknown): error is NodeJS.ErrnoException {
-  if (!isError(error)) return false;
-  if (!('code' in error)) return false;
-  const { code } = error;
-  return typeof code === 'string';
 }
 interface TunableHttpServer {
   headersTimeout?: number;
@@ -284,19 +188,6 @@ export function compactContext<T extends object>(obj: T): Partial<T> {
   ) as Partial<T>;
 }
 
-type ErrorConstructorWithIsError = ErrorConstructor & {
-  isError?: (value: unknown) => boolean;
-};
-
-export function isError(value: unknown): value is Error {
-  const maybeIsError = (Error as ErrorConstructorWithIsError).isError;
-  if (typeof maybeIsError === 'function') {
-    const result = maybeIsError(value);
-    if (typeof result === 'boolean') return result;
-  }
-
-  return value instanceof Error;
-}
 interface HtmlNode {
   readonly tagName?: string | undefined;
   readonly nodeName?: string | undefined;

@@ -13,15 +13,14 @@ import {
 import { z } from 'zod';
 
 import { config, logDebug, logInfo, logWarn } from '../lib/core.js';
-import { SystemErrors } from '../lib/error-codes.js';
-import { Loggers } from '../lib/logger-names.js';
 import {
-  type CancellableTimeout,
   createAbortError,
-  createUnrefTimeout,
   FetchError,
   getErrorMessage,
-} from '../lib/utils.js';
+} from '../lib/error-classes.js';
+import { SystemErrors } from '../lib/error-codes.js';
+import { Loggers } from '../lib/logger-names.js';
+import { type CancellableTimeout, createUnrefTimeout } from '../lib/utils.js';
 import { formatZodError } from '../lib/zod.js';
 
 import { extractedMetadataSchema } from '../schemas.js';

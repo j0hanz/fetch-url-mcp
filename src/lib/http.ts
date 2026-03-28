@@ -18,6 +18,13 @@ import {
   logWarn,
   redactUrl,
 } from './core.js';
+import {
+  FetchError,
+  isAbortError,
+  isError,
+  isSystemError,
+  toError,
+} from './error-classes.js';
 import { SystemErrors } from './error-codes.js';
 import {
   invalidRedirectError,
@@ -36,15 +43,7 @@ import {
   type TransformResult,
   UrlNormalizer,
 } from './url.js';
-import {
-  composeAbortSignal,
-  FetchError,
-  isAbortError,
-  isError,
-  isObject,
-  isSystemError,
-  toError,
-} from './utils.js';
+import { composeAbortSignal, isObject } from './utils.js';
 
 // ═══════════════════════════════════════════════════════════════════
 // ENCODING DETECTION

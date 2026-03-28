@@ -2,20 +2,22 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 import {
-  CharCode,
   CodedError,
-  composeAbortSignal,
   FetchError,
   getErrorMessage,
-  getUtf8ByteLength,
   isAbortError,
-  isAsciiOnly,
   isError,
-  isObject,
   isSystemError,
+  toError,
+} from '../src/lib/error-classes.js';
+import {
+  CharCode,
+  composeAbortSignal,
+  getUtf8ByteLength,
+  isAsciiOnly,
+  isObject,
   isWhitespaceChar,
   timingSafeEqualUtf8,
-  toError,
   trimDanglingTagFragment,
   trimUtf8Buffer,
   truncateToUtf8Boundary,

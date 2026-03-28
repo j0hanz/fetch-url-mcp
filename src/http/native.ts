@@ -36,6 +36,7 @@ import {
   type SessionStore,
   startSessionCleanupLoop,
 } from '../lib/core.js';
+import { toError } from '../lib/error-classes.js';
 import { Loggers } from '../lib/logger-names.js';
 import {
   acceptsEventStream,
@@ -47,7 +48,6 @@ import {
   applyHttpServerTuning,
   drainConnectionsOnShutdown,
   isObject,
-  toError,
 } from '../lib/utils.js';
 
 import { createMcpServerForHttpSession } from '../server.js';

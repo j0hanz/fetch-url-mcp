@@ -1,5 +1,5 @@
 import { config } from '../lib/core.js';
-import { throwIfAborted } from '../lib/utils.js';
+import { throwIfAborted } from '../lib/error-classes.js';
 
 // ── ASCII code constants ────────────────────────────────────────────
 const ASCII_MARKERS = {

@@ -8,6 +8,7 @@ import type { ServerResult } from '@modelcontextprotocol/sdk/types.js';
 import type { z } from 'zod';
 
 import { config, logInfo } from '../lib/core.js';
+import { isAbortError } from '../lib/error-classes.js';
 import {
   finalizeInlineMarkdown,
   type InlineContentResult,
@@ -27,13 +28,8 @@ import {
   type ToolHandlerExtra,
   validateOrThrow,
 } from '../lib/mcp-interop.js';
-import { classifyAndLogToolError } from '../lib/tool-errors.js';
-import {
-  composeAbortSignal,
-  isAbortError,
-  isObject,
-  parseUrlOrNull,
-} from '../lib/utils.js';
+import { classifyAndLogToolError } from '../lib/tool-error-classify.js';
+import { composeAbortSignal, isObject, parseUrlOrNull } from '../lib/utils.js';
 
 import {
   fetchUrlInputSchema,

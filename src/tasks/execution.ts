@@ -13,14 +13,15 @@ import {
   logWarn,
   runWithRequestContext,
 } from '../lib/core.js';
+import { getErrorMessage } from '../lib/error-classes.js';
 import { Loggers } from '../lib/logger-names.js';
 import { createMcpError } from '../lib/mcp-interop.js';
 import { type ProgressNotification } from '../lib/mcp-interop.js';
+import { handleToolError } from '../lib/tool-error-classify.js';
 import {
-  handleToolError,
+  stripMcpErrorPrefix,
   tryReadToolErrorMessage,
-} from '../lib/tool-errors.js';
-import { getErrorMessage } from '../lib/utils.js';
+} from '../lib/tool-error-payload.js';
 import { isObject } from '../lib/utils.js';
 
 import {
@@ -175,10 +176,7 @@ function buildTaskFailureState(error: unknown): {
   };
 } {
   const mcpErrorMessage =
-    error instanceof McpError
-      ? (/^(?:MCP )?[Ee]rror -?\d+:\s*(.*)$/s.exec(error.message)?.[1] ??
-        error.message)
-      : undefined;
+    error instanceof McpError ? stripMcpErrorPrefix(error.message) : undefined;
   const statusMessage = mcpErrorMessage ?? getErrorMessage(error);
 
   if (error instanceof McpError) {

@@ -13,18 +13,20 @@ import {
   logWarn,
   redactUrl,
 } from '../lib/core.js';
+import {
+  FetchError,
+  getErrorMessage,
+  throwIfAborted,
+  toError,
+} from '../lib/error-classes.js';
 import { SystemErrors } from '../lib/error-codes.js';
 import { isRawTextContentUrl } from '../lib/http.js';
 import { Loggers } from '../lib/logger-names.js';
 import {
   composeAbortSignal,
-  FetchError,
-  getErrorMessage,
   getUtf8ByteLength,
   isAsciiOnly,
   isObject,
-  throwIfAborted,
-  toError,
   trimDanglingTagFragment,
   truncateToUtf8Boundary,
 } from '../lib/utils.js';

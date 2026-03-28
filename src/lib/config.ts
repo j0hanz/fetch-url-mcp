@@ -4,13 +4,13 @@ import process from 'node:process';
 
 import { z } from 'zod';
 
+import { getErrorMessage } from './error-classes.js';
 import {
   buildIpv4,
   isIP,
   normalizeHostname,
   stripTrailingDots,
 } from './url.js';
-import { getErrorMessage } from './utils.js';
 
 // ── Version ─────────────────────────────────────────────────────────
 

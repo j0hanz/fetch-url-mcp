@@ -15,10 +15,10 @@ import {
   unregisterMcpSessionServer,
   unregisterMcpSessionServerByServer,
 } from '../lib/core.js';
+import { getErrorMessage, toError } from '../lib/error-classes.js';
 import { Loggers } from '../lib/logger-names.js';
 import type { JsonRpcId } from '../lib/mcp-interop.js';
 import { createDefaultBlockList, normalizeIpForBlockList } from '../lib/url.js';
-import { getErrorMessage, toError } from '../lib/utils.js';
 
 // ---------------------------------------------------------------------------
 // Shared types
@@ -83,8 +83,8 @@ export function sendError(
   _code: number,
   message: string,
   status = 400,
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  _id: JsonRpcId | null = null
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- kept for call-site compat
+  _id?: JsonRpcId | null
 ): void {
   sendJson(res, status, { error: message });
 }

@@ -2,8 +2,8 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 
 import { ErrorCode } from '@modelcontextprotocol/sdk/types.js';
 
+import { toError } from '../lib/error-classes.js';
 import { createMcpError } from '../lib/mcp-interop.js';
-import { toError } from '../lib/utils.js';
 import { type CancellableTimeout, createUnrefTimeout } from '../lib/utils.js';
 
 interface WaitableTask {

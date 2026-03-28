@@ -96,10 +96,13 @@ export function buildServerInstructions(): string {
 - Notifications: opt-in. Set \`TASKS_STATUS_NOTIFICATIONS=true\`.
 
 # Errors
-- SystemErrors.VALIDATION_ERROR: invalid/blocked URL. Do not retry.
-- SystemErrors.FETCH_ERROR: network failure. Retry once with backoff.
-- HTTP_xxx: upstream error. Retry only for 5xx.
-- SystemErrors.ABORTED: cancelled. Retry if needed.
+- VALIDATION_ERROR: invalid/blocked URL. Do not retry.
+- FETCH_ERROR: network failure. Retry once with backoff.
+- UPSTREAM_HTTP_ERROR: upstream HTTP error. Retry only for 5xx.
+- UPSTREAM_RATE_LIMITED: upstream returned 429. Back off and retry.
+- UPSTREAM_TIMEOUT: upstream request timed out. Retry with backoff.
+- UPSTREAM_ABORTED: request was cancelled. Retry if needed.
+- MCP_ERROR: internal protocol error. Do not retry.
 - queue_full: worker pool busy. Wait and retry, or use task mode.`;
 }
 

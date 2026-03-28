@@ -9,8 +9,9 @@ import { McpError } from '@modelcontextprotocol/sdk/types.js';
 import { z } from 'zod';
 
 import { logError, logWarn } from './core.js';
+import { getErrorMessage } from './error-classes.js';
 import { Loggers } from './logger-names.js';
-import { getErrorMessage, isObject } from './utils.js';
+import { isObject } from './utils.js';
 import { formatZodError } from './zod.js';
 
 export function createMcpError(
