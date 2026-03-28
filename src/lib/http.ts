@@ -24,13 +24,13 @@ import {
   isError,
   isSystemError,
   toError,
-} from './error-classes.js';
-import { SystemErrors } from './error-codes.js';
+} from './error/index.js';
+import { SystemErrors } from './error/index.js';
 import {
   invalidRedirectError,
   redirectCredentialsError,
   unsupportedProtocolError,
-} from './error-messages.js';
+} from './error/index.js';
 import { Loggers } from './logger-names.js';
 import { isIP } from './url.js';
 import {

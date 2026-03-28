@@ -1,8 +1,8 @@
 import { ErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js';
 
-import { logError, logWarn } from './core.js';
-import { FetchError, isAbortError, isSystemError } from './error-classes.js';
-import { ErrorCategory, SystemErrors } from './error-codes.js';
+import { logError, logWarn } from '../core.js';
+import { FetchError, isAbortError, isSystemError } from './classes.js';
+import { ErrorCategory, SystemErrors } from './codes.js';
 import {
   createToolErrorResponse,
   sanitizeToolErrorDetails,
@@ -10,7 +10,7 @@ import {
   type ToolErrorLogMeta,
   type ToolErrorPayload,
   type ToolErrorResponse,
-} from './tool-error-payload.js';
+} from './payload.js';
 
 function toToolErrorResponse(payload: ToolErrorPayload): ToolErrorResponse {
   return createToolErrorResponse(payload.error, payload.url, payload);

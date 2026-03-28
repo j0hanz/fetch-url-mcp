@@ -36,7 +36,7 @@ import {
   type SessionStore,
   startSessionCleanupLoop,
 } from '../lib/core.js';
-import { toError } from '../lib/error-classes.js';
+import { toError } from '../lib/error/index.js';
 import { Loggers } from '../lib/logger-names.js';
 import {
   acceptsEventStream,

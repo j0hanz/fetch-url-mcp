@@ -3,8 +3,8 @@ import { BlockList, isIP, SocketAddress } from 'node:net';
 import { domainToASCII } from 'node:url';
 
 import { config, logDebug } from './core.js';
-import { CodedError, isError, isSystemError } from './error-classes.js';
-import { SystemErrors } from './error-codes.js';
+import { CodedError, isError, isSystemError } from './error/index.js';
+import { SystemErrors } from './error/index.js';
 import {
   blockedCnameError,
   blockedHostError,
@@ -14,7 +14,7 @@ import {
   invalidAddressFamilyError,
   invalidHostnameError,
   invalidUrlError,
-} from './error-messages.js';
+} from './error/index.js';
 import { Loggers } from './logger-names.js';
 import { composeAbortSignal } from './utils.js';
 

@@ -13,15 +13,15 @@ import {
   logWarn,
   runWithRequestContext,
 } from '../lib/core.js';
-import { getErrorMessage } from '../lib/error-classes.js';
-import { Loggers } from '../lib/logger-names.js';
-import { createMcpError } from '../lib/mcp-interop.js';
-import { type ProgressNotification } from '../lib/mcp-interop.js';
-import { handleToolError } from '../lib/tool-error-classify.js';
+import { getErrorMessage } from '../lib/error/index.js';
+import { handleToolError } from '../lib/error/index.js';
 import {
   stripMcpErrorPrefix,
   tryReadToolErrorMessage,
-} from '../lib/tool-error-payload.js';
+} from '../lib/error/index.js';
+import { Loggers } from '../lib/logger-names.js';
+import { createMcpError } from '../lib/mcp-interop.js';
+import { type ProgressNotification } from '../lib/mcp-interop.js';
 import { isObject } from '../lib/utils.js';
 
 import {

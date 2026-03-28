@@ -1,8 +1,8 @@
 import { type CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import { z } from 'zod';
 
-import { SystemErrors } from './error-codes.js';
-import { isObject } from './utils.js';
+import { isObject } from '../utils.js';
+import { SystemErrors } from './codes.js';
 
 export type ToolErrorResponse = CallToolResult & {
   isError: true;

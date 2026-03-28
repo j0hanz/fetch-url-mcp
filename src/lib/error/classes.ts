@@ -1,7 +1,7 @@
 import { inspect } from 'node:util';
 
-import { SystemErrors } from './error-codes.js';
-import { isObject } from './utils.js';
+import { isObject } from '../utils.js';
+import { SystemErrors } from './codes.js';
 
 // ── Error identity ─────────────────────────────────────────────────
 

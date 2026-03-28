@@ -17,8 +17,8 @@ import {
   createAbortError,
   FetchError,
   getErrorMessage,
-} from '../lib/error-classes.js';
-import { SystemErrors } from '../lib/error-codes.js';
+} from '../lib/error/index.js';
+import { SystemErrors } from '../lib/error/index.js';
 import { Loggers } from '../lib/logger-names.js';
 import { type CancellableTimeout, createUnrefTimeout } from '../lib/utils.js';
 import { formatZodError } from '../lib/zod.js';

@@ -9,7 +9,7 @@ import {
   isError,
   isSystemError,
   toError,
-} from '../src/lib/error-classes.js';
+} from '../src/lib/error/index.js';
 import {
   CharCode,
   composeAbortSignal,

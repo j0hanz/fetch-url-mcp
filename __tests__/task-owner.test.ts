@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { tryReadToolErrorMessage } from '../src/lib/tool-error-payload.js';
+import { tryReadToolErrorMessage } from '../src/lib/error/index.js';
 import {
   buildToolHandlerExtra,
   compact,

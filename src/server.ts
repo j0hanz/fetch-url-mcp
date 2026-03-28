@@ -14,7 +14,7 @@ import {
   setLogLevel,
   setMcpServer,
 } from './lib/core.js';
-import { toError } from './lib/error-classes.js';
+import { toError } from './lib/error/index.js';
 import { Loggers } from './lib/logger-names.js';
 import { setTaskToolCallCapability } from './lib/mcp-interop.js';
 import type { IconInfo } from './lib/utils.js';

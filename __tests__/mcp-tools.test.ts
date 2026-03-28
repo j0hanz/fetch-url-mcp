@@ -3,7 +3,12 @@ import { describe, it } from 'node:test';
 
 import { ErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js';
 
-import { FetchError } from '../src/lib/error-classes.js';
+import { FetchError } from '../src/lib/error/index.js';
+import { handleToolError } from '../src/lib/error/index.js';
+import {
+  createToolErrorResponse,
+  tryReadToolErrorPayload,
+} from '../src/lib/error/index.js';
 import {
   acceptsEventStream,
   acceptsJsonAndEventStream,
@@ -11,11 +16,6 @@ import {
   isMcpMessageBody,
   isMcpRequestBody,
 } from '../src/lib/mcp-interop.js';
-import { handleToolError } from '../src/lib/tool-error-classify.js';
-import {
-  createToolErrorResponse,
-  tryReadToolErrorPayload,
-} from '../src/lib/tool-error-payload.js';
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);

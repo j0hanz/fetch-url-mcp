@@ -6,7 +6,7 @@ import {
 } from 'node:timers/promises';
 
 import { config, logDebug, logWarn } from './core.js';
-import { isAbortError } from './error-classes.js';
+import { isAbortError } from './error/index.js';
 import { Loggers } from './logger-names.js';
 
 const textEncoder = new TextEncoder();

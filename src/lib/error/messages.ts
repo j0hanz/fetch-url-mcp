@@ -1,5 +1,5 @@
-import { CodedError } from './error-classes.js';
-import { SystemErrors } from './error-codes.js';
+import { CodedError } from './classes.js';
+import { SystemErrors } from './codes.js';
 
 // ── DNS / Network ──────────────────────────────────────────────────
 

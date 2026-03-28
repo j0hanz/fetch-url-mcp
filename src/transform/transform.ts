@@ -18,8 +18,8 @@ import {
   getErrorMessage,
   throwIfAborted,
   toError,
-} from '../lib/error-classes.js';
-import { SystemErrors } from '../lib/error-codes.js';
+} from '../lib/error/index.js';
+import { SystemErrors } from '../lib/error/index.js';
 import { isRawTextContentUrl } from '../lib/http.js';
 import { Loggers } from '../lib/logger-names.js';
 import {

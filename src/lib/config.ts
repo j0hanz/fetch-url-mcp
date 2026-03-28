@@ -4,7 +4,7 @@ import process from 'node:process';
 
 import { z } from 'zod';
 
-import { getErrorMessage } from './error-classes.js';
+import { getErrorMessage } from './error/index.js';
 import {
   buildIpv4,
   isIP,

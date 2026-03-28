@@ -1,5 +1,5 @@
 import { logWarn } from '../lib/core.js';
-import { isAbortError } from '../lib/error-classes.js';
+import { isAbortError } from '../lib/error/index.js';
 import { Loggers } from '../lib/logger-names.js';
 import { startAbortableIntervalLoop } from '../lib/utils.js';
 
