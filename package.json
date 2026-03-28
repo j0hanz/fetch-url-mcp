@@ -94,7 +94,7 @@
     "eslint-plugin-de-morgan": "^2.1.1",
     "eslint-plugin-depend": "^1.5.0",
     "eslint-plugin-unused-imports": "^4.4.1",
-    "knip": "^6",
+    "knip": "^6.1.0",
     "prettier": "^3.8.1",
     "tsx": "^4.21.0",
     "typescript": "^6.0.2",
