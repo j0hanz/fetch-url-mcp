@@ -1,11 +1,11 @@
-import { randomBytes } from 'node:crypto';
-import type { IncomingMessage, ServerResponse } from 'node:http';
-
 import {
   InvalidTokenError,
   ServerError,
 } from '@modelcontextprotocol/sdk/server/auth/errors.js';
 import type { AuthInfo } from '@modelcontextprotocol/sdk/server/auth/types.js';
+
+import { randomBytes } from 'node:crypto';
+import type { IncomingMessage, ServerResponse } from 'node:http';
 
 import { config, logDebug, logWarn } from '../lib/core.js';
 import { Loggers } from '../lib/logger-names.js';

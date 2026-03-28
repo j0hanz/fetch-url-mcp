@@ -1,8 +1,8 @@
+import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+
 import assert from 'node:assert/strict';
 import process from 'node:process';
 import { after, before, beforeEach, describe, it } from 'node:test';
-
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 
 import {
   config,

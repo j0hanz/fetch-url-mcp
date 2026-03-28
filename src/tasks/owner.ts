@@ -1,6 +1,6 @@
-import { hash, randomUUID } from 'node:crypto';
-
 import type { ServerResult } from '@modelcontextprotocol/sdk/types.js';
+
+import { hash, randomUUID } from 'node:crypto';
 
 import {
   getRequestId,

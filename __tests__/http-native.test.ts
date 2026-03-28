@@ -1,7 +1,7 @@
+import type { ServerResult } from '@modelcontextprotocol/sdk/types.js';
+
 import assert from 'node:assert/strict';
 import { after, before, describe, it } from 'node:test';
-
-import type { ServerResult } from '@modelcontextprotocol/sdk/types.js';
 
 import { authService, startHttpServer } from '../src/http/index.js';
 import { config } from '../src/lib/core.js';

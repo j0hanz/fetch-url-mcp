@@ -1,7 +1,7 @@
+import { ErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js';
+
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-
-import { ErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js';
 
 import {
   createToolErrorResponse,

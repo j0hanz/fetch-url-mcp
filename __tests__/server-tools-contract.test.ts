@@ -1,7 +1,7 @@
+import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+
 import assert from 'node:assert/strict';
 import { afterEach, describe, it } from 'node:test';
-
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 
 import { createMcpServerForHttpSession } from '../src/server.js';
 import { buildFetchUrlContentBlocks } from '../src/tools/fetch-url.js';

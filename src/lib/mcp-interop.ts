@@ -1,11 +1,12 @@
-import { setTimeout as setTimeoutPromise } from 'node:timers/promises';
-
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import {
   ListToolsRequestSchema,
   ListToolsResultSchema,
   McpError,
 } from '@modelcontextprotocol/sdk/types.js';
+
+import { setTimeout as setTimeoutPromise } from 'node:timers/promises';
+
 import { z } from 'zod';
 
 import { logError, logWarn } from './core.js';

@@ -4,6 +4,7 @@ import type {
   GetPromptResult,
   ReadResourceResult,
 } from '@modelcontextprotocol/sdk/types.js';
+
 import { z } from 'zod';
 
 import { config } from '../lib/core.js';

@@ -1,7 +1,7 @@
+import { ErrorCode } from '@modelcontextprotocol/sdk/types.js';
+
 import { createHmac, randomBytes, randomUUID } from 'node:crypto';
 import { setInterval } from 'node:timers';
-
-import { ErrorCode } from '@modelcontextprotocol/sdk/types.js';
 
 import { config, logInfo, logWarn } from '../lib/core.js';
 import { Loggers } from '../lib/logger-names.js';

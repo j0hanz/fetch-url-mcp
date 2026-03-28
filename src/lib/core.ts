@@ -1,3 +1,5 @@
+import { type McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+
 import { AsyncLocalStorage } from 'node:async_hooks';
 import process from 'node:process';
 import {
@@ -5,8 +7,6 @@ import {
   inspect,
   stripVTControlCharacters,
 } from 'node:util';
-
-import { type McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 
 import { config, type LogLevel } from './config.js';
 import { getErrorMessage, isAbortError } from './error/index.js';

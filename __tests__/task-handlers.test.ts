@@ -1,10 +1,10 @@
+import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { ErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js';
+
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { describe, it } from 'node:test';
 import { setTimeout as setTimeoutPromise } from 'node:timers/promises';
-
-import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { ErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js';
 
 import {
   createProgressReporter,

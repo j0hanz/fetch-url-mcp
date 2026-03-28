@@ -1,8 +1,8 @@
-import assert from 'node:assert/strict';
-import { after, before, describe, it } from 'node:test';
-
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+
+import assert from 'node:assert/strict';
+import { after, before, describe, it } from 'node:test';
 
 import {
   getSdkCallToolHandler,
