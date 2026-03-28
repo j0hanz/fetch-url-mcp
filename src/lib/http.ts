@@ -18,19 +18,13 @@ import {
   logWarn,
   redactUrl,
 } from './core.js';
-import {
-  EBADREDIRECT,
-  EBLOCKED,
-  EINVAL,
-  ENODATA,
-  VALIDATION_ERROR,
-} from './error-codes.js';
+import { SystemErrors } from './error-codes.js';
 import {
   invalidRedirectError,
   redirectCredentialsError,
   unsupportedProtocolError,
 } from './error-messages.js';
-import { LOG_FETCH } from './logger-names.js';
+import { Loggers } from './logger-names.js';
 import { isIP } from './url.js';
 import {
   BLOCKED_HOST_SUFFIXES,
@@ -408,12 +402,12 @@ function resolveErrorUrl(error: unknown, fallback: string): string {
   const { requestUrl } = error;
   return typeof requestUrl === 'string' ? requestUrl : fallback;
 }
-const CLIENT_ERROR_CODES = new Set([
-  VALIDATION_ERROR,
-  EBADREDIRECT,
-  EBLOCKED,
-  ENODATA,
-  EINVAL,
+const CLIENT_ERROR_CODES = new Set<string>([
+  SystemErrors.VALIDATION_ERROR,
+  SystemErrors.EBADREDIRECT,
+  SystemErrors.EBLOCKED,
+  SystemErrors.ENODATA,
+  SystemErrors.EINVAL,
 ]);
 
 function mapAbortError(
@@ -429,7 +423,7 @@ function mapAbortError(
 function mapSystemError(error: NodeJS.ErrnoException, url: string): FetchError {
   const { code, message } = error;
 
-  if (code === 'ETIMEOUT') {
+  if (code === SystemErrors.ETIMEOUT) {
     const fetchError = new FetchError(message, url, 504, { code });
     return fetchError;
   }
@@ -743,7 +737,7 @@ function assertSupportedContentType(
       {
         url: redactUrl(url),
       },
-      LOG_FETCH
+      Loggers.LOG_FETCH
     );
     return;
   }

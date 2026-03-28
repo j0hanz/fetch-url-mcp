@@ -1,13 +1,15 @@
 /**
  * Logger names for different components of the application.
  */
-export const LOG_AUTH = 'auth';
-export const LOG_HTTP = 'http';
-export const LOG_SESSION = 'session';
-export const LOG_SERVER = 'server';
-export const LOG_FETCH = 'fetch';
-export const LOG_TRANSFORM = 'transform';
-export const LOG_TASKS = 'tasks';
-export const LOG_RATE_LIMIT = 'rate-limit';
-export const LOG_MCP = 'mcp';
-export const LOG_FETCH_URL = 'fetch-url';
+export const Loggers = {
+  LOG_AUTH: 'auth',
+  LOG_HTTP: 'http',
+  LOG_SESSION: 'session',
+  LOG_SERVER: 'server',
+  LOG_FETCH: 'fetch',
+  LOG_TRANSFORM: 'transform',
+  LOG_TASKS: 'tasks',
+  LOG_RATE_LIMIT: 'rate-limit',
+  LOG_MCP: 'mcp',
+  LOG_FETCH_URL: 'fetch-url',
+} as const;

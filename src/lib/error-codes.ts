@@ -1,19 +1,12 @@
-// ── Error codes ────────────────────────────────
-
-// DNS / network resolution
-export const EBLOCKED = 'EBLOCKED';
-export const ETIMEOUT = 'ETIMEOUT';
-export const EINVAL = 'EINVAL';
-export const ENODATA = 'ENODATA';
-
-// HTTP redirect
-export const EBADREDIRECT = 'EBADREDIRECT';
-export const EUNSUPPORTEDPROTOCOL = 'EUNSUPPORTEDPROTOCOL';
-
-// Fetch pipeline
-export const FETCH_ERROR = 'FETCH_ERROR';
-export const ABORTED = 'ABORTED';
-export const QUEUE_FULL = 'queue_full';
-
-// Validation
-export const VALIDATION_ERROR = 'VALIDATION_ERROR';
+export const SystemErrors = {
+  EBLOCKED: 'EBLOCKED',
+  ETIMEOUT: 'ETIMEOUT',
+  EINVAL: 'EINVAL',
+  ENODATA: 'ENODATA',
+  EBADREDIRECT: 'EBADREDIRECT',
+  EUNSUPPORTEDPROTOCOL: 'EUNSUPPORTEDPROTOCOL',
+  FETCH_ERROR: 'FETCH_ERROR',
+  ABORTED: 'ABORTED',
+  QUEUE_FULL: 'queue_full',
+  VALIDATION_ERROR: 'VALIDATION_ERROR',
+} as const;

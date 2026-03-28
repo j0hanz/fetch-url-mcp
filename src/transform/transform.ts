@@ -13,9 +13,9 @@ import {
   logWarn,
   redactUrl,
 } from '../lib/core.js';
-import { QUEUE_FULL } from '../lib/error-codes.js';
+import { SystemErrors } from '../lib/error-codes.js';
 import { isRawTextContentUrl } from '../lib/http.js';
-import { LOG_TRANSFORM } from '../lib/logger-names.js';
+import { Loggers } from '../lib/logger-names.js';
 import {
   composeAbortSignal,
   FetchError,
@@ -174,7 +174,7 @@ class StageTracker {
             thresholdMs: Math.round(warnThresholdMs),
             url: context.url,
           },
-          LOG_TRANSFORM
+          Loggers.LOG_TRANSFORM
         );
       }
     }
@@ -258,7 +258,7 @@ class StageTracker {
           stage: event.stage,
           error: getErrorMessage(error),
         },
-        LOG_TRANSFORM
+        Loggers.LOG_TRANSFORM
       );
     }
   }
@@ -353,7 +353,7 @@ function truncateHtml(
       maxSize,
       truncatedSize: getUtf8ByteLength(content),
     },
-    LOG_TRANSFORM
+    Loggers.LOG_TRANSFORM
   );
   return { html: content, truncated: true };
 }
@@ -524,7 +524,7 @@ function validateReaderability(
         'This might be a client-side rendered (SPA) application. ' +
         'Content extraction may be incomplete.',
       { textLength },
-      LOG_TRANSFORM
+      Loggers.LOG_TRANSFORM
     );
   }
 
@@ -599,7 +599,7 @@ function extractArticle(
     logWarn(
       'Document not compatible with Readability',
       undefined,
-      LOG_TRANSFORM
+      Loggers.LOG_TRANSFORM
     );
     return null;
   }
@@ -617,7 +617,7 @@ function extractArticle(
     logError(
       'Failed to extract article with Readability',
       error instanceof Error ? error : undefined,
-      LOG_TRANSFORM
+      Loggers.LOG_TRANSFORM
     );
     return null;
   }
@@ -628,12 +628,16 @@ function isValidInput(html: string, url: string): boolean {
     logWarn(
       'extractContent called with invalid HTML input',
       undefined,
-      LOG_TRANSFORM
+      Loggers.LOG_TRANSFORM
     );
     return false;
   }
   if (typeof url !== 'string' || url.length === 0) {
-    logWarn('extractContent called with invalid URL', undefined, LOG_TRANSFORM);
+    logWarn(
+      'extractContent called with invalid URL',
+      undefined,
+      Loggers.LOG_TRANSFORM
+    );
     return false;
   }
   return true;
@@ -649,7 +653,7 @@ function applyBaseUri(document: Document, url: string): void {
         url: url.substring(0, 100),
         error: getErrorMessage(error),
       },
-      LOG_TRANSFORM
+      Loggers.LOG_TRANSFORM
     );
   }
 }
@@ -762,7 +766,7 @@ function extractContentContext(
     logError(
       'Failed to extract content',
       error instanceof Error ? error : undefined,
-      LOG_TRANSFORM
+      Loggers.LOG_TRANSFORM
     );
 
     return createEmptyExtractionContext();
@@ -974,7 +978,7 @@ export function htmlToMarkdown(
     logError(
       'Failed to convert HTML to markdown',
       error instanceof Error ? error : undefined,
-      LOG_TRANSFORM
+      Loggers.LOG_TRANSFORM
     );
     const fetchError = new FetchError(
       'Failed to convert HTML to markdown',
@@ -1030,7 +1034,7 @@ function tryTransformRawContent(params: {
     {
       url: params.url.substring(0, 80),
     },
-    LOG_TRANSFORM
+    Loggers.LOG_TRANSFORM
   );
 
   const { content, title } = buildRawMarkdownPayload({
@@ -1638,7 +1642,8 @@ function resolveWorkerFallback(
 ): MarkdownTransformResult {
   const poolStats = getWorkerPoolStats();
   const isQueueFull =
-    error instanceof FetchError && error.details['reason'] === QUEUE_FULL;
+    error instanceof FetchError &&
+    error.details['reason'] === SystemErrors.QUEUE_FULL;
 
   if (isQueueFull) {
     logWarn(
@@ -1647,7 +1652,7 @@ function resolveWorkerFallback(
         url: redactUrl(url),
         ...(poolStats ?? {}),
       },
-      LOG_TRANSFORM
+      Loggers.LOG_TRANSFORM
     );
 
     return transformInputInProcess(htmlOrBuffer, url, options);
@@ -1667,7 +1672,7 @@ function resolveWorkerFallback(
       error: message,
       ...(poolStats ?? {}),
     },
-    LOG_TRANSFORM
+    Loggers.LOG_TRANSFORM
   );
 
   return transformInputInProcess(htmlOrBuffer, url, options);

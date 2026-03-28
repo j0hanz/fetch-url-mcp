@@ -9,8 +9,9 @@ import { McpError } from '@modelcontextprotocol/sdk/types.js';
 import { z } from 'zod';
 
 import { logError, logWarn } from './core.js';
-import { LOG_MCP } from './logger-names.js';
+import { Loggers } from './logger-names.js';
 import { getErrorMessage, isObject } from './utils.js';
+import { formatZodError } from './zod.js';
 
 export function createMcpError(
   code: number,
@@ -143,7 +144,7 @@ function drainServerCleanupCallbacks(server: McpServer): void {
     try {
       callback();
     } catch (error: unknown) {
-      logWarn('Server cleanup callback failed', { error }, LOG_MCP);
+      logWarn('Server cleanup callback failed', { error }, Loggers.LOG_MCP);
     }
   }
 }
@@ -418,7 +419,7 @@ class ToolProgressReporter implements ProgressReporter {
             progress: effectiveProgress,
             message,
           },
-          LOG_MCP
+          Loggers.LOG_MCP
         );
       }
     }
@@ -496,7 +497,7 @@ class ToolProgressReporter implements ProgressReporter {
             progress: notification.params.progress,
             message: notification.params.message,
           },
-          LOG_MCP
+          Loggers.LOG_MCP
         );
       }
     } catch (error: unknown) {
@@ -507,7 +508,7 @@ class ToolProgressReporter implements ProgressReporter {
           progress: notification.params.progress,
           message: notification.params.message,
         },
-        LOG_MCP
+        Loggers.LOG_MCP
       );
     }
   }
@@ -538,3 +539,19 @@ class ToolProgressReporter implements ProgressReporter {
 export const createProgressReporter = (
   extra?: ToolHandlerExtra
 ): ProgressReporter => ToolProgressReporter.create(extra);
+
+export function validateOrThrow<T>(
+  schema: z.ZodType<T>,
+  data: unknown,
+  errorCode: number,
+  msg: string,
+  logger: string
+): T {
+  const result = schema.safeParse(data);
+  if (!result.success) {
+    const issues = formatZodError(result.error);
+    logWarn(`Zod validation failed: ${msg}`, { issues }, logger);
+    throw createMcpError(errorCode, msg, { issues });
+  }
+  return result.data;
+}

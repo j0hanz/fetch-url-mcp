@@ -7,7 +7,7 @@ import { ErrorCode } from '@modelcontextprotocol/sdk/types.js';
 import type { ServerResult } from '@modelcontextprotocol/sdk/types.js';
 import type { z } from 'zod';
 
-import { config, logInfo, logWarn } from '../lib/core.js';
+import { config, logInfo } from '../lib/core.js';
 import {
   finalizeInlineMarkdown,
   type InlineContentResult,
@@ -18,13 +18,14 @@ import {
   withSignal,
 } from '../lib/fetch-pipeline.js';
 import type { SharedFetchStage } from '../lib/fetch-pipeline.js';
-import { LOG_FETCH_URL } from '../lib/logger-names.js';
+import { Loggers } from '../lib/logger-names.js';
 import {
   createMcpError,
   createProgressReporter,
   type ProgressReporter,
   registerToolPresentation,
   type ToolHandlerExtra,
+  validateOrThrow,
 } from '../lib/mcp-interop.js';
 import { classifyAndLogToolError } from '../lib/tool-errors.js';
 import {
@@ -33,7 +34,6 @@ import {
   isObject,
   parseUrlOrNull,
 } from '../lib/utils.js';
-import { formatZodError } from '../lib/zod.js';
 
 import {
   fetchUrlInputSchema,
@@ -130,24 +130,15 @@ function buildStructuredContent(
 }
 
 function validateStructuredContent(
-  structuredContent: Record<string, unknown>,
-  inputUrl: string
+  structuredContent: Record<string, unknown>
 ): void {
-  const validation = fetchUrlOutputSchema.safeParse(structuredContent);
-  if (validation.success) return;
-
-  const issues = formatZodError(validation.error);
-  logWarn(
-    'Tool output schema validation failed',
-    {
-      url: inputUrl,
-      issues,
-    },
-    LOG_FETCH_URL
+  validateOrThrow(
+    fetchUrlOutputSchema,
+    structuredContent,
+    ErrorCode.InternalError,
+    'Output validation failed',
+    Loggers.LOG_FETCH_URL
   );
-  throw createMcpError(ErrorCode.InternalError, 'Output validation failed', {
-    issues,
-  });
 }
 
 export function buildFetchUrlContentBlocks(
@@ -174,7 +165,7 @@ function buildResponse(
     inlineResult,
     inputUrl
   );
-  validateStructuredContent(structuredContent, inputUrl);
+  validateStructuredContent(structuredContent);
   return {
     content: buildFetchUrlContentBlocks(structuredContent),
     structuredContent,
@@ -347,7 +338,7 @@ async function executeFetch(
           ? { taskId: relatedTask['taskId'] }
           : {}),
       },
-      LOG_FETCH_URL
+      Loggers.LOG_FETCH_URL
     );
     progressPlan.reportStart();
     const { pipeline, inlineResult } = await performSharedFetch(
@@ -365,7 +356,7 @@ async function executeFetch(
         durationMs: Math.round(performance.now() - startedAt),
         ...(truncated ? { truncated: true } : {}),
       },
-      LOG_FETCH_URL
+      Loggers.LOG_FETCH_URL
     );
     const response = buildResponse(pipeline, inlineResult, url);
     progressPlan.reportSuccess(inlineResult.contentSize);
@@ -387,7 +378,7 @@ export async function fetchUrlToolHandler(
     return classifyAndLogToolError(
       error,
       { url: input.url, durationMs },
-      LOG_FETCH_URL,
+      Loggers.LOG_FETCH_URL,
       'fetch-url',
       'Failed to fetch URL'
     );
@@ -421,14 +412,13 @@ function createTaskCapableDescriptor(): TaskCapableToolDescriptor<FetchUrlInput>
   return {
     name: TOOL_DEFINITION.name,
     parseArguments: (args: unknown) => {
-      const parsed = TOOL_DEFINITION.inputSchema.safeParse(args);
-      if (!parsed.success) {
-        throw createMcpError(
-          ErrorCode.InvalidParams,
-          formatZodError(parsed.error)
-        );
-      }
-      return parsed.data;
+      return validateOrThrow(
+        TOOL_DEFINITION.inputSchema,
+        args,
+        ErrorCode.InvalidParams,
+        'Invalid parameters for fetch-url',
+        Loggers.LOG_FETCH_URL
+      );
     },
     execute: TOOL_DEFINITION.handler,
     getCompletionStatusMessage: getFetchCompletionStatusMessage,

@@ -9,7 +9,7 @@ import {
 import { type McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 
 import { config, type LogLevel } from './config.js';
-import { LOG_SESSION } from './logger-names.js';
+import { Loggers } from './logger-names.js';
 import type { SessionEntry } from './session.js';
 import type { SessionStore } from './session.js';
 import {
@@ -686,7 +686,7 @@ function handleSessionCleanupError(error: unknown): void {
   logWarn(
     'Session cleanup loop failed',
     { error: getErrorMessage(error) },
-    LOG_SESSION
+    Loggers.LOG_SESSION
   );
 }
 function logRejectedSettledResults(
@@ -695,7 +695,11 @@ function logRejectedSettledResults(
 ): void {
   for (const result of results) {
     if (result.status === 'rejected') {
-      logWarn(message, { error: getErrorMessage(result.reason) }, LOG_SESSION);
+      logWarn(
+        message,
+        { error: getErrorMessage(result.reason) },
+        Loggers.LOG_SESSION
+      );
     }
   }
 }
@@ -750,7 +754,7 @@ class SessionCleanupLoop {
           evicted: evicted.length,
           timestamp: new Date(now).toISOString(),
         },
-        LOG_SESSION
+        Loggers.LOG_SESSION
       );
     }
   }
@@ -768,7 +772,7 @@ class SessionCleanupLoop {
           {
             error: getErrorMessage(error),
           },
-          LOG_SESSION
+          Loggers.LOG_SESSION
         );
       }
     }
@@ -804,7 +808,7 @@ class SessionCleanupLoop {
         {
           error: getErrorMessage(error),
         },
-        LOG_SESSION
+        Loggers.LOG_SESSION
       );
     } finally {
       if (timeoutId) {
@@ -820,7 +824,7 @@ class SessionCleanupLoop {
         {
           error: getErrorMessage(error),
         },
-        LOG_SESSION
+        Loggers.LOG_SESSION
       );
     }
   }
@@ -836,7 +840,7 @@ class SessionCleanupLoop {
       {
         error: getErrorMessage(error),
       },
-      LOG_SESSION
+      Loggers.LOG_SESSION
     );
   }
 }

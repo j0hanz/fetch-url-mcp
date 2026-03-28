@@ -5,7 +5,7 @@ import { setInterval } from 'node:timers';
 import { ErrorCode } from '@modelcontextprotocol/sdk/types.js';
 
 import { config, logInfo, logWarn } from '../lib/core.js';
-import { LOG_TASKS } from '../lib/logger-names.js';
+import { Loggers } from '../lib/logger-names.js';
 import { createMcpError } from '../lib/mcp-interop.js';
 import { isObject, timingSafeEqualUtf8 } from '../lib/utils.js';
 
@@ -137,11 +137,11 @@ function logTaskStatusTransition(
   };
 
   if (nextStatus === 'failed') {
-    logWarn('Task status changed to failed', meta, LOG_TASKS);
+    logWarn('Task status changed to failed', meta, Loggers.LOG_TASKS);
     return;
   }
 
-  logInfo('Task status changed', meta, LOG_TASKS);
+  logInfo('Task status changed', meta, Loggers.LOG_TASKS);
 }
 
 class TaskManager {
@@ -182,7 +182,7 @@ class TaskManager {
             ownerKey: task.ownerKey,
             status: task.status,
           },
-          LOG_TASKS
+          Loggers.LOG_TASKS
         );
         this.removeTask(task.taskId);
       }
@@ -291,7 +291,7 @@ class TaskManager {
         ownerKey,
         ttl: task.ttl,
       },
-      LOG_TASKS
+      Loggers.LOG_TASKS
     );
     return task;
   }
@@ -322,7 +322,11 @@ class TaskManager {
   ): void {
     const task = this.tasks.get(taskId);
     if (!task) {
-      logWarn('updateTask called for unknown task', { taskId }, LOG_TASKS);
+      logWarn(
+        'updateTask called for unknown task',
+        { taskId },
+        Loggers.LOG_TASKS
+      );
       return;
     }
     if (isTerminalStatus(task.status)) {
@@ -332,7 +336,7 @@ class TaskManager {
           taskId,
           currentStatus: task.status,
         },
-        LOG_TASKS
+        Loggers.LOG_TASKS
       );
       return;
     }
@@ -368,7 +372,7 @@ class TaskManager {
         taskId: task.taskId,
         ownerKey: task.ownerKey,
       },
-      LOG_TASKS
+      Loggers.LOG_TASKS
     );
     return task;
   }
@@ -393,7 +397,7 @@ class TaskManager {
           ownerKey,
           count: cancelled.length,
         },
-        LOG_TASKS
+        Loggers.LOG_TASKS
       );
     }
     return cancelled;

@@ -260,7 +260,7 @@ describe('handleToolError', () => {
     assert.equal(details?.['timeout'], 15000);
   });
 
-  it('handles AbortError with ABORTED code', () => {
+  it('handles AbortError with SystemErrors.ABORTED code', () => {
     const error = new Error('Request was canceled');
     error.name = 'AbortError';
     const result = handleToolError(error, 'https://example.com');

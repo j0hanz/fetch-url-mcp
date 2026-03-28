@@ -3,7 +3,7 @@ import process from 'node:process';
 
 import { serverVersion } from './lib/core.js';
 import { logError } from './lib/core.js';
-import { LOG_SERVER } from './lib/logger-names.js';
+import { Loggers } from './lib/logger-names.js';
 import { toError } from './lib/utils.js';
 
 import { parseCliArgs, renderCliUsage } from './cli.js';
@@ -84,14 +84,14 @@ function registerHttpSignalHandlers(): void {
 }
 
 function writeStartupError(error: Error): void {
-  logError('Failed to start server', error, LOG_SERVER);
+  logError('Failed to start server', error, Loggers.LOG_SERVER);
   process.stderr.write(`Failed to start server: ${error.message}\n`);
   process.exitCode = 1;
   scheduleForcedExit('Startup failure');
 }
 
 function handleFatalError(label: string, error: Error, signal: string): void {
-  logError(label, error, LOG_SERVER);
+  logError(label, error, Loggers.LOG_SERVER);
   process.stderr.write(`${label}: ${error.message}\n`);
   process.exitCode = 1;
 

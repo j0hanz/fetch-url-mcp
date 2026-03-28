@@ -13,7 +13,7 @@ import {
   logWarn,
   runWithRequestContext,
 } from '../lib/core.js';
-import { LOG_TASKS } from '../lib/logger-names.js';
+import { Loggers } from '../lib/logger-names.js';
 import { createMcpError } from '../lib/mcp-interop.js';
 import { type ProgressNotification } from '../lib/mcp-interop.js';
 import { tryReadToolErrorMessage } from '../lib/tool-errors.js';
@@ -58,7 +58,7 @@ function attachAbortController(taskId: string): AbortController {
         size: taskAbortControllers.size,
         maxTotal: config.tasks.maxTotal,
       },
-      LOG_TASKS
+      Loggers.LOG_TASKS
     );
   }
 
@@ -139,7 +139,7 @@ export function emitTaskStatusNotification(
           status: task.status,
           error: getErrorMessage(error),
         },
-        LOG_TASKS
+        Loggers.LOG_TASKS
       );
     });
 }
@@ -243,7 +243,7 @@ async function runTaskToolExecution(params: {
         logInfo(
           'Task execution started',
           { taskId, tool: tool.name },
-          LOG_TASKS
+          Loggers.LOG_TASKS
         );
         const relatedMeta = buildRelatedTaskMeta(taskId, meta);
 
@@ -278,13 +278,13 @@ async function runTaskToolExecution(params: {
           logInfo(
             'Task execution completed',
             { taskId, tool: tool.name },
-            LOG_TASKS
+            Loggers.LOG_TASKS
           );
         } else {
           logWarn(
             'Task execution completed with tool error result',
             { taskId, tool: tool.name },
-            LOG_TASKS
+            Loggers.LOG_TASKS
           );
         }
       } catch (error: unknown) {
@@ -295,7 +295,7 @@ async function runTaskToolExecution(params: {
             tool: tool.name,
             error: getErrorMessage(error),
           },
-          LOG_TASKS
+          Loggers.LOG_TASKS
         );
         updateTaskAndEmitStatus(server, taskId, buildTaskFailureState(error));
       } finally {
@@ -344,7 +344,7 @@ export async function handleToolCallRequest(
         tool: params.name,
         ...(params.task.ttl !== undefined ? { ttl: params.task.ttl } : {}),
       },
-      LOG_TASKS
+      Loggers.LOG_TASKS
     );
 
     void runTaskToolExecution({
@@ -387,7 +387,7 @@ export async function handleToolCallRequest(
       tool: params.name,
       hasProgressToken: params._meta?.progressToken !== undefined,
     },
-    LOG_TASKS
+    Loggers.LOG_TASKS
   );
 
   try {

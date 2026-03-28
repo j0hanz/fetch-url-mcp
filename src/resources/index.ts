@@ -96,10 +96,10 @@ export function buildServerInstructions(): string {
 - Notifications: opt-in. Set \`TASKS_STATUS_NOTIFICATIONS=true\`.
 
 # Errors
-- VALIDATION_ERROR: invalid/blocked URL. Do not retry.
-- FETCH_ERROR: network failure. Retry once with backoff.
+- SystemErrors.VALIDATION_ERROR: invalid/blocked URL. Do not retry.
+- SystemErrors.FETCH_ERROR: network failure. Retry once with backoff.
 - HTTP_xxx: upstream error. Retry only for 5xx.
-- ABORTED: cancelled. Retry if needed.
+- SystemErrors.ABORTED: cancelled. Retry if needed.
 - queue_full: worker pool busy. Wait and retry, or use task mode.`;
 }
 

@@ -3,7 +3,7 @@ import { BlockList, isIP, SocketAddress } from 'node:net';
 import { domainToASCII } from 'node:url';
 
 import { config, logDebug } from './core.js';
-import { VALIDATION_ERROR } from './error-codes.js';
+import { SystemErrors } from './error-codes.js';
 import {
   blockedCnameError,
   blockedHostError,
@@ -14,7 +14,7 @@ import {
   invalidHostnameError,
   invalidUrlError,
 } from './error-messages.js';
-import { LOG_FETCH } from './logger-names.js';
+import { Loggers } from './logger-names.js';
 import {
   CodedError,
   composeAbortSignal,
@@ -197,7 +197,7 @@ export class SafeDnsResolver {
           hostname,
           ...(isSystemError(error) ? { code: error.code } : {}),
         },
-        LOG_FETCH
+        Loggers.LOG_FETCH
       );
       return [];
     }
@@ -593,9 +593,9 @@ export interface Logger {
   warn(message: string, data?: Record<string, unknown>): void;
   error(message: string, data?: Record<string, unknown>): void;
 }
-export const VALIDATION_ERROR_CODE = VALIDATION_ERROR;
+export const VALIDATION_ERROR_CODE = SystemErrors.VALIDATION_ERROR;
 function createValidationError(message: string): Error {
-  const error = new CodedError(message, VALIDATION_ERROR);
+  const error = new CodedError(message, SystemErrors.VALIDATION_ERROR);
   return error;
 }
 export const BLOCKED_HOST_SUFFIXES: readonly string[] = ['.local', '.internal'];

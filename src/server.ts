@@ -14,7 +14,7 @@ import {
   setLogLevel,
   setMcpServer,
 } from './lib/core.js';
-import { LOG_SERVER } from './lib/logger-names.js';
+import { Loggers } from './lib/logger-names.js';
 import { setTaskToolCallCapability } from './lib/mcp-interop.js';
 import type { IconInfo } from './lib/utils.js';
 import { toError } from './lib/utils.js';
@@ -187,7 +187,7 @@ function registerLoggingSetLevelHandler(server: McpServer): void {
 
 function attachServerErrorHandler(server: McpServer): void {
   server.server.onerror = (error) => {
-    logError('MCP server error', toError(error), LOG_SERVER);
+    logError('MCP server error', toError(error), Loggers.LOG_SERVER);
   };
 }
 
@@ -211,7 +211,11 @@ async function shutdownServer(
 
   for (const result of results) {
     if (result.status === 'rejected') {
-      logError('Shutdown step failed', toError(result.reason), LOG_SERVER);
+      logError(
+        'Shutdown step failed',
+        toError(result.reason),
+        Loggers.LOG_SERVER
+      );
     }
   }
 }
@@ -231,7 +235,7 @@ function createShutdownHandler(
           signal,
           initialSignal,
         },
-        LOG_SERVER
+        Loggers.LOG_SERVER
       );
       return shutdownPromise ?? Promise.resolve();
     }
@@ -243,7 +247,7 @@ function createShutdownHandler(
       .then(() => shutdownServer(server, signal))
       .catch((err: unknown) => {
         const error = toError(err);
-        logError('Error during shutdown', error, LOG_SERVER);
+        logError('Error during shutdown', error, Loggers.LOG_SERVER);
         process.exitCode = 1;
       })
       .finally(() => {
@@ -270,7 +274,11 @@ async function connectStdioServer(
 ): Promise<void> {
   try {
     await server.connect(transport);
-    logInfo('Fetch URL MCP server running on stdio', undefined, LOG_SERVER);
+    logInfo(
+      'Fetch URL MCP server running on stdio',
+      undefined,
+      Loggers.LOG_SERVER
+    );
   } catch (error: unknown) {
     const err = toError(error);
     throw Error(`Failed to start stdio server: ${err.message}`, {

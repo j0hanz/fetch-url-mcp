@@ -15,7 +15,7 @@ import {
   unregisterMcpSessionServer,
   unregisterMcpSessionServerByServer,
 } from '../lib/core.js';
-import { LOG_HTTP } from '../lib/logger-names.js';
+import { Loggers } from '../lib/logger-names.js';
 import type { JsonRpcId } from '../lib/mcp-interop.js';
 import { createDefaultBlockList, normalizeIpForBlockList } from '../lib/url.js';
 import { getErrorMessage, toError } from '../lib/utils.js';
@@ -228,7 +228,7 @@ export function registerInboundBlockList(server: NetworkServer): void {
           remoteAddress: normalized.ip,
           family: normalized.family,
         },
-        LOG_HTTP
+        Loggers.LOG_HTTP
       );
       socket.destroy();
     }
@@ -272,7 +272,7 @@ export async function closeTransportBestEffort(
   try {
     await transport.close();
   } catch (error) {
-    logWarn('Transport close failed', { context, error }, LOG_HTTP);
+    logWarn('Transport close failed', { context, error }, Loggers.LOG_HTTP);
   }
 }
 
@@ -283,7 +283,7 @@ export async function closeMcpServerBestEffort(
   try {
     await server.close();
   } catch (error) {
-    logWarn('MCP server close failed', { context, error }, LOG_HTTP);
+    logWarn('MCP server close failed', { context, error }, Loggers.LOG_HTTP);
   }
 }
 

@@ -1,7 +1,7 @@
 import { parseHTML } from 'linkedom';
 
 import { config, logDebug } from '../lib/core.js';
-import { LOG_TRANSFORM } from '../lib/logger-names.js';
+import { Loggers } from '../lib/logger-names.js';
 import { CharCode, isWhitespaceChar } from '../lib/utils.js';
 
 import type { ExtractedArticle } from './types.js';
@@ -554,7 +554,7 @@ function stripNoise(document: Document, signal?: AbortSignal): void {
       {
         categories: [...(context.flags.navFooter ? ['nav-footer'] : [])],
       },
-      LOG_TRANSFORM
+      Loggers.LOG_TRANSFORM
     );
   }
 
@@ -1538,17 +1538,21 @@ export function evaluateArticleContent(
   document: Document
 ): Document | null {
   if (!passesContentRatioGate(article.textContent.length, document)) {
-    logDebug('FAILED passesContentRatioGate', undefined, LOG_TRANSFORM);
+    logDebug('FAILED passesContentRatioGate', undefined, Loggers.LOG_TRANSFORM);
     return null;
   }
 
   if (!passesRetentionRulesFromHtml(document, article.content)) {
-    logDebug('FAILED passesRetentionRulesFromHtml', undefined, LOG_TRANSFORM);
+    logDebug(
+      'FAILED passesRetentionRulesFromHtml',
+      undefined,
+      Loggers.LOG_TRANSFORM
+    );
     return null;
   }
 
   if (hasTruncatedSentences(article.textContent)) {
-    logDebug('FAILED hasTruncatedSentences', undefined, LOG_TRANSFORM);
+    logDebug('FAILED hasTruncatedSentences', undefined, Loggers.LOG_TRANSFORM);
     return null;
   }
 
@@ -1561,13 +1565,13 @@ export function evaluateArticleContent(
     logDebug(
       `FAILED passesEmptySectionRatio: ${headings.length} headings`,
       undefined,
-      LOG_TRANSFORM
+      Loggers.LOG_TRANSFORM
     );
     for (const h of headings) {
       logDebug(
         `H: ${h.textContent} ${String(hasSectionContent(h))}`,
         undefined,
-        LOG_TRANSFORM
+        Loggers.LOG_TRANSFORM
       );
     }
     return null;

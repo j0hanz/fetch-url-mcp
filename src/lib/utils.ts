@@ -7,8 +7,8 @@ import {
 import { inspect } from 'node:util';
 
 import { config, logDebug, logWarn } from './core.js';
-import { FETCH_ERROR } from './error-codes.js';
-import { LOG_HTTP } from './logger-names.js';
+import { SystemErrors } from './error-codes.js';
+import { Loggers } from './logger-names.js';
 
 const textEncoder = new TextEncoder();
 const UNKNOWN_ERROR_MESSAGE = 'Unknown error';
@@ -88,7 +88,7 @@ export class FetchError extends Error {
     } else if (httpStatus) {
       this.code = `HTTP_${httpStatus}`;
     } else {
-      this.code = FETCH_ERROR;
+      this.code = SystemErrors.FETCH_ERROR;
     }
   }
 }
@@ -186,7 +186,7 @@ export function applyHttpServerTuning(server: TunableHttpServer): void {
             dropped: droppedSinceLastLog,
             data,
           },
-          LOG_HTTP
+          Loggers.LOG_HTTP
         );
 
         lastLoggedAt = now;
@@ -203,7 +203,7 @@ export function drainConnectionsOnShutdown(server: TunableHttpServer): void {
     logDebug(
       'Closed idle HTTP connections during shutdown',
       undefined,
-      LOG_HTTP
+      Loggers.LOG_HTTP
     );
   }
 }
@@ -276,6 +276,12 @@ export function isObject(
   value: unknown
 ): value is Record<PropertyKey, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+export function compactContext<T extends object>(obj: T): Partial<T> {
+  return Object.fromEntries(
+    Object.entries(obj).filter(([, v]) => v !== undefined)
+  ) as Partial<T>;
 }
 
 type ErrorConstructorWithIsError = ErrorConstructor & {

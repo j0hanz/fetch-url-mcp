@@ -1,16 +1,12 @@
 import {
   type CallToolResult,
+  ErrorCode,
   McpError,
 } from '@modelcontextprotocol/sdk/types.js';
 import { z } from 'zod';
 
 import { logError, logWarn } from './core.js';
-import {
-  ABORTED,
-  FETCH_ERROR,
-  QUEUE_FULL,
-  VALIDATION_ERROR,
-} from './error-codes.js';
+import { SystemErrors } from './error-codes.js';
 import { FetchError, isAbortError, isObject, isSystemError } from './utils.js';
 
 export type ToolErrorResponse = CallToolResult & {
@@ -55,7 +51,11 @@ const toolErrorPayloadSchema = z.strictObject({
   data: z.unknown().optional(),
 });
 
-const PUBLIC_ERROR_REASONS = new Set(['aborted', QUEUE_FULL, 'timeout']);
+const PUBLIC_ERROR_REASONS = new Set([
+  'aborted',
+  SystemErrors.QUEUE_FULL,
+  'timeout',
+]);
 
 function sanitizeToolErrorDetails(
   details: Readonly<Record<string, unknown>>
@@ -204,7 +204,7 @@ function isValidationError(error: unknown): error is NodeJS.ErrnoException {
   return (
     error instanceof Error &&
     isSystemError(error) &&
-    error.code === VALIDATION_ERROR
+    error.code === SystemErrors.VALIDATION_ERROR
   );
 }
 
@@ -234,8 +234,8 @@ function mapFetchToolError(
   let { code } = error;
   if (typeof detailsCode === 'string') {
     code = detailsCode;
-  } else if (reason === QUEUE_FULL) {
-    code = QUEUE_FULL;
+  } else if (reason === SystemErrors.QUEUE_FULL) {
+    code = SystemErrors.QUEUE_FULL;
   }
 
   const url = error.url || fallbackUrl;
@@ -265,7 +265,7 @@ function mapFetchToolError(
     };
   }
 
-  if (reason === QUEUE_FULL) {
+  if (reason === SystemErrors.QUEUE_FULL) {
     return {
       message: error.message,
       url,
@@ -313,7 +313,7 @@ function mapGenericToolError(
       message: error.message,
       url,
       category: 'validation_error',
-      code: VALIDATION_ERROR,
+      code: SystemErrors.VALIDATION_ERROR,
     };
   }
 
@@ -325,7 +325,7 @@ function mapGenericToolError(
         : `${fallbackMessage}: unknown error`,
     url,
     category: isAborted ? 'upstream_aborted' : 'fetch_error',
-    code: isAborted ? ABORTED : FETCH_ERROR,
+    code: isAborted ? SystemErrors.ABORTED : SystemErrors.FETCH_ERROR,
   };
 }
 
@@ -359,12 +359,23 @@ export function classifyAndLogToolError(
   fallbackMessage: string
 ): ToolErrorResponse {
   if (error instanceof McpError) {
-    logError(
-      `${toolName} tool failed`,
+    if (
+      error.code === (ErrorCode.InvalidParams as number) ||
+      error.code === (ErrorCode.MethodNotFound as number)
+    ) {
+      logError(
+        `${toolName} tool protocol error`,
+        { url: meta.url, durationMs: meta.durationMs, error },
+        loggerName
+      );
+      throw error;
+    }
+    logWarn(
+      `${toolName} tool domain error`,
       { url: meta.url, durationMs: meta.durationMs, error },
       loggerName
     );
-    throw error;
+    return handleToolError(error, meta.url, fallbackMessage);
   }
   if (error instanceof FetchError || isAbortError(error)) {
     logWarn(

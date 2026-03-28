@@ -1,11 +1,4 @@
-import {
-  EBADREDIRECT,
-  EBLOCKED,
-  EINVAL,
-  ENODATA,
-  ETIMEOUT,
-  EUNSUPPORTEDPROTOCOL,
-} from './error-codes.js';
+import { SystemErrors } from './error-codes.js';
 import { CodedError } from './utils.js';
 
 // ── DNS / Network ──────────────────────────────────────────────────
@@ -20,7 +13,7 @@ export function blockedIpError(
       : 'Private IPs are not allowed';
   const error = new CodedError(
     `Blocked IP range: ${target}. ${detail}`,
-    EBLOCKED
+    SystemErrors.EBLOCKED
   );
   return error;
 }
@@ -28,7 +21,7 @@ export function blockedIpError(
 export function blockedHostError(hostname: string): CodedError {
   const error = new CodedError(
     `Blocked host: ${hostname}. Internal hosts are not allowed`,
-    EBLOCKED
+    SystemErrors.EBLOCKED
   );
   return error;
 }
@@ -36,7 +29,7 @@ export function blockedHostError(hostname: string): CodedError {
 export function blockedCnameError(hostname: string, cname: string): CodedError {
   const error = new CodedError(
     `Blocked DNS CNAME detected for ${hostname}: ${cname}`,
-    EBLOCKED
+    SystemErrors.EBLOCKED
   );
   return error;
 }
@@ -44,7 +37,7 @@ export function blockedCnameError(hostname: string, cname: string): CodedError {
 export function dnsTimeoutError(hostname: string): CodedError {
   const error = new CodedError(
     `DNS lookup timed out for ${hostname}`,
-    ETIMEOUT
+    SystemErrors.ETIMEOUT
   );
   return error;
 }
@@ -52,7 +45,7 @@ export function dnsTimeoutError(hostname: string): CodedError {
 export function dnsNoResultsError(hostname: string): CodedError {
   const error = new CodedError(
     `No DNS results returned for ${hostname}`,
-    ENODATA
+    SystemErrors.ENODATA
   );
   return error;
 }
@@ -60,32 +53,38 @@ export function dnsNoResultsError(hostname: string): CodedError {
 export function invalidAddressFamilyError(hostname: string): CodedError {
   const error = new CodedError(
     `Invalid address family returned for ${hostname}`,
-    EINVAL
+    SystemErrors.EINVAL
   );
   return error;
 }
 
 export function invalidHostnameError(): CodedError {
-  const error = new CodedError('Invalid hostname provided', EINVAL);
+  const error = new CodedError(
+    'Invalid hostname provided',
+    SystemErrors.EINVAL
+  );
   return error;
 }
 
 export function invalidUrlError(): CodedError {
-  const error = new CodedError('Invalid URL', EINVAL);
+  const error = new CodedError('Invalid URL', SystemErrors.EINVAL);
   return error;
 }
 
 // ── HTTP Redirect ──────────────────────────────────────────────────
 
 export function invalidRedirectError(): CodedError {
-  const error = new CodedError('Invalid redirect target', EBADREDIRECT);
+  const error = new CodedError(
+    'Invalid redirect target',
+    SystemErrors.EBADREDIRECT
+  );
   return error;
 }
 
 export function redirectCredentialsError(): CodedError {
   const error = new CodedError(
     'Redirect target includes credentials',
-    EBADREDIRECT
+    SystemErrors.EBADREDIRECT
   );
   return error;
 }
@@ -93,7 +92,7 @@ export function redirectCredentialsError(): CodedError {
 export function unsupportedProtocolError(protocol: string): CodedError {
   const error = new CodedError(
     `Unsupported redirect protocol: ${protocol}`,
-    EUNSUPPORTEDPROTOCOL
+    SystemErrors.EUNSUPPORTEDPROTOCOL
   );
   return error;
 }

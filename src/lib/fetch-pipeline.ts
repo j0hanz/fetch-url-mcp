@@ -7,7 +7,7 @@ import {
   normalizeUrl,
   transformToRawUrl,
 } from './http.js';
-import { LOG_FETCH } from './logger-names.js';
+import { Loggers } from './logger-names.js';
 import { withSignal } from './utils.js';
 
 export { withSignal };
@@ -206,12 +206,16 @@ export async function executeFetchPipeline<T>(
       {
         original: resolvedUrl.originalUrl,
       },
-      LOG_FETCH
+      Loggers.LOG_FETCH
     );
   }
 
   options.onStage?.('fetch_remote');
-  logDebug('Fetching URL', { url: resolvedUrl.normalizedUrl }, LOG_FETCH);
+  logDebug(
+    'Fetching URL',
+    { url: resolvedUrl.normalizedUrl },
+    Loggers.LOG_FETCH
+  );
 
   const { buffer, encoding, truncated, finalUrl } =
     await fetchNormalizedUrlBuffer(
@@ -226,7 +230,7 @@ export async function executeFetchPipeline<T>(
         fromUrl: resolvedUrl.normalizedUrl,
         toUrl: finalUrl,
       },
-      LOG_FETCH
+      Loggers.LOG_FETCH
     );
   }
 
@@ -337,7 +341,7 @@ export async function performSharedFetch(
         contentSize: inlineResult.contentSize,
         maxInlineChars: config.constants.maxInlineContentChars,
       },
-      LOG_FETCH
+      Loggers.LOG_FETCH
     );
   }
 
