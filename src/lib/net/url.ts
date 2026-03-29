@@ -2,8 +2,7 @@ import dns from 'node:dns';
 import { BlockList, isIP, SocketAddress } from 'node:net';
 import { domainToASCII } from 'node:url';
 
-import { config, logDebug } from '../core.js';
-import { Loggers } from '../core.js';
+import { config, logDebug, Loggers } from '../core.js';
 import {
   blockedCnameError,
   blockedHostError,

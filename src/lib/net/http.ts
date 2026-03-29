@@ -15,10 +15,10 @@ import {
   getRequestId,
   logDebug,
   logError,
+  Loggers,
   logWarn,
   redactUrl,
 } from '../core.js';
-import { Loggers } from '../core.js';
 import {
   FetchError,
   invalidRedirectError,

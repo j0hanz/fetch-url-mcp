@@ -3,8 +3,7 @@ import {
   type MarkdownTransformResult,
   transformBufferToMarkdown,
 } from '../../transform/index.js';
-import { config, logDebug } from '../core.js';
-import { Loggers } from '../core.js';
+import { config, logDebug, Loggers } from '../core.js';
 import { withSignal } from '../utils.js';
 import {
   fetchNormalizedUrlBuffer,

@@ -34,6 +34,7 @@ import {
   ensureSessionCapacity,
   logDebug,
   logError,
+  Loggers,
   logInfo,
   logWarn,
   registerMcpSessionOwnerKey,
@@ -47,7 +48,6 @@ import {
   unregisterMcpSessionServer,
   unregisterMcpSessionServerByServer,
 } from '../lib/core.js';
-import { Loggers } from '../lib/core.js';
 import { getErrorMessage, toError } from '../lib/error/index.js';
 import {
   acceptsEventStream,

@@ -7,8 +7,7 @@ import {
 
 import { z } from 'zod';
 
-import { config, logDebug, logWarn } from './core.js';
-import { Loggers } from './core.js';
+import { config, logDebug, Loggers, logWarn } from './core.js';
 import { isAbortError } from './error/index.js';
 
 const textEncoder = new TextEncoder();

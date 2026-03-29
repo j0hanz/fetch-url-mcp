@@ -2,10 +2,8 @@
 import process from 'node:process';
 import { parseArgs } from 'node:util';
 
-import { logError, serverVersion } from './lib/core.js';
-import { Loggers } from './lib/core.js';
-import { toError } from './lib/error/index.js';
-import { getErrorMessage } from './lib/error/index.js';
+import { logError, Loggers, serverVersion } from './lib/core.js';
+import { getErrorMessage, toError } from './lib/error/index.js';
 
 import { startHttpServer } from './http/index.js';
 import { startStdioServer } from './server.js';

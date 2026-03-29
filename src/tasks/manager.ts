@@ -17,12 +17,12 @@ import {
   getRequestId,
   logDebug,
   logError,
+  Loggers,
   logInfo,
   logWarn,
   resolveMcpSessionOwnerKey,
   runWithRequestContext,
 } from '../lib/core.js';
-import { Loggers } from '../lib/core.js';
 import {
   getErrorMessage,
   handleToolError,
@@ -37,10 +37,10 @@ import {
   registerServerLifecycleCleanup,
   type ToolHandlerExtra,
 } from '../lib/mcp-interop.js';
-import { formatZodError } from '../lib/utils.js';
 import {
   type CancellableTimeout,
   createUnrefTimeout,
+  formatZodError,
   isObject,
   timingSafeEqualUtf8,
 } from '../lib/utils.js';
