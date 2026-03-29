@@ -2,7 +2,10 @@ import type { AuthInfo } from '@modelcontextprotocol/sdk/server/auth/types.js';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import type { Transport } from '@modelcontextprotocol/sdk/shared/transport.js';
-import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
+import {
+  ErrorCode,
+  isInitializeRequest,
+} from '@modelcontextprotocol/sdk/types.js';
 
 import { randomUUID } from 'node:crypto';
 import { once } from 'node:events';
@@ -41,6 +44,7 @@ import {
   reserveSessionSlot,
   resolveMcpSessionIdByServer,
   runWithRequestContext,
+  runWithTraceContext,
   type SessionStore,
   startSessionCleanupLoop,
   unregisterMcpSessionServer,
@@ -52,6 +56,7 @@ import {
   acceptsJsonAndEventStream,
   isMcpRequestBody,
   type JsonRpcId,
+  sendJsonRpcError,
 } from '../lib/mcp-interop.js';
 import {
   createDefaultBlockList,
@@ -70,7 +75,6 @@ import {
   buildAuthFingerprint,
   buildProtectedResourceMetadataDocument,
   corsPolicy,
-  DEFAULT_MCP_PROTOCOL_VERSION,
   ensureMcpProtocolVersion,
   hostOriginPolicy,
   isInsufficientScopeError,
@@ -228,13 +232,12 @@ export function sendEmpty(res: ServerResponse, status: number): void {
 
 export function sendError(
   res: ServerResponse,
-  _code: number,
+  code: number,
   message: string,
   status = 400,
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- kept for call-site compat
-  _id?: JsonRpcId | null
+  id?: JsonRpcId | null
 ): void {
-  sendJson(res, status, { error: message });
+  sendJsonRpcError(res, status, code, message, id ?? null);
 }
 
 // ---------------------------------------------------------------------------
@@ -989,19 +992,16 @@ export function sendHealthRouteResponse(
 type SessionRecord = NonNullable<ReturnType<SessionStore['get']>>;
 
 function resolveRequestedProtocolVersion(body: unknown): string {
-  if (!isObject(body)) return DEFAULT_MCP_PROTOCOL_VERSION;
+  if (!isObject(body)) return '';
 
   const { params } = body;
-  if (!isObject(params)) return DEFAULT_MCP_PROTOCOL_VERSION;
+  if (!isObject(params)) return '';
 
   const { protocolVersion: value } = params;
-  if (typeof value !== 'string') return DEFAULT_MCP_PROTOCOL_VERSION;
+  if (typeof value !== 'string') return '';
 
   const normalized = value.trim();
-  if (normalized.length === 0) return DEFAULT_MCP_PROTOCOL_VERSION;
-  return SUPPORTED_MCP_PROTOCOL_VERSIONS.has(normalized)
-    ? normalized
-    : DEFAULT_MCP_PROTOCOL_VERSION;
+  return normalized;
 }
 
 function resolveProtocolVersionHeader(
@@ -1016,6 +1016,16 @@ function resolveProtocolVersionHeader(
 
 function isInitializedNotification(method: string): boolean {
   return method === 'notifications/initialized';
+}
+
+function getBodyMeta(body: unknown): Record<string, unknown> | undefined {
+  if (!isObject(body)) return undefined;
+
+  const { params } = body;
+  if (!isObject(params)) return undefined;
+
+  const meta = params['_meta'];
+  return isObject(meta) ? meta : undefined;
 }
 
 function isPingRequest(method: string): boolean {
@@ -1184,9 +1194,12 @@ class McpSessionGateway {
         status: 406,
         sessionId,
       });
-      sendJson(ctx.res, 406, {
-        error: 'We need you to use "text/event-stream" for this connection.',
-      });
+      sendError(
+        ctx.res,
+        ErrorCode.InvalidRequest,
+        'We need you to use "text/event-stream" for this connection.',
+        406
+      );
       return;
     }
 
@@ -1223,10 +1236,12 @@ class McpSessionGateway {
         reason: 'accept_missing_json_or_event_stream',
         status: 406,
       });
-      sendJson(ctx.res, 406, {
-        error:
-          'We need the request to accept both "application/json" and "text/event-stream".',
-      });
+      sendError(
+        ctx.res,
+        ErrorCode.InvalidRequest,
+        'We need the request to accept both "application/json" and "text/event-stream".',
+        406
+      );
       return null;
     }
 
@@ -1435,7 +1450,33 @@ class McpSessionGateway {
     }
 
     const negotiatedProtocolVersion = resolveRequestedProtocolVersion(ctx.body);
+    if (
+      negotiatedProtocolVersion.length === 0 ||
+      !SUPPORTED_MCP_PROTOCOL_VERSIONS.has(negotiatedProtocolVersion)
+    ) {
+      return this.rejectInitializeRequest(
+        ctx,
+        requestId,
+        'unsupported_protocol_version',
+        -32600,
+        `The protocol version '${negotiatedProtocolVersion || '(missing)'}' isn't supported right now. Please check and try again.`
+      );
+    }
+
     const headerProtocolVersion = resolveProtocolVersionHeader(ctx.req);
+    if (
+      headerProtocolVersion &&
+      !SUPPORTED_MCP_PROTOCOL_VERSIONS.has(headerProtocolVersion)
+    ) {
+      return this.rejectInitializeRequest(
+        ctx,
+        requestId,
+        'unsupported_protocol_version_header',
+        -32600,
+        `The protocol version '${headerProtocolVersion}' isn't supported right now. Please check and try again.`
+      );
+    }
+
     if (
       headerProtocolVersion &&
       headerProtocolVersion !== negotiatedProtocolVersion
@@ -1933,7 +1974,7 @@ class HttpDispatcher {
     if (!isOAuthMetadataEnabled()) return false;
     if (!isProtectedResourceMetadataPath(ctx.url.pathname)) return false;
 
-    const document = buildProtectedResourceMetadataDocument(ctx.req);
+    const document = buildProtectedResourceMetadataDocument();
     sendJson(ctx.res, 200, document);
     return true;
   }
@@ -2009,12 +2050,20 @@ class HttpDispatcher {
           err.requiredScopes,
           message
         );
-        sendError(ctx.res, -32000, message, 403);
+        if (isMcpRoute(ctx.url.pathname)) {
+          sendError(ctx.res, -32000, message, 403);
+        } else {
+          sendJson(ctx.res, 403, { error: message });
+        }
         return null;
       }
 
       applyUnauthorizedAuthHeaders(ctx.req, ctx.res);
-      sendError(ctx.res, -32000, message, 401);
+      if (isMcpRoute(ctx.url.pathname)) {
+        sendError(ctx.res, -32000, message, 401);
+      } else {
+        sendJson(ctx.res, 401, { error: message });
+      }
       return null;
     }
   }
@@ -2117,7 +2166,9 @@ class HttpRequestPipeline {
           if (!this.applyRequestGuards(ctx, rawReq)) return;
           if (!(await this.populateRequestBody(ctx, rawReq))) return;
 
-          await this.dispatcher.dispatch(ctx);
+          await runWithTraceContext(getBodyMeta(ctx.body), () =>
+            this.dispatcher.dispatch(ctx)
+          );
         }
       );
     } finally {
@@ -2172,10 +2223,6 @@ class HttpRequestPipeline {
       return false;
     }
     if (!this.rateLimiter.check(ctx)) {
-      sendJson(ctx.res, 429, {
-        error:
-          "You're sending requests a bit too quickly. Please slow down and try again.",
-      });
       drainRequest(rawReq);
       return false;
     }
@@ -2396,6 +2443,13 @@ export async function startHttpServer(): Promise<{
 
   const port = resolveListeningPort(server, config.server.port);
   const protocol = config.server.https.enabled ? 'https' : 'http';
+  if (!config.auth.publicBaseUrl) {
+    const resolvedResourceUrl = new URL(config.auth.resourceUrl);
+    resolvedResourceUrl.port = String(port);
+    resolvedResourceUrl.protocol = `${protocol}:`;
+    config.auth.resourceUrl = resolvedResourceUrl;
+  }
+
   logInfo(
     `${protocol.toUpperCase()} server listening on port ${port}`,
     {

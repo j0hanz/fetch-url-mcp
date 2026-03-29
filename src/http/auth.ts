@@ -9,6 +9,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 
 import { config } from '../lib/config.js';
 import { logDebug, Loggers, logWarn } from '../lib/core.js';
+import { type JsonRpcId, sendJsonRpcError } from '../lib/mcp-interop.js';
 import { normalizeHost } from '../lib/net/index.js';
 import {
   composeAbortSignal,
@@ -39,13 +40,12 @@ function sendEmpty(res: ServerResponse, status: number): void {
 
 function sendError(
   res: ServerResponse,
-  _code: number,
+  code: number,
   message: string,
   status = 400,
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- kept for call-site compatibility
-  _id?: string | number | null
+  id?: JsonRpcId | null
 ): void {
-  sendJson(res, status, { error: message });
+  sendJsonRpcError(res, status, code, message, id ?? null);
 }
 
 function getHeaderValue(req: IncomingMessage, name: string): string | null {
@@ -281,6 +281,10 @@ export function assertHttpModeConfiguration(): void {
     );
   }
 
+  if (config.auth.mode === 'oauth' && !config.auth.introspectionUrl) {
+    throw Error('OAuth mode requires OAUTH_INTROSPECTION_URL');
+  }
+
   if (config.auth.mode === 'static' && config.auth.staticTokens.length === 0) {
     throw Error(
       'Static auth requires ACCESS_TOKENS or API_KEY to be configured'
@@ -318,12 +322,6 @@ export function ensureMcpProtocolVersion(
   const path = URL.parse(req.url ?? '', 'http://localhost')?.pathname;
 
   if (!version) {
-    // Tolerate missing header on sessioned requests (expectedVersion set)
-    // to avoid breaking older clients that don't send it yet.
-    if (options?.expectedVersion) {
-      return true;
-    }
-
     logWarn(
       'MCP protocol version rejected',
       { reason: 'missing_header', path },
@@ -778,21 +776,15 @@ class AuthService {
   }
 }
 
-function resolvePublicOrigin(req: IncomingMessage): string {
-  const host = getHeaderValue(req, 'host');
-  if (host) {
-    const protocol = config.server.https.enabled ? 'https' : 'http';
-    return `${protocol}://${host}`;
-  }
-
+function resolvePublicOrigin(): string {
   return config.auth.resourceUrl.origin;
 }
 
-function buildRequestScopedProtectedResourceUrls(req: IncomingMessage): {
+function buildRequestScopedProtectedResourceUrls(): {
   resource: string;
   resourceMetadata: string;
 } {
-  const origin = resolvePublicOrigin(req);
+  const origin = resolvePublicOrigin();
   return {
     resource: new URL('/mcp', `${origin}/`).href,
     resourceMetadata: new URL(resolveResourceMetadataPath(), `${origin}/`).href,
@@ -803,8 +795,8 @@ function resolveResourceMetadataPath(): string {
   return '/.well-known/oauth-protected-resource/mcp';
 }
 
-function buildResourceMetadataUrl(req: IncomingMessage): string {
-  return buildRequestScopedProtectedResourceUrls(req).resourceMetadata;
+function buildResourceMetadataUrl(): string {
+  return buildRequestScopedProtectedResourceUrls().resourceMetadata;
 }
 
 export function applyUnauthorizedAuthHeaders(
@@ -813,7 +805,7 @@ export function applyUnauthorizedAuthHeaders(
 ): void {
   if (!isOAuthMetadataEnabled()) return;
 
-  const resourceMetadata = buildResourceMetadataUrl(req);
+  const resourceMetadata = buildResourceMetadataUrl();
   const challengeParts = [`resource_metadata="${resourceMetadata}"`];
   if (config.auth.requiredScopes.length > 0) {
     challengeParts.push(`scope="${config.auth.requiredScopes.join(' ')}"`);
@@ -830,7 +822,7 @@ export function applyInsufficientScopeAuthHeaders(
 ): void {
   if (!isOAuthMetadataEnabled()) return;
 
-  const resourceMetadata = buildResourceMetadataUrl(req);
+  const resourceMetadata = buildResourceMetadataUrl();
   const challengeParts = [
     'error="insufficient_scope"',
     `scope="${requiredScopes.join(' ')}"`,
@@ -841,14 +833,14 @@ export function applyInsufficientScopeAuthHeaders(
   res.setHeader('WWW-Authenticate', `Bearer ${challengeParts.join(', ')}`);
 }
 
-export function buildProtectedResourceMetadataDocument(req: IncomingMessage): {
+export function buildProtectedResourceMetadataDocument(): {
   resource: string;
   resource_metadata: string;
   authorization_servers: string[];
   bearer_methods_supported: string[];
   scopes_supported: string[];
 } {
-  const urls = buildRequestScopedProtectedResourceUrls(req);
+  const urls = buildRequestScopedProtectedResourceUrls();
   if (!config.auth.issuerUrl) {
     const error = new ServerError(
       'OAuth issuer URL is required for protected resource metadata'

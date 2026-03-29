@@ -5,6 +5,7 @@ import {
   McpError,
 } from '@modelcontextprotocol/sdk/types.js';
 
+import type { ServerResponse } from 'node:http';
 import { setTimeout as setTimeoutPromise } from 'node:timers/promises';
 
 import { z } from 'zod';
@@ -21,6 +22,48 @@ export function createMcpError(
   const error = new McpError(code, message, data);
   error.message = message;
   return error;
+}
+
+interface JsonRpcErrorPayload {
+  code: number;
+  message: string;
+  data?: unknown;
+}
+
+export function buildJsonRpcErrorBody(
+  code: number,
+  message: string,
+  id: JsonRpcId = null,
+  data?: unknown
+): {
+  jsonrpc: '2.0';
+  error: JsonRpcErrorPayload;
+  id: JsonRpcId;
+} {
+  return {
+    jsonrpc: '2.0',
+    error: {
+      code,
+      message,
+      ...(data !== undefined ? { data } : {}),
+    },
+    id,
+  };
+}
+
+export function sendJsonRpcError(
+  res: ServerResponse,
+  status: number,
+  code: number,
+  message: string,
+  id: JsonRpcId = null,
+  data?: unknown
+): void {
+  res.statusCode = status;
+  res.setHeader('Content-Type', 'application/json; charset=utf-8');
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('Cache-Control', 'no-store');
+  res.end(JSON.stringify(buildJsonRpcErrorBody(code, message, id, data)));
 }
 
 /* =================================================================================================
@@ -335,7 +378,7 @@ const PROGRESS_NOTIFICATION_MIN_INTERVAL_MS = 100;
 function resolveRelatedTaskMeta(
   meta?: RequestMeta
 ): { taskId: string } | undefined {
-  const related = meta?.['io.modelcontextprotocol/related-task'];
+  const related = meta?.['modelcontextprotocol.io/related-task'];
   if (!isObject(related)) return undefined;
   const { taskId } = related;
   return typeof taskId === 'string' ? { taskId } : undefined;
@@ -528,7 +571,7 @@ class ToolProgressReporter implements ProgressReporter {
         message: params.message,
         ...(this.taskMeta && {
           _meta: {
-            'io.modelcontextprotocol/related-task': this.taskMeta,
+            'modelcontextprotocol.io/related-task': this.taskMeta,
           },
         }),
       },

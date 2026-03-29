@@ -6,6 +6,7 @@ import { randomUUID } from 'node:crypto';
 import { describe, it } from 'node:test';
 import { setTimeout as setTimeoutPromise } from 'node:timers/promises';
 
+import { config } from '../src/lib/config.js';
 import {
   createProgressReporter,
   type ProgressNotification,
@@ -26,6 +27,26 @@ function isUnknownRequestHandler(
   value: unknown
 ): value is UnknownRequestHandler {
   return typeof value === 'function';
+}
+
+function assertMcpErrorLike(
+  error: unknown,
+  expected: {
+    code: number;
+    messageIncludes?: string;
+    data?: Record<string, unknown>;
+  }
+): void {
+  assert.ok(error instanceof Error);
+  assert.equal('code' in error ? error.code : undefined, expected.code);
+
+  if (expected.messageIncludes !== undefined) {
+    assert.match(error.message, new RegExp(expected.messageIncludes));
+  }
+
+  if (expected.data !== undefined) {
+    assert.deepEqual('data' in error ? error.data : undefined, expected.data);
+  }
 }
 
 function getTaskResultHandler(server: McpServer): UnknownRequestHandler {
@@ -83,6 +104,87 @@ function createDeferred(): {
     resolve,
   };
 }
+
+describe('task creation notifications', () => {
+  it('emits notifications/tasks/created with related-task metadata only', async () => {
+    const server = createTaskTestServer();
+    const toolName = `task-created-notification-tool-${randomUUID()}`;
+    const notifications: Array<Record<string, unknown>> = [];
+
+    registerTaskCapableTool(server, {
+      name: toolName,
+      parseArguments: () => ({}),
+      execute: async () => ({
+        content: [{ type: 'text' as const, text: 'ok' }],
+      }),
+      taskSupport: 'optional',
+    });
+
+    const originalIsConnected = server.isConnected.bind(server);
+    const originalNotification = server.server.notification.bind(server.server);
+    const originalEmitStatusNotifications =
+      config.tasks.emitStatusNotifications;
+    config.tasks.emitStatusNotifications = true;
+    (server as unknown as { isConnected: () => boolean }).isConnected = () =>
+      true;
+    (
+      server.server as unknown as {
+        notification: (...args: unknown[]) => Promise<void>;
+      }
+    ).notification = async (notification: unknown) => {
+      notifications.push(notification as Record<string, unknown>);
+    };
+
+    try {
+      registerTaskHandlers(server, { requireInterception: false });
+
+      const result = (await handleToolCallRequest(
+        server,
+        {
+          method: 'tools/call',
+          params: {
+            name: toolName,
+            arguments: {},
+            _meta: {
+              'modelcontextprotocol.io/task': {
+                taskId: 'created-notification-task',
+                keepAlive: 5_000,
+              },
+            },
+          },
+        },
+        { ownerKey: 'default' }
+      )) as { task: { taskId: string } };
+
+      assert.equal(notifications.length >= 1, true);
+      const created = notifications.find(
+        (notification) =>
+          notification['method'] === 'notifications/tasks/created'
+      );
+      assert.ok(created);
+      assert.deepEqual(created['params'], {
+        _meta: {
+          'modelcontextprotocol.io/related-task': {
+            taskId: result.task.taskId,
+          },
+        },
+      });
+    } finally {
+      (server as unknown as { isConnected: () => boolean }).isConnected =
+        originalIsConnected;
+      (
+        server.server as unknown as {
+          notification: (...args: unknown[]) => Promise<void>;
+        }
+      ).notification = originalNotification as (
+        ...args: unknown[]
+      ) => Promise<void>;
+      config.tasks.emitStatusNotifications = originalEmitStatusNotifications;
+      unregisterTaskCapableTool(server, toolName);
+      await server.close();
+    }
+  });
+});
 
 async function waitForTaskSnapshot(
   server: McpServer,
@@ -262,7 +364,7 @@ describe('progress notifications', () => {
             _meta: {
               progressToken: 'tok-task',
               'modelcontextprotocol.io/task': {
-                id: 'test-notif',
+                taskId: 'test-notif',
                 keepAlive: 5_000,
               },
             },
@@ -275,6 +377,12 @@ describe('progress notifications', () => {
           },
         }
       )) as { task: { taskId: string } };
+
+      await waitForTaskSnapshot(
+        server,
+        createTask.task.taskId,
+        (task) => task['status'] === 'completed'
+      );
 
       const result = (await getTaskResultHandler(server)(
         { method: 'tasks/result', params: { taskId: createTask.task.taskId } },
@@ -296,13 +404,13 @@ describe('progress notifications', () => {
             notification.params.progressToken === 'tok-task' &&
             notification.params.total === 4 &&
             notification.params._meta?.[
-              'io.modelcontextprotocol/related-task'
+              'modelcontextprotocol.io/related-task'
             ] !== undefined
         )
       );
       assert.deepEqual(
         notifications[0]?.params._meta?.[
-          'io.modelcontextprotocol/related-task'
+          'modelcontextprotocol.io/related-task'
         ],
         { taskId: createTask.task.taskId }
       );
@@ -346,7 +454,7 @@ describe('progress notifications', () => {
             _meta: {
               progressToken: 7,
               'modelcontextprotocol.io/task': {
-                id: 'test-abort',
+                taskId: 'test-abort',
                 keepAlive: 5_000,
               },
             },
@@ -359,6 +467,12 @@ describe('progress notifications', () => {
           },
         }
       )) as { task: { taskId: string } };
+
+      await waitForTaskSnapshot(
+        server,
+        createTask.task.taskId,
+        (task) => task['status'] === 'completed'
+      );
 
       await getTaskResultHandler(server)(
         { method: 'tasks/result', params: { taskId: createTask.task.taskId } },
@@ -422,7 +536,7 @@ describe('task progress state', () => {
             _meta: {
               progressToken: 'tok-state',
               'modelcontextprotocol.io/task': {
-                id: 'test-state',
+                taskId: 'test-state',
                 keepAlive: 5_000,
               },
             },
@@ -443,6 +557,11 @@ describe('task progress state', () => {
       assert.equal(snapshot['total'], 3);
 
       gate.resolve();
+      await waitForTaskSnapshot(
+        server,
+        createTask.task.taskId,
+        (task) => task['status'] === 'completed'
+      );
 
       await getTaskResultHandler(server)(
         { method: 'tasks/result', params: { taskId: createTask.task.taskId } },
@@ -455,7 +574,146 @@ describe('task progress state', () => {
   });
 });
 
+describe('task result availability', () => {
+  it('rejects tasks/result for a task that has not completed yet', async () => {
+    const server = createTaskTestServer();
+    const toolName = `task-result-working-tool-${randomUUID()}`;
+    const gate = createDeferred();
+
+    registerTaskCapableTool(server, {
+      name: toolName,
+      parseArguments: () => ({}),
+      execute: async () => {
+        await gate.promise;
+        return {
+          content: [{ type: 'text' as const, text: 'done' }],
+        };
+      },
+      taskSupport: 'optional',
+    });
+
+    try {
+      registerTaskHandlers(server, { requireInterception: false });
+
+      const taskResult = (await handleToolCallRequest(
+        server,
+        {
+          method: 'tools/call',
+          params: {
+            name: toolName,
+            arguments: {},
+            _meta: {
+              'modelcontextprotocol.io/task': {
+                taskId: 'working-task',
+                keepAlive: 5_000,
+              },
+            },
+          },
+        },
+        { ownerKey: 'default' }
+      )) as { task: { taskId: string } };
+
+      let error: unknown;
+
+      try {
+        await getTaskResultHandler(server)(
+          {
+            method: 'tasks/result',
+            params: { taskId: taskResult.task.taskId },
+          },
+          undefined
+        );
+      } catch (caught) {
+        error = caught;
+      }
+
+      assertMcpErrorLike(error, {
+        code: ErrorCode.InvalidParams,
+        messageIncludes: 'not available',
+        data: { taskId: taskResult.task.taskId, status: 'working' },
+      });
+    } finally {
+      gate.resolve();
+      unregisterTaskCapableTool(server, toolName);
+      await server.close();
+    }
+  });
+});
+
 describe('task result failure normalization', () => {
+  it('rejects tasks/result for failed tool error results', async () => {
+    const server = createTaskTestServer();
+    const toolName = `failed-result-task-tool-${randomUUID()}`;
+
+    registerTaskCapableTool(server, {
+      name: toolName,
+      parseArguments: () => ({}),
+      execute: async () => ({
+        isError: true,
+        content: [
+          {
+            type: 'text' as const,
+            text: JSON.stringify({
+              error: 'tool reported failure',
+              url: 'https://example.com/failure',
+            }),
+          },
+        ],
+      }),
+      taskSupport: 'optional',
+    });
+
+    try {
+      registerTaskHandlers(server, { requireInterception: false });
+
+      const taskResult = (await handleToolCallRequest(
+        server,
+        {
+          method: 'tools/call',
+          params: {
+            name: toolName,
+            arguments: {},
+            _meta: {
+              'modelcontextprotocol.io/task': {
+                taskId: 'test-fail-result',
+                keepAlive: 1_000,
+              },
+            },
+          },
+        },
+        { ownerKey: 'default' }
+      )) as { task: { taskId: string } };
+
+      await waitForTaskSnapshot(
+        server,
+        taskResult.task.taskId,
+        (task) => task['status'] === 'failed'
+      );
+
+      let error: unknown;
+
+      try {
+        await getTaskResultHandler(server)(
+          {
+            method: 'tasks/result',
+            params: { taskId: taskResult.task.taskId },
+          },
+          undefined
+        );
+      } catch (caught) {
+        error = caught;
+      }
+
+      assertMcpErrorLike(error, {
+        code: ErrorCode.InternalError,
+        messageIncludes: 'tool reported failure',
+      });
+    } finally {
+      unregisterTaskCapableTool(server, toolName);
+      await server.close();
+    }
+  });
+
   it('replays a JSON-RPC error when a background tool throws', async () => {
     const server = createTaskTestServer();
     const toolName = `failing-task-tool-${randomUUID()}`;
@@ -481,7 +739,7 @@ describe('task result failure normalization', () => {
             arguments: {},
             _meta: {
               'modelcontextprotocol.io/task': {
-                id: 'test-fail-1',
+                taskId: 'test-fail-1',
                 keepAlive: 1_000,
               },
             },
@@ -490,20 +748,30 @@ describe('task result failure normalization', () => {
         { ownerKey: 'default' }
       )) as { task: { taskId: string } };
 
-      await assert.rejects(
-        () =>
-          getTaskResultHandler(server)(
-            {
-              method: 'tasks/result',
-              params: { taskId: taskResult.task.taskId },
-            },
-            undefined
-          ),
-        (error: unknown) =>
-          error instanceof McpError &&
-          error.code === ErrorCode.InternalError &&
-          error.message.includes('boom')
+      await waitForTaskSnapshot(
+        server,
+        taskResult.task.taskId,
+        (task) => task['status'] === 'failed'
       );
+
+      let error: unknown;
+
+      try {
+        await getTaskResultHandler(server)(
+          {
+            method: 'tasks/result',
+            params: { taskId: taskResult.task.taskId },
+          },
+          undefined
+        );
+      } catch (caught) {
+        error = caught;
+      }
+
+      assertMcpErrorLike(error, {
+        code: ErrorCode.InternalError,
+        messageIncludes: 'boom',
+      });
     } finally {
       unregisterTaskCapableTool(server, toolName);
       await server.close();
@@ -538,7 +806,7 @@ describe('task result failure normalization', () => {
             arguments: {},
             _meta: {
               'modelcontextprotocol.io/task': {
-                id: 'test-fail-2',
+                taskId: 'test-fail-2',
                 keepAlive: 1_000,
               },
             },
@@ -547,22 +815,31 @@ describe('task result failure normalization', () => {
         { ownerKey: 'default' }
       )) as { task: { taskId: string } };
 
-      await assert.rejects(
-        () =>
-          getTaskResultHandler(server)(
-            {
-              method: 'tasks/result',
-              params: { taskId: taskResult.task.taskId },
-            },
-            undefined
-          ),
-        (error: unknown) =>
-          error instanceof McpError &&
-          error.code === ErrorCode.InternalError &&
-          error.message.includes('broken') &&
-          (error.data as Record<string, unknown> | undefined)?.['reason'] ===
-            'test'
+      await waitForTaskSnapshot(
+        server,
+        taskResult.task.taskId,
+        (task) => task['status'] === 'failed'
       );
+
+      let error: unknown;
+
+      try {
+        await getTaskResultHandler(server)(
+          {
+            method: 'tasks/result',
+            params: { taskId: taskResult.task.taskId },
+          },
+          undefined
+        );
+      } catch (caught) {
+        error = caught;
+      }
+
+      assertMcpErrorLike(error, {
+        code: ErrorCode.InternalError,
+        messageIncludes: 'broken',
+        data: { reason: 'test' },
+      });
     } finally {
       unregisterTaskCapableTool(server, toolName);
       await server.close();
@@ -597,7 +874,7 @@ describe('task result for cancelled task', () => {
             arguments: {},
             _meta: {
               'modelcontextprotocol.io/task': {
-                id: 'test-cancel',
+                taskId: 'test-cancel',
                 keepAlive: 5_000,
               },
             },
@@ -613,22 +890,25 @@ describe('task result for cancelled task', () => {
         undefined
       );
 
-      await assert.rejects(
-        () =>
-          getTaskResultHandler(server)(
-            {
-              method: 'tasks/result',
-              params: { taskId: taskResult.task.taskId },
-            },
-            undefined
-          ),
-        (error: unknown) =>
-          error instanceof McpError &&
-          error.code === ErrorCode.ConnectionClosed &&
-          error.message.includes('The task was cancelled by request.') &&
-          (error.data as Record<string, unknown> | undefined)?.['code'] ===
-            'ABORTED'
-      );
+      let error: unknown;
+
+      try {
+        await getTaskResultHandler(server)(
+          {
+            method: 'tasks/result',
+            params: { taskId: taskResult.task.taskId },
+          },
+          undefined
+        );
+      } catch (caught) {
+        error = caught;
+      }
+
+      assertMcpErrorLike(error, {
+        code: -32_000,
+        messageIncludes: 'The task was cancelled by request.',
+        data: { code: 'ABORTED' },
+      });
     } finally {
       unregisterTaskCapableTool(server, toolName);
       await server.close();
@@ -700,7 +980,7 @@ describe('model-immediate-response in CreateTaskResult', () => {
             arguments: {},
             _meta: {
               'modelcontextprotocol.io/task': {
-                id: 'test-imm-yes',
+                taskId: 'test-imm-yes',
                 keepAlive: 5_000,
               },
             },
@@ -748,7 +1028,7 @@ describe('model-immediate-response in CreateTaskResult', () => {
             arguments: {},
             _meta: {
               'modelcontextprotocol.io/task': {
-                id: 'test-imm-no',
+                taskId: 'test-imm-no',
                 keepAlive: 5_000,
               },
             },
@@ -794,7 +1074,7 @@ describe('tasks/delete handler', () => {
             arguments: {},
             _meta: {
               'modelcontextprotocol.io/task': {
-                id: 'test-del-ok',
+                taskId: 'test-del-ok',
                 keepAlive: 5_000,
               },
             },
@@ -803,7 +1083,12 @@ describe('tasks/delete handler', () => {
         { ownerKey: 'default' }
       )) as { task: { taskId: string } };
 
-      // Wait for completion
+      await waitForTaskSnapshot(
+        server,
+        taskResult.task.taskId,
+        (task) => task['status'] === 'completed'
+      );
+
       await getTaskResultHandler(server)(
         { method: 'tasks/result', params: { taskId: taskResult.task.taskId } },
         undefined
@@ -859,7 +1144,7 @@ describe('tasks/delete handler', () => {
             arguments: {},
             _meta: {
               'modelcontextprotocol.io/task': {
-                id: 'test-del-reject',
+                taskId: 'test-del-reject',
                 keepAlive: 5_000,
               },
             },
@@ -921,7 +1206,7 @@ describe('task creation uses client-provided ID', () => {
             arguments: {},
             _meta: {
               'modelcontextprotocol.io/task': {
-                id: 'test-submitted',
+                taskId: 'test-submitted',
                 keepAlive: 5_000,
               },
             },

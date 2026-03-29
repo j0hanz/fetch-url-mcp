@@ -22,6 +22,7 @@ import {
   logWarn,
   resolveMcpSessionOwnerKey,
   runWithRequestContext,
+  runWithTraceContext,
 } from '../lib/core.js';
 import {
   getErrorMessage,
@@ -58,9 +59,10 @@ import {
 
 const MIN_TASK_KEEP_ALIVE_MS = 1_000;
 const MAX_TASK_KEEP_ALIVE_MS = 86_400_000;
+const RELATED_TASK_META_KEY = 'modelcontextprotocol.io/related-task';
 
 const taskMetaSchema = z.strictObject({
-  id: z.string().min(1, 'Task id required'),
+  taskId: z.string().min(1, 'Task id required'),
   keepAlive: z
     .number()
     .int()
@@ -76,7 +78,7 @@ const relatedTaskMetaSchema = z.strictObject({
 const toolCallMetaSchema = z.looseObject({
   progressToken: z.union([z.string(), z.number()]).optional(),
   'modelcontextprotocol.io/task': taskMetaSchema.optional(),
-  'io.modelcontextprotocol/related-task': relatedTaskMetaSchema.optional(),
+  [RELATED_TASK_META_KEY]: relatedTaskMetaSchema.optional(),
 });
 
 export const extendedCallToolRequestSchema = z.looseObject({
@@ -116,8 +118,9 @@ export function sanitizeToolCallMeta(
 ): ToolCallRequestMeta | undefined {
   if (!meta) return undefined;
 
-  const sanitized = { ...meta };
-  delete sanitized['io.modelcontextprotocol/related-task'];
+  const sanitized = Object.fromEntries(
+    Object.entries(meta).filter(([key]) => key !== RELATED_TASK_META_KEY)
+  ) as NonNullable<ToolCallRequestMeta>;
   return Object.keys(sanitized).length > 0 ? sanitized : undefined;
 }
 
@@ -127,7 +130,7 @@ export function buildRelatedTaskMeta(
 ): Record<string, unknown> {
   return {
     ...(sanitizeToolCallMeta(meta) ?? {}),
-    'io.modelcontextprotocol/related-task': { taskId },
+    [RELATED_TASK_META_KEY]: { taskId },
   };
 }
 
@@ -139,7 +142,20 @@ export function withRelatedTaskMeta(
     ...result,
     _meta: {
       ...result._meta,
-      'io.modelcontextprotocol/related-task': { taskId },
+      [RELATED_TASK_META_KEY]: { taskId },
+    },
+  };
+}
+
+function withRelatedTaskSummaryMeta<T extends Record<string, unknown>>(
+  payload: T,
+  taskId: string
+): T & { _meta: Record<string, unknown> } {
+  return {
+    ...payload,
+    _meta: {
+      ...(isObject(payload['_meta']) ? payload['_meta'] : {}),
+      [RELATED_TASK_META_KEY]: { taskId },
     },
   };
 }
@@ -240,7 +256,7 @@ export function emitTaskStatusNotification(
   void server.server
     .notification({
       method: 'notifications/tasks/status',
-      params: { ...toTaskSummary(task) },
+      params: withRelatedTaskSummaryMeta(toTaskSummary(task), task.taskId),
     })
     .catch((error: unknown) => {
       logError(
@@ -261,7 +277,11 @@ function emitTaskCreatedNotification(server: McpServer, task: TaskState): void {
   void server.server
     .notification({
       method: 'notifications/tasks/created',
-      params: { ...toTaskSummary(task) },
+      params: {
+        _meta: {
+          [RELATED_TASK_META_KEY]: { taskId: task.taskId },
+        },
+      },
     })
     .catch((error: unknown) => {
       logError(
@@ -334,14 +354,23 @@ function buildTaskCompletionUpdate(
 ): Parameters<(typeof taskManager)['updateTask']>[1] {
   const isError =
     isObject(result) && 'isError' in result && result.isError === true;
+  const errorMessage = tryReadToolErrorMessage(result) ?? 'Execution failed';
 
   return {
     status: isError ? 'failed' : 'completed',
     statusMessage: isError
-      ? (tryReadToolErrorMessage(result) ?? 'Execution failed')
+      ? errorMessage
       : (tool.getCompletionStatusMessage?.(result) ??
         'Task completed successfully.'),
     result,
+    ...(isError
+      ? {
+          error: {
+            code: ErrorCode.InternalError,
+            message: errorMessage,
+          },
+        }
+      : {}),
   };
 }
 
@@ -363,78 +392,79 @@ async function runTaskToolExecution(params: {
       operationId: taskId,
       ...(sessionId ? { sessionId } : {}),
     },
-    async () => {
-      const controller = attachAbortController(taskId);
-      const progressState = { closed: false };
+    () =>
+      runWithTraceContext(meta, async () => {
+        const controller = attachAbortController(taskId);
+        const progressState = { closed: false };
 
-      try {
-        updateTaskAndEmitStatus(server, taskId, {
-          status: 'working',
-          statusMessage: 'Task started',
-        });
-        logInfo(
-          'Task execution started',
-          { taskId, tool: tool.name },
-          Loggers.LOG_TASKS
-        );
-        const relatedMeta = buildRelatedTaskMeta(taskId, meta);
-
-        const result = await tool.execute(args, {
-          signal: controller.signal,
-          requestId: taskId,
-          _meta: relatedMeta,
-          progressState,
-          canReportProgress: () =>
-            taskManager.getTask(taskId)?.status === 'working',
-          ...compact({ sendNotification }),
-          onProgress: (progress, message, total) => {
-            const current = taskManager.getTask(taskId);
-            if (
-              current?.status === 'working' &&
-              (current.statusMessage !== message ||
-                current.progress !== progress ||
-                (total !== undefined && current.total !== total))
-            ) {
-              updateTaskAndEmitStatus(server, taskId, {
-                statusMessage: message,
-                progress,
-                ...(total !== undefined ? { total } : {}),
-              });
-            }
-          },
-        });
-
-        const completionUpdate = buildTaskCompletionUpdate(result, tool);
-        updateTaskAndEmitStatus(server, taskId, completionUpdate);
-        if (completionUpdate.status === 'completed') {
+        try {
+          updateTaskAndEmitStatus(server, taskId, {
+            status: 'working',
+            statusMessage: 'Task started',
+          });
           logInfo(
-            'Task execution completed',
+            'Task execution started',
             { taskId, tool: tool.name },
             Loggers.LOG_TASKS
           );
-        } else {
-          logWarn(
-            'Task execution completed with tool error result',
-            { taskId, tool: tool.name },
+          const relatedMeta = buildRelatedTaskMeta(taskId, meta);
+
+          const result = await tool.execute(args, {
+            signal: controller.signal,
+            requestId: taskId,
+            _meta: relatedMeta,
+            progressState,
+            canReportProgress: () =>
+              taskManager.getTask(taskId)?.status === 'working',
+            ...compact({ sendNotification }),
+            onProgress: (progress, message, total) => {
+              const current = taskManager.getTask(taskId);
+              if (
+                current?.status === 'working' &&
+                (current.statusMessage !== message ||
+                  current.progress !== progress ||
+                  (total !== undefined && current.total !== total))
+              ) {
+                updateTaskAndEmitStatus(server, taskId, {
+                  statusMessage: message,
+                  progress,
+                  ...(total !== undefined ? { total } : {}),
+                });
+              }
+            },
+          });
+
+          const completionUpdate = buildTaskCompletionUpdate(result, tool);
+          updateTaskAndEmitStatus(server, taskId, completionUpdate);
+          if (completionUpdate.status === 'completed') {
+            logInfo(
+              'Task execution completed',
+              { taskId, tool: tool.name },
+              Loggers.LOG_TASKS
+            );
+          } else {
+            logWarn(
+              'Task execution completed with tool error result',
+              { taskId, tool: tool.name },
+              Loggers.LOG_TASKS
+            );
+          }
+        } catch (error: unknown) {
+          logError(
+            'Task execution failed',
+            {
+              taskId,
+              tool: tool.name,
+              error: getErrorMessage(error),
+            },
             Loggers.LOG_TASKS
           );
+          updateTaskAndEmitStatus(server, taskId, buildTaskFailureState(error));
+        } finally {
+          progressState.closed = true;
+          detachAbortController(taskId);
         }
-      } catch (error: unknown) {
-        logError(
-          'Task execution failed',
-          {
-            taskId,
-            tool: tool.name,
-            error: getErrorMessage(error),
-          },
-          Loggers.LOG_TASKS
-        );
-        updateTaskAndEmitStatus(server, taskId, buildTaskFailureState(error));
-      } finally {
-        progressState.closed = true;
-        detachAbortController(taskId);
-      }
-    }
+      })
   );
 }
 
@@ -490,7 +520,7 @@ function enqueueTaskToolExecution(
 ): ServerResult {
   const task = taskManager.createTask(
     {
-      taskId: taskMeta.id,
+      taskId: taskMeta.taskId,
       ...(taskMeta.keepAlive !== undefined
         ? { keepAlive: taskMeta.keepAlive }
         : {}),
@@ -545,50 +575,52 @@ export async function handleToolCallRequest(
 ): Promise<ServerResult> {
   const { params } = request;
 
-  // Validate the tool name first so an unknown tool always produces MethodNotFound
-  const tool = getTaskCapableTool(server, params.name);
-  if (!tool) {
-    throw createMcpError(
-      ErrorCode.MethodNotFound,
-      `Unknown tool: ${params.name}`
+  return runWithTraceContext(params._meta, async () => {
+    // Validate the tool name first so an unknown tool always produces MethodNotFound
+    const tool = getTaskCapableTool(server, params.name);
+    if (!tool) {
+      throw createMcpError(
+        ErrorCode.MethodNotFound,
+        `Unknown tool: ${params.name}`
+      );
+    }
+
+    const taskMeta = getTaskMeta(params);
+    validateTaskSupport(server, params.name, !!taskMeta);
+
+    const parsed = tryParseArguments(tool, params.arguments);
+    if (!parsed.ok) return parsed.response;
+
+    if (taskMeta) {
+      return enqueueTaskToolExecution(
+        server,
+        tool,
+        params,
+        taskMeta,
+        context,
+        parsed.value
+      );
+    }
+
+    const progressState = { closed: false };
+    logDebug(
+      'Executing task-capable tool inline',
+      {
+        tool: params.name,
+        hasProgressToken: params._meta?.progressToken !== undefined,
+      },
+      Loggers.LOG_TASKS
     );
-  }
 
-  const taskMeta = getTaskMeta(params);
-  validateTaskSupport(server, params.name, !!taskMeta);
-
-  const parsed = tryParseArguments(tool, params.arguments);
-  if (!parsed.ok) return parsed.response;
-
-  if (taskMeta) {
-    return enqueueTaskToolExecution(
-      server,
-      tool,
-      params,
-      taskMeta,
-      context,
-      parsed.value
-    );
-  }
-
-  const progressState = { closed: false };
-  logDebug(
-    'Executing task-capable tool inline',
-    {
-      tool: params.name,
-      hasProgressToken: params._meta?.progressToken !== undefined,
-    },
-    Loggers.LOG_TASKS
-  );
-
-  try {
-    return await tool.execute(parsed.value, {
-      ...buildToolHandlerExtra(context, params._meta),
-      progressState,
-    });
-  } finally {
-    progressState.closed = true;
-  }
+    try {
+      return await tool.execute(parsed.value, {
+        ...buildToolHandlerExtra(context, params._meta),
+        progressState,
+      });
+    } finally {
+      progressState.closed = true;
+    }
+  });
 }
 
 /* -------------------------------------------------------------------------------------------------
@@ -766,21 +798,30 @@ export function registerTaskHandlers(
 
     if (!task) throwTaskNotFound();
 
-    return toTaskSummary(task);
+    return withRelatedTaskSummaryMeta(toTaskSummary(task), task.taskId);
   });
 
-  server.server.setRequestHandler(TaskResultSchema, async (request, extra) => {
+  server.server.setRequestHandler(TaskResultSchema, (request, extra) => {
     const { taskId } = request.params;
-    const { parsedExtra, ownerKey } = resolveOwnerScopedExtra(extra);
+    const { ownerKey } = resolveOwnerScopedExtra(extra);
     logDebug('tasks/result requested', { taskId }, Loggers.LOG_TASKS);
 
-    const task = await taskManager.waitForTerminalTask(
-      taskId,
-      ownerKey,
-      parsedExtra?.signal
-    );
-
+    const task = taskManager.getTask(taskId, ownerKey);
     if (!task) throwTaskNotFound();
+    if (task.status === 'submitted' || task.status === 'working') {
+      throw createMcpError(
+        ErrorCode.InvalidParams,
+        'Task result is not available until the task completes',
+        { taskId, status: task.status }
+      );
+    }
+    if (task.status === 'input_required') {
+      throw createMcpError(
+        ErrorCode.InvalidParams,
+        'Task result is not available while the task is waiting for input',
+        { taskId, status: task.status }
+      );
+    }
 
     try {
       if (task.status === 'cancelled') {
@@ -788,15 +829,6 @@ export function registerTaskHandlers(
       }
 
       if (task.status === 'failed') {
-        if (task.error) {
-          throwStoredTaskError(task);
-        }
-
-        const failedResult = (task.result ?? null) as ServerResult | null;
-        if (failedResult) {
-          return withRelatedTaskMeta(failedResult, task.taskId);
-        }
-
         throwStoredTaskError(task);
       }
 
@@ -827,7 +859,9 @@ export function registerTaskHandlers(
     );
 
     return {
-      tasks: tasks.map((task) => toTaskSummary(task)),
+      tasks: tasks.map((task) =>
+        withRelatedTaskSummaryMeta(toTaskSummary(task), task.taskId)
+      ),
       nextCursor,
     };
   });
@@ -844,7 +878,7 @@ export function registerTaskHandlers(
 
     emitTaskStatusNotification(server, task);
 
-    return toTaskSummary(task);
+    return withRelatedTaskSummaryMeta(toTaskSummary(task), task.taskId);
   });
 
   server.server.setRequestHandler(TaskDeleteSchema, (request, extra) => {
@@ -1647,11 +1681,18 @@ export function withRequestContextIfMissing<TParams, TResult, TExtra = unknown>(
   return async (params, extra) => {
     const existingRequestId = getRequestId();
     if (existingRequestId) {
-      return handler(params, extra);
+      const traceMeta =
+        isObject(extra) && isObject(extra['_meta'])
+          ? extra['_meta']
+          : undefined;
+      return runWithTraceContext(traceMeta, () => handler(params, extra));
     }
 
     const derivedRequestId = resolveRequestIdFromExtra(extra) ?? randomUUID();
     const derivedSessionId = resolveSessionIdFromExtra(extra);
+
+    const traceMeta =
+      isObject(extra) && isObject(extra['_meta']) ? extra['_meta'] : undefined;
 
     return runWithRequestContext(
       {
@@ -1659,7 +1700,7 @@ export function withRequestContextIfMissing<TParams, TResult, TExtra = unknown>(
         operationId: derivedRequestId,
         ...(derivedSessionId ? { sessionId: derivedSessionId } : {}),
       },
-      () => handler(params, extra)
+      () => runWithTraceContext(traceMeta, () => handler(params, extra))
     );
   };
 }

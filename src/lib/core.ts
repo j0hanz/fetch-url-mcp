@@ -2,6 +2,7 @@ import { type McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 
 import { AsyncLocalStorage } from 'node:async_hooks';
+import { randomUUID } from 'node:crypto';
 import process from 'node:process';
 import {
   getSystemErrorMessage,
@@ -35,10 +36,18 @@ type McpLogLevel =
   | 'emergency';
 
 type LogMetadata = Record<string, unknown>;
+export interface TraceContext {
+  readonly traceparent?: string;
+  readonly tracestate?: string;
+  readonly baggage?: string;
+}
 interface RequestContext {
   readonly requestId: string;
   readonly sessionId?: string;
   readonly operationId?: string;
+  readonly traceparent?: string;
+  readonly tracestate?: string;
+  readonly baggage?: string;
 }
 const requestContext = new AsyncLocalStorage<RequestContext>({
   name: 'requestContext',
@@ -129,6 +138,52 @@ export function runWithRequestContext<T>(
 ): T {
   return requestContext.run(context, fn);
 }
+
+function isTraceContextValue(value: unknown): value is string {
+  return typeof value === 'string' && value.trim().length > 0;
+}
+
+export function extractTraceContext(meta: unknown): TraceContext | undefined {
+  if (meta === null || typeof meta !== 'object' || Array.isArray(meta)) {
+    return undefined;
+  }
+
+  const traceMeta = meta as Record<string, unknown>;
+
+  const traceparent = isTraceContextValue(traceMeta['traceparent'])
+    ? traceMeta['traceparent']
+    : undefined;
+  const tracestate = isTraceContextValue(traceMeta['tracestate'])
+    ? traceMeta['tracestate']
+    : undefined;
+  const baggage = isTraceContextValue(traceMeta['baggage'])
+    ? traceMeta['baggage']
+    : undefined;
+
+  if (!traceparent && !tracestate && !baggage) return undefined;
+  return {
+    ...(traceparent ? { traceparent } : {}),
+    ...(tracestate ? { tracestate } : {}),
+    ...(baggage ? { baggage } : {}),
+  };
+}
+
+export function runWithTraceContext<T>(meta: unknown, fn: () => T): T {
+  const traceContext = extractTraceContext(meta);
+  if (!traceContext) return fn();
+
+  const existing = getRequestContext();
+  return runWithRequestContext(
+    {
+      requestId: existing?.requestId ?? randomUUID(),
+      ...(existing?.sessionId ? { sessionId: existing.sessionId } : {}),
+      ...(existing?.operationId ? { operationId: existing.operationId } : {}),
+      ...traceContext,
+    },
+    fn
+  );
+}
+
 function getRequestContext(): RequestContext | undefined {
   return requestContext.getStore();
 }
@@ -141,6 +196,19 @@ export function getSessionId(): string | undefined {
 }
 export function getOperationId(): string | undefined {
   return getRequestContext()?.operationId;
+}
+export function getTraceContext(): TraceContext | undefined {
+  const context = getRequestContext();
+  if (!context) return undefined;
+
+  const { traceparent, tracestate, baggage } = context;
+  if (!traceparent && !tracestate && !baggage) return undefined;
+
+  return {
+    ...(traceparent ? { traceparent } : {}),
+    ...(tracestate ? { tracestate } : {}),
+    ...(baggage ? { baggage } : {}),
+  };
 }
 function isDebugEnabled(): boolean {
   return config.logging.level === 'debug';

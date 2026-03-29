@@ -1,7 +1,10 @@
+import { ErrorCode } from '@modelcontextprotocol/sdk/types.js';
+
 import type { ServerResponse } from 'node:http';
 
 import { Loggers, logWarn } from '../lib/core.js';
 import { isAbortError } from '../lib/error/index.js';
+import { sendJsonRpcError } from '../lib/mcp-interop.js';
 import { startAbortableIntervalLoop } from '../lib/utils.js';
 
 import type { RequestContext } from './native.js';
@@ -29,6 +32,10 @@ function sendJson(res: ServerResponse, status: number, body: unknown): void {
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('Cache-Control', 'no-store');
   res.end(JSON.stringify(body));
+}
+
+function isMcpEndpoint(pathname: string): boolean {
+  return pathname === '/mcp' || pathname === '/mcp/';
 }
 
 export class RateLimiter {
@@ -108,7 +115,18 @@ export class RateLimiter {
       logWarn('Rate limit exceeded', { ip: key }, Loggers.LOG_RATE_LIMIT);
       const retryAfter = Math.max(1, Math.ceil((entry.resetTime - now) / 1000));
       ctx.res.setHeader('Retry-After', String(retryAfter));
-      sendJson(ctx.res, 429, { error: 'Rate limit exceeded', retryAfter });
+      if (isMcpEndpoint(ctx.url.pathname)) {
+        sendJsonRpcError(
+          ctx.res,
+          429,
+          ErrorCode.InvalidRequest,
+          'Rate limit exceeded',
+          null,
+          { retryAfter }
+        );
+      } else {
+        sendJson(ctx.res, 429, { error: 'Rate limit exceeded', retryAfter });
+      }
       return false;
     }
 

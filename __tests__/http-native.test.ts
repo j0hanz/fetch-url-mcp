@@ -3,7 +3,12 @@ import type { ServerResult } from '@modelcontextprotocol/sdk/types.js';
 import assert from 'node:assert/strict';
 import { after, before, describe, it } from 'node:test';
 
-import { authService, startHttpServer } from '../src/http/index.js';
+import {
+  assertHttpModeConfiguration,
+  authService,
+  buildProtectedResourceMetadataDocument,
+  startHttpServer,
+} from '../src/http/index.js';
 import { config } from '../src/lib/config.js';
 import { resolveTaskOwnerKey, taskManager } from '../src/tasks/manager.js';
 
@@ -23,6 +28,27 @@ function parseFirstSseDataEvent(text: string): unknown {
     .find((line) => line.startsWith('data: '));
   assert.ok(dataLine, 'expected at least one SSE data event');
   return JSON.parse(dataLine.slice('data: '.length));
+}
+
+function assertJsonRpcError(
+  value: unknown,
+  expected: {
+    id: string | number | null;
+    code: number;
+    message: string;
+    data?: unknown;
+  }
+): void {
+  const body = asRecord(value);
+  assert.deepEqual(body, {
+    jsonrpc: '2.0',
+    error: {
+      code: expected.code,
+      message: expected.message,
+      ...(expected.data !== undefined ? { data: expected.data } : {}),
+    },
+    id: expected.id,
+  });
 }
 
 function createInitializeRequestBody(): string {
@@ -164,8 +190,10 @@ describe('HTTP native gateway routing', () => {
     });
 
     assert.equal(response.status, 406);
-    assert.deepEqual(await response.json(), {
-      error:
+    assertJsonRpcError(await response.json(), {
+      id: null,
+      code: -32600,
+      message:
         'We need the request to accept both "application/json" and "text/event-stream".',
     });
   });
@@ -178,8 +206,10 @@ describe('HTTP native gateway routing', () => {
     });
 
     assert.equal(response.status, 406);
-    assert.deepEqual(await response.json(), {
-      error:
+    assertJsonRpcError(await response.json(), {
+      id: null,
+      code: -32600,
+      message:
         'We need the request to accept both "application/json" and "text/event-stream".',
     });
   });
@@ -195,17 +225,19 @@ describe('HTTP native gateway routing', () => {
     });
 
     assert.equal(response.status, 400);
-    assert.deepEqual(await response.json(), {
-      error:
+    assertJsonRpcError(await response.json(), {
+      id: null,
+      code: -32700,
+      message:
         "We couldn't parse the request body. Please ensure it's valid JSON.",
     });
   });
 
-  it('accepts initialize without MCP-Protocol-Version and negotiates a supported version', async () => {
+  it('accepts initialize without MCP-Protocol-Version when the body version is supported', async () => {
     const response = await fetch(`${baseUrl}/mcp`, {
       method: 'POST',
       headers: createSessionHeaders(),
-      body: createInitializeRequestBodyForVersion('2099-01-01'),
+      body: createInitializeRequestBody(),
     });
 
     assert.equal(response.status, 200);
@@ -214,6 +246,22 @@ describe('HTTP native gateway routing', () => {
 
     const body = await response.text();
     assert.match(body, /"protocolVersion":"2025-11-25"/);
+  });
+
+  it('rejects initialize when the body protocol version is unsupported', async () => {
+    const response = await fetch(`${baseUrl}/mcp`, {
+      method: 'POST',
+      headers: createSessionHeaders(),
+      body: createInitializeRequestBodyForVersion('2099-01-01'),
+    });
+
+    assert.equal(response.status, 400);
+    assertJsonRpcError(await response.json(), {
+      id: 1,
+      code: -32600,
+      message:
+        "The protocol version '2099-01-01' isn't supported right now. Please check and try again.",
+    });
   });
 
   it('rejects pre-initialized session requests other than ping', async () => {
@@ -242,13 +290,15 @@ describe('HTTP native gateway routing', () => {
     });
 
     assert.equal(response.status, 400);
-    assert.deepEqual(await response.json(), {
-      error:
+    assertJsonRpcError(await response.json(), {
+      id: 2,
+      code: -32600,
+      message:
         "Your session hasn't been initialized yet. Please wait a moment and try again.",
     });
   });
 
-  it('tolerates missing MCP-Protocol-Version on sessioned requests (backwards compat)', async () => {
+  it('rejects sessioned requests that omit MCP-Protocol-Version', async () => {
     const initializeResponse = await fetch(`${baseUrl}/mcp`, {
       method: 'POST',
       headers: createSessionHeaders(),
@@ -274,7 +324,6 @@ describe('HTTP native gateway routing', () => {
 
     assert.equal(initializedResponse.status, 202);
 
-    // Ping without MCP-Protocol-Version — should succeed via session fallback
     const pingResponse = await fetch(`${baseUrl}/mcp`, {
       method: 'POST',
       headers: createSessionHeaders({ sessionId }),
@@ -285,9 +334,13 @@ describe('HTTP native gateway routing', () => {
       }),
     });
 
-    assert.equal(pingResponse.status, 200);
-    const body = await pingResponse.text();
-    assert.match(body, /"result"/);
+    assert.equal(pingResponse.status, 400);
+    assertJsonRpcError(await pingResponse.json(), {
+      id: null,
+      code: -32600,
+      message:
+        'Please include the MCP-Protocol-Version header in your request.',
+    });
   });
 
   it('rejects invalid MCP-Protocol-Version on sessioned requests', async () => {
@@ -331,8 +384,10 @@ describe('HTTP native gateway routing', () => {
     });
 
     assert.equal(pingResponse.status, 400);
-    assert.deepEqual(await pingResponse.json(), {
-      error:
+    assertJsonRpcError(await pingResponse.json(), {
+      id: null,
+      code: -32600,
+      message:
         "The protocol version '1999-01-01' isn't supported right now. Please check and try again.",
     });
   });
@@ -457,5 +512,105 @@ describe('HTTP native gateway routing', () => {
       error: "Looks like you tried to use a method that isn't allowed here.",
     });
     assert.equal(response.headers.get('allow'), 'DELETE, GET, OPTIONS, POST');
+  });
+});
+
+describe('HTTP auth and rate-limit behavior', () => {
+  it('fails fast when OAuth mode is missing introspection configuration', () => {
+    const originalMode = config.auth.mode;
+    const originalIssuerUrl = config.auth.issuerUrl;
+    const originalIntrospectionUrl = config.auth.introspectionUrl;
+
+    config.auth.mode = 'oauth';
+    config.auth.issuerUrl = new URL('https://issuer.example.com');
+    config.auth.introspectionUrl = undefined;
+
+    try {
+      assert.throws(
+        () => assertHttpModeConfiguration(),
+        /OAUTH_INTROSPECTION_URL/
+      );
+    } finally {
+      config.auth.mode = originalMode;
+      config.auth.issuerUrl = originalIssuerUrl;
+      config.auth.introspectionUrl = originalIntrospectionUrl;
+    }
+  });
+
+  it('builds protected resource metadata from the configured public resource URL', () => {
+    const originalResourceUrl = config.auth.resourceUrl;
+    const originalIssuerUrl = config.auth.issuerUrl;
+
+    config.auth.resourceUrl = new URL('https://public.example.com/mcp');
+    config.auth.issuerUrl = new URL('https://issuer.example.com');
+
+    try {
+      const document = buildProtectedResourceMetadataDocument();
+
+      assert.equal(document.resource, 'https://public.example.com/mcp');
+      assert.equal(
+        document.resource_metadata,
+        'https://public.example.com/.well-known/oauth-protected-resource/mcp'
+      );
+    } finally {
+      config.auth.resourceUrl = originalResourceUrl;
+      config.auth.issuerUrl = originalIssuerUrl;
+    }
+  });
+
+  it('returns a single 429 response with retry-after headers', async () => {
+    const originalMaxRequests = config.rateLimit.maxRequests;
+    const originalPort = config.server.port;
+    const originalResourceUrl = config.auth.resourceUrl;
+    const originalStaticTokens = [...config.auth.staticTokens];
+    const originalAuthenticate = authService.authenticate.bind(authService);
+
+    config.rateLimit.maxRequests = 0;
+    config.server.port = 0;
+    config.auth.staticTokens.splice(
+      0,
+      config.auth.staticTokens.length,
+      TEST_API_KEY
+    );
+    authService.authenticate = async () => ({
+      token: TEST_API_KEY,
+      clientId: 'static-token',
+      scopes: [],
+      resource: config.auth.resourceUrl,
+    });
+
+    let rateLimitedServer: HttpServerHandle | undefined;
+    try {
+      rateLimitedServer = await startHttpServer();
+      const rateLimitedBaseUrl = `http://${rateLimitedServer.host}:${rateLimitedServer.port}`;
+
+      const response = await fetch(`${rateLimitedBaseUrl}/mcp`, {
+        method: 'POST',
+        headers: createSessionHeaders(),
+        body: createInitializeRequestBody(),
+      });
+
+      assert.equal(response.status, 429);
+      assert.equal(response.headers.get('retry-after'), '60');
+      assertJsonRpcError(await response.json(), {
+        id: null,
+        code: -32600,
+        message: 'Rate limit exceeded',
+        data: { retryAfter: 60 },
+      });
+    } finally {
+      if (rateLimitedServer) {
+        await rateLimitedServer.shutdown('test');
+      }
+      config.rateLimit.maxRequests = originalMaxRequests;
+      config.server.port = originalPort;
+      config.auth.resourceUrl = originalResourceUrl;
+      config.auth.staticTokens.splice(
+        0,
+        config.auth.staticTokens.length,
+        ...originalStaticTokens
+      );
+      authService.authenticate = originalAuthenticate;
+    }
   });
 });

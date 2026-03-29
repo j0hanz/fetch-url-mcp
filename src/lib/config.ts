@@ -402,6 +402,7 @@ interface AuthConfig {
   revocationUrl: URL | undefined;
   registrationUrl: URL | undefined;
   introspectionUrl: URL | undefined;
+  publicBaseUrl: URL | undefined;
   resourceUrl: URL;
   requiredScopes: string[];
   clientId: string | undefined;
@@ -427,7 +428,8 @@ function buildAuthConfig(baseUrl: URL): AuthConfig {
   const revocationUrl = parseUrl('OAUTH_REVOCATION_URL');
   const registrationUrl = parseUrl('OAUTH_REGISTRATION_URL');
   const introspectionUrl = parseUrl('OAUTH_INTROSPECTION_URL');
-  const resourceUrl = new URL('/mcp', baseUrl);
+  const publicBaseUrl = parseUrl('PUBLIC_BASE_URL');
+  const resourceUrl = new URL('/mcp', publicBaseUrl ?? baseUrl);
 
   const oauthConfigured =
     issuerUrl !== undefined ||
@@ -446,6 +448,7 @@ function buildAuthConfig(baseUrl: URL): AuthConfig {
     revocationUrl,
     registrationUrl,
     introspectionUrl,
+    publicBaseUrl,
     resourceUrl,
     requiredScopes: EnvParser.list(env['OAUTH_REQUIRED_SCOPES']),
     clientId: env['OAUTH_CLIENT_ID'],

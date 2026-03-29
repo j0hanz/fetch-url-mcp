@@ -320,7 +320,7 @@ async function executeFetch(
   const signal = buildToolAbortSignal(extra?.signal);
   const startedAt = performance.now();
   const relatedTaskMeta =
-    extra?._meta?.['io.modelcontextprotocol/related-task'];
+    extra?._meta?.['modelcontextprotocol.io/related-task'];
   const relatedTask = isObject(relatedTaskMeta) ? relatedTaskMeta : undefined;
   const progressPlan = new FetchUrlProgressPlan(
     createProgressReporter(extra),

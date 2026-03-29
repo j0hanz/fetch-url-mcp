@@ -540,6 +540,8 @@ You get text content back by default. If output validation passes, the response 
 
 To opt into progress updates, include `_meta.progressToken` in the tool call. The token may be a string or number. The server may then emit monotonic `notifications/progress` updates, and task mode reuses the same token until the task reaches a terminal state.
 
+To run the tool in task mode, include `_meta["modelcontextprotocol.io/task"] = { "taskId": "<client-id>", "keepAlive": <ms> }`. `tasks/result` returns output only after the task reaches `completed`. Task-linked progress notifications, task summaries, and final results include `_meta["modelcontextprotocol.io/related-task"] = { "taskId": "<client-id>" }`.
+
 ```json
 {
   "method": "tools/call",
