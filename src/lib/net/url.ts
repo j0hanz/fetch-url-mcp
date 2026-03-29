@@ -591,7 +591,6 @@ export interface Logger {
   warn(message: string, data?: Record<string, unknown>): void;
   error(message: string, data?: Record<string, unknown>): void;
 }
-export const VALIDATION_ERROR_CODE = SystemErrors.VALIDATION_ERROR;
 function createValidationError(message: string): Error {
   const error = new CodedError(message, SystemErrors.VALIDATION_ERROR);
   return error;

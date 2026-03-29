@@ -659,15 +659,6 @@ export function logError(
     error instanceof Error ? formatErrorMeta(error) : (error ?? {});
   writeLog('error', message, errorMeta, logger);
 }
-export function logCritical(
-  message: string,
-  error?: Error | LogMetadata,
-  logger?: string
-): void {
-  const errorMeta: LogMetadata =
-    error instanceof Error ? formatErrorMeta(error) : (error ?? {});
-  writeLog('critical', message, errorMeta, logger);
-}
 export function setLogLevel(level: string, sessionId?: string): void {
   const normalized = normalizeLogLevel(level);
   if (!normalized) return;

@@ -14,16 +14,10 @@ import {
   composeAbortSignal,
   hmacSha256Hex,
   isObject,
-  parseUrlOrNull,
   timingSafeEqualUtf8,
 } from '../lib/utils.js';
 
-interface RequestContextLike {
-  readonly req: IncomingMessage;
-  readonly res: ServerResponse;
-  readonly url: URL;
-  readonly method: string | undefined;
-}
+import type { RequestContext } from './native.js';
 
 function setNoStoreHeaders(res: ServerResponse): void {
   res.setHeader('X-Content-Type-Options', 'nosniff');
@@ -68,7 +62,7 @@ class CorsPolicy {
   // NOTE: CorsPolicy.handle() is invoked only AFTER hostOriginPolicy.validate() in
   // HttpRequestPipeline. The Origin header is reflected only when it matches an
   // allowlisted host — arbitrary/unauthenticated origins are never reflected.
-  handle(ctx: RequestContextLike): boolean {
+  handle(ctx: RequestContext): boolean {
     const { req, res } = ctx;
     const origin = getHeaderValue(req, 'origin');
 
@@ -157,7 +151,7 @@ function buildAllowedHosts(): ReadonlySet<string> {
 const ALLOWED_HOSTS = buildAllowedHosts();
 
 class HostOriginPolicy {
-  validate(ctx: RequestContextLike): boolean {
+  validate(ctx: RequestContext): boolean {
     const { req } = ctx;
     const host = this.resolveHostHeader(req);
 
@@ -200,7 +194,7 @@ class HostOriginPolicy {
 
     const isEncrypted = Reflect.get(req.socket, 'encrypted') === true;
     const scheme = isEncrypted ? 'https' : 'http';
-    const parsed = parseUrlOrNull(`${scheme}://${hostHeader}`);
+    const parsed = URL.parse(`${scheme}://${hostHeader}`);
     if (!parsed) return null;
 
     const normalizedHost = normalizeHost(parsed.host);
@@ -217,7 +211,7 @@ class HostOriginPolicy {
     origin: string
   ): { scheme: 'http' | 'https'; host: string; port: string } | null {
     if (origin === 'null') return null;
-    const parsed = parseUrlOrNull(origin);
+    const parsed = URL.parse(origin);
     if (!parsed) return null;
 
     const scheme = parsed.protocol === 'https:' ? 'https' : 'http';
@@ -240,7 +234,7 @@ class HostOriginPolicy {
   }
 
   private reject(
-    ctx: RequestContextLike,
+    ctx: RequestContext,
     status: number,
     message: string
   ): boolean {

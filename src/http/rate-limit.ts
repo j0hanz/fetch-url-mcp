@@ -4,6 +4,8 @@ import { Loggers, logWarn } from '../lib/core.js';
 import { isAbortError } from '../lib/error/index.js';
 import { startAbortableIntervalLoop } from '../lib/utils.js';
 
+import type { RequestContext } from './native.js';
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -21,12 +23,6 @@ interface RateLimitConfig {
   enabled: boolean;
 }
 
-interface RequestContextLike {
-  readonly method: string | undefined;
-  readonly ip: string | null;
-  readonly res: ServerResponse;
-}
-
 function sendJson(res: ServerResponse, status: number, body: unknown): void {
   res.statusCode = status;
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
@@ -35,16 +31,7 @@ function sendJson(res: ServerResponse, status: number, body: unknown): void {
   res.end(JSON.stringify(body));
 }
 
-export interface RateLimitManagerImpl {
-  check(ctx: RequestContextLike): boolean;
-  stop(): void;
-}
-
-// ---------------------------------------------------------------------------
-// Rate limiter
-// ---------------------------------------------------------------------------
-
-class RateLimiter implements RateLimitManagerImpl {
+export class RateLimiter {
   private readonly store = new Map<string, RateLimitEntry>();
   private readonly cleanup = new AbortController();
 
@@ -98,7 +85,7 @@ class RateLimiter implements RateLimitManagerImpl {
     };
   }
 
-  check(ctx: RequestContextLike): boolean {
+  check(ctx: RequestContext): boolean {
     if (!this.options.enabled || ctx.method === 'OPTIONS') return true;
 
     if (!ctx.ip) return true; // no identifiable IP (e.g. Unix socket) — bypass rate limiting
@@ -131,11 +118,4 @@ class RateLimiter implements RateLimitManagerImpl {
   stop(): void {
     this.cleanup.abort();
   }
-}
-
-export function createRateLimitManagerImpl(
-  options: RateLimitConfig
-): RateLimitManagerImpl {
-  const limiter = new RateLimiter(options);
-  return limiter;
 }

@@ -51,7 +51,6 @@ import {
   isHtmlNode,
   isObject,
   isWhitespaceChar,
-  parseUrlOrNull,
   trimDanglingTagFragment,
   truncateToUtf8Boundary,
 } from '../lib/utils.js';
@@ -447,7 +446,7 @@ export function normalizeDocumentTitle(
 ): string {
   if (!baseUrl || !title.startsWith('GitHub - ')) return title;
 
-  const parsed = parseUrlOrNull(baseUrl);
+  const parsed = URL.parse(baseUrl);
   if (!parsed) return title;
 
   const hostname = parsed.hostname.toLowerCase();
@@ -585,7 +584,7 @@ function resolveFaviconUrl(href: string, baseUrl: string): string | undefined {
   const trimmed = href.trim();
   if (!trimmed || trimmed.toLowerCase().startsWith('data:')) return undefined;
 
-  const resolved = parseUrlOrNull(trimmed, baseUrl);
+  const resolved = URL.parse(trimmed, baseUrl);
   if (resolved?.protocol !== 'http:' && resolved?.protocol !== 'https:') {
     return undefined;
   }
@@ -943,7 +942,7 @@ export function shouldPreferPrimaryHeadingTitle(
 }
 
 export function isGithubRepositoryRootUrl(url: string): boolean {
-  const parsed = parseUrlOrNull(url);
+  const parsed = URL.parse(url);
   if (!parsed) return false;
 
   const hostname = parsed.hostname.toLowerCase();

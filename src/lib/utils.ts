@@ -23,10 +23,6 @@ export function composeAbortSignal(
   return signal ?? timeoutSignal;
 }
 
-export function parseUrlOrNull(input: string, base?: string): URL | null {
-  return URL.parse(input, base);
-}
-
 export function timingSafeEqualUtf8(a: string, b: string): boolean {
   const aBuf = textEncoder.encode(a);
   const bBuf = textEncoder.encode(b);
@@ -108,12 +104,6 @@ export function isObject(
   value: unknown
 ): value is Record<PropertyKey, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
-export function compactContext<T extends object>(obj: T): Partial<T> {
-  return Object.fromEntries(
-    Object.entries(obj).filter(([, v]) => v !== undefined)
-  ) as Partial<T>;
 }
 
 interface HtmlNode {

@@ -78,10 +78,7 @@ import {
   isProtectedResourceMetadataPath,
   SUPPORTED_MCP_PROTOCOL_VERSIONS,
 } from './auth.js';
-import {
-  createRateLimitManagerImpl,
-  type RateLimitManagerImpl,
-} from './rate-limit.js';
+import { RateLimiter } from './rate-limit.js';
 
 /*
  * Module map:
@@ -2086,7 +2083,7 @@ function sendBodyParseError(
 
 class HttpRequestPipeline {
   constructor(
-    private readonly rateLimiter: RateLimitManagerImpl,
+    private readonly rateLimiter: RateLimiter,
     private readonly dispatcher: HttpDispatcher
   ) {}
 
@@ -2319,7 +2316,7 @@ function resolveListeningPort(server: NetworkServer, fallback: number): number {
 
 function createShutdownHandler(options: {
   server: NetworkServer;
-  rateLimiter: RateLimitManagerImpl;
+  rateLimiter: RateLimiter;
   sessionCleanup: AbortController;
   sessionStore: SessionStore;
 }): (signal: string) => Promise<void> {
@@ -2370,7 +2367,7 @@ export async function startHttpServer(): Promise<{
 
   resetEventLoopMonitoring();
 
-  const rateLimiter = createRateLimitManagerImpl(config.rateLimit);
+  const rateLimiter = new RateLimiter(config.rateLimit);
 
   const sessionStore = createSessionStore(config.server.sessionTtlMs);
   const sessionCleanup = startSessionCleanupLoop(

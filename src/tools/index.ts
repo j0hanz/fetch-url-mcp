@@ -29,7 +29,7 @@ import {
   type SharedFetchStage,
   withSignal,
 } from '../lib/net/index.js';
-import { composeAbortSignal, isObject, parseUrlOrNull } from '../lib/utils.js';
+import { composeAbortSignal, isObject } from '../lib/utils.js';
 
 import {
   fetchUrlInputSchema,
@@ -73,7 +73,7 @@ const HARD_TOOL_TIMEOUT_MS = 300_000;
 const CODE_HOSTS = new Set(['github.com', 'gitlab.com', 'bitbucket.org']);
 
 function formatUrlForDisplay(urlStr: string): string {
-  const parsed = parseUrlOrNull(urlStr);
+  const parsed = URL.parse(urlStr);
   if (!parsed) return 'unknown';
 
   const host = parsed.hostname.replace(/^www\./, '');
