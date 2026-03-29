@@ -52,6 +52,14 @@ function getTaskGetHandler(server: McpServer): UnknownRequestHandler {
   return handler;
 }
 
+function getDeleteHandler(server: McpServer): UnknownRequestHandler {
+  const handlers: unknown = Reflect.get(server.server, '_requestHandlers');
+  assert.ok(handlers instanceof Map);
+  const handler = handlers.get('tasks/delete');
+  assert.ok(isUnknownRequestHandler(handler));
+  return handler;
+}
+
 function createTaskTestServer(): McpServer {
   return new McpServer(
     { name: 'task-handler-test', version: '0.0.0' },
@@ -251,8 +259,13 @@ describe('progress notifications', () => {
           params: {
             name: toolName,
             arguments: {},
-            task: { ttl: 5_000 },
-            _meta: { progressToken: 'tok-task' },
+            _meta: {
+              progressToken: 'tok-task',
+              'modelcontextprotocol.io/task': {
+                id: 'test-notif',
+                keepAlive: 5_000,
+              },
+            },
           },
         },
         {
@@ -330,8 +343,13 @@ describe('progress notifications', () => {
           params: {
             name: toolName,
             arguments: {},
-            task: { ttl: 5_000 },
-            _meta: { progressToken: 7 },
+            _meta: {
+              progressToken: 7,
+              'modelcontextprotocol.io/task': {
+                id: 'test-abort',
+                keepAlive: 5_000,
+              },
+            },
           },
         },
         {
@@ -401,8 +419,13 @@ describe('task progress state', () => {
           params: {
             name: toolName,
             arguments: {},
-            task: { ttl: 5_000 },
-            _meta: { progressToken: 'tok-state' },
+            _meta: {
+              progressToken: 'tok-state',
+              'modelcontextprotocol.io/task': {
+                id: 'test-state',
+                keepAlive: 5_000,
+              },
+            },
           },
         },
         { ownerKey: 'default' }
@@ -453,7 +476,16 @@ describe('task result failure normalization', () => {
         server,
         {
           method: 'tools/call',
-          params: { name: toolName, arguments: {}, task: { ttl: 1_000 } },
+          params: {
+            name: toolName,
+            arguments: {},
+            _meta: {
+              'modelcontextprotocol.io/task': {
+                id: 'test-fail-1',
+                keepAlive: 1_000,
+              },
+            },
+          },
         },
         { ownerKey: 'default' }
       )) as { task: { taskId: string } };
@@ -501,7 +533,16 @@ describe('task result failure normalization', () => {
         server,
         {
           method: 'tools/call',
-          params: { name: toolName, arguments: {}, task: { ttl: 1_000 } },
+          params: {
+            name: toolName,
+            arguments: {},
+            _meta: {
+              'modelcontextprotocol.io/task': {
+                id: 'test-fail-2',
+                keepAlive: 1_000,
+              },
+            },
+          },
         },
         { ownerKey: 'default' }
       )) as { task: { taskId: string } };
@@ -551,7 +592,16 @@ describe('task result for cancelled task', () => {
         server,
         {
           method: 'tools/call',
-          params: { name: toolName, arguments: {}, task: { ttl: 5_000 } },
+          params: {
+            name: toolName,
+            arguments: {},
+            _meta: {
+              'modelcontextprotocol.io/task': {
+                id: 'test-cancel',
+                keepAlive: 5_000,
+              },
+            },
+          },
         },
         { ownerKey: 'default' }
       )) as { task: { taskId: string } };
@@ -645,7 +695,16 @@ describe('model-immediate-response in CreateTaskResult', () => {
         server,
         {
           method: 'tools/call',
-          params: { name: toolName, arguments: {}, task: { ttl: 5_000 } },
+          params: {
+            name: toolName,
+            arguments: {},
+            _meta: {
+              'modelcontextprotocol.io/task': {
+                id: 'test-imm-yes',
+                keepAlive: 5_000,
+              },
+            },
+          },
         },
         { ownerKey: 'default' }
       )) as {
@@ -684,7 +743,16 @@ describe('model-immediate-response in CreateTaskResult', () => {
         server,
         {
           method: 'tools/call',
-          params: { name: toolName, arguments: {}, task: { ttl: 5_000 } },
+          params: {
+            name: toolName,
+            arguments: {},
+            _meta: {
+              'modelcontextprotocol.io/task': {
+                id: 'test-imm-no',
+                keepAlive: 5_000,
+              },
+            },
+          },
         },
         { ownerKey: 'default' }
       )) as {
@@ -693,7 +761,176 @@ describe('model-immediate-response in CreateTaskResult', () => {
       };
 
       assert.ok(result.task.taskId);
-      assert.equal(result._meta, undefined);
+    } finally {
+      unregisterTaskCapableTool(server, toolName);
+      await server.close();
+    }
+  });
+});
+
+describe('tasks/delete handler', () => {
+  it('deletes a completed task', async () => {
+    const server = createTaskTestServer();
+    const toolName = `del-tool-${randomUUID()}`;
+
+    registerTaskCapableTool(server, {
+      name: toolName,
+      parseArguments: () => ({}),
+      execute: async () => ({
+        content: [{ type: 'text' as const, text: 'ok' }],
+      }),
+      taskSupport: 'optional',
+    });
+
+    try {
+      registerTaskHandlers(server, { requireInterception: false });
+
+      const taskResult = (await handleToolCallRequest(
+        server,
+        {
+          method: 'tools/call',
+          params: {
+            name: toolName,
+            arguments: {},
+            _meta: {
+              'modelcontextprotocol.io/task': {
+                id: 'test-del-ok',
+                keepAlive: 5_000,
+              },
+            },
+          },
+        },
+        { ownerKey: 'default' }
+      )) as { task: { taskId: string } };
+
+      // Wait for completion
+      await getTaskResultHandler(server)(
+        { method: 'tasks/result', params: { taskId: taskResult.task.taskId } },
+        undefined
+      );
+
+      // Delete the terminal task
+      const deleteHandler = getDeleteHandler(server);
+      const deleteResult = await deleteHandler(
+        { method: 'tasks/delete', params: { taskId: taskResult.task.taskId } },
+        undefined
+      );
+      assert.deepEqual(deleteResult, {});
+
+      // Verify task is gone
+      const getTask = getTaskGetHandler(server);
+      await assert.rejects(
+        async () =>
+          getTask(
+            { method: 'tasks/get', params: { taskId: taskResult.task.taskId } },
+            undefined
+          ),
+        (err: unknown) => err instanceof McpError
+      );
+    } finally {
+      unregisterTaskCapableTool(server, toolName);
+      await server.close();
+    }
+  });
+
+  it('rejects deletion of a non-terminal task', async () => {
+    const server = createTaskTestServer();
+    const toolName = `del-reject-tool-${randomUUID()}`;
+
+    registerTaskCapableTool(server, {
+      name: toolName,
+      parseArguments: () => ({}),
+      execute: () =>
+        new Promise(() => {
+          /* never resolves */
+        }),
+      taskSupport: 'optional',
+    });
+
+    try {
+      registerTaskHandlers(server, { requireInterception: false });
+
+      const taskResult = (await handleToolCallRequest(
+        server,
+        {
+          method: 'tools/call',
+          params: {
+            name: toolName,
+            arguments: {},
+            _meta: {
+              'modelcontextprotocol.io/task': {
+                id: 'test-del-reject',
+                keepAlive: 5_000,
+              },
+            },
+          },
+        },
+        { ownerKey: 'default' }
+      )) as { task: { taskId: string } };
+
+      const deleteHandler = getDeleteHandler(server);
+      await assert.rejects(
+        async () =>
+          deleteHandler(
+            {
+              method: 'tasks/delete',
+              params: { taskId: taskResult.task.taskId },
+            },
+            undefined
+          ),
+        (err: unknown) =>
+          err instanceof McpError && err.code === ErrorCode.InvalidParams
+      );
+
+      // Clean up by cancelling
+      const cancelHandler = getCancelHandler(server);
+      await cancelHandler(
+        { method: 'tasks/cancel', params: { taskId: taskResult.task.taskId } },
+        undefined
+      );
+    } finally {
+      unregisterTaskCapableTool(server, toolName);
+      await server.close();
+    }
+  });
+});
+
+describe('task creation uses client-provided ID', () => {
+  it('returns a task with the client-provided taskId', async () => {
+    const server = createTaskTestServer();
+    const toolName = `submitted-status-tool-${randomUUID()}`;
+
+    registerTaskCapableTool(server, {
+      name: toolName,
+      parseArguments: () => ({}),
+      execute: async () => ({
+        content: [{ type: 'text' as const, text: 'ok' }],
+      }),
+      taskSupport: 'optional',
+    });
+
+    try {
+      registerTaskHandlers(server, { requireInterception: false });
+
+      const taskResult = (await handleToolCallRequest(
+        server,
+        {
+          method: 'tools/call',
+          params: {
+            name: toolName,
+            arguments: {},
+            _meta: {
+              'modelcontextprotocol.io/task': {
+                id: 'test-submitted',
+                keepAlive: 5_000,
+              },
+            },
+          },
+        },
+        { ownerKey: 'default' }
+      )) as { task: { taskId: string; status: string } };
+
+      assert.equal(taskResult.task.taskId, 'test-submitted');
     } finally {
       unregisterTaskCapableTool(server, toolName);
       await server.close();

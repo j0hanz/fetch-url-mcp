@@ -87,7 +87,7 @@ export function buildServerInstructions(): string {
 # Workflows
 1. Standard: Call \`${FETCH_URL_TOOL_NAME}\` → read \`markdown\`. \`truncated: true\` means content was cut at server size limit.
 2. Progress: include \`_meta: { progressToken: "token" }\` (string or number) in \`tools/call\` to opt into \`notifications/progress\`.
-3. Async: \`task: { ttl: <ms> }\` in \`tools/call\` → poll \`tasks/get\` for \`statusMessage\`, \`progress\`, and \`total\` → \`tasks/result\`. In HTTP mode, tasks are bound to the authenticated caller and can be resumed from a new MCP session with the same credentials. If a \`progressToken\` is supplied, the same token is reused for the task lifetime.
+3. Async: \`_meta: { "modelcontextprotocol.io/task": { id: "<client-id>", keepAlive: <ms> } }\` in \`tools/call\` → server emits \`notifications/tasks/created\`, then \`notifications/tasks/status\` (submitted → working → completed/failed). Poll \`tasks/get\` for \`statusMessage\`, \`progress\`, and \`total\` → \`tasks/result\`. Delete terminal tasks via \`tasks/delete\`. In HTTP mode, tasks are bound to the authenticated caller and can be resumed from a new MCP session with the same credentials. If a \`progressToken\` is supplied, the same token is reused for the task lifetime.
 
 # Constraints
 - Blocked URLs: localhost, private IPs (10.x, 172.16-31.x, 192.168.x), metadata (169.254.169.254), .local/.internal.
@@ -96,8 +96,9 @@ export function buildServerInstructions(): string {
 - Binary: not supported.
 - Batch JSON-RPC (\`[{...}]\`): rejected with HTTP 400.
 - \`internal://\` URIs are server-scoped, valid only within current session.
-- Tasks API (SDK v1.26): experimental. \`tasks/get\`, \`tasks/result\`, \`tasks/list\`, \`tasks/cancel\` may change.
-- Notifications: opt-in. Set \`TASKS_STATUS_NOTIFICATIONS=true\`.
+- Tasks API: experimental. \`tasks/get\`, \`tasks/result\`, \`tasks/list\`, \`tasks/cancel\`, \`tasks/delete\` may change.
+- Task lifecycle: submitted → working → completed | failed | cancelled.
+- Notifications: opt-in. Set \`TASKS_STATUS_NOTIFICATIONS=true\`. Server emits \`notifications/tasks/created\` and \`notifications/tasks/status\`.
 
 # Errors
 - VALIDATION_ERROR: invalid/blocked URL. Do not retry.

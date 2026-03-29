@@ -56,8 +56,18 @@ import {
  * Own task lifecycle and MCP task wiring here. Keep tool business logic and HTTP transport details elsewhere.
  */
 
-const MIN_TASK_TTL_MS = 1_000;
-const MAX_TASK_TTL_MS = 86_400_000;
+const MIN_TASK_KEEP_ALIVE_MS = 1_000;
+const MAX_TASK_KEEP_ALIVE_MS = 86_400_000;
+
+const taskMetaSchema = z.strictObject({
+  id: z.string().min(1, 'Task id required'),
+  keepAlive: z
+    .number()
+    .int()
+    .min(MIN_TASK_KEEP_ALIVE_MS, `Minimum ${MIN_TASK_KEEP_ALIVE_MS}ms`)
+    .max(MAX_TASK_KEEP_ALIVE_MS, `Maximum ${MAX_TASK_KEEP_ALIVE_MS}ms`)
+    .optional(),
+});
 
 const relatedTaskMetaSchema = z.strictObject({
   taskId: z.string(),
@@ -65,6 +75,7 @@ const relatedTaskMetaSchema = z.strictObject({
 
 const toolCallMetaSchema = z.looseObject({
   progressToken: z.union([z.string(), z.number()]).optional(),
+  'modelcontextprotocol.io/task': taskMetaSchema.optional(),
   'io.modelcontextprotocol/related-task': relatedTaskMetaSchema.optional(),
 });
 
@@ -73,16 +84,6 @@ export const extendedCallToolRequestSchema = z.looseObject({
   params: z.strictObject({
     name: z.string().min(1, 'Tool name required'),
     arguments: z.record(z.string(), z.unknown()).optional(),
-    task: z
-      .strictObject({
-        ttl: z
-          .number()
-          .int()
-          .min(MIN_TASK_TTL_MS, `Minimum ${MIN_TASK_TTL_MS}ms`)
-          .max(MAX_TASK_TTL_MS, `Maximum ${MAX_TASK_TTL_MS}ms`)
-          .optional(),
-      })
-      .optional(),
     _meta: toolCallMetaSchema.optional(),
   }),
 });
@@ -91,6 +92,15 @@ export type ExtendedCallToolRequest = z.infer<
   typeof extendedCallToolRequestSchema
 >;
 export type ToolCallRequestMeta = ExtendedCallToolRequest['params']['_meta'];
+type TaskMeta = NonNullable<
+  NonNullable<ToolCallRequestMeta>['modelcontextprotocol.io/task']
+>;
+
+function getTaskMeta(
+  params: ExtendedCallToolRequest['params']
+): TaskMeta | undefined {
+  return params._meta?.['modelcontextprotocol.io/task'];
+}
 
 export function parseExtendedCallToolRequest(
   request: unknown
@@ -203,8 +213,8 @@ type TaskLifecycleProjection = Pick<
   | 'total'
   | 'createdAt'
   | 'lastUpdatedAt'
-  | 'ttl'
-  | 'pollInterval'
+  | 'keepAlive'
+  | 'pollFrequency'
 >;
 
 export function toTaskSummary(task: TaskLifecycleProjection): TaskSummary {
@@ -216,8 +226,8 @@ export function toTaskSummary(task: TaskLifecycleProjection): TaskSummary {
     ...(task.total !== undefined ? { total: task.total } : {}),
     createdAt: task.createdAt,
     lastUpdatedAt: task.lastUpdatedAt,
-    ttl: task.ttl,
-    pollInterval: task.pollInterval,
+    keepAlive: task.keepAlive,
+    pollFrequency: task.pollFrequency,
   };
 }
 
@@ -238,6 +248,26 @@ export function emitTaskStatusNotification(
         {
           taskId: task.taskId,
           status: task.status,
+          error: getErrorMessage(error),
+        },
+        Loggers.LOG_TASKS
+      );
+    });
+}
+
+function emitTaskCreatedNotification(server: McpServer, task: TaskState): void {
+  if (!config.tasks.emitStatusNotifications || !server.isConnected()) return;
+
+  void server.server
+    .notification({
+      method: 'notifications/tasks/created',
+      params: { ...toTaskSummary(task) },
+    })
+    .catch((error: unknown) => {
+      logError(
+        'Failed to send task created notification',
+        {
+          taskId: task.taskId,
           error: getErrorMessage(error),
         },
         Loggers.LOG_TASKS
@@ -338,6 +368,10 @@ async function runTaskToolExecution(params: {
       const progressState = { closed: false };
 
       try {
+        updateTaskAndEmitStatus(server, taskId, {
+          status: 'working',
+          statusMessage: 'Task started',
+        });
         logInfo(
           'Task execution started',
           { taskId, tool: tool.name },
@@ -450,21 +484,31 @@ function enqueueTaskToolExecution(
   server: McpServer,
   tool: NonNullable<ReturnType<typeof getTaskCapableTool>>,
   params: ExtendedCallToolRequest['params'],
+  taskMeta: TaskMeta,
   context: ToolCallContext,
   parsedArgs: unknown
 ): ServerResult {
   const task = taskManager.createTask(
-    params.task?.ttl !== undefined ? { ttl: params.task.ttl } : undefined,
-    'Task started',
+    {
+      taskId: taskMeta.id,
+      ...(taskMeta.keepAlive !== undefined
+        ? { keepAlive: taskMeta.keepAlive }
+        : {}),
+    },
+    'Task submitted',
     context.ownerKey
   );
+
+  emitTaskCreatedNotification(server, task);
 
   logInfo(
     'Task execution queued',
     {
       taskId: task.taskId,
       tool: params.name,
-      ...(params.task?.ttl !== undefined ? { ttl: params.task.ttl } : {}),
+      ...(taskMeta.keepAlive !== undefined
+        ? { keepAlive: taskMeta.keepAlive }
+        : {}),
     },
     Loggers.LOG_TASKS
   );
@@ -510,16 +554,18 @@ export async function handleToolCallRequest(
     );
   }
 
-  validateTaskSupport(server, params.name, !!params.task);
+  const taskMeta = getTaskMeta(params);
+  validateTaskSupport(server, params.name, !!taskMeta);
 
   const parsed = tryParseArguments(tool, params.arguments);
   if (!parsed.ok) return parsed.response;
 
-  if (params.task) {
+  if (taskMeta) {
     return enqueueTaskToolExecution(
       server,
       tool,
       params,
+      taskMeta,
       context,
       parsed.value
     );
@@ -576,6 +622,16 @@ const TaskListSchema = z.looseObject(
 const TaskCancelSchema = z.looseObject(
   {
     method: z.literal('tasks/cancel', 'Expected "tasks/cancel"'),
+    params: z.looseObject(
+      { taskId: z.string('Expected string') },
+      'Expected object'
+    ),
+  },
+  'Invalid request'
+);
+const TaskDeleteSchema = z.looseObject(
+  {
+    method: z.literal('tasks/delete', 'Expected "tasks/delete"'),
     params: z.looseObject(
       { taskId: z.string('Expected string') },
       'Expected object'
@@ -689,7 +745,7 @@ export function registerTaskHandlers(
               'Intercepted task-capable tool call',
               {
                 tool: toolName,
-                taskRequested: parsed.params.task !== undefined,
+                taskRequested: getTaskMeta(parsed.params) !== undefined,
                 hasProgressToken:
                   parsed.params._meta?.progressToken !== undefined,
               },
@@ -750,10 +806,10 @@ export function registerTaskHandlers(
 
       return withRelatedTaskMeta(result, task.taskId);
     } finally {
-      // Shrink TTL only after the result has been fully constructed and
-      // is about to be delivered — avoids premature expiry if result
+      // Shrink keepAlive only after the result has been fully constructed
+      // and is about to be delivered — avoids premature expiry if result
       // construction throws.
-      taskManager.shrinkTtlAfterDelivery(taskId);
+      taskManager.shrinkKeepAliveAfterDelivery(taskId);
     }
   });
 
@@ -791,6 +847,17 @@ export function registerTaskHandlers(
     return toTaskSummary(task);
   });
 
+  server.server.setRequestHandler(TaskDeleteSchema, (request, extra) => {
+    const { taskId } = request.params;
+    const { ownerKey } = resolveOwnerScopedExtra(extra);
+    logDebug('tasks/delete requested', { taskId }, Loggers.LOG_TASKS);
+
+    const deleted = taskManager.deleteTask(taskId, ownerKey);
+    if (!deleted) throwTaskNotFound();
+
+    return {};
+  });
+
   return {
     interceptedToolsCall: sdkCallToolHandler !== null,
     taskCapableToolsRegistered,
@@ -798,6 +865,7 @@ export function registerTaskHandlers(
 }
 
 export type TaskStatus =
+  | 'submitted'
   | 'working'
   | 'input_required'
   | 'completed'
@@ -819,18 +887,20 @@ export interface TaskState {
   total?: number;
   createdAt: string;
   lastUpdatedAt: string;
-  ttl: number; // in ms
-  pollInterval: number; // in ms
+  keepAlive: number; // in ms
+  pollFrequency: number; // in ms
   result?: unknown;
   error?: TaskError;
 }
 
 interface InternalTaskState extends TaskState {
   _createdAtMs: number;
+  _terminalAtMs?: number;
 }
 
 interface CreateTaskOptions {
-  ttl?: number;
+  taskId?: string;
+  keepAlive?: number;
 }
 
 export interface CreateTaskResult {
@@ -843,21 +913,22 @@ export interface CreateTaskResult {
     total?: number;
     createdAt: string;
     lastUpdatedAt: string;
-    ttl: number;
-    pollInterval: number;
+    keepAlive: number;
+    pollFrequency: number;
   };
 }
 
-const DEFAULT_TTL_MS = 60_000;
-const MIN_TTL_MS = 1_000;
-const MAX_TTL_MS = 86_400_000;
-const DEFAULT_POLL_INTERVAL_MS = 1_000;
+const DEFAULT_KEEP_ALIVE_MS = 60_000;
+const MIN_KEEP_ALIVE_MS = 1_000;
+const MAX_KEEP_ALIVE_MS = 86_400_000;
+const DEFAULT_POLL_FREQUENCY_MS = 1_000;
 const DEFAULT_OWNER_KEY = 'default';
 const DEFAULT_PAGE_SIZE = 50;
 
 const CLEANUP_INTERVAL_MS = 60_000;
 const RESULT_DELIVERY_GRACE_MS = 10_000;
 const TASK_STATUS_VALUES = new Set<TaskStatus>([
+  'submitted',
   'working',
   'input_required',
   'completed',
@@ -899,9 +970,13 @@ function resolveNextTaskStatus(
   return nextStatus;
 }
 
-function normalizeTaskTtl(ttl: number | undefined): number {
-  if (ttl === undefined || !Number.isFinite(ttl)) return DEFAULT_TTL_MS;
-  return Math.max(MIN_TTL_MS, Math.min(Math.trunc(ttl), MAX_TTL_MS));
+function normalizeKeepAlive(keepAlive: number | undefined): number {
+  if (keepAlive === undefined || !Number.isFinite(keepAlive))
+    return DEFAULT_KEEP_ALIVE_MS;
+  return Math.max(
+    MIN_KEEP_ALIVE_MS,
+    Math.min(Math.trunc(keepAlive), MAX_KEEP_ALIVE_MS)
+  );
 }
 
 function logTaskStatusTransition(
@@ -951,7 +1026,10 @@ class TaskManager {
   }
 
   private isTaskExpired(task: InternalTaskState, nowMs: number): boolean {
-    return nowMs - task._createdAtMs > task.ttl;
+    if (task._terminalAtMs !== undefined) {
+      return nowMs - task._terminalAtMs > task.keepAlive;
+    }
+    return nowMs - task._createdAtMs > MAX_KEEP_ALIVE_MS;
   }
 
   private removeExpiredTasks(): void {
@@ -994,6 +1072,13 @@ class TaskManager {
   ): void {
     Object.assign(task, updates);
     task.lastUpdatedAt = new Date().toISOString();
+    if (
+      updates.status &&
+      isTerminalStatus(updates.status) &&
+      task._terminalAtMs === undefined
+    ) {
+      task._terminalAtMs = Date.now();
+    }
   }
 
   private cancelActiveTask(
@@ -1044,24 +1129,33 @@ class TaskManager {
 
   createTask(
     options?: CreateTaskOptions,
-    statusMessage = 'Task started',
+    statusMessage = 'Task submitted',
     ownerKey: string = DEFAULT_OWNER_KEY
   ): TaskState {
     this.removeExpiredTasks();
+
+    const taskId = options?.taskId ?? randomUUID();
+    if (this.tasks.has(taskId)) {
+      throw createMcpError(
+        ErrorCode.InvalidRequest,
+        `Task already exists: ${taskId}`
+      );
+    }
+
     this.reserveTaskCapacity(ownerKey);
 
     const now = new Date();
     const createdAt = now.toISOString();
 
     const task: InternalTaskState = {
-      taskId: randomUUID(),
+      taskId,
       ownerKey,
-      status: 'working',
+      status: 'submitted',
       statusMessage,
       createdAt,
       lastUpdatedAt: createdAt,
-      ttl: normalizeTaskTtl(options?.ttl),
-      pollInterval: DEFAULT_POLL_INTERVAL_MS,
+      keepAlive: normalizeKeepAlive(options?.keepAlive),
+      pollFrequency: DEFAULT_POLL_FREQUENCY_MS,
       _createdAtMs: now.getTime(),
     };
 
@@ -1072,7 +1166,7 @@ class TaskManager {
       {
         taskId: task.taskId,
         ownerKey,
-        ttl: task.ttl,
+        keepAlive: task.keepAlive,
       },
       Loggers.LOG_TASKS
     );
@@ -1158,6 +1252,27 @@ class TaskManager {
       Loggers.LOG_TASKS
     );
     return task;
+  }
+
+  deleteTask(taskId: string, ownerKey?: string): boolean {
+    const task = this.lookupActiveTask(taskId, ownerKey);
+    if (!task) return false;
+
+    if (!isTerminalStatus(task.status)) {
+      throw createMcpError(
+        ErrorCode.InvalidParams,
+        `Cannot delete task: status is ${task.status}`
+      );
+    }
+
+    this.tasks.delete(taskId);
+    this.releaseTaskCapacity(task);
+    logInfo(
+      'Task deleted by request',
+      { taskId: task.taskId, ownerKey: task.ownerKey },
+      Loggers.LOG_TASKS
+    );
+    return true;
   }
 
   cancelTasksByOwner(
@@ -1259,13 +1374,12 @@ class TaskManager {
     });
   }
 
-  shrinkTtlAfterDelivery(taskId: string): void {
+  shrinkKeepAliveAfterDelivery(taskId: string): void {
     const task = this.tasks.get(taskId);
     if (!task || !isTerminalStatus(task.status)) return;
 
-    const newTtl = Date.now() - task._createdAtMs + RESULT_DELIVERY_GRACE_MS;
-    if (newTtl < task.ttl) {
-      task.ttl = newTtl;
+    if (RESULT_DELIVERY_GRACE_MS < task.keepAlive) {
+      task.keepAlive = RESULT_DELIVERY_GRACE_MS;
       task.lastUpdatedAt = new Date().toISOString();
     }
   }
@@ -1637,7 +1751,7 @@ interface WaitableTask {
   taskId: string;
   ownerKey: string;
   status: string;
-  ttl: number;
+  keepAlive: number;
   _createdAtMs: number;
 }
 
@@ -1696,7 +1810,7 @@ export async function waitForTerminalTask<TTask extends WaitableTask>(options: {
 
   if (options.isTerminalStatus(task.status)) return task;
 
-  const deadlineMs = task._createdAtMs + task.ttl;
+  const deadlineMs = task._createdAtMs + task.keepAlive;
 
   const { promise, resolve, reject } = Promise.withResolvers<
     TTask | undefined

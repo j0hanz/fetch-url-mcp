@@ -378,7 +378,7 @@ describe('HTTP native gateway routing', () => {
       authInfo: { clientId: 'static-token', token: TEST_API_KEY },
     });
     const task = taskManager.createTask(
-      { ttl: 5_000 },
+      { keepAlive: 5_000 },
       'Task completed',
       ownerKey
     );

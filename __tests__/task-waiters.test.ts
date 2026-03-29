@@ -12,7 +12,7 @@ interface TestTask {
   taskId: string;
   ownerKey: string;
   status: string;
-  ttl: number;
+  keepAlive: number;
   _createdAtMs: number;
 }
 
@@ -21,7 +21,7 @@ function makeTask(overrides?: Partial<TestTask>): TestTask {
     taskId: 'task-1',
     ownerKey: 'owner-1',
     status: 'working',
-    ttl: 30_000,
+    keepAlive: 30_000,
     _createdAtMs: Date.now(),
     ...overrides,
   };
@@ -153,7 +153,7 @@ describe('waitForTerminalTask', () => {
 
   it('resolves when task becomes terminal', async () => {
     const registry = new TaskWaiterRegistry<TestTask>(isTerminal);
-    const task = makeTask({ status: 'working', ttl: 30_000 });
+    const task = makeTask({ status: 'working', keepAlive: 30_000 });
 
     const promise = waitForTerminalTask({
       taskId: 'task-1',
@@ -177,7 +177,7 @@ describe('waitForTerminalTask', () => {
 
   it('rejects on abort signal', async () => {
     const registry = new TaskWaiterRegistry<TestTask>(isTerminal);
-    const task = makeTask({ status: 'working', ttl: 30_000 });
+    const task = makeTask({ status: 'working', keepAlive: 30_000 });
     const ac = new AbortController();
 
     const promise = waitForTerminalTask({
@@ -200,11 +200,11 @@ describe('waitForTerminalTask', () => {
   // internal promise but returns void, causing an unhandled rejection.
   // This is a known implementation quirk — tracked separately.
 
-  it('rejects on TTL expiry with short TTL', async () => {
+  it('rejects on keepAlive expiry with short keepAlive', async () => {
     const registry = new TaskWaiterRegistry<TestTask>(isTerminal);
     const task = makeTask({
       status: 'working',
-      ttl: 50, // 50ms — will expire very quickly.
+      keepAlive: 50, // 50ms — will expire very quickly.
       _createdAtMs: Date.now(),
     });
 
@@ -227,7 +227,7 @@ describe('waitForTerminalTask', () => {
 
   it('returns undefined when owner mismatch on notification', async () => {
     const registry = new TaskWaiterRegistry<TestTask>(isTerminal);
-    const task = makeTask({ status: 'working', ttl: 30_000 });
+    const task = makeTask({ status: 'working', keepAlive: 30_000 });
 
     const promise = waitForTerminalTask({
       taskId: 'task-1',

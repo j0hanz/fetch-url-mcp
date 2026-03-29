@@ -32,17 +32,26 @@ describe('parseExtendedCallToolRequest', () => {
     });
   });
 
-  it('parses a request with task TTL', () => {
+  it('parses a request with task meta keepAlive', () => {
     const request = {
       method: 'tools/call',
       params: {
         name: 'fetch-url',
         arguments: {},
-        task: { ttl: 30_000 },
+        _meta: {
+          'modelcontextprotocol.io/task': { id: 'task-1', keepAlive: 30_000 },
+        },
       },
     };
     const parsed = parseExtendedCallToolRequest(request);
-    assert.equal(parsed.params.task?.ttl, 30_000);
+    assert.equal(
+      parsed.params._meta?.['modelcontextprotocol.io/task']?.keepAlive,
+      30_000
+    );
+    assert.equal(
+      parsed.params._meta?.['modelcontextprotocol.io/task']?.id,
+      'task-1'
+    );
   });
 
   it('accepts a request without arguments', () => {
@@ -122,34 +131,52 @@ describe('parseExtendedCallToolRequest', () => {
     );
   });
 
-  it('throws for task TTL below minimum', () => {
+  it('throws for task keepAlive below minimum', () => {
     assert.throws(
       () =>
         parseExtendedCallToolRequest({
           method: 'tools/call',
-          params: { name: 'x', task: { ttl: 100 } },
+          params: {
+            name: 'x',
+            _meta: {
+              'modelcontextprotocol.io/task': { id: 't', keepAlive: 100 },
+            },
+          },
         }),
       (err: unknown) => err instanceof Error
     );
   });
 
-  it('throws for task TTL above maximum', () => {
+  it('throws for task keepAlive above maximum', () => {
     assert.throws(
       () =>
         parseExtendedCallToolRequest({
           method: 'tools/call',
-          params: { name: 'x', task: { ttl: 100_000_000 } },
+          params: {
+            name: 'x',
+            _meta: {
+              'modelcontextprotocol.io/task': {
+                id: 't',
+                keepAlive: 100_000_000,
+              },
+            },
+          },
         }),
       (err: unknown) => err instanceof Error
     );
   });
 
-  it('throws for non-integer task TTL', () => {
+  it('throws for non-integer task keepAlive', () => {
     assert.throws(
       () =>
         parseExtendedCallToolRequest({
           method: 'tools/call',
-          params: { name: 'x', task: { ttl: 5000.5 } },
+          params: {
+            name: 'x',
+            _meta: {
+              'modelcontextprotocol.io/task': { id: 't', keepAlive: 5000.5 },
+            },
+          },
         }),
       (err: unknown) => err instanceof Error
     );

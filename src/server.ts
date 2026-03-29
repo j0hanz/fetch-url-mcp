@@ -69,6 +69,7 @@ function createServerCapabilities(): McpServerCapabilities {
     tasks: {
       list: {},
       cancel: {},
+      delete: {},
       requests: {
         tools: {
           call: {},

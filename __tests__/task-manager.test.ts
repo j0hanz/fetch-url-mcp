@@ -14,8 +14,11 @@ import {
 
 describe('taskManager', () => {
   // Helper to create and cleanup a task in a test scope.
-  function createTestTask(ownerKey = 'test-owner', ttl = 10_000): TaskState {
-    return taskManager.createTask({ ttl }, 'test task', ownerKey);
+  function createTestTask(
+    ownerKey = 'test-owner',
+    keepAlive = 10_000
+  ): TaskState {
+    return taskManager.createTask({ keepAlive }, 'test task', ownerKey);
   }
 
   function cleanupTask(taskId: string): void {
@@ -29,15 +32,15 @@ describe('taskManager', () => {
   // ── createTask ──────────────────────────────────────────────────
 
   describe('createTask', () => {
-    it('returns a task with working status', () => {
+    it('returns a task with submitted status', () => {
       const task = createTestTask();
       try {
-        assert.equal(task.status, 'working');
+        assert.equal(task.status, 'submitted');
         assert.ok(task.taskId);
         assert.ok(task.createdAt);
         assert.ok(task.lastUpdatedAt);
-        assert.equal(typeof task.ttl, 'number');
-        assert.equal(typeof task.pollInterval, 'number');
+        assert.equal(typeof task.keepAlive, 'number');
+        assert.equal(typeof task.pollFrequency, 'number');
       } finally {
         cleanupTask(task.taskId);
       }
@@ -63,35 +66,77 @@ describe('taskManager', () => {
       }
     });
 
-    it('clamps TTL to minimum (1 000 ms)', () => {
-      const task = taskManager.createTask({ ttl: 100 }, 'test', 'ttl-test');
-      try {
-        assert.ok(task.ttl >= 1_000, `ttl should be >= 1000, got ${task.ttl}`);
-      } finally {
-        cleanupTask(task.taskId);
-      }
-    });
-
-    it('clamps TTL to maximum (86 400 000 ms)', () => {
+    it('clamps keepAlive to minimum (1 000 ms)', () => {
       const task = taskManager.createTask(
-        { ttl: 200_000_000 },
+        { keepAlive: 100 },
         'test',
-        'ttl-test'
+        'ka-test'
       );
       try {
         assert.ok(
-          task.ttl <= 86_400_000,
-          `ttl should be <= 86400000, got ${task.ttl}`
+          task.keepAlive >= 1_000,
+          `keepAlive should be >= 1000, got ${task.keepAlive}`
         );
       } finally {
         cleanupTask(task.taskId);
       }
     });
 
-    it('defaults TTL when undefined', () => {
-      const task = taskManager.createTask(undefined, 'test', 'ttl-test');
+    it('clamps keepAlive to maximum (86 400 000 ms)', () => {
+      const task = taskManager.createTask(
+        { keepAlive: 200_000_000 },
+        'test',
+        'ka-test'
+      );
       try {
-        assert.equal(task.ttl, 60_000);
+        assert.ok(
+          task.keepAlive <= 86_400_000,
+          `keepAlive should be <= 86400000, got ${task.keepAlive}`
+        );
+      } finally {
+        cleanupTask(task.taskId);
+      }
+    });
+
+    it('defaults keepAlive when undefined', () => {
+      const task = taskManager.createTask(undefined, 'test', 'ka-test');
+      try {
+        assert.equal(task.keepAlive, 60_000);
+      } finally {
+        cleanupTask(task.taskId);
+      }
+    });
+
+    it('uses a client-provided taskId when supplied', () => {
+      const task = taskManager.createTask(
+        { taskId: 'custom-id-test', keepAlive: 10_000 },
+        'test',
+        'id-test'
+      );
+      try {
+        assert.equal(task.taskId, 'custom-id-test');
+      } finally {
+        cleanupTask(task.taskId);
+      }
+    });
+
+    it('rejects duplicate taskId', () => {
+      const task = taskManager.createTask(
+        { taskId: 'dup-id', keepAlive: 10_000 },
+        'test',
+        'dup-owner'
+      );
+      try {
+        assert.throws(
+          () =>
+            taskManager.createTask(
+              { taskId: 'dup-id', keepAlive: 10_000 },
+              'test',
+              'dup-owner'
+            ),
+          (err: unknown) =>
+            err instanceof Error && err.message.includes('already exists')
+        );
       } finally {
         cleanupTask(task.taskId);
       }
@@ -103,18 +148,26 @@ describe('taskManager', () => {
 
       config.tasks.maxPerOwner = 1;
       try {
-        const first = taskManager.createTask({ ttl: 1_000 }, 'test', ownerKey);
+        const first = taskManager.createTask(
+          { keepAlive: 1_000 },
+          'test',
+          ownerKey
+        );
         taskManager.updateTask(first.taskId, { status: 'completed' });
 
         assert.throws(
-          () => taskManager.createTask({ ttl: 1_000 }, 'test', ownerKey),
+          () => taskManager.createTask({ keepAlive: 1_000 }, 'test', ownerKey),
           (error: unknown) => error instanceof Error
         );
 
         await setTimeoutPromise(1_050);
         assert.equal(taskManager.getTask(first.taskId, ownerKey), undefined);
 
-        const second = taskManager.createTask({ ttl: 1_000 }, 'test', ownerKey);
+        const second = taskManager.createTask(
+          { keepAlive: 1_000 },
+          'test',
+          ownerKey
+        );
         cleanupTask(second.taskId);
       } finally {
         config.tasks.maxPerOwner = originalMaxPerOwner;
@@ -154,7 +207,7 @@ describe('taskManager', () => {
   // ── updateTask ──────────────────────────────────────────────────
 
   describe('updateTask', () => {
-    it('updates statusMessage on a working task', () => {
+    it('updates statusMessage on a non-terminal task', () => {
       const task = createTestTask();
       try {
         taskManager.updateTask(task.taskId, {
@@ -167,7 +220,7 @@ describe('taskManager', () => {
       }
     });
 
-    it('stores numeric progress and total on a working task', () => {
+    it('stores numeric progress and total on a non-terminal task', () => {
       const task = createTestTask();
       try {
         taskManager.updateTask(task.taskId, {
@@ -222,7 +275,7 @@ describe('taskManager', () => {
       assert.equal(t?.status, 'completed');
     });
 
-    it('transitions to input_required from working', () => {
+    it('transitions to input_required from submitted', () => {
       const task = createTestTask();
       try {
         taskManager.updateTask(task.taskId, {
@@ -274,7 +327,7 @@ describe('taskManager', () => {
   // ── cancelTask ──────────────────────────────────────────────────
 
   describe('cancelTask', () => {
-    it('cancels a working task', () => {
+    it('cancels a submitted task', () => {
       const task = createTestTask();
       const cancelled = taskManager.cancelTask(task.taskId);
       assert.ok(cancelled);
@@ -307,7 +360,7 @@ describe('taskManager', () => {
   // ── cancelTasksByOwner ──────────────────────────────────────────
 
   describe('cancelTasksByOwner', () => {
-    it('cancels all working tasks for the given owner', () => {
+    it('cancels all non-terminal tasks for the given owner', () => {
       const a = createTestTask('bulk-owner');
       const b = createTestTask('bulk-owner');
       const other = createTestTask('other-owner');
@@ -315,8 +368,8 @@ describe('taskManager', () => {
         const cancelled = taskManager.cancelTasksByOwner('bulk-owner');
         assert.equal(cancelled.length, 2);
         assert.ok(cancelled.every((t) => t.status === 'cancelled'));
-        // The other owner's task should still be working.
-        assert.equal(taskManager.getTask(other.taskId)?.status, 'working');
+        // The other owner's task should still be submitted.
+        assert.equal(taskManager.getTask(other.taskId)?.status, 'submitted');
       } finally {
         cleanupTask(a.taskId);
         cleanupTask(b.taskId);
@@ -360,28 +413,71 @@ describe('taskManager', () => {
     });
   });
 
-  // ── shrinkTtlAfterDelivery ──────────────────────────────────────
+  // ── deleteTask ───────────────────────────────────────────────────
 
-  describe('shrinkTtlAfterDelivery', () => {
-    it('reduces TTL on a completed task', () => {
+  describe('deleteTask', () => {
+    it('deletes a completed task', () => {
+      const task = createTestTask('del-owner');
+      taskManager.updateTask(task.taskId, { status: 'completed' });
+      const deleted = taskManager.deleteTask(task.taskId, 'del-owner');
+      assert.equal(deleted, true);
+      assert.equal(taskManager.getTask(task.taskId), undefined);
+    });
+
+    it('deletes a failed task', () => {
+      const task = createTestTask('del-owner');
+      taskManager.updateTask(task.taskId, { status: 'failed' });
+      assert.equal(taskManager.deleteTask(task.taskId, 'del-owner'), true);
+      assert.equal(taskManager.getTask(task.taskId), undefined);
+    });
+
+    it('returns false for unknown taskId', () => {
+      assert.equal(taskManager.deleteTask('nonexistent'), false);
+    });
+
+    it('throws when deleting a non-terminal task', () => {
+      const task = createTestTask('del-owner');
+      try {
+        assert.throws(
+          () => taskManager.deleteTask(task.taskId, 'del-owner'),
+          (err: unknown) =>
+            err instanceof Error && err.message.includes('Cannot delete task')
+        );
+      } finally {
+        cleanupTask(task.taskId);
+      }
+    });
+
+    it('respects ownerKey filter', () => {
+      const task = createTestTask('del-owner-a');
+      taskManager.updateTask(task.taskId, { status: 'completed' });
+      assert.equal(taskManager.deleteTask(task.taskId, 'del-owner-b'), false);
+      assert.equal(taskManager.deleteTask(task.taskId, 'del-owner-a'), true);
+    });
+  });
+
+  // ── shrinkKeepAliveAfterDelivery ────────────────────────────────
+
+  describe('shrinkKeepAliveAfterDelivery', () => {
+    it('reduces keepAlive on a completed task', () => {
       const task = taskManager.createTask(
-        { ttl: 60_000 },
+        { keepAlive: 60_000 },
         'test',
         'shrink-owner'
       );
       taskManager.updateTask(task.taskId, { status: 'completed' });
-      const before = taskManager.getTask(task.taskId)?.ttl ?? 0;
-      taskManager.shrinkTtlAfterDelivery(task.taskId);
-      const after = taskManager.getTask(task.taskId)?.ttl ?? 0;
-      assert.ok(after <= before, 'TTL should shrink or stay the same');
+      const before = taskManager.getTask(task.taskId)?.keepAlive ?? 0;
+      taskManager.shrinkKeepAliveAfterDelivery(task.taskId);
+      const after = taskManager.getTask(task.taskId)?.keepAlive ?? 0;
+      assert.ok(after <= before, 'keepAlive should shrink or stay the same');
     });
 
-    it('is a no-op for a working task', () => {
+    it('is a no-op for a non-terminal task', () => {
       const task = createTestTask('shrink-owner');
       try {
-        const before = task.ttl;
-        taskManager.shrinkTtlAfterDelivery(task.taskId);
-        const after = taskManager.getTask(task.taskId)?.ttl ?? 0;
+        const before = task.keepAlive;
+        taskManager.shrinkKeepAliveAfterDelivery(task.taskId);
+        const after = taskManager.getTask(task.taskId)?.keepAlive ?? 0;
         assert.equal(after, before);
       } finally {
         cleanupTask(task.taskId);
