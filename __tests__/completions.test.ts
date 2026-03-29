@@ -40,7 +40,7 @@ describe('extractSection', () => {
     const section = extractSection(instructions, 'constraints');
     assert.ok(section, 'section not found');
     assert.ok(section.startsWith('# Constraints'));
-    assert.ok(section.includes('Blocked URLs'));
+    assert.ok(section.includes('Blocked'));
   });
 
   it('extracts the Errors section', () => {
@@ -89,9 +89,9 @@ describe('filterInstructions', () => {
 });
 
 describe('buildServerInstructions completions mention', () => {
-  it('mentions completions in capabilities section', () => {
-    assert.ok(instructions.includes('Completions:'));
-    assert.ok(instructions.includes('auto-completion'));
+  it('mentions topic filter in capabilities section', () => {
+    assert.ok(instructions.includes('topic'));
+    assert.ok(instructions.includes('get-help'));
   });
 
   it('lists all help topics', () => {

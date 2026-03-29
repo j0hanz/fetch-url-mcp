@@ -79,36 +79,57 @@ export function buildServerInstructions(): string {
   return `# Fetch public webpages and return clean, readable Markdown.
 
 # Capabilities
-- Tool: \`${FETCH_URL_TOOL_NAME}\` (fetch URL, return Markdown)
-- Resource: \`internal://instructions\` (this document)
-- Prompt: \`get-help\` (returns these instructions, optional \`topic\` filter with auto-completion)
-- Completions: \`get-help\` prompt argument \`topic\` (${HELP_TOPICS.join(' | ')})
+- Tool: \`${FETCH_URL_TOOL_NAME}\` — fetch a URL, return Markdown with metadata.
+- Resource: \`internal://instructions\` — this document.
+- Prompt: \`get-help\` — returns these instructions. Accepts optional \`topic\` filter (${HELP_TOPICS.join(' | ')}).
 
 # Workflows
-1. Standard: Call \`${FETCH_URL_TOOL_NAME}\` → read \`markdown\`. \`truncated: true\` means content was cut at server size limit.
-2. Progress: include \`_meta: { progressToken: "token" }\` (string or number) in \`tools/call\` to opt into \`notifications/progress\`.
-3. Async: \`_meta: { "modelcontextprotocol.io/task": { id: "<client-id>", keepAlive: <ms> } }\` in \`tools/call\` → server emits \`notifications/tasks/created\`, then \`notifications/tasks/status\` (submitted → working → completed/failed). Poll \`tasks/get\` for \`statusMessage\`, \`progress\`, and \`total\` → \`tasks/result\`. Delete terminal tasks via \`tasks/delete\`. In HTTP mode, tasks are bound to the authenticated caller and can be resumed from a new MCP session with the same credentials. If a \`progressToken\` is supplied, the same token is reused for the task lifetime.
+
+## Standard
+Call \`${FETCH_URL_TOOL_NAME}\` with \`{ url }\` → read \`markdown\` from result. Check \`truncated: true\` for incomplete content.
+
+## Progress
+Add \`_meta: { progressToken: "<token>" }\` to \`tools/call\` → receive \`notifications/progress\`.
+
+## Async (task mode)
+Add \`_meta: { "modelcontextprotocol.io/task": { id: "<client-id>", keepAlive: <ms> } }\` to \`tools/call\`.
+
+Lifecycle: \`submitted\` → \`working\` → \`completed\` | \`failed\` | \`cancelled\`.
+
+Endpoints:
+- \`tasks/get\` — poll for \`statusMessage\`, \`progress\`, \`total\`.
+- \`tasks/result\` — retrieve final output (blocks until terminal).
+- \`tasks/list\` — list tasks for the current session.
+- \`tasks/cancel\` — cancel an active task.
+- \`tasks/delete\` — remove a terminal task.
+
+Notifications (opt-in via \`TASKS_STATUS_NOTIFICATIONS=true\`):
+- \`notifications/tasks/created\` — emitted on task creation.
+- \`notifications/tasks/status\` — emitted on each status transition.
+
+HTTP mode: tasks are bound to the authenticated caller and resumable across sessions.
 
 # Constraints
-- Blocked URLs: localhost, private IPs (10.x, 172.16-31.x, 192.168.x), metadata (169.254.169.254), .local/.internal.
+- Blocked: localhost, private IPs, link-local, cloud metadata endpoints, \`.local\`/\`.internal\` domains.
 - Max HTML: ${maxHtmlSizeMb}MB. Max redirects: ${config.fetcher.maxRedirects}.
-- No JS rendering — client-side pages may be incomplete.
-- Binary: not supported.
+- No JS rendering — client-rendered pages may return incomplete content.
+- Binary content: not supported.
 - Batch JSON-RPC (\`[{...}]\`): rejected with HTTP 400.
-- \`internal://\` URIs are server-scoped, valid only within current session.
-- Tasks API: experimental. \`tasks/get\`, \`tasks/result\`, \`tasks/list\`, \`tasks/cancel\`, \`tasks/delete\` may change.
-- Task lifecycle: submitted → working → completed | failed | cancelled.
-- Notifications: opt-in. Set \`TASKS_STATUS_NOTIFICATIONS=true\`. Server emits \`notifications/tasks/created\` and \`notifications/tasks/status\`.
+- \`internal://\` URIs are session-scoped.
+- Tasks API is experimental — endpoints may change.
 
 # Errors
-- VALIDATION_ERROR: invalid/blocked URL. Do not retry.
-- FETCH_ERROR: network failure. Retry once with backoff.
-- UPSTREAM_HTTP_ERROR: upstream HTTP error. Retry only for 5xx.
-- UPSTREAM_RATE_LIMITED: upstream returned 429. Back off and retry.
-- UPSTREAM_TIMEOUT: upstream request timed out. Retry with backoff.
-- UPSTREAM_ABORTED: request was cancelled. Retry if needed.
-- MCP_ERROR: internal protocol error. Do not retry.
-- queue_full: worker pool busy. Wait and retry, or use task mode.`;
+
+| Code | Cause | Action |
+|---|---|---|
+| VALIDATION_ERROR | Invalid or blocked URL | Do not retry |
+| FETCH_ERROR | Network failure | Retry once with backoff |
+| UPSTREAM_HTTP_ERROR | Upstream HTTP error | Retry only for 5xx |
+| UPSTREAM_RATE_LIMITED | 429 from upstream | Back off, then retry |
+| UPSTREAM_TIMEOUT | Upstream timed out | Retry with backoff |
+| UPSTREAM_ABORTED | Request cancelled | Retry if needed |
+| MCP_ERROR | Internal protocol error | Do not retry |
+| queue_full | Worker pool saturated | Wait, retry, or use task mode |`;
 }
 
 function buildTopicSchema(): ReturnType<
