@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
+import { getRequestId, runWithRequestContext } from '../src/lib/core.js';
 import {
   TaskWaiterRegistry,
   waitForTerminalTask,
@@ -249,5 +250,41 @@ describe('waitForTerminalTask', () => {
 
     const result = await promise;
     assert.equal(result, undefined);
+  });
+
+  it('preserves request context when the waiter resolves asynchronously', async () => {
+    const registry = new TaskWaiterRegistry<TestTask>(isTerminal);
+    const task = makeTask({ status: 'working', keepAlive: 30_000 });
+    let observedRequestId: string | undefined;
+
+    const promise = runWithRequestContext(
+      {
+        requestId: 'req-task-waiter',
+        operationId: 'req-task-waiter',
+      },
+      async () => {
+        const result = await waitForTerminalTask({
+          taskId: 'task-1',
+          ownerKey: 'owner-1',
+          lookupTask: () => task,
+          removeTask: () => {},
+          registry,
+          isTerminalStatus: isTerminal,
+        });
+
+        observedRequestId = getRequestId();
+        return result;
+      }
+    );
+
+    queueMicrotask(() => {
+      task.status = 'completed';
+      registry.notify(task);
+    });
+
+    const result = await promise;
+    assert.ok(result);
+    assert.equal(result.status, 'completed');
+    assert.equal(observedRequestId, 'req-task-waiter');
   });
 });

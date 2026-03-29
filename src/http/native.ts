@@ -116,6 +116,12 @@ interface TunableHttpServer {
 }
 
 const DROP_LOG_INTERVAL_MS = 10_000;
+const MISSING_SESSION_ID_MESSAGE =
+  "We couldn't find a session ID for your request. Please ensure you have an active session.";
+const SESSION_NOT_INITIALIZED_MESSAGE =
+  "Your session hasn't been initialized yet. Please wait a moment and try again.";
+const SESSION_NOT_FOUND_MESSAGE =
+  "We couldn't find your session. It might have expired or been closed.";
 
 function abortControllerBestEffort(controller: AbortController): void {
   if (!controller.signal.aborted) controller.abort();
@@ -1339,13 +1345,7 @@ class McpSessionGateway {
           mcpCode: -32600,
           rpcId: requestId,
         });
-        sendError(
-          ctx.res,
-          -32600,
-          "We couldn't find a session ID for your request. Please ensure you have an active session.",
-          400,
-          requestId
-        );
+        sendError(ctx.res, -32600, MISSING_SESSION_ID_MESSAGE, 400, requestId);
         return false;
       }
 
@@ -1367,13 +1367,7 @@ class McpSessionGateway {
       sessionId,
       rpcId: requestId,
     });
-    sendError(
-      ctx.res,
-      -32600,
-      "Your session hasn't been initialized yet. Please wait a moment and try again.",
-      400,
-      requestId
-    );
+    sendError(ctx.res, -32600, SESSION_NOT_INITIALIZED_MESSAGE, 400, requestId);
     return false;
   }
 
@@ -1432,7 +1426,7 @@ class McpSessionGateway {
         requestId,
         'missing_session_id',
         -32600,
-        "We couldn't find a session ID for your request. Please ensure you have an active session."
+        MISSING_SESSION_ID_MESSAGE
       );
     }
 
@@ -1445,7 +1439,7 @@ class McpSessionGateway {
         invalidInitialize ? -32602 : -32600,
         invalidInitialize
           ? 'The initialize request format is invalid. Please double-check your parameters.'
-          : "We couldn't find a session ID for your request. Please ensure you have an active session."
+          : MISSING_SESSION_ID_MESSAGE
       );
     }
 
@@ -1544,6 +1538,31 @@ class McpSessionGateway {
     return { sessionId, session };
   }
 
+  private sendMissingSessionId(
+    res: ServerResponse,
+    requestId: JsonRpcId = null
+  ): null {
+    sendError(res, -32600, MISSING_SESSION_ID_MESSAGE, 400, requestId);
+    return null;
+  }
+
+  private sendSessionNotInitialized(
+    res: ServerResponse,
+    requestId: JsonRpcId = null
+  ): null {
+    sendError(res, -32600, SESSION_NOT_INITIALIZED_MESSAGE, 400, requestId);
+    return null;
+  }
+
+  private sendSessionUnavailable(
+    res: ServerResponse,
+    requestId: JsonRpcId = null,
+    status = 404
+  ): null {
+    sendError(res, -32600, SESSION_NOT_FOUND_MESSAGE, status, requestId);
+    return null;
+  }
+
   private getRequiredAuthenticatedSession(
     ctx: AuthenticatedContext,
     requestId: JsonRpcId = null,
@@ -1554,26 +1573,12 @@ class McpSessionGateway {
 
     const { sessionId, session } = state;
     if (!sessionId || !session) {
-      sendError(
-        ctx.res,
-        -32600,
-        "We couldn't find a session ID for your request. Please ensure you have an active session.",
-        400,
-        requestId
-      );
-      return null;
+      return this.sendMissingSessionId(ctx.res, requestId);
     }
 
     if (!this.ensureSessionProtocolVersion(ctx, session)) return null;
     if (options?.requireInitialized && !session.protocolInitialized) {
-      sendError(
-        ctx.res,
-        -32600,
-        "Your session hasn't been initialized yet. Please wait a moment and try again.",
-        400,
-        requestId
-      );
-      return null;
+      return this.sendSessionNotInitialized(ctx.res, requestId);
     }
 
     return { sessionId, session };
@@ -1596,13 +1601,7 @@ class McpSessionGateway {
         sessionId,
         rpcId: requestId,
       });
-      sendError(
-        res,
-        -32600,
-        "We couldn't find your session. It might have expired or been closed.",
-        404,
-        requestId
-      );
+      sendError(res, -32600, SESSION_NOT_FOUND_MESSAGE, 404, requestId);
       return null;
     }
 
@@ -1616,14 +1615,7 @@ class McpSessionGateway {
         sessionId,
         rpcId: requestId,
       });
-      sendError(
-        res,
-        -32600,
-        "We couldn't find your session. It might have expired or been closed.",
-        404,
-        requestId
-      );
-      return null;
+      return this.sendSessionUnavailable(res, requestId);
     }
 
     return session;
@@ -1950,6 +1942,19 @@ class HttpDispatcher {
     private readonly mcpGateway: McpSessionGateway
   ) {}
 
+  private sendAuthFailure(
+    ctx: RequestContext,
+    status: 401 | 403,
+    message: string
+  ): void {
+    if (isMcpRoute(ctx.url.pathname)) {
+      sendError(ctx.res, -32000, message, status);
+      return;
+    }
+
+    sendJson(ctx.res, status, { error: message });
+  }
+
   private async tryHandleHealthRoute(ctx: RequestContext): Promise<boolean> {
     if (!shouldHandleHealthRoute(ctx)) return false;
 
@@ -2050,20 +2055,12 @@ class HttpDispatcher {
           err.requiredScopes,
           message
         );
-        if (isMcpRoute(ctx.url.pathname)) {
-          sendError(ctx.res, -32000, message, 403);
-        } else {
-          sendJson(ctx.res, 403, { error: message });
-        }
+        this.sendAuthFailure(ctx, 403, message);
         return null;
       }
 
       applyUnauthorizedAuthHeaders(ctx.req, ctx.res);
-      if (isMcpRoute(ctx.url.pathname)) {
-        sendError(ctx.res, -32000, message, 401);
-      } else {
-        sendJson(ctx.res, 401, { error: message });
-      }
+      this.sendAuthFailure(ctx, 401, message);
       return null;
     }
   }
