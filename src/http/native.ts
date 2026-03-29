@@ -507,6 +507,16 @@ function isRequestReadAborted(req: IncomingMessage): boolean {
 }
 
 class JsonBodyReader {
+  private validateContentLength(req: IncomingMessage, limit: number): void {
+    const contentLengthHeader = getHeaderValue(req, 'content-length');
+    if (!contentLengthHeader) return;
+
+    const contentLength = Number.parseInt(contentLengthHeader, 10);
+    if (Number.isFinite(contentLength) && contentLength > limit) {
+      throw new JsonBodyError('payload-too-large', 'Payload too large');
+    }
+  }
+
   async read(
     req: IncomingMessage,
     limit = DEFAULT_BODY_LIMIT_BYTES,
@@ -515,17 +525,7 @@ class JsonBodyReader {
     const contentType = getHeaderValue(req, 'content-type');
     if (!contentType?.includes('application/json')) return undefined;
 
-    const contentLengthHeader = getHeaderValue(req, 'content-length');
-    if (contentLengthHeader) {
-      const contentLength = Number.parseInt(contentLengthHeader, 10);
-      if (Number.isFinite(contentLength) && contentLength > limit) {
-        const error = new JsonBodyError(
-          'payload-too-large',
-          'Payload too large'
-        );
-        throw error;
-      }
-    }
+    this.validateContentLength(req, limit);
 
     if (signal?.aborted || isRequestReadAborted(req)) {
       const error = new JsonBodyError('read-failed', 'Request aborted');
@@ -538,8 +538,7 @@ class JsonBodyReader {
     try {
       return JSON.parse(body);
     } catch (err: unknown) {
-      const error = new JsonBodyError('invalid-json', getErrorMessage(err));
-      throw error;
+      throw new JsonBodyError('invalid-json', getErrorMessage(err));
     }
   }
 
@@ -1388,53 +1387,51 @@ class McpSessionGateway {
     return this.createNewSession(ctx, requestId, negotiatedProtocolVersion);
   }
 
+  private rejectInitializeRequest(
+    ctx: AuthenticatedContext,
+    requestId: JsonRpcId,
+    reason: string,
+    mcpCode: number,
+    message: string
+  ): null {
+    logGatewayRejection({
+      message: 'Rejected MCP initialize request',
+      method: ctx.method,
+      path: ctx.url.pathname,
+      reason,
+      status: 400,
+      mcpCode,
+      rpcId: requestId,
+    });
+    sendError(ctx.res, mcpCode, message, 400, requestId);
+    return null;
+  }
+
   private getInitializeProtocolVersion(
     ctx: AuthenticatedContext,
     requestId: JsonRpcId
   ): string | null {
     if (!isMcpRequestBody(ctx.body)) {
-      logGatewayRejection({
-        message: 'Rejected MCP initialize request',
-        method: ctx.method,
-        path: ctx.url.pathname,
-        reason: 'missing_session_id',
-        status: 400,
-        mcpCode: -32600,
-        rpcId: requestId,
-      });
-      sendError(
-        ctx.res,
+      return this.rejectInitializeRequest(
+        ctx,
+        requestId,
+        'missing_session_id',
         -32600,
-        "We couldn't find a session ID for your request. Please ensure you have an active session.",
-        400,
-        requestId
+        "We couldn't find a session ID for your request. Please ensure you have an active session."
       );
-      return null;
     }
 
     if (!isInitializeRequest(ctx.body)) {
       const invalidInitialize = ctx.body.method === 'initialize';
-      logGatewayRejection({
-        message: 'Rejected MCP initialize request',
-        method: ctx.method,
-        path: ctx.url.pathname,
-        reason: invalidInitialize
-          ? 'invalid_initialize_request'
-          : 'missing_session_id',
-        status: 400,
-        mcpCode: invalidInitialize ? -32602 : -32600,
-        rpcId: requestId,
-      });
-      sendError(
-        ctx.res,
+      return this.rejectInitializeRequest(
+        ctx,
+        requestId,
+        invalidInitialize ? 'invalid_initialize_request' : 'missing_session_id',
         invalidInitialize ? -32602 : -32600,
         invalidInitialize
           ? 'The initialize request format is invalid. Please double-check your parameters.'
-          : "We couldn't find a session ID for your request. Please ensure you have an active session.",
-        400,
-        requestId
+          : "We couldn't find a session ID for your request. Please ensure you have an active session."
       );
-      return null;
     }
 
     const negotiatedProtocolVersion = resolveRequestedProtocolVersion(ctx.body);

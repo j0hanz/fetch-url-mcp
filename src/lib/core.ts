@@ -145,24 +145,31 @@ export function getOperationId(): string | undefined {
 function isDebugEnabled(): boolean {
   return config.logging.level === 'debug';
 }
-function mergeMetadata(meta?: LogMetadata): LogMetadata | undefined {
-  const ctx = getRequestContext();
-  const hasMeta = meta && Object.keys(meta).length > 0;
-
-  if (!ctx) return hasMeta ? meta : undefined;
+function buildContextMetadata(
+  ctx: RequestContext | undefined
+): LogMetadata | undefined {
+  if (!ctx) return undefined;
 
   const { requestId, operationId, sessionId } = ctx;
   const includeSession = sessionId && isDebugEnabled();
 
-  if (!requestId && !operationId && !includeSession)
-    return hasMeta ? meta : undefined;
+  if (!requestId && !operationId && !includeSession) return undefined;
 
   const contextMeta: LogMetadata = {};
   if (requestId) contextMeta['requestId'] = requestId;
   if (operationId) contextMeta['operationId'] = operationId;
   if (includeSession) contextMeta['sessionId'] = sessionId;
 
-  return hasMeta ? { ...contextMeta, ...meta } : contextMeta;
+  return contextMeta;
+}
+
+function mergeMetadata(meta?: LogMetadata): LogMetadata | undefined {
+  const ctxMeta = buildContextMetadata(getRequestContext());
+  const hasMeta = meta && Object.keys(meta).length > 0;
+
+  if (!ctxMeta) return hasMeta ? meta : undefined;
+  if (!hasMeta) return ctxMeta;
+  return { ...ctxMeta, ...meta };
 }
 
 function isUrlLikeKey(key: string): boolean {
@@ -201,6 +208,30 @@ interface SanitizeLogOptions {
   key?: string;
 }
 
+function extractErrorCode(
+  value: Error,
+  sanitized: Record<string, unknown>
+): void {
+  if (!('code' in value)) return;
+  const errorCode = value.code;
+  if (typeof errorCode === 'string' || typeof errorCode === 'number') {
+    sanitized['code'] = errorCode;
+  }
+}
+
+function extractSysError(
+  value: Error,
+  sanitized: Record<string, unknown>
+): void {
+  if (!('errno' in value) || typeof value.errno !== 'number') return;
+  try {
+    const sysMsg = getSystemErrorMessage(value.errno);
+    if (sysMsg) sanitized['sysError'] = sysMsg;
+  } catch {
+    // ignore
+  }
+}
+
 function sanitizeErrorForLog(
   value: Error,
   includeStack: boolean
@@ -210,21 +241,8 @@ function sanitizeErrorForLog(
     ...(value.name && value.name !== 'Error' ? { errorName: value.name } : {}),
   };
 
-  if ('code' in value) {
-    const errorCode = value.code;
-    if (typeof errorCode === 'string' || typeof errorCode === 'number') {
-      sanitized['code'] = errorCode;
-    }
-  }
-
-  if ('errno' in value && typeof value.errno === 'number') {
-    try {
-      const sysMsg = getSystemErrorMessage(value.errno);
-      if (sysMsg) sanitized['sysError'] = sysMsg;
-    } catch {
-      // ignore
-    }
-  }
+  extractErrorCode(value, sanitized);
+  extractSysError(value, sanitized);
 
   if (includeStack && value.stack) {
     sanitized['stack'] = value.stack;
@@ -262,21 +280,7 @@ function sanitizeObjectForLog(
   return sanitized;
 }
 
-function sanitizeLogValue(
-  value: unknown,
-  options: SanitizeLogOptions
-): unknown {
-  const {
-    includeStack,
-    depth = 0,
-    seen = new WeakSet<object>(),
-    key,
-  } = options;
-
-  if (depth >= LOG_METADATA_MAX_DEPTH) {
-    return '[truncated]';
-  }
-
+function sanitizePrimitiveOrString(value: unknown, key?: string): unknown {
   if (
     value === null ||
     typeof value === 'number' ||
@@ -288,6 +292,15 @@ function sanitizeLogValue(
   if (typeof value === 'string') {
     return key && isUrlLikeKey(key) ? redactUrlValue(value) : value;
   }
+
+  return undefined; // Not a primitive/string we handle directly here
+}
+
+function sanitizeComplexValue(
+  value: unknown,
+  options: SanitizeLogOptions
+): unknown {
+  const { includeStack, depth = 0, seen = new WeakSet<object>() } = options;
 
   if (typeof value === 'bigint') return value.toString();
   if (value instanceof URL) return redactUrl(value.toString());
@@ -308,6 +321,23 @@ function sanitizeLogValue(
   }
 
   return undefined;
+}
+
+function sanitizeLogValue(
+  value: unknown,
+  options: SanitizeLogOptions
+): unknown {
+  const { depth = 0, key } = options;
+
+  if (depth >= LOG_METADATA_MAX_DEPTH) {
+    return '[truncated]';
+  }
+
+  const primitive = sanitizePrimitiveOrString(value, key);
+  if (primitive !== undefined || value === undefined) return primitive;
+  if (value === null) return null;
+
+  return sanitizeComplexValue(value, options);
 }
 
 function sanitizeLogMetadata(
@@ -409,20 +439,21 @@ function shouldForwardMcpLog(level: LogLevel, sessionId?: string): boolean {
     MCP_LOG_LEVEL_PRIORITY[configuredLevel]
   );
 }
-function resolveErrorText(err: unknown): string {
-  if (err instanceof Error) {
-    if ('errno' in err && typeof err.errno === 'number') {
-      try {
-        const sysMsg = getSystemErrorMessage(err.errno);
-        if (sysMsg) return `${err.message} (${sysMsg})`;
-      } catch {
-        // ignore
-      }
-    }
-    return err.message;
+function resolveErrorSysMsg(err: Error): string | undefined {
+  if (!('errno' in err) || typeof err.errno !== 'number') return undefined;
+  try {
+    return getSystemErrorMessage(err.errno);
+  } catch {
+    return undefined;
   }
+}
+
+function resolveErrorText(err: unknown): string {
   if (typeof err === 'string') return err;
-  return 'unknown error';
+  if (!(err instanceof Error)) return 'unknown error';
+
+  const sysMsg = resolveErrorSysMsg(err);
+  return sysMsg ? `${err.message} (${sysMsg})` : err.message;
 }
 
 const MCP_LOG_SENSITIVE_PATTERNS = [

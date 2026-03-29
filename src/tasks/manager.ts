@@ -426,6 +426,74 @@ function tryParseArguments(
   }
 }
 
+function validateTaskSupport(
+  server: McpServer,
+  toolName: string,
+  isTaskMode: boolean
+): void {
+  const support = getTaskCapableToolSupport(server, toolName);
+  if (isTaskMode && support === 'forbidden') {
+    throw createMcpError(
+      ErrorCode.MethodNotFound,
+      `Task mode is not supported for tool: ${toolName}`
+    );
+  }
+  if (!isTaskMode && support === 'required') {
+    throw createMcpError(
+      ErrorCode.MethodNotFound,
+      `Task mode is required for tool: ${toolName}`
+    );
+  }
+}
+
+function enqueueTaskToolExecution(
+  server: McpServer,
+  tool: NonNullable<ReturnType<typeof getTaskCapableTool>>,
+  params: ExtendedCallToolRequest['params'],
+  context: ToolCallContext,
+  parsedArgs: any
+): ServerResult {
+  const task = taskManager.createTask(
+    params.task?.ttl !== undefined ? { ttl: params.task.ttl } : undefined,
+    'Task started',
+    context.ownerKey
+  );
+
+  logInfo(
+    'Task execution queued',
+    {
+      taskId: task.taskId,
+      tool: params.name,
+      ...(params.task?.ttl !== undefined ? { ttl: params.task.ttl } : {}),
+    },
+    Loggers.LOG_TASKS
+  );
+
+  void runTaskToolExecution({
+    server,
+    taskId: task.taskId,
+    args: parsedArgs,
+    tool,
+    ...compact({
+      meta: params._meta,
+      sessionId: context.sessionId,
+      sendNotification: context.sendNotification,
+    }),
+  });
+
+  return {
+    task: toTaskSummary(task),
+    ...(tool.immediateResponse
+      ? {
+          _meta: {
+            'io.modelcontextprotocol/model-immediate-response':
+              tool.immediateResponse,
+          },
+        }
+      : {}),
+  };
+}
+
 export async function handleToolCallRequest(
   server: McpServer,
   request: ExtendedCallToolRequest,
@@ -442,67 +510,20 @@ export async function handleToolCallRequest(
     );
   }
 
-  if (params.task) {
-    if (getTaskCapableToolSupport(server, params.name) === 'forbidden') {
-      throw createMcpError(
-        ErrorCode.MethodNotFound,
-        `Task mode is not supported for tool: ${params.name}`
-      );
-    }
-
-    const parsed = tryParseArguments(tool, params.arguments);
-    if (!parsed.ok) return parsed.response;
-
-    const task = taskManager.createTask(
-      params.task.ttl !== undefined ? { ttl: params.task.ttl } : undefined,
-      'Task started',
-      context.ownerKey
-    );
-
-    logInfo(
-      'Task execution queued',
-      {
-        taskId: task.taskId,
-        tool: params.name,
-        ...(params.task.ttl !== undefined ? { ttl: params.task.ttl } : {}),
-      },
-      Loggers.LOG_TASKS
-    );
-
-    void runTaskToolExecution({
-      server,
-      taskId: task.taskId,
-      args: parsed.value,
-      tool,
-      ...compact({
-        meta: params._meta,
-        sessionId: context.sessionId,
-        sendNotification: context.sendNotification,
-      }),
-    });
-
-    return {
-      task: toTaskSummary(task),
-      ...(tool.immediateResponse
-        ? {
-            _meta: {
-              'io.modelcontextprotocol/model-immediate-response':
-                tool.immediateResponse,
-            },
-          }
-        : {}),
-    };
-  }
-
-  if (getTaskCapableToolSupport(server, params.name) === 'required') {
-    throw createMcpError(
-      ErrorCode.MethodNotFound,
-      `Task mode is required for tool: ${params.name}`
-    );
-  }
+  validateTaskSupport(server, params.name, !!params.task);
 
   const parsed = tryParseArguments(tool, params.arguments);
   if (!parsed.ok) return parsed.response;
+
+  if (params.task) {
+    return enqueueTaskToolExecution(
+      server,
+      tool,
+      params,
+      context,
+      parsed.value
+    );
+  }
 
   const progressState = { closed: false };
   logDebug(
@@ -1269,6 +1290,23 @@ export function encodeTaskCursor(anchorTaskId: string): string {
   return `${payload}.${signature}`;
 }
 
+function validateDecodedPayload(
+  decoded: unknown
+): { anchorTaskId: string } | null {
+  if (!isObject(decoded)) return null;
+
+  const { anchorTaskId } = decoded;
+  if (
+    typeof anchorTaskId !== 'string' ||
+    anchorTaskId.length === 0 ||
+    anchorTaskId.length > MAX_ANCHOR_ID_LENGTH
+  ) {
+    return null;
+  }
+
+  return { anchorTaskId };
+}
+
 export function decodeTaskCursor(
   cursor: string
 ): { anchorTaskId: string } | null {
@@ -1282,18 +1320,7 @@ export function decodeTaskCursor(
     const decoded: unknown = JSON.parse(
       Buffer.from(payload, 'base64url').toString('utf8')
     );
-    if (!isObject(decoded)) return null;
-
-    const { anchorTaskId } = decoded;
-    if (
-      typeof anchorTaskId !== 'string' ||
-      anchorTaskId.length === 0 ||
-      anchorTaskId.length > MAX_ANCHOR_ID_LENGTH
-    ) {
-      return null;
-    }
-
-    return { anchorTaskId };
+    return validateDecodedPayload(decoded);
   } catch {
     return null;
   }

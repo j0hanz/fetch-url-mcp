@@ -1342,29 +1342,37 @@ function isLinkDenseNavigation(
     ASIDE_NAV_LINK_DENSITY_THRESHOLD
   );
 }
+function shouldPreserveDialog(element: Element): boolean {
+  if (isPrimaryContent(element)) return true;
+  const textLen = (element.textContent || '').length;
+  if (textLen > DIALOG_MIN_CHARS_FOR_PRESERVATION) return true;
+  return element.querySelector('h1,h2,h3,h4,h5,h6') !== null;
+}
+
+function shouldPreserveNavFooter(element: Element): boolean {
+  if (element.querySelector('article,main,section,[role="main"]')) return true;
+  const textLen = (element.textContent || '').trim().length;
+  if (textLen < NAV_FOOTER_MIN_CHARS_FOR_PRESERVATION) return false;
+  return !isLinkDenseNavigation(element);
+}
+
+function shouldPreserveAside(element: Element): boolean {
+  if (!isPrimaryContent(element)) return false;
+  return !isLinkDenseNavigation(element, true);
+}
+
 function shouldPreserve(element: Element, tagName: string): boolean {
-  // Check Dialog
   const role = element.getAttribute('role');
   if (role === 'dialog' || role === 'alertdialog') {
-    if (isPrimaryContent(element)) return true;
-    const textLen = (element.textContent || '').length;
-    if (textLen > DIALOG_MIN_CHARS_FOR_PRESERVATION) return true;
-    return element.querySelector('h1,h2,h3,h4,h5,h6') !== null;
+    return shouldPreserveDialog(element);
   }
 
   if (tagName === 'nav' || tagName === 'footer') {
-    if (element.querySelector('article,main,section,[role="main"]'))
-      return true;
-    const textLen = (element.textContent || '').trim().length;
-    if (textLen < NAV_FOOTER_MIN_CHARS_FOR_PRESERVATION) return false;
-    if (isLinkDenseNavigation(element)) return false;
-    return true;
+    return shouldPreserveNavFooter(element);
   }
 
-  // Check Aside — preserve only if it looks like article content, not navigation
   if (tagName === 'aside') {
-    if (!isPrimaryContent(element)) return false;
-    return !isLinkDenseNavigation(element, true);
+    return shouldPreserveAside(element);
   }
 
   return false;
@@ -1679,16 +1687,21 @@ function preferSameDomainSrc(document: Document, base: URL): void {
   }
 }
 
+function getNoscriptImages(noscript: Element): Element[] {
+  let imgs = Array.from(noscript.querySelectorAll('img'));
+  if (imgs.length > 0) return imgs;
+
+  const html = noscript.innerHTML || noscript.textContent || '';
+  if (!/<img\b/i.test(html)) return [];
+
+  const { document: fragDoc } = parseHTML(`<body>${html}</body>`);
+  return Array.from(fragDoc.querySelectorAll('img'));
+}
+
 export function extractNoscriptImages(document: Document): void {
   for (const noscript of document.querySelectorAll('noscript')) {
     // linkedom may parse noscript children as DOM or raw text — handle both.
-    let imgs = Array.from(noscript.querySelectorAll('img'));
-    if (imgs.length === 0) {
-      const html = noscript.innerHTML || noscript.textContent || '';
-      if (!/<img\b/i.test(html)) continue;
-      const { document: fragDoc } = parseHTML(`<body>${html}</body>`);
-      imgs = Array.from(fragDoc.querySelectorAll('img'));
-    }
+    const imgs = getNoscriptImages(noscript);
     if (imgs.length === 0) continue;
 
     // Skip when the previous sibling is (or contains) an <img> — the
@@ -2774,6 +2787,48 @@ interface LanguageDef {
   match: Matcher;
 }
 
+function matchPythonKeywords(l: string): boolean {
+  return (
+    l.includes('print(') ||
+    l.includes('__name__') ||
+    l.includes('self.') ||
+    l.includes('elif ') ||
+    /\b(?:def |elif |except |finally:|yield |lambda |raise |pass$)/m.test(l)
+  );
+}
+
+function matchPythonRegex(c: string): boolean {
+  return (
+    // eslint-disable-next-line sonarjs/slow-regex -- Python REPL prefix, bounded input
+    /^\s*(?:>>>|\.\.\.)\s/m.test(c) ||
+    /<(?:QuerySet|[A-Z]\w*:\s)|\bdatetime\.datetime\(|\bDoesNotExist:/.test(
+      c
+    ) ||
+    // eslint-disable-next-line sonarjs/slow-regex -- Python assignment pattern, bounded input
+    /^\s*[A-Za-z_][\w.]*\s*=\s*[A-Z][\w.]*\(/m.test(c) ||
+    // eslint-disable-next-line sonarjs/slow-regex -- Python dotted expression, bounded input
+    /^\s*[A-Za-z_][\w.]*\.[A-Za-z_]\w*\s*$/m.test(c)
+  );
+}
+
+function matchPython(ctx: DetectionContext): boolean {
+  if (HTML_TAGS.some((tag) => ctx.lower.includes(tag))) return false;
+
+  const l = ctx.lower;
+  const c = ctx.code;
+
+  if (matchPythonRegex(c)) return true;
+  if (c.includes('None') || c.includes('True') || c.includes('False'))
+    return true;
+  if (matchPythonKeywords(l)) return true;
+
+  const hasJsSignals =
+    /\b(?:const |let |var |function |require\(|=>|===|!==|console\.)/.test(l) ||
+    l.includes('{') ||
+    l.includes("from '");
+  return /\b(?:import|from|class)\b/.test(l) && !hasJsSignals;
+}
+
 const LANGUAGES: LanguageDef[] = [
   {
     lang: 'rust',
@@ -2832,42 +2887,7 @@ const LANGUAGES: LanguageDef[] = [
   {
     lang: 'python',
     weight: 18,
-    match: (ctx) => {
-      if (HTML_TAGS.some((tag) => ctx.lower.includes(tag))) return false;
-
-      const l = ctx.lower;
-      const c = ctx.code;
-
-      if (
-        // eslint-disable-next-line sonarjs/slow-regex -- Python REPL prefix, bounded input
-        /^\s*(?:>>>|\.\.\.)\s/m.test(c) ||
-        /<(?:QuerySet|[A-Z]\w*:\s)|\bdatetime\.datetime\(|\bDoesNotExist:/.test(
-          c
-        ) ||
-        // eslint-disable-next-line sonarjs/slow-regex -- Python assignment pattern, bounded input
-        /^\s*[A-Za-z_][\w.]*\s*=\s*[A-Z][\w.]*\(/m.test(c) ||
-        // eslint-disable-next-line sonarjs/slow-regex -- Python dotted expression, bounded input
-        /^\s*[A-Za-z_][\w.]*\.[A-Za-z_]\w*\s*$/m.test(c) ||
-        c.includes('None') ||
-        c.includes('True') ||
-        c.includes('False') ||
-        l.includes('print(') ||
-        l.includes('__name__') ||
-        l.includes('self.') ||
-        l.includes('elif ') ||
-        /\b(?:def |elif |except |finally:|yield |lambda |raise |pass$)/m.test(l)
-      ) {
-        return true;
-      }
-
-      const hasJsSignals =
-        /\b(?:const |let |var |function |require\(|=>|===|!==|console\.)/.test(
-          l
-        ) ||
-        l.includes('{') ||
-        l.includes("from '");
-      return /\b(?:import|from|class)\b/.test(l) && !hasJsSignals;
-    },
+    match: matchPython,
   },
   {
     lang: 'css',
@@ -5535,6 +5555,19 @@ function appendMetadataFooter(
   return footer ? `${content}\n\n${footer}` : content;
 }
 
+function handleHtmlToMarkdownError(error: unknown, url: string): never {
+  if (error instanceof FetchError) throw error;
+
+  logError(
+    'Failed to convert HTML to markdown',
+    error instanceof Error ? error : undefined,
+    Loggers.LOG_TRANSFORM
+  );
+  throw new FetchError('Failed to convert HTML to markdown', url, 500, {
+    reason: 'markdown_convert_failed',
+  });
+}
+
 export function htmlToMarkdown(
   html: string,
   metadata?: MetadataBlock,
@@ -5559,22 +5592,7 @@ export function htmlToMarkdown(
 
     return appendMetadataFooter(content, metadata, url);
   } catch (error: unknown) {
-    if (error instanceof FetchError) throw error;
-
-    logError(
-      'Failed to convert HTML to markdown',
-      error instanceof Error ? error : undefined,
-      Loggers.LOG_TRANSFORM
-    );
-    const fetchError = new FetchError(
-      'Failed to convert HTML to markdown',
-      url,
-      500,
-      {
-        reason: 'markdown_convert_failed',
-      }
-    );
-    throw fetchError;
+    return handleHtmlToMarkdownError(error, url);
   }
 }
 
