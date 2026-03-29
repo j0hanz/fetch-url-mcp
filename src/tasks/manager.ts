@@ -142,8 +142,16 @@ export function withRelatedTaskMeta(
 // during SIGTERM/SIGINT shutdown to cancel every in-flight task across all sessions.
 const taskAbortControllers = new Map<string, AbortController>();
 
+function detachAbortController(taskId: string): AbortController | undefined {
+  const controller = taskAbortControllers.get(taskId);
+  if (controller) {
+    taskAbortControllers.delete(taskId);
+  }
+  return controller;
+}
+
 function attachAbortController(taskId: string): AbortController {
-  taskAbortControllers.get(taskId)?.abort();
+  detachAbortController(taskId)?.abort();
 
   if (taskAbortControllers.size >= config.tasks.maxTotal) {
     logWarn(
@@ -162,8 +170,7 @@ function attachAbortController(taskId: string): AbortController {
 }
 
 export function abortTaskExecution(taskId: string): void {
-  taskAbortControllers.get(taskId)?.abort();
-  taskAbortControllers.delete(taskId);
+  detachAbortController(taskId)?.abort();
 }
 
 export function cancelTasksForOwner(
@@ -391,7 +398,7 @@ async function runTaskToolExecution(params: {
         updateTaskAndEmitStatus(server, taskId, buildTaskFailureState(error));
       } finally {
         progressState.closed = true;
-        taskAbortControllers.delete(taskId);
+        detachAbortController(taskId);
       }
     }
   );

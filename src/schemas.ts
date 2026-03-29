@@ -2,7 +2,15 @@ import { z } from 'zod';
 
 import { config } from './lib/config.js';
 
-import type { ExtractedMetadata } from './transform/index.js';
+export interface ExtractedMetadata {
+  title?: string | undefined;
+  description?: string | undefined;
+  author?: string | undefined;
+  image?: string | undefined;
+  favicon?: string | undefined;
+  publishedAt?: string | undefined;
+  modifiedAt?: string | undefined;
+}
 
 const URL_FIELD_MAX_LENGTH = 2048;
 

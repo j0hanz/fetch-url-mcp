@@ -678,11 +678,12 @@ function unregisterSessionTaskScope(server: McpServer): string | null {
   return sessionId;
 }
 
-async function closeSessionResources(
+function buildCloseTasks(
   session: SessionRecordLike,
   options: SessionCloseOptions
-): Promise<void> {
+): Promise<unknown>[] {
   const closeTasks: Promise<unknown>[] = [];
+
   if (options.closeTransportReason) {
     closeTasks.push(
       closeTransportBestEffort(session.transport, options.closeTransportReason)
@@ -693,6 +694,15 @@ async function closeSessionResources(
       closeMcpServerBestEffort(session.server, options.closeServerReason)
     );
   }
+
+  return closeTasks;
+}
+
+async function closeSessionResources(
+  session: SessionRecordLike,
+  options: SessionCloseOptions
+): Promise<void> {
+  const closeTasks = buildCloseTasks(session, options);
 
   if (options.awaitClose && closeTasks.length > 0) {
     await Promise.all(closeTasks);

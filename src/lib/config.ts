@@ -6,7 +6,7 @@ import { domainToASCII } from 'node:url';
 
 import { z } from 'zod';
 
-import { getErrorMessage } from './error/index.js';
+import { getErrorMessage } from './error/classes.js';
 
 // ── Version ─────────────────────────────────────────────────────────
 

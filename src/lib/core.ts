@@ -10,7 +10,7 @@ import {
 } from 'node:util';
 
 import { config, type LogLevel } from './config.js';
-import { getErrorMessage, isAbortError } from './error/index.js';
+import { getErrorMessage, isAbortError } from './error/classes.js';
 import { startAbortableIntervalLoop } from './utils.js';
 
 /*
@@ -68,6 +68,21 @@ process.stderr.on('error', () => {
     }
   }, 5_000).unref();
 });
+
+function clearSessionTracking(sessionId: string): void {
+  sessionServers.delete(sessionId);
+  sessionOwnerKeys.delete(sessionId);
+  sessionMcpLogLevels.delete(sessionId);
+}
+
+function findSessionIdByServer(server: McpServer): string | undefined {
+  for (const [sessionId, mappedServer] of sessionServers.entries()) {
+    if (mappedServer === server) return sessionId;
+  }
+
+  return undefined;
+}
+
 export function setMcpServer(server: McpServer): void {
   if (mcpServer) {
     logWarn('setMcpServer called when server already set — overwriting');
@@ -90,16 +105,12 @@ export function registerMcpSessionOwnerKey(
 }
 export function unregisterMcpSessionServer(sessionId: string): void {
   if (!sessionId) return;
-  sessionServers.delete(sessionId);
-  sessionOwnerKeys.delete(sessionId);
-  sessionMcpLogLevels.delete(sessionId);
+  clearSessionTracking(sessionId);
 }
 export function unregisterMcpSessionServerByServer(server: McpServer): void {
   for (const [sessionId, mappedServer] of sessionServers.entries()) {
     if (mappedServer !== server) continue;
-    sessionServers.delete(sessionId);
-    sessionOwnerKeys.delete(sessionId);
-    sessionMcpLogLevels.delete(sessionId);
+    clearSessionTracking(sessionId);
   }
 }
 export function resolveMcpSessionOwnerKey(
@@ -110,10 +121,7 @@ export function resolveMcpSessionOwnerKey(
 export function resolveMcpSessionIdByServer(
   server: McpServer
 ): string | undefined {
-  for (const [sessionId, mappedServer] of sessionServers.entries()) {
-    if (mappedServer === server) return sessionId;
-  }
-  return undefined;
+  return findSessionIdByServer(server);
 }
 export function runWithRequestContext<T>(
   context: RequestContext,
@@ -138,7 +146,7 @@ function isDebugEnabled(): boolean {
   return config.logging.level === 'debug';
 }
 function mergeMetadata(meta?: LogMetadata): LogMetadata | undefined {
-  const ctx = requestContext.getStore();
+  const ctx = getRequestContext();
   const hasMeta = meta && Object.keys(meta).length > 0;
 
   if (!ctx) return hasMeta ? meta : undefined;

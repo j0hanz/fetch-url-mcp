@@ -7,7 +7,7 @@ import {
 
 import { z } from 'zod';
 
-import { isAbortError } from './error/index.js';
+import { isAbortError } from './error/classes.js';
 
 const textEncoder = new TextEncoder();
 

@@ -1,6 +1,5 @@
 import { inspect } from 'node:util';
 
-import { isObject } from '../utils.js';
 import { SystemErrors } from './codes.js';
 
 // ── Error identity ─────────────────────────────────────────────────
@@ -8,6 +7,10 @@ import { SystemErrors } from './codes.js';
 type ErrorConstructorWithIsError = ErrorConstructor & {
   isError?: (value: unknown) => boolean;
 };
+
+function isRecord(value: unknown): value is Record<PropertyKey, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
 
 export function isError(value: unknown): value is Error {
   const maybeIsError = (Error as ErrorConstructorWithIsError).isError;
@@ -80,7 +83,7 @@ export function getErrorMessage(error: unknown): string {
   if (isError(error)) return error.message;
   if (typeof error === 'string' && error.length > 0) return error;
   if (
-    isObject(error) &&
+    isRecord(error) &&
     typeof error['message'] === 'string' &&
     error['message'].length > 0
   ) {

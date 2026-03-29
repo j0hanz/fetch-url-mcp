@@ -39,7 +39,7 @@ import {
   throwIfAborted,
   toError,
 } from '../lib/error/index.js';
-import { isRawTextContentUrl } from '../lib/net/index.js';
+import { isRawTextContentUrl } from '../lib/net/http.js';
 import {
   type CancellableTimeout,
   CharCode,
@@ -56,7 +56,7 @@ import {
   truncateToUtf8Boundary,
 } from '../lib/utils.js';
 
-import { extractedMetadataSchema } from '../schemas.js';
+import { type ExtractedMetadata, extractedMetadataSchema } from '../schemas.js';
 
 /*
  * Module map:
@@ -95,19 +95,6 @@ export interface ExtractedArticle {
   textContent: string;
   excerpt?: string;
   siteName?: string;
-}
-
-/**
- * Metadata extracted from HTML meta tags.
- */
-export interface ExtractedMetadata {
-  title?: string | undefined;
-  description?: string | undefined;
-  author?: string | undefined;
-  image?: string | undefined;
-  favicon?: string | undefined;
-  publishedAt?: string | undefined;
-  modifiedAt?: string | undefined;
 }
 
 /**

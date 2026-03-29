@@ -1,4 +1,4 @@
-import type { normalizeExtractedMetadata } from '../../schemas.js';
+import type { ExtractedMetadata } from '../../schemas.js';
 import {
   type MarkdownTransformResult,
   transformBufferToMarkdown,
@@ -266,7 +266,7 @@ function createMarkdownPipelineResult({
 }: {
   markdown: string;
   title: string | undefined;
-  metadata: ReturnType<typeof normalizeExtractedMetadata>;
+  metadata: ExtractedMetadata | undefined;
   truncated: boolean;
 }): MarkdownPipelineResult {
   const markdown = normalizeMarkdownForTruncation(rawMarkdown, truncated);
