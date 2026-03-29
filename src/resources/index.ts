@@ -10,7 +10,7 @@ import { z } from 'zod';
 import { config } from '../lib/core.js';
 import { buildOptionalIcons, type IconInfo } from '../lib/utils.js';
 
-import { FETCH_URL_TOOL_NAME } from '../tools/fetch-url.js';
+import { FETCH_URL_TOOL_NAME } from '../tools/index.js';
 
 export function registerInstructionResource(
   server: McpServer,

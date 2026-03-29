@@ -18,6 +18,7 @@ import {
   logWarn,
   redactUrl,
 } from '../core.js';
+import { Loggers } from '../core.js';
 import {
   FetchError,
   invalidRedirectError,
@@ -29,7 +30,6 @@ import {
   toError,
   unsupportedProtocolError,
 } from '../error/index.js';
-import { Loggers } from '../logger-names.js';
 import { composeAbortSignal, isObject } from '../utils.js';
 import {
   BLOCKED_HOST_SUFFIXES,

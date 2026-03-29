@@ -10,10 +10,10 @@ import { setTimeout as setTimeoutPromise } from 'node:timers/promises';
 import { z } from 'zod';
 
 import { logError, logWarn } from './core.js';
+import { Loggers } from './core.js';
 import { getErrorMessage } from './error/index.js';
-import { Loggers } from './logger-names.js';
 import { isObject } from './utils.js';
-import { formatZodError } from './zod.js';
+import { formatZodError } from './utils.js';
 
 export function createMcpError(
   code: number,

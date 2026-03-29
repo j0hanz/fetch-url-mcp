@@ -11,7 +11,7 @@ import {
   registerTaskCapableTool,
   setTaskCapableToolSupport,
   unregisterTaskCapableTool,
-} from '../src/tasks/index.js';
+} from '../src/tasks/manager.js';
 
 function createRegistryTestServer(): McpServer {
   return new McpServer(

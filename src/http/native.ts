@@ -1,6 +1,7 @@
 import type { AuthInfo } from '@modelcontextprotocol/sdk/server/auth/types.js';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
+import type { Transport } from '@modelcontextprotocol/sdk/shared/transport.js';
 import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
 
 import { randomUUID } from 'node:crypto';
@@ -9,14 +10,20 @@ import { readFileSync } from 'node:fs';
 import {
   createServer,
   type IncomingMessage,
+  type Server,
   type ServerResponse,
 } from 'node:http';
 import {
   createServer as createHttpsServer,
+  type Server as HttpsServer,
   type ServerOptions as HttpsServerOptions,
 } from 'node:https';
-import { hostname } from 'node:os';
+import type { Socket } from 'node:net';
+import { freemem, hostname, totalmem } from 'node:os';
+import { monitorEventLoopDelay, performance } from 'node:perf_hooks';
 import process from 'node:process';
+import { Writable } from 'node:stream';
+import { pipeline } from 'node:stream/promises';
 
 import {
   composeCloseHandlers,
@@ -32,18 +39,26 @@ import {
   registerMcpSessionOwnerKey,
   registerMcpSessionServer,
   reserveSessionSlot,
+  resolveMcpSessionIdByServer,
   runWithRequestContext,
+  serverVersion,
   type SessionStore,
   startSessionCleanupLoop,
+  unregisterMcpSessionServer,
+  unregisterMcpSessionServerByServer,
 } from '../lib/core.js';
-import { toError } from '../lib/error/index.js';
-import { Loggers } from '../lib/logger-names.js';
+import { Loggers } from '../lib/core.js';
+import { getErrorMessage, toError } from '../lib/error/index.js';
 import {
   acceptsEventStream,
   acceptsJsonAndEventStream,
   isMcpRequestBody,
   type JsonRpcId,
 } from '../lib/mcp-interop.js';
+import {
+  createDefaultBlockList,
+  normalizeIpForBlockList,
+} from '../lib/net/index.js';
 import {
   applyHttpServerTuning,
   drainConnectionsOnShutdown,
@@ -52,6 +67,7 @@ import {
 
 import { createMcpServerForHttpSession } from '../server.js';
 import { buildAuthenticatedOwnerKey } from '../tasks/index.js';
+import { getTransformPoolStats } from '../transform/index.js';
 import {
   applyInsufficientScopeAuthHeaders,
   applyUnauthorizedAuthHeaders,
@@ -69,39 +85,807 @@ import {
   SUPPORTED_MCP_PROTOCOL_VERSIONS,
 } from './auth.js';
 import {
-  disableEventLoopMonitoring,
-  isVerboseHealthRequest,
-  resetEventLoopMonitoring,
-  sendHealthRouteResponse,
-  shouldHandleHealthRoute,
-} from './health.js';
-import {
-  type AuthenticatedContext,
-  buildRequestContext,
-  createRequestAbortSignal,
-  createTransportAdapter,
-  DEFAULT_BODY_LIMIT_BYTES,
-  drainRequest,
-  findDuplicateSingleValueHeader,
-  getHeaderValue,
-  getMcpSessionId,
-  isJsonBodyError,
-  jsonBodyReader,
-  type NetworkServer,
-  registerInboundBlockList,
-  type RequestContext,
-  sendEmpty,
-  sendError,
-  sendJson,
-  teardownSessionRegistration,
-  teardownSessionResources,
-  teardownUnregisteredSessionResources,
-} from './helpers.js';
-import {
   createRateLimitManagerImpl,
   type RateLimitManagerImpl,
 } from './rate-limit.js';
 
+// --- helpers.ts ---
+// ---------------------------------------------------------------------------
+// Shared types
+// ---------------------------------------------------------------------------
+
+export type NetworkServer = Server | HttpsServer;
+
+function abortControllerBestEffort(controller: AbortController): void {
+  if (!controller.signal.aborted) controller.abort();
+}
+
+function destroyRequestBestEffort(req: IncomingMessage): void {
+  try {
+    req.destroy();
+  } catch {
+    // Best-effort only.
+  }
+}
+
+export interface RequestContext {
+  req: IncomingMessage;
+  res: ServerResponse;
+  url: URL;
+  method: string | undefined;
+  ip: string | null;
+  body: unknown;
+  signal?: AbortSignal;
+}
+
+export interface AuthenticatedContext extends RequestContext {
+  auth: AuthInfo;
+}
+
+// ---------------------------------------------------------------------------
+// Response helpers
+// ---------------------------------------------------------------------------
+
+function setNoStoreHeaders(res: ServerResponse): void {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('Cache-Control', 'no-store');
+}
+
+export function sendJson(
+  res: ServerResponse,
+  status: number,
+  body: unknown
+): void {
+  res.statusCode = status;
+  res.setHeader('Content-Type', 'application/json; charset=utf-8');
+  setNoStoreHeaders(res);
+  res.end(JSON.stringify(body));
+}
+
+export function sendEmpty(res: ServerResponse, status: number): void {
+  res.statusCode = status;
+  res.setHeader('Content-Length', '0');
+  res.end();
+}
+
+export function sendError(
+  res: ServerResponse,
+  _code: number,
+  message: string,
+  status = 400,
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- kept for call-site compat
+  _id?: JsonRpcId | null
+): void {
+  sendJson(res, status, { error: message });
+}
+
+// ---------------------------------------------------------------------------
+// Request helpers
+// ---------------------------------------------------------------------------
+
+export function getHeaderValue(
+  req: IncomingMessage,
+  name: string
+): string | null {
+  const val = req.headers[name];
+  if (!val) return null;
+  return Array.isArray(val) ? (val[0] ?? null) : val;
+}
+
+export function getMcpSessionId(req: IncomingMessage): string | null {
+  return (
+    getHeaderValue(req, 'mcp-session-id') ??
+    getHeaderValue(req, 'x-mcp-session-id')
+  );
+}
+
+const SINGLE_VALUE_HEADER_NAMES: readonly string[] = [
+  'authorization',
+  'x-api-key',
+  'host',
+  'origin',
+  'content-length',
+  'mcp-protocol-version',
+  'mcp-session-id',
+  'x-mcp-session-id',
+];
+
+function hasDuplicateHeader(req: IncomingMessage, name: string): boolean {
+  const values = req.headersDistinct[name];
+  return Array.isArray(values) && values.length > 1;
+}
+
+export function findDuplicateSingleValueHeader(
+  req: IncomingMessage
+): string | null {
+  for (const name of SINGLE_VALUE_HEADER_NAMES) {
+    if (hasDuplicateHeader(req, name)) return name;
+  }
+  return null;
+}
+
+export function drainRequest(req: IncomingMessage): void {
+  if (req.readableEnded) return;
+  try {
+    req.resume();
+  } catch {
+    // Best-effort only.
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Request abort signal
+// ---------------------------------------------------------------------------
+
+export function createRequestAbortSignal(req: IncomingMessage): {
+  signal: AbortSignal;
+  cleanup: () => void;
+} {
+  const controller = new AbortController();
+
+  let cleanedUp = false;
+
+  const abortRequest = (): void => {
+    if (cleanedUp) return;
+    abortControllerBestEffort(controller);
+  };
+
+  if (req.destroyed) {
+    abortRequest();
+    return {
+      signal: controller.signal,
+      cleanup: () => {
+        cleanedUp = true;
+      },
+    };
+  }
+
+  const onClose = (): void => {
+    // A normal close after a complete body should not be treated as cancellation.
+    if (req.complete) return;
+    abortRequest();
+  };
+  const onError = (): void => {
+    abortRequest();
+  };
+
+  req.once('close', onClose);
+  req.once('error', onError);
+
+  return {
+    signal: controller.signal,
+    cleanup: () => {
+      cleanedUp = true;
+      req.removeListener('close', onClose);
+      req.removeListener('error', onError);
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// IP & connection helpers
+// ---------------------------------------------------------------------------
+
+function normalizeRemoteAddress(address: string | undefined): string | null {
+  if (!address) return null;
+  const trimmed = address.trim();
+  if (!trimmed) return null;
+
+  const normalized = normalizeIpForBlockList(trimmed);
+  if (normalized) return normalized.ip;
+  return trimmed;
+}
+
+export function registerInboundBlockList(server: NetworkServer): void {
+  if (!config.server.http.blockPrivateConnections) return;
+
+  const blockList = createDefaultBlockList();
+
+  server.on('connection', (socket: Socket) => {
+    const raw = socket.remoteAddress?.trim();
+    if (!raw) return;
+
+    const normalized = normalizeIpForBlockList(raw);
+    if (!normalized) return;
+
+    if (blockList.check(normalized.ip, normalized.family)) {
+      logWarn(
+        'Blocked inbound connection',
+        {
+          remoteAddress: normalized.ip,
+          family: normalized.family,
+        },
+        Loggers.LOG_HTTP
+      );
+      socket.destroy();
+    }
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Request context builder
+// ---------------------------------------------------------------------------
+
+export function buildRequestContext(
+  req: IncomingMessage,
+  res: ServerResponse,
+  signal?: AbortSignal
+): RequestContext | null {
+  const url = URL.parse(req.url ?? '', 'http://localhost');
+  if (!url) {
+    sendJson(res, 400, { error: 'Invalid request URL' });
+    return null;
+  }
+
+  return {
+    req,
+    res,
+    url,
+    method: req.method,
+    ip: normalizeRemoteAddress(req.socket.remoteAddress),
+    body: undefined,
+    ...(signal ? { signal } : {}),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Transport / MCP helpers
+// ---------------------------------------------------------------------------
+
+export async function closeTransportBestEffort(
+  transport: { close: () => Promise<unknown> },
+  context: string
+): Promise<void> {
+  try {
+    await transport.close();
+  } catch (error) {
+    logWarn('Transport close failed', { context, error }, Loggers.LOG_HTTP);
+  }
+}
+
+export async function closeMcpServerBestEffort(
+  server: McpServer,
+  context: string
+): Promise<void> {
+  try {
+    await server.close();
+  } catch (error) {
+    logWarn('MCP server close failed', { context, error }, Loggers.LOG_HTTP);
+  }
+}
+
+export function createTransportAdapter(
+  transportImpl: StreamableHTTPServerTransport
+): Transport {
+  type OnClose = NonNullable<Transport['onclose']>;
+  type OnError = NonNullable<Transport['onerror']>;
+  type OnMessage = NonNullable<Transport['onmessage']>;
+
+  const noopOnClose: OnClose = () => {};
+  const noopOnError: OnError = () => {};
+  const noopOnMessage: OnMessage = () => {};
+
+  const baseOnClose = transportImpl.onclose;
+
+  let oncloseHandler: OnClose = noopOnClose;
+  let onerrorHandler: OnError = noopOnError;
+  let onmessageHandler: OnMessage = noopOnMessage;
+
+  return {
+    start: () => transportImpl.start(),
+    send: (message, options) => transportImpl.send(message, options),
+    close: () => transportImpl.close(),
+
+    get onclose() {
+      return oncloseHandler;
+    },
+    set onclose(handler: OnClose) {
+      oncloseHandler = handler;
+      transportImpl.onclose = composeCloseHandlers(baseOnClose, handler);
+    },
+
+    get onerror() {
+      return onerrorHandler;
+    },
+    set onerror(handler: OnError) {
+      onerrorHandler = handler;
+      transportImpl.onerror = handler;
+    },
+
+    get onmessage() {
+      return onmessageHandler;
+    },
+    set onmessage(handler: OnMessage) {
+      onmessageHandler = handler;
+      transportImpl.onmessage = handler;
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// JSON body reading
+// ---------------------------------------------------------------------------
+
+type JsonBodyErrorKind = 'payload-too-large' | 'invalid-json' | 'read-failed';
+
+export class JsonBodyError extends Error {
+  readonly kind: JsonBodyErrorKind;
+
+  constructor(kind: JsonBodyErrorKind, message: string) {
+    super(message);
+    this.name = 'JsonBodyError';
+    this.kind = kind;
+  }
+}
+
+export function isJsonBodyError(error: unknown): error is JsonBodyError {
+  return error instanceof JsonBodyError;
+}
+
+export const DEFAULT_BODY_LIMIT_BYTES = 1024 * 1024;
+
+function isRequestReadAborted(req: IncomingMessage): boolean {
+  return req.destroyed && !req.complete;
+}
+
+class JsonBodyReader {
+  async read(
+    req: IncomingMessage,
+    limit = DEFAULT_BODY_LIMIT_BYTES,
+    signal?: AbortSignal
+  ): Promise<unknown> {
+    const contentType = getHeaderValue(req, 'content-type');
+    if (!contentType?.includes('application/json')) return undefined;
+
+    const contentLengthHeader = getHeaderValue(req, 'content-length');
+    if (contentLengthHeader) {
+      const contentLength = Number.parseInt(contentLengthHeader, 10);
+      if (Number.isFinite(contentLength) && contentLength > limit) {
+        const error = new JsonBodyError(
+          'payload-too-large',
+          'Payload too large'
+        );
+        throw error;
+      }
+    }
+
+    if (signal?.aborted || isRequestReadAborted(req)) {
+      const error = new JsonBodyError('read-failed', 'Request aborted');
+      throw error;
+    }
+
+    const body = await this.readBody(req, limit, signal);
+    if (!body) return undefined;
+
+    try {
+      return JSON.parse(body);
+    } catch (err: unknown) {
+      const error = new JsonBodyError('invalid-json', getErrorMessage(err));
+      throw error;
+    }
+  }
+
+  private async readBody(
+    req: IncomingMessage,
+    limit: number,
+    signal?: AbortSignal
+  ): Promise<string | undefined> {
+    const abortListener =
+      signal != null
+        ? (): void => {
+            destroyRequestBestEffort(req);
+          }
+        : null;
+
+    if (signal != null && abortListener) {
+      if (signal.aborted) {
+        abortListener();
+      } else {
+        signal.addEventListener('abort', abortListener, { once: true });
+      }
+    }
+
+    try {
+      const { chunks, size } = await this.collectChunks(req, limit, signal);
+      if (chunks.length === 0) return undefined;
+      const combined = new Uint8Array(size);
+      let offset = 0;
+      for (const chunk of chunks) {
+        combined.set(chunk, offset);
+        offset += chunk.byteLength;
+      }
+      const text = new TextDecoder().decode(combined);
+      return text;
+    } finally {
+      if (signal && abortListener) {
+        try {
+          signal.removeEventListener('abort', abortListener);
+        } catch {
+          // Best-effort cleanup.
+        }
+      }
+    }
+  }
+
+  private async collectChunks(
+    req: IncomingMessage,
+    limit: number,
+    signal?: AbortSignal
+  ): Promise<{ chunks: Uint8Array[]; size: number }> {
+    let size = 0;
+    const chunks: Uint8Array[] = [];
+
+    const sink = new Writable({
+      write: (chunk, _encoding, callback): void => {
+        try {
+          if (signal?.aborted || isRequestReadAborted(req)) {
+            callback(new JsonBodyError('read-failed', 'Request aborted'));
+            return;
+          }
+
+          const buf = this.normalizeChunk(chunk as Uint8Array | string);
+          size += buf.byteLength;
+
+          if (size > limit) {
+            callback(
+              new JsonBodyError('payload-too-large', 'Payload too large')
+            );
+            return;
+          }
+
+          chunks.push(buf);
+          callback();
+        } catch (err: unknown) {
+          callback(toError(err));
+        }
+      },
+    });
+
+    try {
+      if (signal?.aborted || isRequestReadAborted(req)) {
+        const error = new JsonBodyError('read-failed', 'Request aborted');
+        throw error;
+      }
+
+      await pipeline(req, sink, signal ? { signal } : undefined);
+      return { chunks, size };
+    } catch (err: unknown) {
+      if (err instanceof JsonBodyError) throw err;
+      if (signal?.aborted || isRequestReadAborted(req)) {
+        const error = new JsonBodyError('read-failed', 'Request aborted');
+        throw error;
+      }
+      const error = new JsonBodyError('read-failed', getErrorMessage(err));
+      throw error;
+    }
+  }
+
+  private normalizeChunk(chunk: Uint8Array | string): Uint8Array {
+    if (typeof chunk === 'string') {
+      const encoded = new TextEncoder().encode(chunk);
+      return encoded;
+    }
+    return chunk;
+  }
+}
+
+export const jsonBodyReader = new JsonBodyReader();
+
+interface SessionRecordLike {
+  server: McpServer;
+  transport: StreamableHTTPServerTransport;
+}
+
+interface SessionTeardownOptions {
+  cancelMessage: string;
+  closeServerReason?: string;
+  closeTransportReason?: string;
+  unregisterByServer?: boolean;
+  awaitClose?: boolean;
+}
+
+type SessionCloseOptions = Pick<
+  SessionTeardownOptions,
+  'closeServerReason' | 'closeTransportReason' | 'awaitClose'
+>;
+
+function unregisterSessionTaskScope(server: McpServer): string | null {
+  const sessionId = resolveMcpSessionIdByServer(server);
+  if (!sessionId) return null;
+
+  unregisterMcpSessionServer(sessionId);
+  return sessionId;
+}
+
+async function closeSessionResources(
+  session: SessionRecordLike,
+  options: SessionCloseOptions
+): Promise<void> {
+  const closeTasks: Promise<unknown>[] = [];
+  if (options.closeTransportReason) {
+    closeTasks.push(
+      closeTransportBestEffort(session.transport, options.closeTransportReason)
+    );
+  }
+  if (options.closeServerReason) {
+    closeTasks.push(
+      closeMcpServerBestEffort(session.server, options.closeServerReason)
+    );
+  }
+
+  if (options.awaitClose && closeTasks.length > 0) {
+    await Promise.all(closeTasks);
+  }
+}
+
+export async function teardownSessionResources(
+  session: SessionRecordLike,
+  options: SessionTeardownOptions
+): Promise<void> {
+  unregisterSessionTaskScope(session.server);
+
+  if (options.unregisterByServer) {
+    unregisterMcpSessionServerByServer(session.server);
+  }
+
+  await closeSessionResources(session, options);
+}
+
+export async function teardownUnregisteredSessionResources(
+  session: SessionRecordLike,
+  context: string
+): Promise<void> {
+  await closeSessionResources(session, {
+    closeTransportReason: context,
+    closeServerReason: context,
+    awaitClose: true,
+  });
+}
+
+export function teardownSessionRegistration(server: McpServer): void {
+  unregisterSessionTaskScope(server);
+}
+
+// --- health.ts ---
+// ---------------------------------------------------------------------------
+// Event-loop monitoring
+// ---------------------------------------------------------------------------
+
+const EVENT_LOOP_DELAY_RESOLUTION_MS = 20;
+const eventLoopDelay = monitorEventLoopDelay({
+  resolution: EVENT_LOOP_DELAY_RESOLUTION_MS,
+});
+let lastEventLoopUtilization = performance.eventLoopUtilization();
+
+export function resetEventLoopMonitoring(): void {
+  lastEventLoopUtilization = performance.eventLoopUtilization();
+  eventLoopDelay.reset();
+  eventLoopDelay.enable();
+}
+
+export function disableEventLoopMonitoring(): void {
+  eventLoopDelay.disable();
+}
+
+// ---------------------------------------------------------------------------
+// Stats helpers
+// ---------------------------------------------------------------------------
+
+function roundTo(value: number, precision: number): number {
+  const factor = 10 ** precision;
+  return Math.round(value * factor) / factor;
+}
+
+function formatEventLoopUtilization(
+  snapshot: ReturnType<typeof performance.eventLoopUtilization>
+): { utilization: number; activeMs: number; idleMs: number } {
+  return {
+    utilization: roundTo(snapshot.utilization, 4),
+    activeMs: Math.round(snapshot.active),
+    idleMs: Math.round(snapshot.idle),
+  };
+}
+
+function toMs(valueNs: number): number {
+  return roundTo(valueNs / 1_000_000, 3);
+}
+
+function getEventLoopStats(): {
+  utilization: {
+    total: { utilization: number; activeMs: number; idleMs: number };
+    sinceLast: { utilization: number; activeMs: number; idleMs: number };
+  };
+  delay: {
+    minMs: number;
+    maxMs: number;
+    meanMs: number;
+    stddevMs: number;
+    p50Ms: number;
+    p95Ms: number;
+    p99Ms: number;
+  };
+} {
+  const current = performance.eventLoopUtilization();
+  const delta = performance.eventLoopUtilization(
+    current,
+    lastEventLoopUtilization
+  );
+  lastEventLoopUtilization = current;
+
+  return {
+    utilization: {
+      total: formatEventLoopUtilization(current),
+      sinceLast: formatEventLoopUtilization(delta),
+    },
+    delay: {
+      minMs: toMs(eventLoopDelay.min),
+      maxMs: toMs(eventLoopDelay.max),
+      meanMs: toMs(eventLoopDelay.mean),
+      stddevMs: toMs(eventLoopDelay.stddev),
+      p50Ms: toMs(eventLoopDelay.percentile(50)),
+      p95Ms: toMs(eventLoopDelay.percentile(95)),
+      p99Ms: toMs(eventLoopDelay.percentile(99)),
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Health response building
+// ---------------------------------------------------------------------------
+
+interface HealthResponse {
+  status: 'ok';
+  version: string;
+  uptime: number;
+  timestamp: string;
+  os?: {
+    hostname: string;
+    platform: NodeJS.Platform;
+    arch: string;
+    memoryFree: number;
+    memoryTotal: number;
+  };
+  process?: {
+    pid: number;
+    ppid: number;
+    memory: NodeJS.MemoryUsage;
+    cpu: NodeJS.CpuUsage;
+    resource: NodeJS.ResourceUsage;
+    availableMemory?: number;
+    constrainedMemory?: number;
+  };
+  perf?: ReturnType<typeof getEventLoopStats>;
+  activeResources?: string[];
+  stats?: {
+    activeSessions: number;
+    workerPool: {
+      queueDepth: number;
+      activeWorkers: number;
+      capacity: number;
+    };
+  };
+}
+
+function buildHealthResponse(
+  store: SessionStore,
+  includeDiagnostics: boolean
+): HealthResponse {
+  const base: HealthResponse = {
+    status: 'ok',
+    version: serverVersion,
+    uptime: Math.floor(process.uptime()),
+    timestamp: new Date().toISOString(),
+  };
+
+  if (!includeDiagnostics) return base;
+
+  const poolStats = getTransformPoolStats();
+  return {
+    ...base,
+    os: {
+      hostname: hostname(),
+      platform: process.platform,
+      arch: process.arch,
+      memoryFree: freemem(),
+      memoryTotal: totalmem(),
+    },
+    process: {
+      pid: process.pid,
+      ppid: process.ppid,
+      memory: process.memoryUsage(),
+      cpu: process.cpuUsage(),
+      resource: process.resourceUsage(),
+      ...(typeof process.availableMemory === 'function'
+        ? { availableMemory: process.availableMemory() }
+        : {}),
+      ...(typeof process.constrainedMemory === 'function'
+        ? { constrainedMemory: process.constrainedMemory() }
+        : {}),
+    },
+    perf: getEventLoopStats(),
+    ...(typeof process.getActiveResourcesInfo === 'function'
+      ? { activeResources: process.getActiveResourcesInfo() }
+      : {}),
+    stats: {
+      activeSessions: store.size(),
+      workerPool: poolStats ?? {
+        queueDepth: 0,
+        activeWorkers: 0,
+        capacity: 0,
+      },
+    },
+  };
+}
+
+function sendHealth(
+  store: SessionStore,
+  res: ServerResponse,
+  includeDiagnostics: boolean
+): void {
+  res.setHeader('Cache-Control', 'no-store');
+  sendJson(res, 200, buildHealthResponse(store, includeDiagnostics));
+}
+
+// ---------------------------------------------------------------------------
+// Health route helpers
+// ---------------------------------------------------------------------------
+
+export function isVerboseHealthRequest(ctx: RequestContext): boolean {
+  const value = ctx.url.searchParams.get('verbose');
+  if (!value) return false;
+  const normalized = value.trim().toLowerCase();
+  return normalized === '1' || normalized === 'true';
+}
+
+function isHealthRoute(ctx: RequestContext): boolean {
+  return ctx.method === 'GET' && ctx.url.pathname === '/health';
+}
+
+function isVerboseHealthRoute(ctx: RequestContext): boolean {
+  return isHealthRoute(ctx) && isVerboseHealthRequest(ctx);
+}
+
+function ensureHealthAuthIfNeeded(
+  ctx: RequestContext,
+  authPresent: boolean
+): boolean {
+  if (!isVerboseHealthRoute(ctx)) return true;
+  if (!config.security.allowRemote) return true;
+  if (authPresent) return true;
+
+  sendJson(ctx.res, 401, {
+    error: 'Authentication required for verbose health metrics',
+  });
+  return false;
+}
+
+function resolveHealthDiagnosticsMode(
+  ctx: RequestContext,
+  authPresent: boolean
+): boolean {
+  return (
+    isVerboseHealthRoute(ctx) && (authPresent || !config.security.allowRemote)
+  );
+}
+
+export function shouldHandleHealthRoute(ctx: RequestContext): boolean {
+  return isHealthRoute(ctx);
+}
+
+export function sendHealthRouteResponse(
+  store: SessionStore,
+  ctx: RequestContext,
+  authPresent: boolean
+): boolean {
+  if (!shouldHandleHealthRoute(ctx)) return false;
+  if (!ensureHealthAuthIfNeeded(ctx, authPresent)) return true;
+
+  const includeDiagnostics = resolveHealthDiagnosticsMode(ctx, authPresent);
+  sendHealth(store, ctx.res, includeDiagnostics);
+  return true;
+}
+
+// --- native.ts ---
 // ---------------------------------------------------------------------------
 // MCP session gateway
 // ---------------------------------------------------------------------------
@@ -146,7 +930,6 @@ function isMcpRoute(pathname: string): boolean {
   return pathname === '/mcp' || pathname === '/mcp/';
 }
 
-type SessionTeardownOptions = Parameters<typeof teardownSessionResources>[1];
 type PostRequestBody = {
   id?: JsonRpcId | undefined;
   method?: string | undefined;

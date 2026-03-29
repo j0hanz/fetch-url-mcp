@@ -8,7 +8,7 @@ import { randomBytes } from 'node:crypto';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 
 import { config, logDebug, logWarn } from '../lib/core.js';
-import { Loggers } from '../lib/logger-names.js';
+import { Loggers } from '../lib/core.js';
 import { normalizeHost } from '../lib/net/index.js';
 import {
   composeAbortSignal,
@@ -24,7 +24,7 @@ import {
   sendEmpty,
   sendError,
   sendJson,
-} from './helpers.js';
+} from './native.js';
 
 // ---------------------------------------------------------------------------
 // CORS

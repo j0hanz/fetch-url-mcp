@@ -4,7 +4,7 @@ import {
   transformBufferToMarkdown,
 } from '../../transform/index.js';
 import { config, logDebug } from '../core.js';
-import { Loggers } from '../logger-names.js';
+import { Loggers } from '../core.js';
 import { withSignal } from '../utils.js';
 import {
   fetchNormalizedUrlBuffer,

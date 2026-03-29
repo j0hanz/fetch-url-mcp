@@ -1,4 +1,5 @@
 import { type McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import type { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 
 import { AsyncLocalStorage } from 'node:async_hooks';
 import process from 'node:process';
@@ -10,8 +11,6 @@ import {
 
 import { config, type LogLevel } from './config.js';
 import { getErrorMessage, isAbortError } from './error/index.js';
-import { Loggers } from './logger-names.js';
-import type { SessionEntry, SessionStore } from './session.js';
 import { startAbortableIntervalLoop } from './utils.js';
 
 export { config, enableHttpMode, serverVersion } from './config.js';
@@ -658,15 +657,6 @@ export function redactUrl(rawUrl: string): string {
   url.search = '';
   return url.toString();
 }
-export type { SessionEntry, SessionStore } from './session.js';
-export {
-  composeCloseHandlers,
-  createSessionStore,
-  createSlotTracker,
-  ensureSessionCapacity,
-  reserveSessionSlot,
-} from './session.js';
-
 const MIN_CLEANUP_INTERVAL_MS = 10_000;
 const MAX_CLEANUP_INTERVAL_MS = 60_000;
 const SESSION_CLOSE_BATCH_SIZE = 10;
@@ -855,4 +845,222 @@ export function startSessionCleanupLoop(
     options?.cleanupIntervalMs
   );
   return loop.start();
+}
+/**
+ * Logger names for different components of the application.
+ */
+export const Loggers = {
+  LOG_AUTH: 'auth',
+  LOG_HTTP: 'http',
+  LOG_SESSION: 'session',
+  LOG_SERVER: 'server',
+  LOG_FETCH: 'fetch',
+  LOG_TRANSFORM: 'transform',
+  LOG_TASKS: 'tasks',
+  LOG_RATE_LIMIT: 'rate-limit',
+  LOG_MCP: 'mcp',
+  LOG_FETCH_URL: 'fetch-url',
+} as const;
+
+/* -------------------------------------------------------------------------------------------------
+ * Session data model
+ * ------------------------------------------------------------------------------------------------- */
+
+export interface SessionEntry {
+  readonly server: McpServer;
+  readonly transport: StreamableHTTPServerTransport;
+  createdAt: number;
+  lastSeen: number;
+  protocolInitialized: boolean;
+  negotiatedProtocolVersion: string;
+  authFingerprint: string;
+}
+
+export interface SessionStore {
+  get: (sessionId: string) => SessionEntry | undefined;
+  touch: (sessionId: string) => void;
+  set: (sessionId: string, entry: SessionEntry) => void;
+  remove: (sessionId: string) => SessionEntry | undefined;
+  size: () => number;
+  inFlight: () => number;
+  incrementInFlight: () => void;
+  decrementInFlight: () => void;
+  clear: () => SessionEntry[];
+  evictExpired: () => { id: string; entry: SessionEntry }[];
+  evictOldest: () => SessionEntry | undefined;
+}
+
+interface SlotTracker {
+  readonly releaseSlot: () => void;
+  readonly markInitialized: () => void;
+  readonly isInitialized: () => boolean;
+}
+
+/* -------------------------------------------------------------------------------------------------
+ * Close handler composition
+ * ------------------------------------------------------------------------------------------------- */
+
+type CloseHandler = (() => void) | undefined;
+
+export function composeCloseHandlers(
+  first: CloseHandler,
+  second: CloseHandler
+): CloseHandler {
+  if (!first) return second;
+  if (!second) return first;
+
+  return () => {
+    try {
+      first();
+    } finally {
+      second();
+    }
+  };
+}
+
+/* -------------------------------------------------------------------------------------------------
+ * In-memory session store
+ * ------------------------------------------------------------------------------------------------- */
+
+class InMemorySessionStore implements SessionStore {
+  private readonly sessions = new Map<string, SessionEntry>();
+  private inflight = 0;
+
+  constructor(private readonly sessionTtlMs: number) {}
+
+  get(sessionId: string): SessionEntry | undefined {
+    if (sessionId.length === 0) return undefined;
+    return this.sessions.get(sessionId);
+  }
+
+  touch(sessionId: string): void {
+    if (sessionId.length === 0) return;
+
+    const session = this.sessions.get(sessionId);
+    if (!session) return;
+
+    session.lastSeen = Date.now();
+    this.sessions.delete(sessionId);
+    this.sessions.set(sessionId, session);
+  }
+
+  set(sessionId: string, entry: SessionEntry): void {
+    if (sessionId.length === 0) return;
+    this.sessions.delete(sessionId);
+    this.sessions.set(sessionId, entry);
+  }
+
+  remove(sessionId: string): SessionEntry | undefined {
+    if (sessionId.length === 0) return undefined;
+    const session = this.sessions.get(sessionId);
+    this.sessions.delete(sessionId);
+    return session;
+  }
+
+  size(): number {
+    return this.sessions.size;
+  }
+
+  inFlight(): number {
+    return this.inflight;
+  }
+
+  incrementInFlight(): void {
+    this.inflight += 1;
+  }
+
+  decrementInFlight(): void {
+    if (this.inflight === 0) return;
+    this.inflight -= 1;
+  }
+
+  clear(): SessionEntry[] {
+    const entries = [...this.sessions.values()];
+    this.sessions.clear();
+    return entries;
+  }
+
+  evictExpired(): { id: string; entry: SessionEntry }[] {
+    const now = Date.now();
+    const evicted: { id: string; entry: SessionEntry }[] = [];
+
+    for (const [id, session] of this.sessions.entries()) {
+      if (this.sessionTtlMs > 0 && now - session.lastSeen > this.sessionTtlMs) {
+        this.sessions.delete(id);
+        evicted.push({ id, entry: session });
+      } else {
+        break;
+      }
+    }
+
+    return evicted;
+  }
+
+  evictOldest(): SessionEntry | undefined {
+    const oldest = this.sessions.keys().next();
+    if (oldest.done) return undefined;
+
+    const session = this.sessions.get(oldest.value);
+    this.sessions.delete(oldest.value);
+    return session;
+  }
+}
+
+export function createSessionStore(sessionTtlMs: number): SessionStore {
+  const store = new InMemorySessionStore(sessionTtlMs);
+  return store;
+}
+
+/* -------------------------------------------------------------------------------------------------
+ * Slot tracking and capacity
+ * ------------------------------------------------------------------------------------------------- */
+
+export function createSlotTracker(store: SessionStore): SlotTracker {
+  let slotReleased = false;
+  let initialized = false;
+
+  return {
+    releaseSlot(): void {
+      if (slotReleased) return;
+      slotReleased = true;
+      store.decrementInFlight();
+    },
+    markInitialized(): void {
+      initialized = true;
+    },
+    isInitialized(): boolean {
+      return initialized;
+    },
+  };
+}
+
+export function reserveSessionSlot(
+  store: SessionStore,
+  maxSessions: number
+): boolean {
+  if (maxSessions <= 0) return false;
+  if (store.size() + store.inFlight() >= maxSessions) return false;
+
+  store.incrementInFlight();
+  return true;
+}
+
+export function ensureSessionCapacity({
+  store,
+  maxSessions,
+  evictOldest,
+}: {
+  store: SessionStore;
+  maxSessions: number;
+  evictOldest: (store: SessionStore) => boolean;
+}): boolean {
+  if (maxSessions <= 0) return false;
+
+  if (store.size() + store.inFlight() < maxSessions) return true;
+
+  if (store.size() > 0 && evictOldest(store)) {
+    return store.size() + store.inFlight() < maxSessions;
+  }
+
+  return false;
 }

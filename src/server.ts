@@ -14,8 +14,8 @@ import {
   setLogLevel,
   setMcpServer,
 } from './lib/core.js';
+import { Loggers } from './lib/core.js';
 import { toError } from './lib/error/index.js';
-import { Loggers } from './lib/logger-names.js';
 import { setTaskToolCallCapability } from './lib/mcp-interop.js';
 import type { IconInfo } from './lib/utils.js';
 
@@ -25,7 +25,7 @@ import {
   registerInstructionResource,
 } from './resources/index.js';
 import { abortAllTaskExecutions, registerTaskHandlers } from './tasks/index.js';
-import { registerTools as registerFetchUrlTool } from './tools/fetch-url.js';
+import { registerTools as registerFetchUrlTool } from './tools/index.js';
 import { shutdownTransformWorkerPool } from './transform/index.js';
 
 /* -------------------------------------------------------------------------------------------------

@@ -1,7 +1,10 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { TaskWaiterRegistry, waitForTerminalTask } from '../src/tasks/index.js';
+import {
+  TaskWaiterRegistry,
+  waitForTerminalTask,
+} from '../src/tasks/manager.js';
 
 // ── Helper types ────────────────────────────────────────────────────
 

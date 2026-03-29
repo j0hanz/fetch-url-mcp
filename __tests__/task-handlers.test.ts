@@ -15,7 +15,7 @@ import {
   registerTaskCapableTool,
   registerTaskHandlers,
   unregisterTaskCapableTool,
-} from '../src/tasks/index.js';
+} from '../src/tasks/manager.js';
 
 type UnknownRequestHandler = (
   request: unknown,

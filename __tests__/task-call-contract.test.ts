@@ -6,7 +6,7 @@ import {
   parseExtendedCallToolRequest,
   sanitizeToolCallMeta,
   withRelatedTaskMeta,
-} from '../src/tasks/index.js';
+} from '../src/tasks/manager.js';
 
 function getRelatedTaskId(value: unknown): string | undefined {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) {

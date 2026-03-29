@@ -3,6 +3,7 @@ import { BlockList, isIP, SocketAddress } from 'node:net';
 import { domainToASCII } from 'node:url';
 
 import { config, logDebug } from '../core.js';
+import { Loggers } from '../core.js';
 import {
   blockedCnameError,
   blockedHostError,
@@ -17,7 +18,6 @@ import {
   isSystemError,
   SystemErrors,
 } from '../error/index.js';
-import { Loggers } from '../logger-names.js';
 import { composeAbortSignal } from '../utils.js';
 
 const DNS_LOOKUP_TIMEOUT_MS = 5000;

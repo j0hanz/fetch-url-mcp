@@ -5,7 +5,7 @@ import { after, before, describe, it } from 'node:test';
 
 import { authService, startHttpServer } from '../src/http/index.js';
 import { config } from '../src/lib/core.js';
-import { resolveTaskOwnerKey, taskManager } from '../src/tasks/index.js';
+import { resolveTaskOwnerKey, taskManager } from '../src/tasks/manager.js';
 
 const TEST_API_KEY = 'test-api-key';
 
