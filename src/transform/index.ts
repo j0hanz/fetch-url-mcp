@@ -1688,7 +1688,7 @@ function preferSameDomainSrc(document: Document, base: URL): void {
 }
 
 function getNoscriptImages(noscript: Element): Element[] {
-  let imgs = Array.from(noscript.querySelectorAll('img'));
+  const imgs = Array.from(noscript.querySelectorAll('img'));
   if (imgs.length > 0) return imgs;
 
   const html = noscript.innerHTML || noscript.textContent || '';

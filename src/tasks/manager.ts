@@ -451,7 +451,7 @@ function enqueueTaskToolExecution(
   tool: NonNullable<ReturnType<typeof getTaskCapableTool>>,
   params: ExtendedCallToolRequest['params'],
   context: ToolCallContext,
-  parsedArgs: any
+  parsedArgs: unknown
 ): ServerResult {
   const task = taskManager.createTask(
     params.task?.ttl !== undefined ? { ttl: params.task.ttl } : undefined,
