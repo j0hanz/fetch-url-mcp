@@ -177,7 +177,7 @@ export default defineConfig(
       'no-useless-computed-key': 'error',
       'no-useless-constructor': 'off',
       '@typescript-eslint/no-useless-constructor': 'error',
-      'no-duplicate-imports': 'off',
+      'no-duplicate-imports': 'error',
       'comma-dangle': 'off',
 
       '@typescript-eslint/no-empty-function': [
