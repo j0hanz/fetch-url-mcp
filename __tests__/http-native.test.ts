@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { after, before, describe, it } from 'node:test';
 
 import { authService, startHttpServer } from '../src/http/index.js';
-import { config } from '../src/lib/core.js';
+import { config } from '../src/lib/config.js';
 import { resolveTaskOwnerKey, taskManager } from '../src/tasks/manager.js';
 
 const TEST_API_KEY = 'test-api-key';

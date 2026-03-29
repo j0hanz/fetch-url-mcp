@@ -1,8 +1,8 @@
+import type { ServerResponse } from 'node:http';
+
 import { Loggers, logWarn } from '../lib/core.js';
 import { isAbortError } from '../lib/error/index.js';
 import { startAbortableIntervalLoop } from '../lib/utils.js';
-
-import { type RequestContext, sendJson } from './native.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -21,8 +21,22 @@ interface RateLimitConfig {
   enabled: boolean;
 }
 
+interface RequestContextLike {
+  readonly method: string | undefined;
+  readonly ip: string | null;
+  readonly res: ServerResponse;
+}
+
+function sendJson(res: ServerResponse, status: number, body: unknown): void {
+  res.statusCode = status;
+  res.setHeader('Content-Type', 'application/json; charset=utf-8');
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('Cache-Control', 'no-store');
+  res.end(JSON.stringify(body));
+}
+
 export interface RateLimitManagerImpl {
-  check(ctx: RequestContext): boolean;
+  check(ctx: RequestContextLike): boolean;
   stop(): void;
 }
 
@@ -84,7 +98,7 @@ class RateLimiter implements RateLimitManagerImpl {
     };
   }
 
-  check(ctx: RequestContext): boolean {
+  check(ctx: RequestContextLike): boolean {
     if (!this.options.enabled || ctx.method === 'OPTIONS') return true;
 
     if (!ctx.ip) return true; // no identifiable IP (e.g. Unix socket) — bypass rate limiting

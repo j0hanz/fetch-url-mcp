@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { config } from '../src/lib/core.js';
+import { config } from '../src/lib/config.js';
 import { removeNoiseFromHtml } from '../src/transform/index.js';
 
 // Helper: wraps content in a minimal HTML page with enough main content

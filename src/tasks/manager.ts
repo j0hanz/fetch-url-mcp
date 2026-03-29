@@ -12,8 +12,8 @@ import { setInterval } from 'node:timers';
 
 import { z } from 'zod';
 
+import { config } from '../lib/config.js';
 import {
-  config,
   getRequestId,
   logDebug,
   logError,
@@ -44,6 +44,17 @@ import {
   isObject,
   timingSafeEqualUtf8,
 } from '../lib/utils.js';
+
+/*
+ * Module map:
+ * - call-tool request parsing
+ * - Abort-controller management for in-flight task executions
+ * - Task notification and validation helpers
+ * - Execution pipeline
+ * - Task handler schemas and registration
+ * - Handler extra parsing & owner-key resolution
+ * Own task lifecycle and MCP task wiring here. Keep tool business logic and HTTP transport details elsewhere.
+ */
 
 const MIN_TASK_TTL_MS = 1_000;
 const MAX_TASK_TTL_MS = 86_400_000;

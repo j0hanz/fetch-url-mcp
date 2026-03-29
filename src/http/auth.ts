@@ -7,7 +7,8 @@ import type { AuthInfo } from '@modelcontextprotocol/sdk/server/auth/types.js';
 import { randomBytes } from 'node:crypto';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 
-import { config, logDebug, Loggers, logWarn } from '../lib/core.js';
+import { config } from '../lib/config.js';
+import { logDebug, Loggers, logWarn } from '../lib/core.js';
 import { normalizeHost } from '../lib/net/index.js';
 import {
   composeAbortSignal,
@@ -17,13 +18,47 @@ import {
   timingSafeEqualUtf8,
 } from '../lib/utils.js';
 
-import {
-  getHeaderValue,
-  type RequestContext,
-  sendEmpty,
-  sendError,
-  sendJson,
-} from './native.js';
+interface RequestContextLike {
+  readonly req: IncomingMessage;
+  readonly res: ServerResponse;
+  readonly url: URL;
+  readonly method: string | undefined;
+}
+
+function setNoStoreHeaders(res: ServerResponse): void {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('Cache-Control', 'no-store');
+}
+
+function sendJson(res: ServerResponse, status: number, body: unknown): void {
+  res.statusCode = status;
+  res.setHeader('Content-Type', 'application/json; charset=utf-8');
+  setNoStoreHeaders(res);
+  res.end(JSON.stringify(body));
+}
+
+function sendEmpty(res: ServerResponse, status: number): void {
+  res.statusCode = status;
+  res.setHeader('Content-Length', '0');
+  res.end();
+}
+
+function sendError(
+  res: ServerResponse,
+  _code: number,
+  message: string,
+  status = 400,
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- kept for call-site compatibility
+  _id?: string | number | null
+): void {
+  sendJson(res, status, { error: message });
+}
+
+function getHeaderValue(req: IncomingMessage, name: string): string | null {
+  const value = req.headers[name];
+  if (!value) return null;
+  return Array.isArray(value) ? (value[0] ?? null) : value;
+}
 
 // ---------------------------------------------------------------------------
 // CORS
@@ -33,7 +68,7 @@ class CorsPolicy {
   // NOTE: CorsPolicy.handle() is invoked only AFTER hostOriginPolicy.validate() in
   // HttpRequestPipeline. The Origin header is reflected only when it matches an
   // allowlisted host — arbitrary/unauthenticated origins are never reflected.
-  handle(ctx: RequestContext): boolean {
+  handle(ctx: RequestContextLike): boolean {
     const { req, res } = ctx;
     const origin = getHeaderValue(req, 'origin');
 
@@ -122,7 +157,7 @@ function buildAllowedHosts(): ReadonlySet<string> {
 const ALLOWED_HOSTS = buildAllowedHosts();
 
 class HostOriginPolicy {
-  validate(ctx: RequestContext): boolean {
+  validate(ctx: RequestContextLike): boolean {
     const { req } = ctx;
     const host = this.resolveHostHeader(req);
 
@@ -205,7 +240,7 @@ class HostOriginPolicy {
   }
 
   private reject(
-    ctx: RequestContext,
+    ctx: RequestContextLike,
     status: number,
     message: string
   ): boolean {

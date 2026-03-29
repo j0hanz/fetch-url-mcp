@@ -7,10 +7,13 @@ import type {
 
 import { z } from 'zod';
 
-import { config } from '../lib/core.js';
+import { config } from '../lib/config.js';
 import { buildOptionalIcons, type IconInfo } from '../lib/utils.js';
 
 import { FETCH_URL_TOOL_NAME } from '../tools/index.js';
+
+// Area contract: MCP resources and prompts for server guidance.
+// Export only assistant-facing help surfaces; keep tool execution and transport wiring out.
 
 export function registerInstructionResource(
   server: McpServer,

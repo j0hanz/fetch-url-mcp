@@ -7,7 +7,6 @@ import {
 
 import { z } from 'zod';
 
-import { config, logDebug, Loggers, logWarn } from './core.js';
 import { isAbortError } from './error/index.js';
 
 const textEncoder = new TextEncoder();
@@ -39,78 +38,6 @@ export function hmacSha256Hex(
   input: string | Uint8Array
 ): string {
   return createHmac('sha256', key).update(input).digest('hex');
-}
-interface TunableHttpServer {
-  headersTimeout?: number;
-  requestTimeout?: number;
-  keepAliveTimeout?: number;
-  keepAliveTimeoutBuffer?: number;
-  maxHeadersCount?: number | null;
-  maxConnections?: number;
-  dropMaxConnection?: boolean;
-  on?: (event: string, listener: (...args: unknown[]) => void) => void;
-  closeIdleConnections?: () => void;
-  closeAllConnections?: () => void;
-}
-const DROP_LOG_INTERVAL_MS = 10_000;
-export function applyHttpServerTuning(server: TunableHttpServer): void {
-  const {
-    headersTimeoutMs,
-    requestTimeoutMs,
-    keepAliveTimeoutMs,
-    keepAliveTimeoutBufferMs,
-    maxHeadersCount,
-    maxConnections,
-  } = config.server.http;
-
-  if (headersTimeoutMs !== undefined) server.headersTimeout = headersTimeoutMs;
-  if (requestTimeoutMs !== undefined) server.requestTimeout = requestTimeoutMs;
-  if (keepAliveTimeoutMs !== undefined)
-    server.keepAliveTimeout = keepAliveTimeoutMs;
-  if (keepAliveTimeoutBufferMs !== undefined)
-    server.keepAliveTimeoutBuffer = keepAliveTimeoutBufferMs;
-  if (maxHeadersCount !== undefined) server.maxHeadersCount = maxHeadersCount;
-
-  if (typeof maxConnections === 'number' && maxConnections > 0) {
-    server.maxConnections = maxConnections;
-    server.dropMaxConnection = true;
-
-    if (typeof server.on === 'function') {
-      let lastLoggedAt = 0;
-      let droppedSinceLastLog = 0;
-
-      const onDrop = (data: unknown): void => {
-        droppedSinceLastLog += 1;
-        const now = Date.now();
-        if (now - lastLoggedAt < DROP_LOG_INTERVAL_MS) return;
-
-        logWarn(
-          'Incoming connection dropped (maxConnections reached)',
-          {
-            maxConnections,
-            dropped: droppedSinceLastLog,
-            data,
-          },
-          Loggers.LOG_HTTP
-        );
-
-        lastLoggedAt = now;
-        droppedSinceLastLog = 0;
-      };
-
-      server.on('drop', onDrop);
-    }
-  }
-}
-export function drainConnectionsOnShutdown(server: TunableHttpServer): void {
-  if (typeof server.closeIdleConnections === 'function') {
-    server.closeIdleConnections();
-    logDebug(
-      'Closed idle HTTP connections during shutdown',
-      undefined,
-      Loggers.LOG_HTTP
-    );
-  }
 }
 export interface CancellableTimeout<T> {
   promise: Promise<T>;

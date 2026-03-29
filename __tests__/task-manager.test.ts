@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { setTimeout as setTimeoutPromise } from 'node:timers/promises';
 
-import { config } from '../src/lib/core.js';
+import { config } from '../src/lib/config.js';
 import {
   decodeTaskCursor,
   encodeTaskCursor,

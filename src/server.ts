@@ -5,8 +5,8 @@ import { SetLevelRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 import * as fs from 'node:fs/promises';
 import process from 'node:process';
 
+import { config } from './lib/config.js';
 import {
-  config,
   getSessionId,
   logError,
   Loggers,

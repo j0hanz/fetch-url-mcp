@@ -25,12 +25,11 @@ import process from 'node:process';
 import { Writable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 
+import { config, enableHttpMode, serverVersion } from '../lib/config.js';
 import {
   composeCloseHandlers,
-  config,
   createSessionStore,
   createSlotTracker,
-  enableHttpMode,
   ensureSessionCapacity,
   logDebug,
   logError,
@@ -42,7 +41,6 @@ import {
   reserveSessionSlot,
   resolveMcpSessionIdByServer,
   runWithRequestContext,
-  serverVersion,
   type SessionStore,
   startSessionCleanupLoop,
   unregisterMcpSessionServer,
@@ -59,11 +57,7 @@ import {
   createDefaultBlockList,
   normalizeIpForBlockList,
 } from '../lib/net/index.js';
-import {
-  applyHttpServerTuning,
-  drainConnectionsOnShutdown,
-  isObject,
-} from '../lib/utils.js';
+import { isObject } from '../lib/utils.js';
 
 import { createMcpServerForHttpSession } from '../server.js';
 import { buildAuthenticatedOwnerKey } from '../tasks/index.js';
@@ -89,12 +83,38 @@ import {
   type RateLimitManagerImpl,
 } from './rate-limit.js';
 
+/*
+ * Module map:
+ * - Shared types -> Transport / MCP helpers
+ * - JSON body reading
+ * - Event-loop monitoring -> Health route helpers
+ * - MCP session gateway
+ * - HTTP dispatcher
+ * - Body parse error responses
+ * - Server bootstrap
+ * Own the HTTP transport and session gateway here. Keep auth policy internals, task business rules, and fetch/transform logic elsewhere.
+ */
+
 // --- helpers.ts ---
 // ---------------------------------------------------------------------------
 // Shared types
 // ---------------------------------------------------------------------------
 
 export type NetworkServer = Server | HttpsServer;
+
+interface TunableHttpServer {
+  headersTimeout?: number;
+  requestTimeout?: number;
+  keepAliveTimeout?: number;
+  keepAliveTimeoutBuffer?: number;
+  maxHeadersCount?: number | null;
+  maxConnections?: number;
+  dropMaxConnection?: boolean;
+  on?: (event: string, listener: (...args: unknown[]) => void) => void;
+  closeIdleConnections?: () => void;
+}
+
+const DROP_LOG_INTERVAL_MS = 10_000;
 
 function abortControllerBestEffort(controller: AbortController): void {
   if (!controller.signal.aborted) controller.abort();
@@ -105,6 +125,67 @@ function destroyRequestBestEffort(req: IncomingMessage): void {
     req.destroy();
   } catch {
     // Best-effort only.
+  }
+}
+
+function applyHttpServerTuning(server: TunableHttpServer): void {
+  const {
+    headersTimeoutMs,
+    requestTimeoutMs,
+    keepAliveTimeoutMs,
+    keepAliveTimeoutBufferMs,
+    maxHeadersCount,
+    maxConnections,
+  } = config.server.http;
+
+  if (headersTimeoutMs !== undefined) server.headersTimeout = headersTimeoutMs;
+  if (requestTimeoutMs !== undefined) server.requestTimeout = requestTimeoutMs;
+  if (keepAliveTimeoutMs !== undefined)
+    server.keepAliveTimeout = keepAliveTimeoutMs;
+  if (keepAliveTimeoutBufferMs !== undefined)
+    server.keepAliveTimeoutBuffer = keepAliveTimeoutBufferMs;
+  if (maxHeadersCount !== undefined) server.maxHeadersCount = maxHeadersCount;
+
+  if (typeof maxConnections === 'number' && maxConnections > 0) {
+    server.maxConnections = maxConnections;
+    server.dropMaxConnection = true;
+
+    if (typeof server.on === 'function') {
+      let lastLoggedAt = 0;
+      let droppedSinceLastLog = 0;
+
+      const onDrop = (data: unknown): void => {
+        droppedSinceLastLog += 1;
+        const now = Date.now();
+        if (now - lastLoggedAt < DROP_LOG_INTERVAL_MS) return;
+
+        logWarn(
+          'Incoming connection dropped (maxConnections reached)',
+          {
+            maxConnections,
+            dropped: droppedSinceLastLog,
+            data,
+          },
+          Loggers.LOG_HTTP
+        );
+
+        lastLoggedAt = now;
+        droppedSinceLastLog = 0;
+      };
+
+      server.on('drop', onDrop);
+    }
+  }
+}
+
+function drainConnectionsOnShutdown(server: TunableHttpServer): void {
+  if (typeof server.closeIdleConnections === 'function') {
+    server.closeIdleConnections();
+    logDebug(
+      'Closed idle HTTP connections during shutdown',
+      undefined,
+      Loggers.LOG_HTTP
+    );
   }
 }
 

@@ -8,7 +8,8 @@ import {
 
 import type { z } from 'zod';
 
-import { config, Loggers, logInfo } from '../lib/core.js';
+import { config } from '../lib/config.js';
+import { Loggers, logInfo } from '../lib/core.js';
 import { classifyAndLogToolError, isAbortError } from '../lib/error/index.js';
 import {
   createMcpError,
@@ -44,6 +45,9 @@ import {
   unregisterTaskCapableTool,
   withRequestContextIfMissing,
 } from '../tasks/index.js';
+
+// Area contract: MCP tool registration and fetch-url response shaping.
+// Export only tool-facing registration and handler primitives; keep transport/session ownership and generic shared helpers out.
 
 type FetchUrlInput = z.infer<typeof fetchUrlInputSchema>;
 

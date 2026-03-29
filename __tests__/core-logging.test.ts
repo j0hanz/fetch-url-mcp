@@ -4,8 +4,8 @@ import assert from 'node:assert/strict';
 import process from 'node:process';
 import { after, before, beforeEach, describe, it } from 'node:test';
 
+import { config } from '../src/lib/config.js';
 import {
-  config,
   logInfo,
   registerMcpSessionServer,
   runWithRequestContext,

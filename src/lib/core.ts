@@ -13,7 +13,16 @@ import { config, type LogLevel } from './config.js';
 import { getErrorMessage, isAbortError } from './error/index.js';
 import { startAbortableIntervalLoop } from './utils.js';
 
-export { config, enableHttpMode, serverVersion } from './config.js';
+/*
+ * Module map:
+ * - request context + log plumbing
+ * - Map internal log levels to standard RFC 5424 severities
+ * - Session data model
+ * - Close handler composition
+ * - In-memory session store
+ * - Slot tracking and capacity
+ * Own logging and session runtime here. Keep config parsing, transport, and fetch/transform logic elsewhere.
+ */
 
 type McpLogLevel =
   | 'debug'

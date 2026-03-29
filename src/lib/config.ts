@@ -1,16 +1,12 @@
 import { readFileSync } from 'node:fs';
 import { findPackageJSON } from 'node:module';
+import { isIP } from 'node:net';
 import process from 'node:process';
+import { domainToASCII } from 'node:url';
 
 import { z } from 'zod';
 
 import { getErrorMessage } from './error/index.js';
-import {
-  buildIpv4,
-  isIP,
-  normalizeHostname,
-  stripTrailingDots,
-} from './net/url.js';
 
 // ── Version ─────────────────────────────────────────────────────────
 
@@ -130,6 +126,27 @@ interface IntegerParseOptions {
 }
 
 // ── Host parsing helpers ────────────────────────────────────────────
+
+function buildIpv4(parts: readonly [number, number, number, number]): string {
+  return parts.join('.');
+}
+
+function stripTrailingDots(value: string): string {
+  let result = value;
+  while (result.endsWith('.')) result = result.slice(0, -1);
+  return result;
+}
+
+function normalizeHostname(value: string): string | null {
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+
+  const lowered = trimmed.toLowerCase();
+  if (isIP(lowered)) return stripTrailingDots(lowered);
+
+  const ascii = domainToASCII(lowered);
+  return ascii ? stripTrailingDots(ascii) : null;
+}
 
 function tryParseUrlHost(raw: string): string | null | undefined {
   if (raw.includes('://')) {

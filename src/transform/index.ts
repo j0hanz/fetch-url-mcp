@@ -20,8 +20,8 @@ import {
 } from 'node-html-markdown';
 import { z } from 'zod';
 
+import { config } from '../lib/config.js';
 import {
-  config,
   getOperationId,
   getRequestId,
   logDebug,
@@ -57,6 +57,16 @@ import {
 } from '../lib/utils.js';
 
 import { extractedMetadataSchema } from '../schemas.js';
+
+/*
+ * Module map:
+ * - Head-section parsing -> Public interface
+ * - Frontmatter & Source Injection -> Title Policy
+ * - Content evaluation heuristics
+ * - DOM helpers (translator-only) -> Translator registry + converter singleton
+ * - Worker message validation -> Worker thread message handling
+ * Own HTML extraction, markdown translation, and transform worker coordination here. Keep transport, auth, and task routing logic elsewhere.
+ */
 
 /**
  * Shared types for the transform pipeline.

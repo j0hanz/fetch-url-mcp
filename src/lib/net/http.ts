@@ -9,8 +9,8 @@ import { createBrotliDecompress, createGunzip, createInflate } from 'node:zlib';
 
 import { Agent, type Dispatcher } from 'undici';
 
+import { config } from '../config.js';
 import {
-  config,
   getOperationId,
   getRequestId,
   logDebug,

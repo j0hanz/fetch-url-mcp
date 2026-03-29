@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { config, serverVersion } from '../src/lib/core.js';
+import { config, serverVersion } from '../src/lib/config.js';
 
 // ── Golden Master: config shape & default values ────────────────────
 // Locks the exported config structure so refactors cannot silently
@@ -11,6 +11,14 @@ describe('config shape', () => {
   it('exports a non-empty serverVersion string', () => {
     assert.equal(typeof serverVersion, 'string');
     assert.ok(serverVersion.length > 0, 'serverVersion must not be empty');
+  });
+
+  it('does not re-export config values from lib/core', async () => {
+    const coreModule = await import('../src/lib/core.js');
+
+    assert.equal('config' in coreModule, false);
+    assert.equal('serverVersion' in coreModule, false);
+    assert.equal('enableHttpMode' in coreModule, false);
   });
 
   it('has all top-level sections', () => {
