@@ -1,5 +1,6 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { availableParallelism } from 'node:os';
+import process from 'node:process';
 import { isSharedArrayBuffer } from 'node:util/types';
 import {
   isMarkedAsUntransferable,
@@ -545,7 +546,7 @@ class WorkerPool implements TransformWorkerPool {
   private spawnWorker(workerIndex: number): WorkerSlot {
     const name = `${WORKER_NAME_PREFIX}-${workerIndex + 1}`;
     const resourceLimits = config.transform.workerResourceLimits;
-    const worker = new Worker(this.workerPath, {
+    const worker = new Worker(resolveWorkerEntry(this.workerPath), {
       name,
       ...(resourceLimits ? { resourceLimits } : {}),
     });
@@ -972,6 +973,35 @@ function buildWorkerDispatchPayload(task: PendingTask): WorkerDispatchPayload {
   return transferableBuffer
     ? { message, transferList: [transferableBuffer] }
     : { message };
+}
+
+function createTsxWorkerBootstrapUrl(workerPath: URL): URL {
+  const tsxApiUrl = new URL(
+    '../../node_modules/tsx/dist/esm/api/index.mjs',
+    import.meta.url
+  );
+  const source = [
+    `import { tsImport } from ${JSON.stringify(tsxApiUrl.href)};`,
+    `await tsImport(${JSON.stringify(workerPath.href)}, { parentURL: import.meta.url });`,
+  ].join('\n');
+  return new URL(
+    `data:text/javascript;charset=utf-8,${encodeURIComponent(source)}`
+  );
+}
+
+function shouldUseTsxWorkerBootstrap(workerPath: URL): boolean {
+  return (
+    workerPath.protocol === 'file:' &&
+    workerPath.pathname.endsWith('.ts') &&
+    process.execArgv.includes('--import') &&
+    process.execArgv.includes('tsx/esm')
+  );
+}
+
+function resolveWorkerEntry(workerPath: URL): URL {
+  return shouldUseTsxWorkerBootstrap(workerPath)
+    ? createTsxWorkerBootstrapUrl(workerPath)
+    : workerPath;
 }
 
 let workerPool: WorkerPool | null = null;
