@@ -194,14 +194,77 @@ function redactUrlValue(value: string): string {
   return redactUrl(value);
 }
 
+interface SanitizeLogOptions {
+  includeStack: boolean;
+  depth?: number;
+  seen?: WeakSet<object>;
+  key?: string;
+}
+
+function sanitizeErrorForLog(
+  value: Error,
+  includeStack: boolean
+): Record<string, unknown> {
+  const sanitized: Record<string, unknown> = {
+    error: value.message,
+    ...(value.name && value.name !== 'Error' ? { errorName: value.name } : {}),
+  };
+
+  if ('code' in value) {
+    const errorCode = value.code;
+    if (typeof errorCode === 'string' || typeof errorCode === 'number') {
+      sanitized['code'] = errorCode;
+    }
+  }
+
+  if ('errno' in value && typeof value.errno === 'number') {
+    try {
+      const sysMsg = getSystemErrorMessage(value.errno);
+      if (sysMsg) sanitized['sysError'] = sysMsg;
+    } catch {
+      // ignore
+    }
+  }
+
+  if (includeStack && value.stack) {
+    sanitized['stack'] = value.stack;
+  }
+
+  return sanitized;
+}
+
+function sanitizeObjectForLog(
+  value: Record<PropertyKey, unknown>,
+  options: Required<Pick<SanitizeLogOptions, 'includeStack' | 'depth' | 'seen'>>
+): Record<string, unknown> | undefined {
+  if (options.seen.has(value)) return '[circular]' as unknown as undefined;
+  options.seen.add(value);
+
+  const sanitized: Record<string, unknown> = {};
+  for (const [entryKey, entryValue] of Object.entries(value)) {
+    if (
+      isSensitiveKey(entryKey) &&
+      (!options.includeStack || entryKey.toLowerCase() !== 'stack')
+    ) {
+      continue;
+    }
+
+    const normalized = sanitizeLogValue(entryValue, {
+      includeStack: options.includeStack,
+      depth: options.depth + 1,
+      seen: options.seen,
+      key: entryKey,
+    });
+    if (normalized !== undefined) {
+      sanitized[entryKey] = normalized;
+    }
+  }
+  return sanitized;
+}
+
 function sanitizeLogValue(
   value: unknown,
-  options: {
-    includeStack: boolean;
-    depth?: number;
-    seen?: WeakSet<object>;
-    key?: string;
-  }
+  options: SanitizeLogOptions
 ): unknown {
   const {
     includeStack,
@@ -229,34 +292,7 @@ function sanitizeLogValue(
   if (typeof value === 'bigint') return value.toString();
   if (value instanceof URL) return redactUrl(value.toString());
   if (value instanceof Error) {
-    const sanitized: Record<string, unknown> = {
-      error: value.message,
-      ...(value.name && value.name !== 'Error'
-        ? { errorName: value.name }
-        : {}),
-    };
-
-    if ('code' in value) {
-      const errorCode = value.code;
-      if (typeof errorCode === 'string' || typeof errorCode === 'number') {
-        sanitized['code'] = errorCode;
-      }
-    }
-
-    if ('errno' in value && typeof value.errno === 'number') {
-      try {
-        const sysMsg = getSystemErrorMessage(value.errno);
-        if (sysMsg) sanitized['sysError'] = sysMsg;
-      } catch {
-        // ignore
-      }
-    }
-
-    if (includeStack && value.stack) {
-      sanitized['stack'] = value.stack;
-    }
-
-    return sanitized;
+    return sanitizeErrorForLog(value, includeStack);
   }
 
   if (Array.isArray(value)) {
@@ -268,29 +304,7 @@ function sanitizeLogValue(
   }
 
   if (isPlainLogObject(value)) {
-    if (seen.has(value)) return '[circular]';
-    seen.add(value);
-
-    const sanitized: Record<string, unknown> = {};
-    for (const [entryKey, entryValue] of Object.entries(value)) {
-      if (
-        isSensitiveKey(entryKey) &&
-        (!includeStack || entryKey.toLowerCase() !== 'stack')
-      ) {
-        continue;
-      }
-
-      const normalized = sanitizeLogValue(entryValue, {
-        includeStack,
-        depth: depth + 1,
-        seen,
-        key: entryKey,
-      });
-      if (normalized !== undefined) {
-        sanitized[entryKey] = normalized;
-      }
-    }
-    return sanitized;
+    return sanitizeObjectForLog(value, { includeStack, depth, seen });
   }
 
   return undefined;

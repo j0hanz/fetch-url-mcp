@@ -546,25 +546,40 @@ class JsonBodyReader {
     }
   }
 
+  private setupAbortListener(
+    req: IncomingMessage,
+    signal?: AbortSignal
+  ): (() => void) | null {
+    if (signal == null) return null;
+    const listener = (): void => {
+      destroyRequestBestEffort(req);
+    };
+    if (signal.aborted) {
+      listener();
+    } else {
+      signal.addEventListener('abort', listener, { once: true });
+    }
+    return listener;
+  }
+
+  private cleanupAbortListener(
+    signal: AbortSignal | undefined,
+    listener: (() => void) | null
+  ): void {
+    if (!signal || !listener) return;
+    try {
+      signal.removeEventListener('abort', listener);
+    } catch {
+      // Best-effort cleanup.
+    }
+  }
+
   private async readBody(
     req: IncomingMessage,
     limit: number,
     signal?: AbortSignal
   ): Promise<string | undefined> {
-    const abortListener =
-      signal != null
-        ? (): void => {
-            destroyRequestBestEffort(req);
-          }
-        : null;
-
-    if (signal != null && abortListener) {
-      if (signal.aborted) {
-        abortListener();
-      } else {
-        signal.addEventListener('abort', abortListener, { once: true });
-      }
-    }
+    const abortListener = this.setupAbortListener(req, signal);
 
     try {
       const { chunks, size } = await this.collectChunks(req, limit, signal);
@@ -578,13 +593,7 @@ class JsonBodyReader {
       const text = new TextDecoder().decode(combined);
       return text;
     } finally {
-      if (signal && abortListener) {
-        try {
-          signal.removeEventListener('abort', abortListener);
-        } catch {
-          // Best-effort cleanup.
-        }
-      }
+      this.cleanupAbortListener(signal, abortListener);
     }
   }
 

@@ -607,12 +607,17 @@ type BlockReason =
   | 'blocked-ip'
   | 'blocked-suffix';
 type BlockCheckResult = Readonly<{ reason: BlockReason }>;
+
+const CLOUD_METADATA_AWS_GCP_AZURE = buildIpv4([169, 254, 169, 254]);
+const CLOUD_METADATA_ALIBABA = buildIpv4([100, 100, 100, 200]);
+const CLOUD_METADATA_AWS_IPV6 = buildIpv6(['fd00', 'ec2', 0, 0, 0, 0, 0, 254]);
+
 export class IpBlocker {
   private static readonly CLOUD_METADATA_HOSTS: ReadonlySet<string> = new Set([
-    '169.254.169.254', // AWS / GCP / Azure
-    'metadata.google.internal', // GCP
-    '100.100.100.200', // Alibaba Cloud
-    'fd00:ec2::254', // AWS IPv6
+    CLOUD_METADATA_AWS_GCP_AZURE,
+    'metadata.google.internal',
+    CLOUD_METADATA_ALIBABA,
+    CLOUD_METADATA_AWS_IPV6,
   ]);
 
   private readonly blockList = createDefaultBlockList();

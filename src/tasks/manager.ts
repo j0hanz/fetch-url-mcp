@@ -1408,7 +1408,8 @@ export function buildAuthenticatedOwnerKey(
   const authToken = typeof authInfo?.token === 'string' ? authInfo.token : '';
 
   if (authClientId || authToken) {
-    return `auth:${hash('sha256', `${authClientId}:${authToken}`, 'hex')}`;
+    const hashInput = `${authClientId}:${authToken}`;
+    return `auth:${hash('sha256', hashInput, 'hex')}`;
   }
 
   return undefined;

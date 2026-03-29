@@ -34,20 +34,22 @@ function buildUpstreamHttpMessage(error: FetchError): string {
   return `An error occurred when communicating with the target URL.`;
 }
 
+function resolveFetchErrorCode(error: FetchError): string {
+  const { code: detailsCode, reason } = error.details;
+  if (typeof detailsCode === 'string') return detailsCode;
+  if (reason === SystemErrors.QUEUE_FULL) return SystemErrors.QUEUE_FULL;
+  return error.code;
+}
+
 function mapFetchToolError(
   error: FetchError,
   fallbackUrl: string
 ): ToolErrorPayload {
-  const { code: detailsCode, reason } = error.details;
-  let { code } = error;
-  if (typeof detailsCode === 'string') {
-    code = detailsCode;
-  } else if (reason === SystemErrors.QUEUE_FULL) {
-    code = SystemErrors.QUEUE_FULL;
-  }
-
+  const { reason } = error.details;
+  const code = resolveFetchErrorCode(error);
   const url = error.url || fallbackUrl;
   const details = sanitizeToolErrorDetails(error.details);
+  const detailsSpread = details ? { details } : {};
 
   if (reason === 'timeout') {
     return {
@@ -57,7 +59,7 @@ function mapFetchToolError(
       code,
       statusCode: error.statusCode,
       upstreamMessage: error.message,
-      ...(details ? { details } : {}),
+      ...detailsSpread,
     };
   }
 
@@ -69,7 +71,7 @@ function mapFetchToolError(
       code,
       statusCode: error.statusCode,
       upstreamMessage: error.message,
-      ...(details ? { details } : {}),
+      ...detailsSpread,
     };
   }
 
@@ -80,24 +82,25 @@ function mapFetchToolError(
       category: ErrorCategory.QUEUE_FULL,
       code,
       statusCode: error.statusCode,
-      ...(details ? { details } : {}),
+      ...detailsSpread,
     };
   }
 
   const isRealHttpError = typeof error.details['httpStatus'] === 'number';
 
   if (isRealHttpError && error.statusCode >= 400) {
+    const category =
+      error.statusCode === 429
+        ? ErrorCategory.UPSTREAM_RATE_LIMITED
+        : ErrorCategory.UPSTREAM_HTTP_ERROR;
     return {
       error: buildUpstreamHttpMessage(error),
       url,
-      category:
-        error.statusCode === 429
-          ? ErrorCategory.UPSTREAM_RATE_LIMITED
-          : ErrorCategory.UPSTREAM_HTTP_ERROR,
+      category,
       code,
       statusCode: error.statusCode,
       upstreamMessage: error.message,
-      ...(details ? { details } : {}),
+      ...detailsSpread,
     };
   }
 
@@ -107,7 +110,7 @@ function mapFetchToolError(
     category: ErrorCategory.FETCH_ERROR,
     code,
     statusCode: error.statusCode,
-    ...(details ? { details } : {}),
+    ...detailsSpread,
   };
 }
 

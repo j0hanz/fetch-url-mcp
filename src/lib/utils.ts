@@ -295,7 +295,8 @@ function formatIssuePath(path: readonly (string | number | symbol)[]): string {
   return path.reduce((acc: string, segment) => {
     const isNum = typeof segment === 'number';
     const formatted = formatPathSegment(segment);
-    return acc ? `${acc}${isNum ? '' : '.'}${formatted}` : formatted;
+    const separator = isNum ? '' : '.';
+    return acc ? `${acc}${separator}${formatted}` : formatted;
   }, '');
 }
 

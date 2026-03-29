@@ -29,7 +29,8 @@ interface FetchTransformInput {
 function getOpenCodeFence(
   content: string
 ): { fenceChar: string; fenceLength: number } | null {
-  const FENCE_PATTERN = /^[ \t]*(`{3,}|~{3,})([^\S\r\n]*|[^\r\n]*)$/gm;
+  // eslint-disable-next-line sonarjs/slow-regex
+  const FENCE_PATTERN = /^[ \t]*(`{3,}|~{3,})([^\r\n]*)$/gm;
   let inFence = false;
   let fenceChar: string | null = null;
   let fenceLength = 0;
@@ -114,15 +115,6 @@ function appendTruncationMarker(content: string, marker: string): string {
   return `${contentWithFence.substring(0, safeBoundary)}${marker}`;
 }
 
-function normalizeMarkdownForTruncation(
-  markdown: string,
-  truncated: boolean
-): string {
-  return truncated
-    ? appendTruncationMarker(markdown, TRUNCATION_MARKER)
-    : markdown;
-}
-
 export function finalizeInlineMarkdown(
   markdown: string | undefined,
   options: { maxChars?: number } = {}
@@ -140,7 +132,9 @@ function applyInlineContentLimit(
   content: string,
   truncated = false
 ): InlineContentResult {
-  const normalized = normalizeMarkdownForTruncation(content, truncated);
+  const normalized = truncated
+    ? appendTruncationMarker(content, TRUNCATION_MARKER)
+    : content;
   const contentSize = normalized.length;
   const inlineLimit = config.constants.maxInlineContentChars;
 
@@ -269,7 +263,9 @@ function createMarkdownPipelineResult({
   metadata: ExtractedMetadata | undefined;
   truncated: boolean;
 }): MarkdownPipelineResult {
-  const markdown = normalizeMarkdownForTruncation(rawMarkdown, truncated);
+  const markdown = truncated
+    ? appendTruncationMarker(rawMarkdown, TRUNCATION_MARKER)
+    : rawMarkdown;
 
   return {
     content: markdown,
