@@ -976,14 +976,15 @@ function buildWorkerDispatchPayload(task: PendingTask): WorkerDispatchPayload {
 }
 
 function createTsxWorkerBootstrapUrl(workerPath: URL): URL {
-  const tsxApiUrl = new URL(
-    '../../node_modules/tsx/dist/esm/api/index.mjs',
-    import.meta.url
-  );
   const source = [
-    `import { tsImport } from ${JSON.stringify(tsxApiUrl.href)};`,
+    `import { createRequire } from 'node:module';`,
+    `import { pathToFileURL } from 'node:url';`,
+    `const require = createRequire(${JSON.stringify(workerPath.href)});`,
+    `const tsxApiUrl = pathToFileURL(require.resolve('tsx/esm/api')).href;`,
+    `const { tsImport } = await import(tsxApiUrl);`,
     `await tsImport(${JSON.stringify(workerPath.href)}, { parentURL: import.meta.url });`,
   ].join('\n');
+
   return new URL(
     `data:text/javascript;charset=utf-8,${encodeURIComponent(source)}`
   );
