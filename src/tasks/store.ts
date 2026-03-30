@@ -65,6 +65,8 @@ export interface CreateTaskResult {
     lastUpdatedAt: string;
     keepAlive: number;
     pollFrequency: number;
+    ttl: number;
+    pollInterval: number;
   };
 }
 

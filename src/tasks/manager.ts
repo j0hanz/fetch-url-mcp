@@ -267,6 +267,8 @@ export function toTaskSummary(task: TaskLifecycleProjection): TaskSummary {
     lastUpdatedAt: task.lastUpdatedAt,
     keepAlive: task.keepAlive,
     pollFrequency: task.pollFrequency,
+    ttl: task.keepAlive,
+    pollInterval: task.pollFrequency,
   };
 }
 
