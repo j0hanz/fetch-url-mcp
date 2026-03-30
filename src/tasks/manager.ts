@@ -83,12 +83,15 @@ const toolCallMetaSchema = z.looseObject({
   [RELATED_TASK_META_KEY]: relatedTaskMetaSchema.optional(),
 });
 
+const sdkTaskParamsSchema = z.object({ ttl: z.number().optional() }).optional();
+
 export const extendedCallToolRequestSchema = z.looseObject({
   method: z.literal('tools/call'),
   params: z.strictObject({
     name: z.string().min(1, 'Tool name required'),
     arguments: z.record(z.string(), z.unknown()).optional(),
     _meta: toolCallMetaSchema.optional(),
+    task: sdkTaskParamsSchema,
   }),
 });
 
@@ -112,7 +115,16 @@ export type { CreateTaskResult, TaskState, TaskStatus };
 function getTaskMeta(
   params: ExtendedCallToolRequest['params']
 ): TaskMeta | undefined {
-  return params._meta?.['modelcontextprotocol.io/task'];
+  const legacyMeta = params._meta?.['modelcontextprotocol.io/task'];
+  if (legacyMeta) return legacyMeta;
+  if (params.task) {
+    return {
+      taskId: randomUUID(),
+      ...(params.task.ttl !== undefined ? { keepAlive: params.task.ttl } : {}),
+    };
+  }
+
+  return undefined;
 }
 
 export function parseExtendedCallToolRequest(
