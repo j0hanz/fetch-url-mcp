@@ -64,10 +64,14 @@ describe('server tool contract', () => {
       openWorldHint: true,
     });
 
-    const icons = Array.isArray(tool['icons']) ? tool['icons'] : [];
+    const meta = asRecord(tool['_meta']);
+    const icons = Array.isArray(meta?.['icons']) ? meta?.['icons'] : [];
     assert.equal(icons.length, 1);
-    assert.equal(icons[0]?.mimeType, 'image/svg+xml');
-    assert.match(String(icons[0]?.src), /^data:image\/svg\+xml;base64,/);
+    assert.equal(asRecord(icons[0])?.['mimeType'], 'image/svg+xml');
+    assert.match(
+      String(asRecord(icons[0])?.['src']),
+      /^data:image\/svg\+xml;base64,/
+    );
 
     const outputSchema =
       tool['outputSchema'] && typeof tool['outputSchema'] === 'object'

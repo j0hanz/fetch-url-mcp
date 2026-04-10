@@ -1,19 +1,23 @@
 import {
+  type CallToolResult,
   type ContentBlock,
-  type ListToolsResult,
   type McpServer,
   ProtocolErrorCode,
-  type RegisteredTool,
   RELATED_TASK_META_KEY,
+  type ServerContext,
   type ServerResult,
   type ToolAnnotations,
 } from '@modelcontextprotocol/server';
 
-import { z } from 'zod';
+import type { z } from 'zod';
 
 import { config } from '../lib/config.js';
-import { Loggers, logInfo } from '../lib/core.js';
-import { classifyAndLogToolError, isAbortError } from '../lib/error/index.js';
+import { logError, Loggers, logInfo } from '../lib/core.js';
+import {
+  classifyAndLogToolError,
+  getErrorMessage,
+  isAbortError,
+} from '../lib/error/index.js';
 import {
   createProgressReporter,
   createProtocolError,
@@ -314,12 +318,16 @@ function buildFetchOptions(
 
 async function executeFetch(
   input: FetchUrlInput,
-  extra?: ToolHandlerExtra
+  extra?: ToolHandlerExtra | ServerContext
 ): Promise<ToolResponseBase> {
   const { url } = input;
-  const signal = buildToolAbortSignal(extra?.signal);
+  const mcpReq = extra && 'mcpReq' in extra ? extra.mcpReq : undefined;
+  const thExtra = extra && !('mcpReq' in extra) ? extra : undefined;
+  const signal = buildToolAbortSignal(mcpReq?.signal ?? thExtra?.signal);
   const startedAt = performance.now();
-  const relatedTaskMeta = extra?._meta?.[RELATED_TASK_META_KEY];
+  const meta = mcpReq?._meta ?? thExtra?._meta;
+  const relatedTaskMeta = meta?.[RELATED_TASK_META_KEY];
+  const progressToken = meta?.progressToken;
   const relatedTask = isObject(relatedTaskMeta) ? relatedTaskMeta : undefined;
   const progressPlan = new FetchUrlProgressPlan(
     createProgressReporter(extra),
@@ -331,7 +339,7 @@ async function executeFetch(
       'fetch-url started',
       {
         inputUrl: url,
-        hasProgressToken: extra?._meta?.progressToken !== undefined,
+        hasProgressToken: progressToken !== undefined,
         ...(isObject(relatedTask) && typeof relatedTask['taskId'] === 'string'
           ? { taskId: relatedTask['taskId'] }
           : {}),
@@ -367,7 +375,7 @@ async function executeFetch(
 
 export async function fetchUrlToolHandler(
   input: FetchUrlInput,
-  extra?: ToolHandlerExtra
+  extra?: ToolHandlerExtra | ServerContext
 ): Promise<ToolResponseBase> {
   const startedAt = performance.now();
 
@@ -406,36 +414,6 @@ export interface ToolRegistrationControls {
   setTaskSupport: (support: TaskCapableToolSupport) => void;
 }
 
-function buildListToolEntry(
-  taskSupport: TaskCapableToolSupport
-): ListToolsResult['tools'][number] {
-  return {
-    name: TOOL_DEFINITION.name,
-    title: TOOL_DEFINITION.title,
-    description: TOOL_DEFINITION.description,
-    annotations: TOOL_DEFINITION.annotations,
-    inputSchema: z.toJSONSchema(
-      TOOL_DEFINITION.inputSchema
-    ) as ListToolsResult['tools'][number]['inputSchema'],
-    outputSchema: z.toJSONSchema(
-      TOOL_DEFINITION.outputSchema
-    ) as ListToolsResult['tools'][number]['outputSchema'],
-    execution: { taskSupport },
-    icons: [TOOL_ICON],
-  };
-}
-
-function registerToolListHandler(
-  server: McpServer,
-  getTaskSupport: () => TaskCapableToolSupport
-): void {
-  server.server.setRequestHandler('tools/list', (): ListToolsResult => {
-    return {
-      tools: [buildListToolEntry(getTaskSupport())],
-    };
-  });
-}
-
 function createTaskCapableDescriptor(): TaskCapableToolDescriptor<FetchUrlInput> {
   return {
     name: TOOL_DEFINITION.name,
@@ -448,7 +426,7 @@ function createTaskCapableDescriptor(): TaskCapableToolDescriptor<FetchUrlInput>
         Loggers.LOG_FETCH_URL
       );
     },
-    execute: TOOL_DEFINITION.handler,
+    execute: fetchUrlToolHandler,
     getCompletionStatusMessage: getFetchCompletionStatusMessage,
     taskSupport: 'optional',
   };
@@ -457,12 +435,6 @@ function createTaskCapableDescriptor(): TaskCapableToolDescriptor<FetchUrlInput>
 export function registerTools(server: McpServer): ToolRegistrationControls {
   if (!config.tools.enabled.includes(FETCH_URL_TOOL_NAME)) {
     unregisterTaskCapableTool(server, FETCH_URL_TOOL_NAME);
-    server.server.setRequestHandler(
-      'tools/list',
-      (): ListToolsResult => ({
-        tools: [],
-      })
-    );
     return {
       setTaskSupport: () => {},
     };
@@ -471,7 +443,7 @@ export function registerTools(server: McpServer): ToolRegistrationControls {
   const descriptor = createTaskCapableDescriptor();
   registerTaskCapableTool(server, descriptor);
 
-  const registeredTool: RegisteredTool = server.registerTool(
+  const registeredTool = server.experimental.tasks.registerToolTask(
     TOOL_DEFINITION.name,
     {
       title: TOOL_DEFINITION.title,
@@ -479,19 +451,55 @@ export function registerTools(server: McpServer): ToolRegistrationControls {
       inputSchema: TOOL_DEFINITION.inputSchema,
       outputSchema: TOOL_DEFINITION.outputSchema,
       annotations: TOOL_DEFINITION.annotations,
+      execution: { taskSupport: 'optional' },
+      _meta: { icons: [TOOL_ICON] },
     },
-    TOOL_DEFINITION.handler
+    {
+      createTask: async (args, ctx) => {
+        const task = await ctx.task.store.createTask(
+          ctx.task.requestedTtl !== undefined
+            ? { ttl: ctx.task.requestedTtl }
+            : {}
+        );
+
+        // Spin off background execution
+        executeFetch(args, ctx)
+          .then((result) => {
+            void ctx.task.store.storeTaskResult(
+              task.taskId,
+              'completed',
+              result as ServerResult
+            );
+          })
+          .catch((error: unknown) => {
+            void ctx.task.store.storeTaskResult(task.taskId, 'failed', {
+              isError: true,
+              content: [{ type: 'text', text: getErrorMessage(error) }],
+            });
+            logError(
+              'Background execution crashed',
+              { error: getErrorMessage(error) },
+              Loggers.LOG_TASKS
+            );
+          });
+
+        return { task };
+      },
+      getTask: async (_args, ctx) => {
+        return ctx.task.store.getTask(ctx.task.id);
+      },
+      getTaskResult: async (_args, ctx) => {
+        return ctx.task.store.getTaskResult(
+          ctx.task.id
+        ) as Promise<CallToolResult>;
+      },
+    }
   );
-  let currentTaskSupport: TaskCapableToolSupport = 'optional';
-  registerToolListHandler(server, () => currentTaskSupport);
 
   const updateTaskSupport = (support: TaskCapableToolSupport): void => {
-    currentTaskSupport = support;
     descriptor.taskSupport = support;
     registeredTool.execution = { taskSupport: support };
   };
-
-  updateTaskSupport('optional');
 
   return { setTaskSupport: updateTaskSupport };
 }

@@ -446,7 +446,7 @@ describe('HTTP native gateway routing', () => {
       idempotentHint: true,
       openWorldHint: true,
     });
-    assert.equal(Array.isArray(tool['icons']), true);
+    assert.equal(Array.isArray(asRecord(tool['_meta'])?.['icons']), true);
   });
 
   it('keeps auth-bound tasks accessible after the original session closes', async () => {

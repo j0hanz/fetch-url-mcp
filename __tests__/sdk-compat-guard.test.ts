@@ -36,25 +36,6 @@ describe('public MCP handler registration', () => {
     return server;
   }
 
-  it('registers tools/call through the public request handler API', async () => {
-    const server = createServer();
-
-    registerTaskCapableTool(server, {
-      name: 'test-tool',
-      parseArguments: () => ({}),
-      execute: async () => ({
-        content: [{ type: 'text', text: 'ok' }],
-      }),
-      taskSupport: 'optional',
-    });
-
-    registerTaskHandlers(server);
-
-    const handlers: unknown = Reflect.get(server.server, '_requestHandlers');
-    assert.ok(handlers instanceof Map);
-    assert.equal(typeof handlers.get('tools/call'), 'function');
-  });
-
   it('registers tasks/delete through the public fallback request handler', async () => {
     const server = createServer();
     registerTaskHandlers(server);

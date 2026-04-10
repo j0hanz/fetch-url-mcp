@@ -688,11 +688,6 @@ export function registerTaskHandlers(
 ): TaskHandlerRegistrationResult {
   const taskCapableToolsRegistered = hasRegisteredTaskCapableTools(server);
 
-  server.server.setRequestHandler('tools/call', async (request, ctx) => {
-    const parsedRequest = parseExtendedCallToolRequest(request);
-    return (await handleToolCallRequest(server, parsedRequest, ctx)) as never;
-  });
-
   server.server.fallbackRequestHandler = (request, ctx) => {
     if (request.method !== 'tasks/delete') {
       throw createProtocolError(
