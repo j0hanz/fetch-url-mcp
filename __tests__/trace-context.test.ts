@@ -12,11 +12,7 @@ import {
   registerTaskHandlers,
   unregisterTaskCapableTool,
 } from '../src/tasks/manager.js';
-
-type UnknownRequestHandler = (
-  request: unknown,
-  extra?: unknown
-) => Promise<unknown>;
+import { taskManager } from '../src/tasks/store.js';
 
 function createTaskTestServer(): McpServer {
   return new McpServer(
@@ -29,35 +25,13 @@ function createTaskTestServer(): McpServer {
   );
 }
 
-function getTaskResultHandler(server: McpServer): UnknownRequestHandler {
-  const handlers: unknown = Reflect.get(server.server, '_requestHandlers');
-  assert.ok(handlers instanceof Map);
-  const handler = handlers.get('tasks/result');
-  assert.equal(typeof handler, 'function');
-  return handler as UnknownRequestHandler;
-}
-
-function getTaskGetHandler(server: McpServer): UnknownRequestHandler {
-  const handlers: unknown = Reflect.get(server.server, '_requestHandlers');
-  assert.ok(handlers instanceof Map);
-  const handler = handlers.get('tasks/get');
-  assert.equal(typeof handler, 'function');
-  return handler as UnknownRequestHandler;
-}
-
 async function waitForCompletedTask(
-  server: McpServer,
+  _server: McpServer,
   taskId: string
 ): Promise<void> {
-  const getTask = getTaskGetHandler(server);
-
   for (let attempt = 0; attempt < 50; attempt++) {
-    const snapshot = (await getTask(
-      { method: 'tasks/get', params: { taskId } },
-      undefined
-    )) as Record<string, unknown>;
-
-    if (snapshot['status'] === 'completed') return;
+    const task = taskManager.getTask(taskId);
+    if (task?.status === 'completed') return;
     await setTimeoutPromise(10);
   }
 
@@ -88,7 +62,7 @@ describe('trace context propagation', () => {
     });
 
     try {
-      registerTaskHandlers(server, { requireInterception: false });
+      registerTaskHandlers(server);
 
       const result = (await handleToolCallRequest(
         server,
@@ -138,7 +112,7 @@ describe('trace context propagation', () => {
     });
 
     try {
-      registerTaskHandlers(server, { requireInterception: false });
+      registerTaskHandlers(server);
 
       const task = (await handleToolCallRequest(
         server,
@@ -164,13 +138,11 @@ describe('trace context propagation', () => {
 
       await waitForCompletedTask(server, task.task.taskId);
 
-      const result = (await getTaskResultHandler(server)(
-        {
-          method: 'tasks/result',
-          params: { taskId: task.task.taskId },
-        },
-        undefined
-      )) as { content: Array<{ text: string }> };
+      const completedTask = taskManager.getTask(task.task.taskId);
+      assert.ok(completedTask);
+      const result = completedTask.result as {
+        content: Array<{ text: string }>;
+      };
 
       assert.deepEqual(parseTraceContext(result.content[0]?.text ?? ''), {
         traceparent: '00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-00',

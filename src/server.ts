@@ -145,10 +145,8 @@ async function createMcpServerWithOptions(
   const toolControls = registerFetchUrlTool(server);
   registerGetHelpPrompt(server, serverInstructions, localIcon);
   registerInstructionResource(server, serverInstructions, localIcon);
-  const taskRegistration = registerTaskHandlers(server, {
-    requireInterception: config.tasks.requireInterception,
-  });
-  const taskToolCallEnabled = taskRegistration.interceptedToolsCall;
+  const taskRegistration = registerTaskHandlers(server);
+  const taskToolCallEnabled = taskRegistration.taskCapableToolsRegistered;
   toolControls.setTaskSupport(taskToolCallEnabled ? 'optional' : 'forbidden');
   syncTaskCapabilityAdvertisement(server, taskToolCallEnabled);
   registerLoggingSetLevelHandler(server);

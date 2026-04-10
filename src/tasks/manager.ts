@@ -31,7 +31,6 @@ import {
 } from '../lib/error/index.js';
 import {
   createProtocolError,
-  getSdkCallToolHandler,
   type ProgressNotification,
   registerServerLifecycleCleanup,
   type ToolHandlerExtra,
@@ -194,7 +193,9 @@ function withRelatedTaskSummaryMeta<T extends Record<string, unknown>>(
 // during SIGTERM/SIGINT shutdown to cancel every in-flight task across all sessions.
 const taskAbortControllers = new Map<string, AbortController>();
 
-function detachAbortController(taskId: string): AbortController | undefined {
+export function detachAbortController(
+  taskId: string
+): AbortController | undefined {
   const controller = taskAbortControllers.get(taskId);
   if (controller) {
     taskAbortControllers.delete(taskId);
@@ -202,7 +203,7 @@ function detachAbortController(taskId: string): AbortController | undefined {
   return controller;
 }
 
-function attachAbortController(taskId: string): AbortController {
+export function attachAbortController(taskId: string): AbortController {
   detachAbortController(taskId)?.abort();
 
   if (taskAbortControllers.size >= config.tasks.maxTotal) {
@@ -657,53 +658,9 @@ export async function handleToolCallRequest(
  * Task handler schemas and registration
  * ------------------------------------------------------------------------------------------------- */
 
-const TaskGetSchema = z.looseObject(
-  {
-    method: z.literal('tasks/get', 'Expected "tasks/get"'),
-    params: z.looseObject(
-      { taskId: z.string('Expected string') },
-      'Expected object'
-    ),
-  },
-  'Invalid request'
-);
-const TaskListSchema = z.looseObject(
-  {
-    method: z.literal('tasks/list', 'Expected "tasks/list"'),
-    params: z
-      .looseObject(
-        {
-          cursor: z.string('Expected string').optional(),
-        },
-        'Expected object'
-      )
-      .optional(),
-  },
-  'Invalid request'
-);
-const TaskCancelSchema = z.looseObject(
-  {
-    method: z.literal('tasks/cancel', 'Expected "tasks/cancel"'),
-    params: z.looseObject(
-      { taskId: z.string('Expected string') },
-      'Expected object'
-    ),
-  },
-  'Invalid request'
-);
 const TaskDeleteSchema = z.looseObject(
   {
     method: z.literal('tasks/delete', 'Expected "tasks/delete"'),
-    params: z.looseObject(
-      { taskId: z.string('Expected string') },
-      'Expected object'
-    ),
-  },
-  'Invalid request'
-);
-const TaskResultSchema = z.looseObject(
-  {
-    method: z.literal('tasks/result', 'Expected "tasks/result"'),
     params: z.looseObject(
       { taskId: z.string('Expected string') },
       'Expected object'
@@ -721,211 +678,18 @@ function resolveOwnerScopedExtra(extra: unknown): {
     ownerKey: resolveTaskOwnerKey(parsedExtra),
   };
 }
-interface TaskHandlerRegistrationOptions {
-  requireInterception?: boolean;
-}
-
 interface TaskHandlerRegistrationResult {
-  interceptedToolsCall: boolean;
   taskCapableToolsRegistered: boolean;
 }
 
-function throwStoredTaskError(task: {
-  taskId: string;
-  statusMessage?: string;
-  error?: { code: number; message: string; data?: unknown };
-}): never {
-  if (task.error) {
-    throw createProtocolError(
-      task.error.code,
-      task.error.message,
-      task.error.data
-    );
-  }
-
-  throw createProtocolError(
-    ProtocolErrorCode.InternalError,
-    task.statusMessage ?? 'Execution failed',
-    { taskId: task.taskId }
-  );
-}
-
 export function registerTaskHandlers(
-  server: McpServer,
-  options?: TaskHandlerRegistrationOptions
+  server: McpServer
 ): TaskHandlerRegistrationResult {
-  type RawRequestHandler = (request: unknown, ctx: ServerContext) => unknown;
-
-  const setRawRequestHandler = server.server.setRequestHandler.bind(
-    server.server
-  ) as unknown as (method: string, handler: RawRequestHandler) => void;
   const privateRequestHandlers = Reflect.get(
     server.server,
     '_requestHandlers'
   ) as Map<string, unknown> | undefined;
-  const sdkCallToolHandler = getSdkCallToolHandler(server);
   const taskCapableToolsRegistered = hasRegisteredTaskCapableTools(server);
-  const requireInterception = options?.requireInterception ?? true;
-
-  if (!sdkCallToolHandler) {
-    if (taskCapableToolsRegistered && requireInterception) {
-      throw Error(
-        'Task-capable tools are registered but SDK tools/call interception is unavailable. Upgrade compatibility or disable strict interception with TASKS_REQUIRE_INTERCEPTION=false.'
-      );
-    }
-
-    logWarn(
-      'Task call interception disabled: SDK tools/call handler unavailable; task-capable tools require MCP SDK compatibility update',
-      { sdkVersion: 'unknown' },
-      Loggers.LOG_TASKS
-    );
-  }
-
-  if (sdkCallToolHandler) {
-    setRawRequestHandler('tools/call', async (request, extra) => {
-      const parsedExtra = parseHandlerExtra(extra);
-      const requestId =
-        parsedExtra?.requestId !== undefined
-          ? String(parsedExtra.requestId)
-          : randomUUID();
-
-      return runWithRequestContext(
-        {
-          requestId,
-          operationId: requestId,
-          ...(parsedExtra?.sessionId
-            ? { sessionId: parsedExtra.sessionId }
-            : {}),
-        },
-        () => {
-          const toolName =
-            isObject(request) &&
-            isObject(request['params']) &&
-            typeof request['params']['name'] === 'string'
-              ? request['params']['name']
-              : '';
-
-          // Only intercept task-capable tools managed by the local task registry.
-          // Delegate all other tools to the SDK handler to avoid shadowing future tools.
-          if (!hasTaskCapableTool(server, toolName)) {
-            return sdkCallToolHandler(request, extra) as Promise<ServerResult>;
-          }
-
-          const parsed = parseExtendedCallToolRequest(request);
-          const context = resolveToolCallContext(
-            parsedExtra,
-            parsed.params._meta
-          );
-          logDebug(
-            'Intercepted task-capable tool call',
-            {
-              tool: toolName,
-              taskRequested: getTaskMeta(parsed.params) !== undefined,
-              hasProgressToken:
-                parsed.params._meta?.progressToken !== undefined,
-            },
-            Loggers.LOG_TASKS
-          );
-          return handleToolCallRequest(server, parsed, context);
-        }
-      );
-    });
-  }
-
-  setRawRequestHandler('tasks/get', (request, extra) => {
-    const parsedRequest = TaskGetSchema.parse(request);
-    const { taskId } = parsedRequest.params;
-    const { ownerKey } = resolveOwnerScopedExtra(extra);
-    logDebug('tasks/get requested', { taskId }, Loggers.LOG_TASKS);
-    const task = taskManager.getTask(taskId, ownerKey);
-
-    if (!task) throwTaskNotFound();
-
-    return withRelatedTaskSummaryMeta(toTaskSummary(task), task.taskId);
-  });
-
-  setRawRequestHandler('tasks/result', (request, extra) => {
-    const parsedRequest = TaskResultSchema.parse(request);
-    const { taskId } = parsedRequest.params;
-    const { ownerKey } = resolveOwnerScopedExtra(extra);
-    logDebug('tasks/result requested', { taskId }, Loggers.LOG_TASKS);
-
-    const task = taskManager.getTask(taskId, ownerKey);
-    if (!task) throwTaskNotFound();
-    if (task.status === 'submitted' || task.status === 'working') {
-      throw createProtocolError(
-        ProtocolErrorCode.InvalidParams,
-        'Task result is not available until the task completes',
-        { taskId, status: task.status }
-      );
-    }
-    if (task.status === 'input_required') {
-      throw createProtocolError(
-        ProtocolErrorCode.InvalidParams,
-        'Task result is not available while the task is waiting for input',
-        { taskId, status: task.status }
-      );
-    }
-
-    try {
-      if (task.status === 'cancelled') {
-        throwStoredTaskError(task);
-      }
-
-      if (task.status === 'failed') {
-        throwStoredTaskError(task);
-      }
-
-      const result: ServerResult = isServerResult(task.result)
-        ? task.result
-        : { content: [] };
-
-      return withRelatedTaskMeta(result, task.taskId);
-    } finally {
-      // Shrink keepAlive only after the result has been fully constructed
-      // and is about to be delivered — avoids premature expiry if result
-      // construction throws.
-      taskManager.shrinkKeepAliveAfterDelivery(taskId);
-    }
-  });
-
-  setRawRequestHandler('tasks/list', (request, extra) => {
-    const parsedRequest = TaskListSchema.parse(request);
-    const { ownerKey } = resolveOwnerScopedExtra(extra);
-    const cursor = parsedRequest.params?.cursor;
-    logDebug(
-      'tasks/list requested',
-      { hasCursor: cursor !== undefined },
-      Loggers.LOG_TASKS
-    );
-
-    const { tasks, nextCursor } = taskManager.listTasks(
-      cursor === undefined ? { ownerKey } : { ownerKey, cursor }
-    );
-
-    return {
-      tasks: tasks.map((task) =>
-        withRelatedTaskSummaryMeta(toTaskSummary(task), task.taskId)
-      ),
-      nextCursor,
-    };
-  });
-
-  setRawRequestHandler('tasks/cancel', (request, extra) => {
-    const parsedRequest = TaskCancelSchema.parse(request);
-    const { taskId } = parsedRequest.params;
-    const { ownerKey } = resolveOwnerScopedExtra(extra);
-    logDebug('tasks/cancel requested', { taskId }, Loggers.LOG_TASKS);
-
-    const task = taskManager.cancelTask(taskId, ownerKey);
-    if (!task) throwTaskNotFound();
-
-    abortTaskExecution(taskId);
-
-    emitTaskStatusNotification(server, task);
-
-    return withRelatedTaskSummaryMeta(toTaskSummary(task), task.taskId);
-  });
 
   const tasksDeleteHandler = (
     request: unknown,
@@ -951,7 +715,6 @@ export function registerTaskHandlers(
   }
 
   return {
-    interceptedToolsCall: sdkCallToolHandler !== null,
     taskCapableToolsRegistered,
   };
 }

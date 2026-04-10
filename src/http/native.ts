@@ -555,6 +555,10 @@ export function createTransportAdapter(
       ),
     close: () => transportImpl.close(),
 
+    get sessionId() {
+      return transportImpl.sessionId;
+    },
+
     get onclose() {
       return oncloseHandler;
     },

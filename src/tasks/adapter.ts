@@ -6,9 +6,17 @@ import type {
   TaskStore,
 } from '@modelcontextprotocol/server';
 
+import { resolveMcpSessionOwnerKey } from '../lib/core.js';
+
+import { abortTaskExecution } from './manager.js';
 import { taskManager, type TaskState } from './store.js';
 
 type SdkRequest = Parameters<TaskStore['createTask']>[2];
+
+function resolveOwnerKey(sessionId?: string): string {
+  if (!sessionId) return 'default';
+  return resolveMcpSessionOwnerKey(sessionId) ?? `session:${sessionId}`;
+}
 
 function toSdkTask(state: TaskState): Task {
   return {
@@ -23,8 +31,6 @@ function toSdkTask(state: TaskState): Task {
 }
 
 export class TaskStoreAdapter implements TaskStore {
-  private results = new Map<string, Result>();
-
   createTask(
     taskParams: SdkCreateTaskOptions,
     _requestId: RequestId,
@@ -32,16 +38,18 @@ export class TaskStoreAdapter implements TaskStore {
     sessionId?: string
   ): Promise<Task> {
     const keepAlive = taskParams.ttl ?? undefined;
+    const ownerKey = resolveOwnerKey(sessionId);
     const state = taskManager.createTask(
       keepAlive !== undefined ? { keepAlive } : {},
       'Task submitted',
-      sessionId ?? 'default'
+      ownerKey
     );
     return Promise.resolve(toSdkTask(state));
   }
 
   getTask(taskId: string, sessionId?: string): Promise<Task | null> {
-    const state = taskManager.getTask(taskId, sessionId);
+    const ownerKey = resolveOwnerKey(sessionId);
+    const state = taskManager.getTask(taskId, ownerKey);
     return Promise.resolve(state ? toSdkTask(state) : null);
   }
 
@@ -50,19 +58,18 @@ export class TaskStoreAdapter implements TaskStore {
     status: 'completed' | 'failed',
     result: Result
   ): Promise<void> {
-    this.results.set(taskId, result);
-    taskManager.updateTask(taskId, { status });
+    taskManager.updateTask(taskId, { status, result });
     return Promise.resolve();
   }
 
   getTaskResult(taskId: string): Promise<Result> {
-    const stored = this.results.get(taskId);
-    if (stored) return Promise.resolve(stored);
-
     const state = taskManager.getTask(taskId);
-    if (state?.result) return Promise.resolve(state.result as Result);
-
-    return Promise.resolve({});
+    const result =
+      state?.result !== undefined && state.result !== null
+        ? (state.result as Result)
+        : {};
+    taskManager.shrinkKeepAliveAfterDelivery(taskId);
+    return Promise.resolve(result);
   }
 
   updateTaskStatus(
@@ -74,6 +81,9 @@ export class TaskStoreAdapter implements TaskStore {
       status,
       ...(statusMessage ? { statusMessage } : {}),
     });
+    if (status === 'cancelled') {
+      abortTaskExecution(taskId);
+    }
     return Promise.resolve();
   }
 
@@ -81,8 +91,9 @@ export class TaskStoreAdapter implements TaskStore {
     cursor?: string,
     sessionId?: string
   ): Promise<{ tasks: Task[]; nextCursor?: string }> {
+    const ownerKey = resolveOwnerKey(sessionId);
     const result = taskManager.listTasks({
-      ownerKey: sessionId ?? 'default',
+      ownerKey,
       ...(cursor ? { cursor } : {}),
     });
     return Promise.resolve({

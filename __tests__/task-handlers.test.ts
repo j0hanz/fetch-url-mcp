@@ -12,11 +12,13 @@ import {
   type ProgressNotification,
 } from '../src/lib/mcp-interop.js';
 import {
+  abortTaskExecution,
   handleToolCallRequest,
   registerTaskCapableTool,
   registerTaskHandlers,
   unregisterTaskCapableTool,
 } from '../src/tasks/manager.js';
+import { taskManager, type TaskState } from '../src/tasks/store.js';
 
 type UnknownRequestHandler = (
   request: unknown,
@@ -29,56 +31,25 @@ function isUnknownRequestHandler(
   return typeof value === 'function';
 }
 
-function assertProtocolErrorLike(
-  error: unknown,
-  expected: {
-    code: number;
-    messageIncludes?: string;
-    data?: Record<string, unknown>;
-  }
-): void {
-  assert.ok(error instanceof Error);
-  assert.equal('code' in error ? error.code : undefined, expected.code);
-
-  if (expected.messageIncludes !== undefined) {
-    assert.match(error.message, new RegExp(expected.messageIncludes));
-  }
-
-  if (expected.data !== undefined) {
-    assert.deepEqual('data' in error ? error.data : undefined, expected.data);
-  }
-}
-
-function getTaskResultHandler(server: McpServer): UnknownRequestHandler {
-  const handlers: unknown = Reflect.get(server.server, '_requestHandlers');
-  assert.ok(handlers instanceof Map);
-  const handler = handlers.get('tasks/result');
-  assert.ok(isUnknownRequestHandler(handler));
-  return handler;
-}
-
-function getCancelHandler(server: McpServer): UnknownRequestHandler {
-  const handlers: unknown = Reflect.get(server.server, '_requestHandlers');
-  assert.ok(handlers instanceof Map);
-  const handler = handlers.get('tasks/cancel');
-  assert.ok(isUnknownRequestHandler(handler));
-  return handler;
-}
-
-function getTaskGetHandler(server: McpServer): UnknownRequestHandler {
-  const handlers: unknown = Reflect.get(server.server, '_requestHandlers');
-  assert.ok(handlers instanceof Map);
-  const handler = handlers.get('tasks/get');
-  assert.ok(isUnknownRequestHandler(handler));
-  return handler;
-}
-
 function getDeleteHandler(server: McpServer): UnknownRequestHandler {
   const handlers: unknown = Reflect.get(server.server, '_requestHandlers');
   assert.ok(handlers instanceof Map);
   const handler = handlers.get('tasks/delete');
   assert.ok(isUnknownRequestHandler(handler));
   return handler;
+}
+
+function getTaskDirect(taskId: string, ownerKey = 'default'): TaskState {
+  const task = taskManager.getTask(taskId, ownerKey);
+  assert.ok(task, `Task ${taskId} not found`);
+  return task;
+}
+
+function cancelTaskDirect(taskId: string, ownerKey = 'default'): TaskState {
+  const task = taskManager.cancelTask(taskId, ownerKey);
+  assert.ok(task, `Task ${taskId} not found for cancellation`);
+  abortTaskExecution(taskId);
+  return task;
 }
 
 function createTaskTestServer(): McpServer {
@@ -136,7 +107,7 @@ describe('task creation notifications', () => {
     };
 
     try {
-      registerTaskHandlers(server, { requireInterception: false });
+      registerTaskHandlers(server);
 
       const result = (await handleToolCallRequest(
         server,
@@ -187,18 +158,16 @@ describe('task creation notifications', () => {
 });
 
 async function waitForTaskSnapshot(
-  server: McpServer,
+  _server: McpServer,
   taskId: string,
   predicate: (task: Record<string, unknown>) => boolean
 ): Promise<Record<string, unknown>> {
-  const getTask = getTaskGetHandler(server);
-
   for (let attempt = 0; attempt < 50; attempt++) {
-    const snapshot = (await getTask(
-      { method: 'tasks/get', params: { taskId } },
-      undefined
-    )) as Record<string, unknown>;
-    if (predicate(snapshot)) return snapshot;
+    const task = taskManager.getTask(taskId);
+    if (task) {
+      const snapshot = task as unknown as Record<string, unknown>;
+      if (predicate(snapshot)) return snapshot;
+    }
     await setTimeoutPromise(10);
   }
 
@@ -228,7 +197,7 @@ describe('progress notifications', () => {
     const notifications: ProgressNotification[] = [];
 
     try {
-      registerTaskHandlers(server, { requireInterception: false });
+      registerTaskHandlers(server);
 
       await handleToolCallRequest(
         server,
@@ -291,7 +260,7 @@ describe('progress notifications', () => {
     const notifications: ProgressNotification[] = [];
 
     try {
-      registerTaskHandlers(server, { requireInterception: false });
+      registerTaskHandlers(server);
 
       await handleToolCallRequest(
         server,
@@ -352,7 +321,7 @@ describe('progress notifications', () => {
     const notifications: ProgressNotification[] = [];
 
     try {
-      registerTaskHandlers(server, { requireInterception: false });
+      registerTaskHandlers(server);
 
       const createTask = (await handleToolCallRequest(
         server,
@@ -384,10 +353,10 @@ describe('progress notifications', () => {
         (task) => task['status'] === 'completed'
       );
 
-      const result = (await getTaskResultHandler(server)(
-        { method: 'tasks/result', params: { taskId: createTask.task.taskId } },
-        undefined
-      )) as { content: Array<{ type: string; text: string }> };
+      const task = getTaskDirect(createTask.task.taskId);
+      const result = task.result as {
+        content: Array<{ type: string; text: string }>;
+      };
 
       assert.equal(result.content[0]?.text, 'done');
 
@@ -442,7 +411,7 @@ describe('progress notifications', () => {
     const notifications: ProgressNotification[] = [];
 
     try {
-      registerTaskHandlers(server, { requireInterception: false });
+      registerTaskHandlers(server);
 
       const createTask = (await handleToolCallRequest(
         server,
@@ -474,10 +443,8 @@ describe('progress notifications', () => {
         (task) => task['status'] === 'completed'
       );
 
-      await getTaskResultHandler(server)(
-        { method: 'tasks/result', params: { taskId: createTask.task.taskId } },
-        undefined
-      );
+      const task = getTaskDirect(createTask.task.taskId);
+      assert.equal(task.status, 'completed');
 
       await setTimeoutPromise(250);
 
@@ -524,7 +491,7 @@ describe('task progress state', () => {
     });
 
     try {
-      registerTaskHandlers(server, { requireInterception: false });
+      registerTaskHandlers(server);
 
       const createTask = (await handleToolCallRequest(
         server,
@@ -563,10 +530,8 @@ describe('task progress state', () => {
         (task) => task['status'] === 'completed'
       );
 
-      await getTaskResultHandler(server)(
-        { method: 'tasks/result', params: { taskId: createTask.task.taskId } },
-        undefined
-      );
+      const completedTask = getTaskDirect(createTask.task.taskId);
+      assert.equal(completedTask.status, 'completed');
     } finally {
       unregisterTaskCapableTool(server, toolName);
       await server.close();
@@ -593,7 +558,7 @@ describe('task result availability', () => {
     });
 
     try {
-      registerTaskHandlers(server, { requireInterception: false });
+      registerTaskHandlers(server);
 
       const taskResult = (await handleToolCallRequest(
         server,
@@ -613,25 +578,9 @@ describe('task result availability', () => {
         { ownerKey: 'default' }
       )) as { task: { taskId: string } };
 
-      let error: unknown;
-
-      try {
-        await getTaskResultHandler(server)(
-          {
-            method: 'tasks/result',
-            params: { taskId: taskResult.task.taskId },
-          },
-          undefined
-        );
-      } catch (caught) {
-        error = caught;
-      }
-
-      assertProtocolErrorLike(error, {
-        code: ProtocolErrorCode.InvalidParams,
-        messageIncludes: 'not available',
-        data: { taskId: taskResult.task.taskId, status: 'working' },
-      });
+      const task = getTaskDirect(taskResult.task.taskId);
+      assert.equal(task.status, 'working');
+      assert.equal(task.result, undefined);
     } finally {
       gate.resolve();
       unregisterTaskCapableTool(server, toolName);
@@ -664,7 +613,7 @@ describe('task result failure normalization', () => {
     });
 
     try {
-      registerTaskHandlers(server, { requireInterception: false });
+      registerTaskHandlers(server);
 
       const taskResult = (await handleToolCallRequest(
         server,
@@ -690,24 +639,9 @@ describe('task result failure normalization', () => {
         (task) => task['status'] === 'failed'
       );
 
-      let error: unknown;
-
-      try {
-        await getTaskResultHandler(server)(
-          {
-            method: 'tasks/result',
-            params: { taskId: taskResult.task.taskId },
-          },
-          undefined
-        );
-      } catch (caught) {
-        error = caught;
-      }
-
-      assertProtocolErrorLike(error, {
-        code: ProtocolErrorCode.InternalError,
-        messageIncludes: 'tool reported failure',
-      });
+      const task = getTaskDirect(taskResult.task.taskId);
+      assert.equal(task.status, 'failed');
+      assert.ok(task.statusMessage?.includes('tool reported failure'));
     } finally {
       unregisterTaskCapableTool(server, toolName);
       await server.close();
@@ -728,7 +662,7 @@ describe('task result failure normalization', () => {
     });
 
     try {
-      registerTaskHandlers(server, { requireInterception: false });
+      registerTaskHandlers(server);
 
       const taskResult = (await handleToolCallRequest(
         server,
@@ -754,24 +688,11 @@ describe('task result failure normalization', () => {
         (task) => task['status'] === 'failed'
       );
 
-      let error: unknown;
-
-      try {
-        await getTaskResultHandler(server)(
-          {
-            method: 'tasks/result',
-            params: { taskId: taskResult.task.taskId },
-          },
-          undefined
-        );
-      } catch (caught) {
-        error = caught;
-      }
-
-      assertProtocolErrorLike(error, {
-        code: ProtocolErrorCode.InternalError,
-        messageIncludes: 'boom',
-      });
+      const task = getTaskDirect(taskResult.task.taskId);
+      assert.equal(task.status, 'failed');
+      assert.ok(task.statusMessage?.includes('boom'));
+      assert.ok(task.error);
+      assert.equal(task.error.code, ProtocolErrorCode.InternalError);
     } finally {
       unregisterTaskCapableTool(server, toolName);
       await server.close();
@@ -799,7 +720,7 @@ describe('task result failure normalization', () => {
     });
 
     try {
-      registerTaskHandlers(server, { requireInterception: false });
+      registerTaskHandlers(server);
 
       const taskResult = (await handleToolCallRequest(
         server,
@@ -825,25 +746,12 @@ describe('task result failure normalization', () => {
         (task) => task['status'] === 'failed'
       );
 
-      let error: unknown;
-
-      try {
-        await getTaskResultHandler(server)(
-          {
-            method: 'tasks/result',
-            params: { taskId: taskResult.task.taskId },
-          },
-          undefined
-        );
-      } catch (caught) {
-        error = caught;
-      }
-
-      assertProtocolErrorLike(error, {
-        code: ProtocolErrorCode.InternalError,
-        messageIncludes: 'broken',
-        data: { reason: 'test' },
-      });
+      const task = getTaskDirect(taskResult.task.taskId);
+      assert.equal(task.status, 'failed');
+      assert.ok(task.statusMessage?.includes('broken'));
+      assert.ok(task.error);
+      assert.equal(task.error.code, ProtocolErrorCode.InternalError);
+      assert.deepEqual(task.error.data, { reason: 'test' });
     } finally {
       unregisterTaskCapableTool(server, toolName);
       await server.close();
@@ -867,7 +775,7 @@ describe('task result for cancelled task', () => {
     });
 
     try {
-      registerTaskHandlers(server, { requireInterception: false });
+      registerTaskHandlers(server);
 
       const taskResult = (await handleToolCallRequest(
         server,
@@ -888,31 +796,10 @@ describe('task result for cancelled task', () => {
       )) as { task: { taskId: string } };
 
       // Cancel the task
-      const cancelHandler = getCancelHandler(server);
-      await cancelHandler(
-        { method: 'tasks/cancel', params: { taskId: taskResult.task.taskId } },
-        undefined
-      );
+      cancelTaskDirect(taskResult.task.taskId);
 
-      let error: unknown;
-
-      try {
-        await getTaskResultHandler(server)(
-          {
-            method: 'tasks/result',
-            params: { taskId: taskResult.task.taskId },
-          },
-          undefined
-        );
-      } catch (caught) {
-        error = caught;
-      }
-
-      assertProtocolErrorLike(error, {
-        code: -32_000,
-        messageIncludes: 'The task was cancelled by request.',
-        data: { code: 'ABORTED' },
-      });
+      const task = getTaskDirect(taskResult.task.taskId);
+      assert.equal(task.status, 'cancelled');
     } finally {
       unregisterTaskCapableTool(server, toolName);
       await server.close();
@@ -935,7 +822,7 @@ describe('required task support enforcement', () => {
     });
 
     try {
-      registerTaskHandlers(server, { requireInterception: false });
+      registerTaskHandlers(server);
 
       await assert.rejects(
         () =>
@@ -974,7 +861,7 @@ describe('model-immediate-response in CreateTaskResult', () => {
     });
 
     try {
-      registerTaskHandlers(server, { requireInterception: false });
+      registerTaskHandlers(server);
 
       const result = (await handleToolCallRequest(
         server,
@@ -1022,7 +909,7 @@ describe('model-immediate-response in CreateTaskResult', () => {
     });
 
     try {
-      registerTaskHandlers(server, { requireInterception: false });
+      registerTaskHandlers(server);
 
       const result = (await handleToolCallRequest(
         server,
@@ -1068,7 +955,7 @@ describe('tasks/delete handler', () => {
     });
 
     try {
-      registerTaskHandlers(server, { requireInterception: false });
+      registerTaskHandlers(server);
 
       const taskResult = (await handleToolCallRequest(
         server,
@@ -1094,10 +981,9 @@ describe('tasks/delete handler', () => {
         (task) => task['status'] === 'completed'
       );
 
-      await getTaskResultHandler(server)(
-        { method: 'tasks/result', params: { taskId: taskResult.task.taskId } },
-        undefined
-      );
+      // Verify task is completed
+      const task = getTaskDirect(taskResult.task.taskId);
+      assert.equal(task.status, 'completed');
 
       // Delete the terminal task
       const deleteHandler = getDeleteHandler(server);
@@ -1108,15 +994,8 @@ describe('tasks/delete handler', () => {
       assert.deepEqual(deleteResult, {});
 
       // Verify task is gone
-      const getTask = getTaskGetHandler(server);
-      await assert.rejects(
-        async () =>
-          getTask(
-            { method: 'tasks/get', params: { taskId: taskResult.task.taskId } },
-            undefined
-          ),
-        (err: unknown) => err instanceof ProtocolError
-      );
+      const deleted = taskManager.getTask(taskResult.task.taskId);
+      assert.equal(deleted, undefined);
     } finally {
       unregisterTaskCapableTool(server, toolName);
       await server.close();
@@ -1138,7 +1017,7 @@ describe('tasks/delete handler', () => {
     });
 
     try {
-      registerTaskHandlers(server, { requireInterception: false });
+      registerTaskHandlers(server);
 
       const taskResult = (await handleToolCallRequest(
         server,
@@ -1174,11 +1053,7 @@ describe('tasks/delete handler', () => {
       );
 
       // Clean up by cancelling
-      const cancelHandler = getCancelHandler(server);
-      await cancelHandler(
-        { method: 'tasks/cancel', params: { taskId: taskResult.task.taskId } },
-        undefined
-      );
+      cancelTaskDirect(taskResult.task.taskId);
     } finally {
       unregisterTaskCapableTool(server, toolName);
       await server.close();
@@ -1201,7 +1076,7 @@ describe('task creation uses client-provided ID', () => {
     });
 
     try {
-      registerTaskHandlers(server, { requireInterception: false });
+      registerTaskHandlers(server);
 
       const taskResult = (await handleToolCallRequest(
         server,

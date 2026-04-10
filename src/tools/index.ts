@@ -40,12 +40,11 @@ import {
 } from '../schemas.js';
 import {
   registerTaskCapableTool,
-  setTaskCapableToolSupport,
   type TaskCapableToolDescriptor,
   type TaskCapableToolSupport,
   unregisterTaskCapableTool,
-  withRequestContextIfMissing,
 } from '../tasks/index.js';
+import { createToolTaskHandler } from '../tasks/tool-task-handler.js';
 
 // Area contract: MCP tool registration and fetch-url response shaping.
 // Export only tool-facing registration and handler primitives; keep transport/session ownership and generic shared helpers out.
@@ -436,7 +435,8 @@ export function registerTools(server: McpServer): ToolRegistrationControls {
   const descriptor = createTaskCapableDescriptor();
   registerTaskCapableTool(server, descriptor);
 
-  const registeredTool = server.registerTool(
+  const handler = createToolTaskHandler({ server, descriptor });
+  const registeredTool = server.experimental.tasks.registerToolTask(
     TOOL_DEFINITION.name,
     {
       title: TOOL_DEFINITION.title,
@@ -445,19 +445,14 @@ export function registerTools(server: McpServer): ToolRegistrationControls {
       outputSchema: TOOL_DEFINITION.outputSchema,
       annotations: TOOL_DEFINITION.annotations,
       execution: { taskSupport: 'optional' as const },
-      icons: [TOOL_ICON],
-    } as {
-      inputSchema: typeof fetchUrlInputSchema;
-      outputSchema: typeof fetchUrlOutputSchema;
-    } & Record<string, unknown>,
-    withRequestContextIfMissing(TOOL_DEFINITION.handler)
+    },
+    handler
   );
   registerToolPresentation(server, TOOL_DEFINITION.name, {
     icons: [TOOL_ICON],
   });
 
   const updateTaskSupport = (support: TaskCapableToolSupport): void => {
-    setTaskCapableToolSupport(server, FETCH_URL_TOOL_NAME, support);
     registeredTool.execution = { taskSupport: support };
   };
 
