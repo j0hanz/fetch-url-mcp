@@ -1,5 +1,4 @@
 import {
-  type ListToolsResult,
   type McpServer,
   ProtocolError,
   RELATED_TASK_META_KEY,
@@ -152,29 +151,6 @@ export function acceptsJsonAndEventStream(
  * ================================================================================================= */
 
 type CleanupCallback = () => void;
-type RequestHandlerFn = (request: unknown, extra?: unknown) => Promise<unknown>;
-interface ToolPresentation {
-  icons?: { src: string; mimeType?: string; sizes?: string[] }[];
-}
-
-type ListToolsEntry = ListToolsResult['tools'][number];
-
-function getNestedRecord(
-  value: Record<PropertyKey, unknown>,
-  key: string
-): Record<PropertyKey, unknown> | undefined {
-  const nested = value[key];
-  return isObject(nested) ? nested : undefined;
-}
-
-function isListToolsEntry(value: unknown): value is ListToolsEntry {
-  return isObject(value);
-}
-
-function isListToolsResult(value: unknown): value is ListToolsResult {
-  return isObject(value) && Array.isArray(value['tools']);
-}
-
 const patchedCleanupServers = new WeakSet<McpServer>();
 const serverCleanupCallbacks = new WeakMap<McpServer, Set<CleanupCallback>>();
 
@@ -225,122 +201,6 @@ export function registerServerLifecycleCleanup(
 ): void {
   ensureServerCleanupHooks(server);
   getServerCleanupCallbackSet(server).add(callback);
-}
-
-/**
- * Retrieves the SDK's internal request-handler map.
- *
- * Depends on SDK private API `_requestHandlers` (verified against ^1.28).
- * If the SDK changes this internal, the sdk-compat-guard.test.ts tests will fail.
- */
-export function getSdkCallToolHandler(
-  server: McpServer
-): RequestHandlerFn | null {
-  const maybeHandlers: unknown = Reflect.get(server.server, '_requestHandlers');
-  if (!(maybeHandlers instanceof Map)) return null;
-
-  const handler: unknown = maybeHandlers.get('tools/call');
-  return typeof handler === 'function' ? (handler as RequestHandlerFn) : null;
-}
-
-function getSdkListToolsHandler(server: McpServer): RequestHandlerFn | null {
-  const maybeHandlers: unknown = Reflect.get(server.server, '_requestHandlers');
-  if (!(maybeHandlers instanceof Map)) return null;
-
-  const handler: unknown = maybeHandlers.get('tools/list');
-  return typeof handler === 'function' ? (handler as RequestHandlerFn) : null;
-}
-
-/**
- * Patches the SDK's internal capabilities to enable/disable task-mode tool calls.
- *
- * Depends on SDK private API `_capabilities.tasks.requests` (verified against ^1.28).
- * If the SDK changes this internal, the sdk-compat-guard.test.ts tests will fail.
- */
-export function setTaskToolCallCapability(
-  server: McpServer,
-  enabled: boolean
-): void {
-  const capabilities: unknown = Reflect.get(server.server, '_capabilities');
-  if (!isObject(capabilities)) return;
-
-  const tasks = getNestedRecord(capabilities, 'tasks');
-  if (!tasks) return;
-
-  const requests = getNestedRecord(tasks, 'requests');
-  if (!requests) return;
-
-  if (enabled) {
-    requests['tools'] = { call: {} };
-    return;
-  }
-
-  delete requests['tools'];
-}
-
-const toolPresentationByServer = new WeakMap<
-  McpServer,
-  Map<string, ToolPresentation>
->();
-const patchedToolListServers = new WeakSet<McpServer>();
-
-function getServerToolPresentationMap(
-  server: McpServer
-): Map<string, ToolPresentation> {
-  let toolMap = toolPresentationByServer.get(server);
-  if (toolMap) return toolMap;
-
-  toolMap = new Map<string, ToolPresentation>();
-  toolPresentationByServer.set(server, toolMap);
-  registerServerLifecycleCleanup(server, () => {
-    toolPresentationByServer.delete(server);
-  });
-  return toolMap;
-}
-
-function patchSdkToolListHandler(server: McpServer): void {
-  if (patchedToolListServers.has(server)) return;
-
-  const sdkListToolsHandler = getSdkListToolsHandler(server);
-  if (!sdkListToolsHandler) return;
-
-  patchedToolListServers.add(server);
-  server.server.setRequestHandler(
-    'tools/list',
-    async (request, extra): Promise<ListToolsResult> => {
-      const rawResult = await sdkListToolsHandler(request, extra);
-      if (!isListToolsResult(rawResult)) {
-        throw Error('SDK tools/list handler returned an invalid response');
-      }
-
-      const presentations = getServerToolPresentationMap(server);
-      return {
-        ...rawResult,
-        tools: rawResult.tools.map((tool) => {
-          if (!isListToolsEntry(tool) || typeof tool.name !== 'string') {
-            return tool;
-          }
-
-          const presentation = presentations.get(tool.name);
-          if (!presentation?.icons?.length) return tool;
-
-          return {
-            ...tool,
-            icons: presentation.icons,
-          };
-        }),
-      };
-    }
-  );
-}
-
-export function registerToolPresentation(
-  server: McpServer,
-  name: string,
-  presentation: ToolPresentation
-): void {
-  getServerToolPresentationMap(server).set(name, presentation);
-  patchSdkToolListHandler(server);
 }
 
 /* =================================================================================================

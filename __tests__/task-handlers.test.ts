@@ -32,9 +32,7 @@ function isUnknownRequestHandler(
 }
 
 function getDeleteHandler(server: McpServer): UnknownRequestHandler {
-  const handlers: unknown = Reflect.get(server.server, '_requestHandlers');
-  assert.ok(handlers instanceof Map);
-  const handler = handlers.get('tasks/delete');
+  const handler = server.server.fallbackRequestHandler;
   assert.ok(isUnknownRequestHandler(handler));
   return handler;
 }
@@ -57,6 +55,7 @@ function createTaskTestServer(): McpServer {
     { name: 'task-handler-test', version: '0.0.0' },
     {
       capabilities: {
+        tools: {},
         tasks: { list: {}, cancel: {}, requests: { tools: { call: {} } } },
       },
     }

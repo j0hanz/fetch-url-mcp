@@ -14,7 +14,6 @@ import {
   setMcpServer,
 } from './lib/core.js';
 import { toError } from './lib/error/index.js';
-import { setTaskToolCallCapability } from './lib/mcp-interop.js';
 import type { IconInfo } from './lib/utils.js';
 
 import {
@@ -58,32 +57,30 @@ type McpServerCapabilities = NonNullable<
 >;
 
 function createServerCapabilities(): McpServerCapabilities {
+  const taskCapableToolCalls = config.tools.enabled.includes('fetch-url');
+
   return {
     completions: {},
     logging: {},
     resources: { subscribe: true, listChanged: true },
-    // SDK auto-adds listChanged to tools capability at runtime.
     tools: {},
     prompts: {},
     tasks: {
       list: {},
       cancel: {},
       delete: {},
-      requests: {
-        tools: {
-          call: {},
-        },
-      },
+      ...(taskCapableToolCalls
+        ? {
+            requests: {
+              tools: {
+                call: {},
+              },
+            },
+          }
+        : {}),
       taskStore: new TaskStoreAdapter(),
     },
   };
-}
-
-function syncTaskCapabilityAdvertisement(
-  server: McpServer,
-  taskToolCallEnabled: boolean
-): void {
-  setTaskToolCallCapability(server, taskToolCallEnabled);
 }
 
 interface ServerInfo {
@@ -148,7 +145,6 @@ async function createMcpServerWithOptions(
   const taskRegistration = registerTaskHandlers(server);
   const taskToolCallEnabled = taskRegistration.taskCapableToolsRegistered;
   toolControls.setTaskSupport(taskToolCallEnabled ? 'optional' : 'forbidden');
-  syncTaskCapabilityAdvertisement(server, taskToolCallEnabled);
   registerLoggingSetLevelHandler(server);
   attachServerErrorHandler(server);
 

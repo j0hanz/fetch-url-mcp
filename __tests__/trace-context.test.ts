@@ -19,6 +19,7 @@ function createTaskTestServer(): McpServer {
     { name: 'trace-context-test', version: '0.0.0' },
     {
       capabilities: {
+        tools: {},
         tasks: { list: {}, cancel: {}, requests: { tools: { call: {} } } },
       },
     }

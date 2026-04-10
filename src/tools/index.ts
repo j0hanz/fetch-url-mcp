@@ -1,13 +1,15 @@
 import {
   type ContentBlock,
+  type ListToolsResult,
   type McpServer,
   ProtocolErrorCode,
+  type RegisteredTool,
   RELATED_TASK_META_KEY,
   type ServerResult,
   type ToolAnnotations,
 } from '@modelcontextprotocol/server';
 
-import type { z } from 'zod';
+import { z } from 'zod';
 
 import { config } from '../lib/config.js';
 import { Loggers, logInfo } from '../lib/core.js';
@@ -16,7 +18,6 @@ import {
   createProgressReporter,
   createProtocolError,
   type ProgressReporter,
-  registerToolPresentation,
   type ToolHandlerExtra,
   validateOrThrow,
 } from '../lib/mcp-interop.js';
@@ -44,7 +45,6 @@ import {
   type TaskCapableToolSupport,
   unregisterTaskCapableTool,
 } from '../tasks/index.js';
-import { createToolTaskHandler } from '../tasks/tool-task-handler.js';
 
 // Area contract: MCP tool registration and fetch-url response shaping.
 // Export only tool-facing registration and handler primitives; keep transport/session ownership and generic shared helpers out.
@@ -406,6 +406,36 @@ export interface ToolRegistrationControls {
   setTaskSupport: (support: TaskCapableToolSupport) => void;
 }
 
+function buildListToolEntry(
+  taskSupport: TaskCapableToolSupport
+): ListToolsResult['tools'][number] {
+  return {
+    name: TOOL_DEFINITION.name,
+    title: TOOL_DEFINITION.title,
+    description: TOOL_DEFINITION.description,
+    annotations: TOOL_DEFINITION.annotations,
+    inputSchema: z.toJSONSchema(
+      TOOL_DEFINITION.inputSchema
+    ) as ListToolsResult['tools'][number]['inputSchema'],
+    outputSchema: z.toJSONSchema(
+      TOOL_DEFINITION.outputSchema
+    ) as ListToolsResult['tools'][number]['outputSchema'],
+    execution: { taskSupport },
+    icons: [TOOL_ICON],
+  };
+}
+
+function registerToolListHandler(
+  server: McpServer,
+  getTaskSupport: () => TaskCapableToolSupport
+): void {
+  server.server.setRequestHandler('tools/list', (): ListToolsResult => {
+    return {
+      tools: [buildListToolEntry(getTaskSupport())],
+    };
+  });
+}
+
 function createTaskCapableDescriptor(): TaskCapableToolDescriptor<FetchUrlInput> {
   return {
     name: TOOL_DEFINITION.name,
@@ -427,6 +457,12 @@ function createTaskCapableDescriptor(): TaskCapableToolDescriptor<FetchUrlInput>
 export function registerTools(server: McpServer): ToolRegistrationControls {
   if (!config.tools.enabled.includes(FETCH_URL_TOOL_NAME)) {
     unregisterTaskCapableTool(server, FETCH_URL_TOOL_NAME);
+    server.server.setRequestHandler(
+      'tools/list',
+      (): ListToolsResult => ({
+        tools: [],
+      })
+    );
     return {
       setTaskSupport: () => {},
     };
@@ -435,8 +471,7 @@ export function registerTools(server: McpServer): ToolRegistrationControls {
   const descriptor = createTaskCapableDescriptor();
   registerTaskCapableTool(server, descriptor);
 
-  const handler = createToolTaskHandler({ server, descriptor });
-  const registeredTool = server.experimental.tasks.registerToolTask(
+  const registeredTool: RegisteredTool = server.registerTool(
     TOOL_DEFINITION.name,
     {
       title: TOOL_DEFINITION.title,
@@ -444,15 +479,15 @@ export function registerTools(server: McpServer): ToolRegistrationControls {
       inputSchema: TOOL_DEFINITION.inputSchema,
       outputSchema: TOOL_DEFINITION.outputSchema,
       annotations: TOOL_DEFINITION.annotations,
-      execution: { taskSupport: 'optional' as const },
     },
-    handler
+    TOOL_DEFINITION.handler
   );
-  registerToolPresentation(server, TOOL_DEFINITION.name, {
-    icons: [TOOL_ICON],
-  });
+  let currentTaskSupport: TaskCapableToolSupport = 'optional';
+  registerToolListHandler(server, () => currentTaskSupport);
 
   const updateTaskSupport = (support: TaskCapableToolSupport): void => {
+    currentTaskSupport = support;
+    descriptor.taskSupport = support;
     registeredTool.execution = { taskSupport: support };
   };
 

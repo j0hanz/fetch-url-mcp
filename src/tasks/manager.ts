@@ -602,9 +602,10 @@ function enqueueTaskToolExecution(
 export async function handleToolCallRequest(
   server: McpServer,
   request: ExtendedCallToolRequest,
-  context: ToolCallContext
+  context?: ToolCallContext | ServerContext
 ): Promise<ServerResult> {
   const { params } = request;
+  const resolvedContext = resolveToolCallContext(context, params._meta);
 
   return runWithTraceContext(params._meta, async () => {
     // Validate the tool name first so an unknown tool always produces MethodNotFound
@@ -628,7 +629,7 @@ export async function handleToolCallRequest(
         tool,
         params,
         taskMeta,
-        context,
+        resolvedContext,
         parsed.value
       );
     }
@@ -645,7 +646,7 @@ export async function handleToolCallRequest(
 
     try {
       return await tool.execute(parsed.value, {
-        ...buildToolHandlerExtra(context, params._meta),
+        ...buildToolHandlerExtra(resolvedContext, params._meta),
         progressState,
       });
     } finally {
@@ -685,34 +686,31 @@ interface TaskHandlerRegistrationResult {
 export function registerTaskHandlers(
   server: McpServer
 ): TaskHandlerRegistrationResult {
-  const privateRequestHandlers = Reflect.get(
-    server.server,
-    '_requestHandlers'
-  ) as Map<string, unknown> | undefined;
   const taskCapableToolsRegistered = hasRegisteredTaskCapableTools(server);
 
-  const tasksDeleteHandler = (
-    request: unknown,
-    extra: unknown
-  ): Record<string, never> => {
+  server.server.setRequestHandler('tools/call', async (request, ctx) => {
+    const parsedRequest = parseExtendedCallToolRequest(request);
+    return (await handleToolCallRequest(server, parsedRequest, ctx)) as never;
+  });
+
+  server.server.fallbackRequestHandler = (request, ctx) => {
+    if (request.method !== 'tasks/delete') {
+      throw createProtocolError(
+        ProtocolErrorCode.MethodNotFound,
+        `Method not found: ${request.method}`
+      );
+    }
+
     const parsedRequest = TaskDeleteSchema.parse(request);
     const { taskId } = parsedRequest.params;
-    const { ownerKey } = resolveOwnerScopedExtra(extra);
+    const { ownerKey } = resolveOwnerScopedExtra(ctx);
     logDebug('tasks/delete requested', { taskId }, Loggers.LOG_TASKS);
 
     const deleted = taskManager.deleteTask(taskId, ownerKey);
     if (!deleted) throwTaskNotFound();
 
-    return {};
+    return Promise.resolve({});
   };
-
-  if (privateRequestHandlers instanceof Map) {
-    privateRequestHandlers.set('tasks/delete', tasksDeleteHandler);
-  } else {
-    throw Error(
-      'Private request handler Map is unavailable; tasks/delete cannot be registered.'
-    );
-  }
 
   return {
     taskCapableToolsRegistered,
@@ -792,8 +790,14 @@ function normalizeAuthInfo(
   return normalized.clientId || normalized.token ? normalized : undefined;
 }
 
+function isServerContextLike(
+  extra: unknown
+): extra is Pick<ServerContext, 'mcpReq' | 'http' | 'sessionId'> {
+  return isObject(extra) && 'mcpReq' in extra;
+}
+
 export function parseHandlerExtra(extra: unknown): HandlerExtra | undefined {
-  if (!isObject(extra)) return undefined;
+  if (!isServerContextLike(extra) && !isObject(extra)) return undefined;
   const ctx = extra as Partial<ServerContext>;
 
   const parsed: HandlerExtra = {};
@@ -902,9 +906,24 @@ function resolveToolExecutionContext(
 }
 
 export function resolveToolCallContext(
-  extra?: HandlerExtra,
+  extra?: HandlerExtra | ToolCallContext | ServerContext,
   requestMeta?: ToolCallRequestMeta
 ): ToolCallContext {
+  if (isServerContextLike(extra)) {
+    return resolveToolExecutionContext(parseHandlerExtra(extra), requestMeta);
+  }
+
+  if (extra && 'ownerKey' in extra && typeof extra.ownerKey === 'string') {
+    return compact({
+      ownerKey: extra.ownerKey,
+      sessionId: extra.sessionId,
+      signal: extra.signal,
+      requestId: extra.requestId,
+      sendNotification: extra.sendNotification,
+      requestMeta: sanitizeToolCallMeta(requestMeta ?? extra.requestMeta),
+    }) as ToolCallContext;
+  }
+
   return resolveToolExecutionContext(extra, requestMeta);
 }
 
