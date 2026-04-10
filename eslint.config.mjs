@@ -3,7 +3,6 @@ import eslintConfigPrettier from 'eslint-config-prettier';
 import deMorgan from 'eslint-plugin-de-morgan';
 import depend from 'eslint-plugin-depend';
 import sonarjs from 'eslint-plugin-sonarjs';
-import unicorn from 'eslint-plugin-unicorn';
 import unusedImports from 'eslint-plugin-unused-imports';
 import { defineConfig } from 'eslint/config';
 import tseslint from 'typescript-eslint';
