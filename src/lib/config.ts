@@ -536,6 +536,7 @@ interface AppServerHttpConfig {
   keepAliveTimeoutBufferMs: number | undefined;
   maxHeadersCount: number | undefined;
   maxConnections: number;
+  trustProxy: boolean;
   blockPrivateConnections: boolean;
   shutdownCloseIdleConnections: boolean;
   shutdownCloseAllConnections: boolean;
@@ -579,6 +580,11 @@ function buildServerConfig(): AppServerConfig {
         min: 0,
         envName: 'SERVER_MAX_CONNECTIONS',
       }),
+      trustProxy: EnvParser.boolean(
+        env['SERVER_TRUST_PROXY'],
+        false,
+        'SERVER_TRUST_PROXY'
+      ),
       blockPrivateConnections: EnvParser.boolean(
         env['SERVER_BLOCK_PRIVATE_CONNECTIONS'],
         false,

@@ -21,7 +21,7 @@ import {
   type Server as HttpsServer,
   type ServerOptions as HttpsServerOptions,
 } from 'node:https';
-import type { Socket } from 'node:net';
+import { type Socket, SocketAddress } from 'node:net';
 import { freemem, hostname, totalmem } from 'node:os';
 import { monitorEventLoopDelay, performance } from 'node:perf_hooks';
 import process from 'node:process';
@@ -54,6 +54,7 @@ import { getErrorMessage, toError } from '../lib/error/index.js';
 import {
   acceptsEventStream,
   acceptsJsonAndEventStream,
+  isJsonRpcBatchRequest,
   isMcpRequestBody,
   type JsonRpcId,
   sendJsonRpcError,
@@ -363,8 +364,93 @@ function normalizeRemoteAddress(address: string | undefined): string | null {
   return trimmed;
 }
 
+function trimMatchingQuotes(value: string): string {
+  return value.length >= 2 &&
+    ((value.startsWith('"') && value.endsWith('"')) ||
+      (value.startsWith("'") && value.endsWith("'")))
+    ? value.slice(1, -1)
+    : value;
+}
+
+function parseForwardedAddressToken(token: string): string | null {
+  const trimmed = trimMatchingQuotes(token.trim());
+  if (!trimmed) return null;
+
+  const lowered = trimmed.toLowerCase();
+  if (lowered === 'unknown' || lowered.startsWith('_')) return null;
+
+  if (trimmed.startsWith('[')) {
+    const endBracket = trimmed.indexOf(']');
+    if (endBracket === -1) return null;
+    return normalizeRemoteAddress(trimmed.slice(1, endBracket));
+  }
+
+  const socketAddress = SocketAddress.parse(trimmed);
+  if (socketAddress) {
+    return normalizeRemoteAddress(socketAddress.address);
+  }
+
+  const normalized = normalizeRemoteAddress(trimmed);
+  if (normalized) return normalized;
+
+  const firstColon = trimmed.indexOf(':');
+  const lastColon = trimmed.lastIndexOf(':');
+  if (firstColon !== -1 && firstColon === lastColon) {
+    return normalizeRemoteAddress(trimmed.slice(0, firstColon));
+  }
+
+  return null;
+}
+
+function resolveXForwardedForIp(headerValue: string): string | null {
+  for (const part of headerValue.split(',')) {
+    const resolved = parseForwardedAddressToken(part);
+    if (resolved) return resolved;
+  }
+  return null;
+}
+
+function resolveForwardedHeaderIp(headerValue: string): string | null {
+  for (const element of headerValue.split(',')) {
+    for (const part of element.split(';')) {
+      const separatorIndex = part.indexOf('=');
+      if (separatorIndex === -1) continue;
+
+      const key = part.slice(0, separatorIndex).trim().toLowerCase();
+      if (key !== 'for') continue;
+
+      const resolved = parseForwardedAddressToken(
+        part.slice(separatorIndex + 1)
+      );
+      if (resolved) return resolved;
+    }
+  }
+  return null;
+}
+
+export function resolveClientIp(req: IncomingMessage): string | null {
+  if (config.server.http.trustProxy) {
+    const xForwardedFor = getHeaderValue(req, 'x-forwarded-for');
+    const forwardedForIp = xForwardedFor
+      ? resolveXForwardedForIp(xForwardedFor)
+      : null;
+    if (forwardedForIp) return forwardedForIp;
+
+    const forwarded = getHeaderValue(req, 'forwarded');
+    const forwardedIp = forwarded ? resolveForwardedHeaderIp(forwarded) : null;
+    if (forwardedIp) return forwardedIp;
+  }
+
+  return normalizeRemoteAddress(req.socket.remoteAddress);
+}
+
 export function registerInboundBlockList(server: NetworkServer): void {
-  if (!config.server.http.blockPrivateConnections) return;
+  if (
+    !config.server.http.blockPrivateConnections ||
+    config.server.http.trustProxy
+  ) {
+    return;
+  }
 
   const blockList = createDefaultBlockList();
 
@@ -409,7 +495,7 @@ export function buildRequestContext(
     res,
     url,
     method: req.method,
-    ip: normalizeRemoteAddress(req.socket.remoteAddress),
+    ip: resolveClientIp(req),
     body: undefined,
     ...(signal ? { signal } : {}),
   };
@@ -1252,11 +1338,61 @@ class McpSessionGateway {
     }
 
     const { body } = ctx;
-    if (isObject(body) && !Array.isArray(body)) {
+    if (body === undefined) {
+      logGatewayRejection({
+        message: 'Rejected MCP POST request',
+        method: ctx.method,
+        path: ctx.url.pathname,
+        reason: 'missing_json_body',
+        status: 400,
+        mcpCode: -32600,
+      });
+      sendError(
+        ctx.res,
+        ErrorCode.InvalidRequest,
+        'We need a valid JSON object in the request body for MCP POST requests.',
+        400
+      );
+      return null;
+    }
+
+    if (isJsonRpcBatchRequest(body)) {
+      logGatewayRejection({
+        message: 'Rejected MCP POST request',
+        method: ctx.method,
+        path: ctx.url.pathname,
+        reason: 'jsonrpc_batch_unsupported',
+        status: 400,
+        mcpCode: -32600,
+      });
+      sendError(
+        ctx.res,
+        ErrorCode.InvalidRequest,
+        'JSON-RPC batch requests are not supported on this endpoint.',
+        400
+      );
+      return null;
+    }
+
+    if (isObject(body)) {
       return body as PostRequestBody;
     }
 
-    return { id: undefined, method: undefined };
+    logGatewayRejection({
+      message: 'Rejected MCP POST request',
+      method: ctx.method,
+      path: ctx.url.pathname,
+      reason: 'invalid_json_body',
+      status: 400,
+      mcpCode: -32600,
+    });
+    sendError(
+      ctx.res,
+      ErrorCode.InvalidRequest,
+      'We need a valid JSON object in the request body for MCP POST requests.',
+      400
+    );
+    return null;
   }
 
   private resolvePostRequestState(

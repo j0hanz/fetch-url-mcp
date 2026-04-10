@@ -1,12 +1,14 @@
 import type { ServerResult } from '@modelcontextprotocol/sdk/types.js';
 
 import assert from 'node:assert/strict';
+import type { IncomingMessage } from 'node:http';
 import { after, before, describe, it } from 'node:test';
 
 import {
   assertHttpModeConfiguration,
   authService,
   buildProtectedResourceMetadataDocument,
+  resolveClientIp,
   startHttpServer,
 } from '../src/http/index.js';
 import { config } from '../src/lib/config.js';
@@ -230,6 +232,25 @@ describe('HTTP native gateway routing', () => {
       code: -32700,
       message:
         "We couldn't parse the request body. Please ensure it's valid JSON.",
+    });
+  });
+
+  it('rejects MCP POST requests without a JSON object body', async () => {
+    const response = await fetch(`${baseUrl}/mcp`, {
+      method: 'POST',
+      headers: {
+        accept: 'application/json, text/event-stream',
+        'x-api-key': TEST_API_KEY,
+      },
+      body: 'not-json',
+    });
+
+    assert.equal(response.status, 400);
+    assertJsonRpcError(await response.json(), {
+      id: null,
+      code: -32600,
+      message:
+        'We need a valid JSON object in the request body for MCP POST requests.',
     });
   });
 
@@ -516,6 +537,27 @@ describe('HTTP native gateway routing', () => {
 });
 
 describe('HTTP auth and rate-limit behavior', () => {
+  it('prefers trusted proxy forwarding headers for client IP resolution', () => {
+    const originalTrustProxy = config.server.http.trustProxy;
+    config.server.http.trustProxy = true;
+
+    try {
+      const forwardedIp = resolveClientIp({
+        headers: { 'x-forwarded-for': '198.51.100.10, 10.0.0.5' },
+        socket: { remoteAddress: '127.0.0.1' },
+      } as unknown as IncomingMessage);
+      assert.equal(forwardedIp, '198.51.100.10');
+
+      const standardForwardedIp = resolveClientIp({
+        headers: { forwarded: 'for="[2001:db8::8]:1234";proto=https' },
+        socket: { remoteAddress: '127.0.0.1' },
+      } as unknown as IncomingMessage);
+      assert.equal(standardForwardedIp, '2001:db8::8');
+    } finally {
+      config.server.http.trustProxy = originalTrustProxy;
+    }
+  });
+
   it('fails fast when OAuth mode is missing introspection configuration', () => {
     const originalMode = config.auth.mode;
     const originalIssuerUrl = config.auth.issuerUrl;
@@ -604,6 +646,73 @@ describe('HTTP auth and rate-limit behavior', () => {
       }
       config.rateLimit.maxRequests = originalMaxRequests;
       config.server.port = originalPort;
+      config.auth.resourceUrl = originalResourceUrl;
+      config.auth.staticTokens.splice(
+        0,
+        config.auth.staticTokens.length,
+        ...originalStaticTokens
+      );
+      authService.authenticate = originalAuthenticate;
+    }
+  });
+
+  it('rate limits trusted proxy clients by forwarded IP instead of the proxy hop', async () => {
+    const originalMaxRequests = config.rateLimit.maxRequests;
+    const originalPort = config.server.port;
+    const originalResourceUrl = config.auth.resourceUrl;
+    const originalTrustProxy = config.server.http.trustProxy;
+    const originalStaticTokens = [...config.auth.staticTokens];
+    const originalAuthenticate = authService.authenticate.bind(authService);
+
+    config.rateLimit.maxRequests = 1;
+    config.server.port = 0;
+    config.server.http.trustProxy = true;
+    config.auth.staticTokens.splice(
+      0,
+      config.auth.staticTokens.length,
+      TEST_API_KEY
+    );
+    authService.authenticate = async () => ({
+      token: TEST_API_KEY,
+      clientId: 'static-token',
+      scopes: [],
+      resource: config.auth.resourceUrl,
+    });
+
+    let proxiedServer: HttpServerHandle | undefined;
+    try {
+      proxiedServer = await startHttpServer();
+      const proxiedBaseUrl = `http://${proxiedServer.host}:${proxiedServer.port}`;
+
+      const firstResponse = await fetch(`${proxiedBaseUrl}/mcp`, {
+        method: 'POST',
+        headers: {
+          ...createSessionHeaders(),
+          'x-forwarded-for': '198.51.100.10',
+        },
+        body: createInitializeRequestBody(),
+      });
+
+      const secondResponse = await fetch(`${proxiedBaseUrl}/mcp`, {
+        method: 'POST',
+        headers: {
+          ...createSessionHeaders(),
+          'x-forwarded-for': '203.0.113.20',
+        },
+        body: createInitializeRequestBody(),
+      });
+
+      assert.equal(firstResponse.status, 200);
+      assert.equal(secondResponse.status, 200);
+      await firstResponse.text();
+      await secondResponse.text();
+    } finally {
+      if (proxiedServer) {
+        await proxiedServer.shutdown('test');
+      }
+      config.rateLimit.maxRequests = originalMaxRequests;
+      config.server.port = originalPort;
+      config.server.http.trustProxy = originalTrustProxy;
       config.auth.resourceUrl = originalResourceUrl;
       config.auth.staticTokens.splice(
         0,

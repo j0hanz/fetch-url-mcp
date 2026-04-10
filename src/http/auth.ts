@@ -406,6 +406,7 @@ const STATIC_TOKEN_HMAC_KEY = randomBytes(32);
 
 const INTROSPECTION_CACHE_TTL_MS = 30_000;
 const INTROSPECTION_CACHE_MAX_ENTRIES = 1_000;
+const ONE_SECOND_MS = 1000;
 
 interface CachedIntrospection {
   readonly info: AuthInfo;
@@ -604,7 +605,7 @@ class AuthService {
   ): string {
     // Base64 is only an encoding for header transport; it is NOT encryption.
     const credentials = `${clientId}:${clientSecret ?? ''}`;
-    return `Basic ${btoa(credentials)}`;
+    return `Basic ${Buffer.from(credentials, 'utf8').toString('base64')}`;
   }
 
   private buildIntrospectionRequest(
@@ -702,6 +703,20 @@ class AuthService {
     }
   }
 
+  private isExpiredAuthInfo(info: AuthInfo, nowMs: number): boolean {
+    return (
+      typeof info.expiresAt === 'number' &&
+      info.expiresAt <= Math.floor(nowMs / ONE_SECOND_MS)
+    );
+  }
+
+  private resolveCacheExpiry(info: AuthInfo, nowMs: number): number {
+    const cacheExpiry = nowMs + INTROSPECTION_CACHE_TTL_MS;
+    return typeof info.expiresAt === 'number'
+      ? Math.min(cacheExpiry, info.expiresAt * ONE_SECOND_MS)
+      : cacheExpiry;
+  }
+
   private async verifyWithIntrospection(
     token: string,
     signal?: AbortSignal
@@ -713,11 +728,19 @@ class AuthService {
 
     const cacheKey = hmacSha256Hex(STATIC_TOKEN_HMAC_KEY, token);
     const cached = this.introspectionCache.get(cacheKey);
-    if (cached && cached.expiresAt > Date.now()) {
+    const cacheLookupNow = Date.now();
+    if (
+      cached &&
+      cached.expiresAt > cacheLookupNow &&
+      !this.isExpiredAuthInfo(cached.info, cacheLookupNow)
+    ) {
       this.introspectionCache.delete(cacheKey);
       this.introspectionCache.set(cacheKey, cached);
       logDebug('Token introspection cache hit', {}, Loggers.LOG_AUTH);
       return cached.info;
+    }
+    if (cached) {
+      this.introspectionCache.delete(cacheKey);
     }
 
     const req = this.buildIntrospectionRequest(
@@ -744,6 +767,13 @@ class AuthService {
     this.assertTokenAudience(payload);
 
     const info = this.buildIntrospectionAuthInfo(token, payload);
+    const verifiedAt = Date.now();
+    if (this.isExpiredAuthInfo(info, verifiedAt)) {
+      this.introspectionCache.delete(cacheKey);
+      logWarn('Auth failed: token expired', {}, Loggers.LOG_AUTH);
+      const error = new InvalidTokenError('Token is expired');
+      throw error;
+    }
     this.assertRequiredScopes(info.scopes);
 
     logDebug(
@@ -753,10 +783,13 @@ class AuthService {
     );
 
     this.evictStaleEntries();
-    this.introspectionCache.set(cacheKey, {
-      info,
-      expiresAt: Date.now() + INTROSPECTION_CACHE_TTL_MS,
-    });
+    const cacheExpiresAt = this.resolveCacheExpiry(info, verifiedAt);
+    if (cacheExpiresAt > verifiedAt) {
+      this.introspectionCache.set(cacheKey, {
+        info,
+        expiresAt: cacheExpiresAt,
+      });
+    }
 
     return info;
   }

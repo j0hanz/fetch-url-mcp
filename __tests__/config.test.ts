@@ -49,6 +49,7 @@ describe('config shape', () => {
     }
     assert.equal(config.server.name, 'fetch-url-mcp');
     assert.equal(typeof config.server.port, 'number');
+    assert.equal(typeof config.server.http.trustProxy, 'boolean');
   });
 
   it('fetcher section has required keys', () => {

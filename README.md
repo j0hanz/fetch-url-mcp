@@ -605,19 +605,20 @@ All configuration is through environment variables. For basic stdio usage, nothi
 
 ### HTTP Server
 
-| Variable                              | Default     | Notes                                                                 |
-| ------------------------------------- | ----------- | --------------------------------------------------------------------- |
-| `HOST`                                | `127.0.0.1` | Bind address. Non-loopback bindings also require `ALLOW_REMOTE=true`. |
-| `PORT`                                | `3000`      | Listening port for `--http`.                                          |
-| `ALLOW_REMOTE`                        | `false`     | Must be enabled to bind to a non-loopback interface.                  |
-| `ALLOWED_HOSTS`                       | empty       | Additional allowed `Host` and `Origin` values.                        |
-| `SERVER_MAX_CONNECTIONS`              | `0`         | Optional connection cap.                                              |
-| `SERVER_HEADERS_TIMEOUT_MS`           | unset       | Optional Node server tuning.                                          |
-| `SERVER_REQUEST_TIMEOUT_MS`           | unset       | Optional Node server tuning.                                          |
-| `SERVER_KEEP_ALIVE_TIMEOUT_MS`        | unset       | Optional keep-alive tuning.                                           |
-| `SERVER_KEEP_ALIVE_TIMEOUT_BUFFER_MS` | unset       | Optional keep-alive tuning buffer.                                    |
-| `SERVER_MAX_HEADERS_COUNT`            | unset       | Optional header count limit.                                          |
-| `SERVER_BLOCK_PRIVATE_CONNECTIONS`    | `false`     | Enables inbound private-network protections.                          |
+| Variable                              | Default     | Notes                                                                  |
+| ------------------------------------- | ----------- | ---------------------------------------------------------------------- |
+| `HOST`                                | `127.0.0.1` | Bind address. Non-loopback bindings also require `ALLOW_REMOTE=true`.  |
+| `PORT`                                | `3000`      | Listening port for `--http`.                                           |
+| `ALLOW_REMOTE`                        | `false`     | Must be enabled to bind to a non-loopback interface.                   |
+| `ALLOWED_HOSTS`                       | empty       | Additional allowed `Host` and `Origin` values.                         |
+| `SERVER_MAX_CONNECTIONS`              | `0`         | Optional connection cap.                                               |
+| `SERVER_TRUST_PROXY`                  | `false`     | Trust `X-Forwarded-For` / `Forwarded` for client IP resolution.        |
+| `SERVER_HEADERS_TIMEOUT_MS`           | unset       | Optional Node server tuning.                                           |
+| `SERVER_REQUEST_TIMEOUT_MS`           | unset       | Optional Node server tuning.                                           |
+| `SERVER_KEEP_ALIVE_TIMEOUT_MS`        | unset       | Optional keep-alive tuning.                                            |
+| `SERVER_KEEP_ALIVE_TIMEOUT_BUFFER_MS` | unset       | Optional keep-alive tuning buffer.                                     |
+| `SERVER_MAX_HEADERS_COUNT`            | unset       | Optional header count limit.                                           |
+| `SERVER_BLOCK_PRIVATE_CONNECTIONS`    | `false`     | Enables inbound private-network protections when not trusting a proxy. |
 
 ### Authentication & OAuth
 
@@ -706,15 +707,15 @@ All configuration is through environment variables. For basic stdio usage, nothi
 
 ## Security
 
-| Control                    | Status      | Notes                                                                                                                                    |
-| -------------------------- | ----------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| Host and origin validation | implemented | HTTP requests are rejected unless `Host` and `Origin` match the allowlist built from loopback, the configured host, and `ALLOWED_HOSTS`. |
-| Authentication             | implemented | HTTP mode supports static bearer tokens locally or OAuth token introspection; remote bindings require OAuth.                             |
-| Protocol version checks    | implemented | Session-bound MCP HTTP requests validate `MCP-Protocol-Version` and pin it to the negotiated session version.                            |
-| Rate limiting              | implemented | Requests pass through the HTTP rate limiter before route dispatch.                                                                       |
-| Outbound SSRF protections  | implemented | Local/private IPs, metadata endpoints, and `.local`/`.internal` hosts are blocked unless `ALLOW_LOCAL_FETCH=true`.                       |
-| TLS                        | optional    | HTTPS is enabled when both TLS key and certificate files are configured.                                                                 |
-| Stdio logging safety       | implemented | Server logs are written to stderr, not stdout, so stdio MCP traffic stays clean.                                                         |
+| Control                    | Status      | Notes                                                                                                                                                                                                   |
+| -------------------------- | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Host and origin validation | implemented | HTTP requests are rejected unless `Host` and `Origin` match the allowlist built from loopback, the configured host, and `ALLOWED_HOSTS`.                                                                |
+| Authentication             | implemented | HTTP mode supports static bearer tokens locally or OAuth token introspection; remote bindings require OAuth.                                                                                            |
+| Protocol version checks    | implemented | Session-bound MCP HTTP requests validate `MCP-Protocol-Version` and pin it to the negotiated session version.                                                                                           |
+| Rate limiting              | implemented | Requests pass through the HTTP rate limiter before route dispatch. Enable `SERVER_TRUST_PROXY=true` behind a trusted reverse proxy so limits apply to the forwarded client IP instead of the proxy hop. |
+| Outbound SSRF protections  | implemented | Local/private IPs, metadata endpoints, and `.local`/`.internal` hosts are blocked unless `ALLOW_LOCAL_FETCH=true`.                                                                                      |
+| TLS                        | optional    | HTTPS is enabled when both TLS key and certificate files are configured.                                                                                                                                |
+| Stdio logging safety       | implemented | Server logs are written to stderr, not stdout, so stdio MCP traffic stays clean.                                                                                                                        |
 
 ## Development
 
@@ -773,15 +774,16 @@ All configuration is through environment variables. For basic stdio usage, nothi
 
 ## Troubleshooting
 
-| Symptom                                       | Likely Cause                        | Fix                                                                           |
-| --------------------------------------------- | ----------------------------------- | ----------------------------------------------------------------------------- |
-| Server output mixes with MCP traffic on stdio | Logs going to stdout                | Ensure all logging writes to stderr; the server does this by default.         |
-| HTTP mode returns `403`                       | Host/origin mismatch                | Add the domain to `ALLOWED_HOSTS` or verify loopback bindings.                |
-| HTTP mode returns `401`                       | Missing or invalid token            | Set `ACCESS_TOKENS` or configure OAuth env vars for remote bindings.          |
-| Fetch returns private-IP error                | SSRF protections blocked the target | Set `ALLOW_LOCAL_FETCH=true` if the target is intentionally local.            |
-| `truncated: true` in response                 | Content exceeded inline limits      | Increase `MAX_INLINE_CONTENT_CHARS` or accept truncated output.               |
-| Transform timeout or worker crash             | Large or complex HTML               | Tune `TRANSFORM_WORKER_MAX_OLD_GENERATION_MB` or increase `FETCH_TIMEOUT_MS`. |
-| Client config not working                     | Wrong config format for the client  | Check the matching `<details>` block above — config keys vary by client.      |
+| Symptom                                             | Likely Cause                        | Fix                                                                                 |
+| --------------------------------------------------- | ----------------------------------- | ----------------------------------------------------------------------------------- |
+| Server output mixes with MCP traffic on stdio       | Logs going to stdout                | Ensure all logging writes to stderr; the server does this by default.               |
+| HTTP mode returns `403`                             | Host/origin mismatch                | Add the domain to `ALLOWED_HOSTS` or verify loopback bindings.                      |
+| HTTP mode rate limits every request from your proxy | `SERVER_TRUST_PROXY` not enabled    | Enable `SERVER_TRUST_PROXY=true` when the server is behind a trusted reverse proxy. |
+| HTTP mode returns `401`                             | Missing or invalid token            | Set `ACCESS_TOKENS` or configure OAuth env vars for remote bindings.                |
+| Fetch returns private-IP error                      | SSRF protections blocked the target | Set `ALLOW_LOCAL_FETCH=true` if the target is intentionally local.                  |
+| `truncated: true` in response                       | Content exceeded inline limits      | Increase `MAX_INLINE_CONTENT_CHARS` or accept truncated output.                     |
+| Transform timeout or worker crash                   | Large or complex HTML               | Tune `TRANSFORM_WORKER_MAX_OLD_GENERATION_MB` or increase `FETCH_TIMEOUT_MS`.       |
+| Client config not working                           | Wrong config format for the client  | Check the matching `<details>` block above — config keys vary by client.            |
 
 ## Credits
 
