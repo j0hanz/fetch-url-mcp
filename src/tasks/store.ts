@@ -15,7 +15,6 @@ import {
 } from '../lib/utils.js';
 
 export type TaskStatus =
-  | 'submitted'
   | 'working'
   | 'input_required'
   | 'completed'
@@ -81,7 +80,6 @@ const CLEANUP_INTERVAL_MS = 60_000;
 const RESULT_DELIVERY_GRACE_MS = 10_000;
 const CONNECTION_CLOSED_ERROR_CODE = -32000;
 const TASK_STATUS_VALUES = new Set<TaskStatus>([
-  'submitted',
   'working',
   'input_required',
   'completed',
@@ -300,7 +298,7 @@ class TaskManager {
     const task: InternalTaskState = {
       taskId,
       ownerKey,
-      status: 'submitted',
+      status: 'working',
       statusMessage,
       createdAt,
       lastUpdatedAt: createdAt,

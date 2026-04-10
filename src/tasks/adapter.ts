@@ -21,7 +21,7 @@ function resolveOwnerKey(sessionId?: string): string {
 function toSdkTask(state: TaskState): Task {
   return {
     taskId: state.taskId,
-    status: state.status === 'submitted' ? 'working' : state.status,
+    status: state.status,
     ttl: state.keepAlive,
     createdAt: state.createdAt,
     lastUpdatedAt: state.lastUpdatedAt,

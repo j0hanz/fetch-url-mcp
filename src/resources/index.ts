@@ -92,9 +92,9 @@ Call \`${FETCH_URL_TOOL_NAME}\` with \`{ url }\` → read \`markdown\` from resu
 Add \`_meta: { progressToken: "<token>" }\` to \`tools/call\` → receive \`notifications/progress\`.
 
 ## Async (task mode)
-Add \`_meta: { "modelcontextprotocol.io/task": { taskId: "<client-id>", keepAlive: <ms> } }\` to \`tools/call\`.
+Add \`_meta: { "modelcontextprotocol.io/task": { taskId: "<client-id>", ttl: <ms> } }\` to \`tools/call\`.
 
-Lifecycle: \`submitted\` → \`working\` → \`completed\` | \`failed\` | \`cancelled\`.
+Lifecycle: \`working\` → \`completed\` | \`failed\` | \`cancelled\`.
 
 Endpoints:
 - \`tasks/get\` — poll for \`statusMessage\`, \`progress\`, \`total\`.

@@ -46,6 +46,7 @@ import {
   registerToolTaskSupport,
   setTaskCapableToolSupport,
   type TaskCapableToolSupport,
+  taskManager,
   unregisterToolTaskSupport,
 } from '../tasks/index.js';
 
@@ -443,23 +444,53 @@ export function registerTools(server: McpServer): ToolRegistrationControls {
 
         // Spin off background execution
         executeFetch(args, ctx)
-          .then((result) => {
-            void ctx.task.store.storeTaskResult(
-              task.taskId,
-              'completed',
-              result as ServerResult
-            );
+          .then(async (result) => {
+            try {
+              await ctx.task.store.storeTaskResult(
+                task.taskId,
+                'completed',
+                result as ServerResult
+              );
+            } catch (storeError: unknown) {
+              logError(
+                'Failed to store completed task result',
+                {
+                  taskId: task.taskId,
+                  error: getErrorMessage(storeError),
+                },
+                Loggers.LOG_TASKS
+              );
+              taskManager.updateTask(task.taskId, {
+                status: 'failed',
+                statusMessage: 'Failed to store result',
+              });
+            }
           })
-          .catch((error: unknown) => {
-            void ctx.task.store.storeTaskResult(task.taskId, 'failed', {
-              isError: true,
-              content: [{ type: 'text', text: getErrorMessage(error) }],
-            });
+          .catch(async (error: unknown) => {
             logError(
               'Background execution crashed',
-              { error: getErrorMessage(error) },
+              { taskId: task.taskId, error: getErrorMessage(error) },
               Loggers.LOG_TASKS
             );
+            try {
+              await ctx.task.store.storeTaskResult(task.taskId, 'failed', {
+                isError: true,
+                content: [{ type: 'text', text: getErrorMessage(error) }],
+              });
+            } catch (storeError: unknown) {
+              logError(
+                'Failed to store task error result',
+                {
+                  taskId: task.taskId,
+                  error: getErrorMessage(storeError),
+                },
+                Loggers.LOG_TASKS
+              );
+              taskManager.updateTask(task.taskId, {
+                status: 'failed',
+                statusMessage: getErrorMessage(error),
+              });
+            }
           });
 
         return { task };

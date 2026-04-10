@@ -32,10 +32,10 @@ describe('taskManager', () => {
   // ── createTask ──────────────────────────────────────────────────
 
   describe('createTask', () => {
-    it('returns a task with submitted status', () => {
+    it('returns a task with working status', () => {
       const task = createTestTask();
       try {
-        assert.equal(task.status, 'submitted');
+        assert.equal(task.status, 'working');
         assert.ok(task.taskId);
         assert.ok(task.createdAt);
         assert.ok(task.lastUpdatedAt);
@@ -275,7 +275,7 @@ describe('taskManager', () => {
       assert.equal(t?.status, 'completed');
     });
 
-    it('transitions to input_required from submitted', () => {
+    it('transitions to input_required from working', () => {
       const task = createTestTask();
       try {
         taskManager.updateTask(task.taskId, {
@@ -327,7 +327,7 @@ describe('taskManager', () => {
   // ── cancelTask ──────────────────────────────────────────────────
 
   describe('cancelTask', () => {
-    it('cancels a submitted task', () => {
+    it('cancels a working task', () => {
       const task = createTestTask();
       const cancelled = taskManager.cancelTask(task.taskId);
       assert.ok(cancelled);
@@ -368,8 +368,8 @@ describe('taskManager', () => {
         const cancelled = taskManager.cancelTasksByOwner('bulk-owner');
         assert.equal(cancelled.length, 2);
         assert.ok(cancelled.every((t) => t.status === 'cancelled'));
-        // The other owner's task should still be submitted.
-        assert.equal(taskManager.getTask(other.taskId)?.status, 'submitted');
+        // The other owner's task should still be working.
+        assert.equal(taskManager.getTask(other.taskId)?.status, 'working');
       } finally {
         cleanupTask(a.taskId);
         cleanupTask(b.taskId);
