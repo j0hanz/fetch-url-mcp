@@ -3,7 +3,6 @@ import { describe, it } from 'node:test';
 
 import { tryReadToolErrorMessage } from '../src/lib/error/index.js';
 import {
-  buildToolHandlerExtra,
   compact,
   isServerResult,
   parseHandlerExtra,
@@ -179,27 +178,6 @@ describe('resolveToolCallContext', () => {
   it('returns default ownerKey when no extra', () => {
     const ctx = resolveToolCallContext();
     assert.equal(ctx.ownerKey, 'default');
-  });
-});
-
-// ── buildToolHandlerExtra ───────────────────────────────────────────
-
-describe('buildToolHandlerExtra', () => {
-  it('builds extra from context', () => {
-    const ac = new AbortController();
-    const extra = buildToolHandlerExtra({
-      ownerKey: 'session:x',
-      signal: ac.signal,
-      requestId: 'req-1',
-    });
-    assert.ok(extra.signal instanceof AbortSignal);
-    assert.equal(extra.requestId, 'req-1');
-  });
-
-  it('omits undefined fields', () => {
-    const extra = buildToolHandlerExtra({ ownerKey: 'default' });
-    assert.equal('signal' in extra, false);
-    assert.equal('requestId' in extra, false);
   });
 });
 

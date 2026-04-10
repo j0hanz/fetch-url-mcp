@@ -2,6 +2,7 @@ import {
   type McpServer,
   ProtocolError,
   RELATED_TASK_META_KEY,
+  type ServerContext,
 } from '@modelcontextprotocol/server';
 
 import type { ServerResponse } from 'node:http';
@@ -9,7 +10,7 @@ import { setTimeout as setTimeoutPromise } from 'node:timers/promises';
 
 import { z } from 'zod';
 
-import { logError, Loggers, logWarn } from './core.js';
+import { Loggers, logWarn } from './core.js';
 import { getErrorMessage } from './error/index.js';
 import { formatZodError, isObject } from './utils.js';
 
@@ -227,17 +228,6 @@ export interface ProgressNotification {
   params: ProgressNotificationParams;
 }
 
-export interface ToolHandlerExtra {
-  signal?: AbortSignal;
-  requestId?: string | number;
-  sessionId?: unknown;
-  _meta?: RequestMeta;
-  progressState?: { closed: boolean };
-  sendNotification?: (notification: ProgressNotification) => Promise<void>;
-  onProgress?: (progress: number, message: string, total?: number) => void;
-  canReportProgress?: () => boolean;
-}
-
 export interface ProgressReporter {
   report: (progress: number, message: string, total?: number) => void;
 }
@@ -256,44 +246,38 @@ function resolveRelatedTaskMeta(
 
 class ToolProgressReporter implements ProgressReporter {
   private lastProgress = -1;
-  private lastMessage?: string;
   private lastTotal: number | undefined;
   private pendingNotification: ProgressNotification | undefined;
   private isDispatching = false;
   private lastDispatchedAt = 0;
 
   private constructor(
-    private readonly token: ProgressToken | null,
-    private readonly handlers: {
-      send: ((notification: ProgressNotification) => Promise<void>) | undefined;
-      onProgress:
-        | ((progress: number, message: string, total?: number) => void)
-        | undefined;
-      canReport: (() => boolean) | undefined;
-    },
-    private readonly progressState?: { closed: boolean },
+    private readonly token: ProgressToken,
+    private readonly send: (
+      notification: ProgressNotification
+    ) => Promise<void>,
     private readonly taskMeta?: { taskId: string }
   ) {}
 
-  static create(extra: ToolHandlerExtra = {}): ProgressReporter {
-    const token = extra._meta?.progressToken ?? null;
-    const { onProgress } = extra;
-
-    if (token === null && !onProgress) {
+  static create(ctx?: ServerContext): ProgressReporter {
+    if (!ctx) {
       return { report: () => {} };
     }
 
-    const reporter = new ToolProgressReporter(
-      token,
-      {
-        send: extra.sendNotification,
-        onProgress,
-        canReport: extra.canReportProgress,
-      },
-      extra.progressState,
-      resolveRelatedTaskMeta(extra._meta)
-    );
-    return reporter;
+    const meta = ctx.mcpReq._meta as RequestMeta | undefined;
+    const token = meta?.progressToken ?? null;
+
+    if (token === null) {
+      return { report: () => {} };
+    }
+
+    const send = (notification: ProgressNotification): Promise<void> =>
+      ctx.mcpReq.notify({
+        method: notification.method,
+        params: { ...notification.params },
+      });
+
+    return new ToolProgressReporter(token, send, resolveRelatedTaskMeta(meta));
   }
 
   /**
@@ -303,41 +287,15 @@ class ToolProgressReporter implements ProgressReporter {
    * rather than expecting every step to fire sequentially.
    */
   report(progress: number, message: string, total?: number): void {
-    if (
-      this.progressState?.closed === true ||
-      this.handlers.canReport?.() === false
-    ) {
-      return;
-    }
-
     const effectiveProgress = Math.max(progress, this.lastProgress);
     const effectiveTotal =
       total === undefined ? this.lastTotal : Math.max(total, effectiveProgress);
     const isIncreasing = effectiveProgress > this.lastProgress;
-    const isMessageChanged = message !== this.lastMessage;
-    const isTotalChanged = effectiveTotal !== this.lastTotal;
 
     this.lastProgress = effectiveProgress;
-    this.lastMessage = message;
     this.lastTotal = effectiveTotal;
 
-    if (isIncreasing || isMessageChanged || isTotalChanged) {
-      try {
-        this.handlers.onProgress?.(effectiveProgress, message, effectiveTotal);
-      } catch (error: unknown) {
-        logError(
-          'Progress callback failed',
-          {
-            error: getErrorMessage(error),
-            progress: effectiveProgress,
-            message,
-          },
-          Loggers.LOG_MCP
-        );
-      }
-    }
-
-    if (!isIncreasing || this.token === null || !this.handlers.send) return;
+    if (!isIncreasing) return;
 
     this.pendingNotification = this.createProgressNotification({
       token: this.token,
@@ -349,17 +307,12 @@ class ToolProgressReporter implements ProgressReporter {
   }
 
   private flushNotifications(): void {
-    if (this.isDispatching || !this.handlers.send) return;
+    if (this.isDispatching) return;
     this.isDispatching = true;
 
     void (async (): Promise<void> => {
       try {
         while (this.pendingNotification) {
-          if (this.handlers.canReport?.() === false) {
-            this.pendingNotification = undefined;
-            return;
-          }
-
           const remainingDelay =
             this.lastDispatchedAt +
             PROGRESS_NOTIFICATION_MIN_INTERVAL_MS -
@@ -382,8 +335,6 @@ class ToolProgressReporter implements ProgressReporter {
   private async sendWithTimeout(
     notification: ProgressNotification
   ): Promise<void> {
-    if (!this.handlers.send) return;
-
     const ac = new AbortController();
     const timeoutPromise = setTimeoutPromise(
       PROGRESS_NOTIFICATION_TIMEOUT_MS,
@@ -396,7 +347,7 @@ class ToolProgressReporter implements ProgressReporter {
 
     try {
       const outcome = await Promise.race([
-        this.handlers.send(notification).then(() => {
+        this.send(notification).then(() => {
           ac.abort();
           return { ok: true as const };
         }),
@@ -449,9 +400,8 @@ class ToolProgressReporter implements ProgressReporter {
   }
 }
 
-export const createProgressReporter = (
-  extra?: ToolHandlerExtra
-): ProgressReporter => ToolProgressReporter.create(extra);
+export const createProgressReporter = (ctx?: ServerContext): ProgressReporter =>
+  ToolProgressReporter.create(ctx);
 
 export function validateOrThrow<T>(
   schema: z.ZodType<T>,

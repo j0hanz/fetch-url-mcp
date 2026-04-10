@@ -1,6 +1,5 @@
 import {
   type McpServer,
-  ProtocolError,
   ProtocolErrorCode,
   RELATED_TASK_META_KEY,
   type ServerContext,
@@ -17,23 +16,16 @@ import {
   logDebug,
   logError,
   Loggers,
-  logInfo,
   logWarn,
   resolveMcpSessionOwnerKey,
   runWithRequestContext,
   runWithTraceContext,
 } from '../lib/core.js';
-import {
-  getErrorMessage,
-  handleToolError,
-  stripProtocolErrorPrefix,
-  tryReadToolErrorMessage,
-} from '../lib/error/index.js';
+import { getErrorMessage } from '../lib/error/index.js';
 import {
   createProtocolError,
   type ProgressNotification,
   registerServerLifecycleCleanup,
-  type ToolHandlerExtra,
 } from '../lib/mcp-interop.js';
 import { formatZodError, isObject } from '../lib/utils.js';
 
@@ -98,9 +90,6 @@ export type ExtendedCallToolRequest = z.infer<
   typeof extendedCallToolRequestSchema
 >;
 export type ToolCallRequestMeta = ExtendedCallToolRequest['params']['_meta'];
-type TaskMeta = NonNullable<
-  NonNullable<ToolCallRequestMeta>['modelcontextprotocol.io/task']
->;
 
 export {
   decodeTaskCursor,
@@ -110,21 +99,6 @@ export {
   waitForTerminalTask,
 };
 export type { CreateTaskResult, TaskState, TaskStatus };
-
-function getTaskMeta(
-  params: ExtendedCallToolRequest['params']
-): TaskMeta | undefined {
-  const legacyMeta = params._meta?.['modelcontextprotocol.io/task'];
-  if (legacyMeta) return legacyMeta;
-  if (params.task) {
-    return {
-      taskId: randomUUID(),
-      ...(params.task.ttl !== undefined ? { keepAlive: params.task.ttl } : {}),
-    };
-  }
-
-  return undefined;
-}
 
 export function parseExtendedCallToolRequest(
   request: unknown
@@ -300,359 +274,8 @@ export function emitTaskStatusNotification(
     });
 }
 
-function emitTaskCreatedNotification(server: McpServer, task: TaskState): void {
-  if (!config.tasks.emitStatusNotifications || !server.isConnected()) return;
-
-  void server.server
-    .notification({
-      method: 'notifications/tasks/created',
-      params: {
-        _meta: {
-          [RELATED_TASK_META_KEY]: { taskId: task.taskId },
-        },
-      },
-    })
-    .catch((error: unknown) => {
-      logError(
-        'Failed to send task created notification',
-        {
-          taskId: task.taskId,
-          error: getErrorMessage(error),
-        },
-        Loggers.LOG_TASKS
-      );
-    });
-}
-
 export function throwTaskNotFound(): never {
   throw createProtocolError(ProtocolErrorCode.InvalidParams, 'Task not found');
-}
-
-/* -------------------------------------------------------------------------------------------------
- * Execution pipeline
- * ------------------------------------------------------------------------------------------------- */
-
-function updateTaskAndEmitStatus(
-  server: McpServer,
-  taskId: string,
-  update: Parameters<(typeof taskManager)['updateTask']>[1]
-): void {
-  taskManager.updateTask(taskId, update);
-  const task = taskManager.getTask(taskId);
-  if (task) emitTaskStatusNotification(server, task);
-}
-
-function buildTaskFailureState(error: unknown): {
-  status: 'failed';
-  statusMessage: string;
-  error: {
-    code: number;
-    message: string;
-    data?: unknown;
-  };
-} {
-  const mcpErrorMessage =
-    error instanceof ProtocolError
-      ? stripProtocolErrorPrefix(error.message)
-      : undefined;
-  const statusMessage = mcpErrorMessage ?? getErrorMessage(error);
-
-  if (error instanceof ProtocolError) {
-    return {
-      status: 'failed',
-      statusMessage,
-      error: {
-        code: error.code,
-        ...(error.data !== undefined ? { data: error.data } : {}),
-        message: statusMessage,
-      },
-    };
-  }
-
-  return {
-    status: 'failed',
-    statusMessage,
-    error: {
-      code: ProtocolErrorCode.InternalError,
-      message: statusMessage,
-    },
-  };
-}
-
-function buildTaskCompletionUpdate(
-  result: Awaited<ReturnType<TaskCapableToolDescriptor['execute']>>,
-  tool: TaskCapableToolDescriptor
-): Parameters<(typeof taskManager)['updateTask']>[1] {
-  const isError =
-    isObject(result) && 'isError' in result && result.isError === true;
-  const errorMessage = tryReadToolErrorMessage(result) ?? 'Execution failed';
-
-  return {
-    status: isError ? 'failed' : 'completed',
-    statusMessage: isError
-      ? errorMessage
-      : (tool.getCompletionStatusMessage?.(result) ??
-        'Task completed successfully.'),
-    result,
-    ...(isError
-      ? {
-          error: {
-            code: ProtocolErrorCode.InternalError,
-            message: errorMessage,
-          },
-        }
-      : {}),
-  };
-}
-
-async function runTaskToolExecution(params: {
-  server: McpServer;
-  taskId: string;
-  args: unknown;
-  tool: TaskCapableToolDescriptor;
-  meta?: ExtendedCallToolRequest['params']['_meta'];
-  sessionId?: string;
-  sendNotification?: (notification: ProgressNotification) => Promise<void>;
-}): Promise<void> {
-  const { server, taskId, args, tool, meta, sessionId, sendNotification } =
-    params;
-
-  return runWithRequestContext(
-    {
-      requestId: taskId,
-      operationId: taskId,
-      ...(sessionId ? { sessionId } : {}),
-    },
-    () =>
-      runWithTraceContext(meta, async () => {
-        const controller = attachAbortController(taskId);
-        const progressState = { closed: false };
-
-        try {
-          updateTaskAndEmitStatus(server, taskId, {
-            status: 'working',
-            statusMessage: 'Task started',
-          });
-          logInfo(
-            'Task execution started',
-            { taskId, tool: tool.name },
-            Loggers.LOG_TASKS
-          );
-          const relatedMeta = buildRelatedTaskMeta(taskId, meta);
-
-          const result = await tool.execute(args, {
-            signal: controller.signal,
-            requestId: taskId,
-            _meta: relatedMeta,
-            progressState,
-            canReportProgress: () =>
-              taskManager.getTask(taskId)?.status === 'working',
-            ...compact({ sendNotification }),
-            onProgress: (progress, message, total) => {
-              const current = taskManager.getTask(taskId);
-              if (
-                current?.status === 'working' &&
-                (current.statusMessage !== message ||
-                  current.progress !== progress ||
-                  (total !== undefined && current.total !== total))
-              ) {
-                updateTaskAndEmitStatus(server, taskId, {
-                  statusMessage: message,
-                  progress,
-                  ...(total !== undefined ? { total } : {}),
-                });
-              }
-            },
-          });
-
-          const completionUpdate = buildTaskCompletionUpdate(result, tool);
-          updateTaskAndEmitStatus(server, taskId, completionUpdate);
-          if (completionUpdate.status === 'completed') {
-            logInfo(
-              'Task execution completed',
-              { taskId, tool: tool.name },
-              Loggers.LOG_TASKS
-            );
-          } else {
-            logWarn(
-              'Task execution completed with tool error result',
-              { taskId, tool: tool.name },
-              Loggers.LOG_TASKS
-            );
-          }
-        } catch (error: unknown) {
-          logError(
-            'Task execution failed',
-            {
-              taskId,
-              tool: tool.name,
-              error: getErrorMessage(error),
-            },
-            Loggers.LOG_TASKS
-          );
-          updateTaskAndEmitStatus(server, taskId, buildTaskFailureState(error));
-        } finally {
-          progressState.closed = true;
-          detachAbortController(taskId);
-        }
-      })
-  );
-}
-
-function extractRawUrl(args: Record<string, unknown> | undefined): string {
-  const url = args?.['url'];
-  return typeof url === 'string' ? url : 'unknown';
-}
-
-function tryParseArguments(
-  tool: TaskCapableToolDescriptor,
-  args: Record<string, unknown> | undefined
-): { ok: true; value: unknown } | { ok: false; response: ServerResult } {
-  try {
-    return { ok: true, value: tool.parseArguments(args) };
-  } catch (error: unknown) {
-    if (error instanceof ProtocolError) {
-      return {
-        ok: false,
-        response: handleToolError(error, extractRawUrl(args)),
-      };
-    }
-    throw error;
-  }
-}
-
-function validateTaskSupport(
-  server: McpServer,
-  toolName: string,
-  isTaskMode: boolean
-): void {
-  const support = getTaskCapableToolSupport(server, toolName);
-  if (isTaskMode && support === 'forbidden') {
-    throw createProtocolError(
-      ProtocolErrorCode.MethodNotFound,
-      `Task mode is not supported for tool: ${toolName}`
-    );
-  }
-  if (!isTaskMode && support === 'required') {
-    throw createProtocolError(
-      ProtocolErrorCode.MethodNotFound,
-      `Task mode is required for tool: ${toolName}`
-    );
-  }
-}
-
-function enqueueTaskToolExecution(
-  server: McpServer,
-  tool: NonNullable<ReturnType<typeof getTaskCapableTool>>,
-  params: ExtendedCallToolRequest['params'],
-  taskMeta: TaskMeta,
-  context: ToolCallContext,
-  parsedArgs: unknown
-): ServerResult {
-  const task = taskManager.createTask(
-    {
-      taskId: taskMeta.taskId,
-      ...(taskMeta.keepAlive !== undefined
-        ? { keepAlive: taskMeta.keepAlive }
-        : {}),
-    },
-    'Task submitted',
-    context.ownerKey
-  );
-
-  emitTaskCreatedNotification(server, task);
-
-  logInfo(
-    'Task execution queued',
-    {
-      taskId: task.taskId,
-      tool: params.name,
-      ...(taskMeta.keepAlive !== undefined
-        ? { keepAlive: taskMeta.keepAlive }
-        : {}),
-    },
-    Loggers.LOG_TASKS
-  );
-
-  void runTaskToolExecution({
-    server,
-    taskId: task.taskId,
-    args: parsedArgs,
-    tool,
-    ...compact({
-      meta: params._meta,
-      sessionId: context.sessionId,
-      sendNotification: context.sendNotification,
-    }),
-  });
-
-  return {
-    task: toTaskSummary(task),
-    ...(tool.immediateResponse
-      ? {
-          _meta: {
-            'io.modelcontextprotocol/model-immediate-response':
-              tool.immediateResponse,
-          },
-        }
-      : {}),
-  };
-}
-
-export async function handleToolCallRequest(
-  server: McpServer,
-  request: ExtendedCallToolRequest,
-  context?: ToolCallContext | ServerContext
-): Promise<ServerResult> {
-  const { params } = request;
-  const resolvedContext = resolveToolCallContext(context, params._meta);
-
-  return runWithTraceContext(params._meta, async () => {
-    // Validate the tool name first so an unknown tool always produces MethodNotFound
-    const tool = getTaskCapableTool(server, params.name);
-    if (!tool) {
-      throw createProtocolError(
-        ProtocolErrorCode.MethodNotFound,
-        `Unknown tool: ${params.name}`
-      );
-    }
-
-    const taskMeta = getTaskMeta(params);
-    validateTaskSupport(server, params.name, !!taskMeta);
-
-    const parsed = tryParseArguments(tool, params.arguments);
-    if (!parsed.ok) return parsed.response;
-
-    if (taskMeta) {
-      return enqueueTaskToolExecution(
-        server,
-        tool,
-        params,
-        taskMeta,
-        resolvedContext,
-        parsed.value
-      );
-    }
-
-    const progressState = { closed: false };
-    logDebug(
-      'Executing task-capable tool inline',
-      {
-        tool: params.name,
-        hasProgressToken: params._meta?.progressToken !== undefined,
-      },
-      Loggers.LOG_TASKS
-    );
-
-    try {
-      return await tool.execute(parsed.value, {
-        ...buildToolHandlerExtra(resolvedContext, params._meta),
-        progressState,
-      });
-    } finally {
-      progressState.closed = true;
-    }
-  });
 }
 
 /* -------------------------------------------------------------------------------------------------
@@ -922,18 +545,6 @@ export function resolveToolCallContext(
   return resolveToolExecutionContext(extra, requestMeta);
 }
 
-export function buildToolHandlerExtra(
-  context: ToolExecutionContext,
-  requestMeta?: ToolCallRequestMeta
-): ToolHandlerExtra {
-  return compact({
-    signal: context.signal,
-    requestId: context.requestId,
-    sendNotification: context.sendNotification,
-    _meta: sanitizeToolCallMeta(requestMeta ?? context.requestMeta),
-  }) as ToolHandlerExtra;
-}
-
 export function withRequestContextIfMissing<TParams, TResult, TExtra = unknown>(
   handler: (params: TParams, extra?: TExtra) => Promise<TResult>
 ): (params: TParams, extra?: TExtra) => Promise<TResult> {
@@ -968,71 +579,49 @@ export function isServerResult(value: unknown): value is ServerResult {
 
 export type TaskCapableToolSupport = 'required' | 'optional' | 'forbidden';
 
-export interface TaskCapableToolDescriptor<TArgs = unknown> {
-  name: string;
-  parseArguments: (args: unknown) => TArgs;
-  execute: (args: TArgs, extra?: ToolHandlerExtra) => Promise<ServerResult>;
-  getCompletionStatusMessage?: (result: ServerResult) => string | undefined;
-  taskSupport?: TaskCapableToolSupport;
-  immediateResponse?: string;
-}
-
-const taskCapableToolsByServer = new WeakMap<
+const taskSupportByServer = new WeakMap<
   McpServer,
-  Map<string, TaskCapableToolDescriptor>
+  Map<string, TaskCapableToolSupport>
 >();
 
-function getServerToolMap(
+function getServerTaskSupportMap(
   server: McpServer
-): Map<string, TaskCapableToolDescriptor> {
-  let toolMap = taskCapableToolsByServer.get(server);
-  if (toolMap) return toolMap;
+): Map<string, TaskCapableToolSupport> {
+  let map = taskSupportByServer.get(server);
+  if (map) return map;
 
-  toolMap = new Map<string, TaskCapableToolDescriptor>();
-  taskCapableToolsByServer.set(server, toolMap);
+  map = new Map<string, TaskCapableToolSupport>();
+  taskSupportByServer.set(server, map);
   registerServerLifecycleCleanup(server, () => {
-    taskCapableToolsByServer.delete(server);
+    taskSupportByServer.delete(server);
   });
-  return toolMap;
+  return map;
 }
 
-export function registerTaskCapableTool<TArgs>(
+export function registerToolTaskSupport(
   server: McpServer,
-  descriptor: TaskCapableToolDescriptor<TArgs>
+  name: string,
+  support: TaskCapableToolSupport = 'optional'
 ): void {
-  getServerToolMap(server).set(descriptor.name, {
-    ...descriptor,
-    taskSupport: descriptor.taskSupport ?? 'optional',
-  } as TaskCapableToolDescriptor);
+  getServerTaskSupportMap(server).set(name, support);
 }
 
-export function unregisterTaskCapableTool(
+export function unregisterToolTaskSupport(
   server: McpServer,
   name: string
 ): void {
-  getServerToolMap(server).delete(name);
-}
-
-export function getTaskCapableTool(
-  server: McpServer,
-  name: string
-): TaskCapableToolDescriptor | undefined {
-  return getServerToolMap(server).get(name);
+  getServerTaskSupportMap(server).delete(name);
 }
 
 export function getTaskCapableToolSupport(
   server: McpServer,
   name: string
 ): TaskCapableToolSupport | undefined {
-  return getServerToolMap(server).get(name)?.taskSupport;
-}
-
-export function hasTaskCapableTool(server: McpServer, name: string): boolean {
-  return getServerToolMap(server).has(name);
+  return getServerTaskSupportMap(server).get(name);
 }
 
 export function hasRegisteredTaskCapableTools(server: McpServer): boolean {
-  return getServerToolMap(server).size > 0;
+  return getServerTaskSupportMap(server).size > 0;
 }
 
 export function setTaskCapableToolSupport(
@@ -1040,7 +629,8 @@ export function setTaskCapableToolSupport(
   name: string,
   support: TaskCapableToolSupport
 ): void {
-  const descriptor = getServerToolMap(server).get(name);
-  if (!descriptor) return;
-  descriptor.taskSupport = support;
+  const map = getServerTaskSupportMap(server);
+  if (map.has(name)) {
+    map.set(name, support);
+  }
 }

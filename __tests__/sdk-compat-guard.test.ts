@@ -5,10 +5,7 @@ import { afterEach, describe, it } from 'node:test';
 
 import { z } from 'zod';
 
-import {
-  registerTaskCapableTool,
-  registerTaskHandlers,
-} from '../src/tasks/manager.js';
+import { registerTaskHandlers } from '../src/tasks/manager.js';
 
 describe('public MCP handler registration', () => {
   const servers: McpServer[] = [];

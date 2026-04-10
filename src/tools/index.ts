@@ -22,7 +22,6 @@ import {
   createProgressReporter,
   createProtocolError,
   type ProgressReporter,
-  type ToolHandlerExtra,
   validateOrThrow,
 } from '../lib/mcp-interop.js';
 import {
@@ -44,10 +43,10 @@ import {
   normalizePageTitle,
 } from '../schemas.js';
 import {
-  registerTaskCapableTool,
-  type TaskCapableToolDescriptor,
+  registerToolTaskSupport,
+  setTaskCapableToolSupport,
   type TaskCapableToolSupport,
-  unregisterTaskCapableTool,
+  unregisterToolTaskSupport,
 } from '../tasks/index.js';
 
 // Area contract: MCP tool registration and fetch-url response shaping.
@@ -318,19 +317,18 @@ function buildFetchOptions(
 
 async function executeFetch(
   input: FetchUrlInput,
-  extra?: ToolHandlerExtra | ServerContext
+  ctx?: ServerContext
 ): Promise<ToolResponseBase> {
   const { url } = input;
-  const mcpReq = extra && 'mcpReq' in extra ? extra.mcpReq : undefined;
-  const thExtra = extra && !('mcpReq' in extra) ? extra : undefined;
-  const signal = buildToolAbortSignal(mcpReq?.signal ?? thExtra?.signal);
+  const mcpReq = ctx?.mcpReq;
+  const signal = buildToolAbortSignal(mcpReq?.signal);
   const startedAt = performance.now();
-  const meta = mcpReq?._meta ?? thExtra?._meta;
+  const meta = mcpReq?._meta;
   const relatedTaskMeta = meta?.[RELATED_TASK_META_KEY];
   const progressToken = meta?.progressToken;
   const relatedTask = isObject(relatedTaskMeta) ? relatedTaskMeta : undefined;
   const progressPlan = new FetchUrlProgressPlan(
-    createProgressReporter(extra),
+    createProgressReporter(ctx),
     formatUrlForDisplay(url)
   );
 
@@ -375,11 +373,11 @@ async function executeFetch(
 
 export async function fetchUrlToolHandler(
   input: FetchUrlInput,
-  extra?: ToolHandlerExtra | ServerContext
+  ctx?: ServerContext
 ): Promise<ToolResponseBase> {
   const startedAt = performance.now();
 
-  return executeFetch(input, extra).catch((error: unknown) => {
+  return executeFetch(input, ctx).catch((error: unknown) => {
     const durationMs = Math.round(performance.now() - startedAt);
     return classifyAndLogToolError(
       error,
@@ -414,34 +412,15 @@ export interface ToolRegistrationControls {
   setTaskSupport: (support: TaskCapableToolSupport) => void;
 }
 
-function createTaskCapableDescriptor(): TaskCapableToolDescriptor<FetchUrlInput> {
-  return {
-    name: TOOL_DEFINITION.name,
-    parseArguments: (args: unknown) => {
-      return validateOrThrow(
-        TOOL_DEFINITION.inputSchema,
-        args,
-        ProtocolErrorCode.InvalidParams,
-        'Invalid parameters for fetch-url',
-        Loggers.LOG_FETCH_URL
-      );
-    },
-    execute: fetchUrlToolHandler,
-    getCompletionStatusMessage: getFetchCompletionStatusMessage,
-    taskSupport: 'optional',
-  };
-}
-
 export function registerTools(server: McpServer): ToolRegistrationControls {
   if (!config.tools.enabled.includes(FETCH_URL_TOOL_NAME)) {
-    unregisterTaskCapableTool(server, FETCH_URL_TOOL_NAME);
+    unregisterToolTaskSupport(server, FETCH_URL_TOOL_NAME);
     return {
       setTaskSupport: () => {},
     };
   }
 
-  const descriptor = createTaskCapableDescriptor();
-  registerTaskCapableTool(server, descriptor);
+  registerToolTaskSupport(server, FETCH_URL_TOOL_NAME, 'optional');
 
   const registeredTool = server.experimental.tasks.registerToolTask(
     TOOL_DEFINITION.name,
@@ -497,7 +476,7 @@ export function registerTools(server: McpServer): ToolRegistrationControls {
   );
 
   const updateTaskSupport = (support: TaskCapableToolSupport): void => {
-    descriptor.taskSupport = support;
+    setTaskCapableToolSupport(server, FETCH_URL_TOOL_NAME, support);
     registeredTool.execution = { taskSupport: support };
   };
 
