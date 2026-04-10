@@ -1,10 +1,10 @@
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import {
   type ContentBlock,
-  ErrorCode,
+  type McpServer,
+  ProtocolErrorCode,
   type ServerResult,
   type ToolAnnotations,
-} from '@modelcontextprotocol/sdk/types.js';
+} from '@modelcontextprotocol/server';
 
 import type { z } from 'zod';
 
@@ -12,8 +12,8 @@ import { config } from '../lib/config.js';
 import { Loggers, logInfo } from '../lib/core.js';
 import { classifyAndLogToolError, isAbortError } from '../lib/error/index.js';
 import {
-  createMcpError,
   createProgressReporter,
+  createProtocolError,
   type ProgressReporter,
   registerToolPresentation,
   type ToolHandlerExtra,
@@ -134,7 +134,7 @@ function validateStructuredContent(
   validateOrThrow(
     fetchUrlOutputSchema,
     structuredContent,
-    ErrorCode.InternalError,
+    ProtocolErrorCode.InternalError,
     'Output validation failed',
     Loggers.LOG_FETCH_URL
   );
@@ -283,8 +283,8 @@ function buildToolAbortSignal(extraSignal?: AbortSignal): AbortSignal {
     config.tools.timeoutMs > 0 ? config.tools.timeoutMs : HARD_TOOL_TIMEOUT_MS;
   const signal = composeAbortSignal(extraSignal, timeout);
   if (!signal) {
-    throw createMcpError(
-      ErrorCode.InternalError,
+    throw createProtocolError(
+      ProtocolErrorCode.InternalError,
       'Failed to create timeout signal'
     );
   }
@@ -414,7 +414,7 @@ function createTaskCapableDescriptor(): TaskCapableToolDescriptor<FetchUrlInput>
       return validateOrThrow(
         TOOL_DEFINITION.inputSchema,
         args,
-        ErrorCode.InvalidParams,
+        ProtocolErrorCode.InvalidParams,
         'Invalid parameters for fetch-url',
         Loggers.LOG_FETCH_URL
       );

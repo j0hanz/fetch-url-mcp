@@ -1,6 +1,4 @@
-import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
-import { SetLevelRequestSchema } from '@modelcontextprotocol/sdk/types.js';
+import { McpServer, StdioServerTransport } from '@modelcontextprotocol/server';
 
 import * as fs from 'node:fs/promises';
 import process from 'node:process';
@@ -168,7 +166,7 @@ export async function createMcpServerForHttpSession(): Promise<McpServer> {
 }
 
 function registerLoggingSetLevelHandler(server: McpServer): void {
-  server.server.setRequestHandler(SetLevelRequestSchema, (request) => {
+  server.server.setRequestHandler('logging/setLevel', (request) => {
     const sessionId = getSessionId();
     setLogLevel(request.params.level, sessionId);
     logNotice(

@@ -1,10 +1,10 @@
-import { type McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import {
-  CallToolRequestSchema,
-  ErrorCode,
-  McpError,
+  type McpServer,
+  ProtocolError,
+  ProtocolErrorCode,
+  type ServerContext,
   type ServerResult,
-} from '@modelcontextprotocol/sdk/types.js';
+} from '@modelcontextprotocol/server';
 
 import { hash, randomUUID } from 'node:crypto';
 
@@ -25,11 +25,11 @@ import {
 import {
   getErrorMessage,
   handleToolError,
-  stripMcpErrorPrefix,
+  stripProtocolErrorPrefix,
   tryReadToolErrorMessage,
 } from '../lib/error/index.js';
 import {
-  createMcpError,
+  createProtocolError,
   getSdkCallToolHandler,
   type ProgressNotification,
   registerServerLifecycleCleanup,
@@ -133,7 +133,10 @@ export function parseExtendedCallToolRequest(
   const parsed = extendedCallToolRequestSchema.safeParse(request);
   if (parsed.success) return parsed.data;
 
-  throw createMcpError(ErrorCode.InvalidParams, formatZodError(parsed.error));
+  throw createProtocolError(
+    ProtocolErrorCode.InvalidParams,
+    formatZodError(parsed.error)
+  );
 }
 
 export function sanitizeToolCallMeta(
@@ -321,7 +324,7 @@ function emitTaskCreatedNotification(server: McpServer, task: TaskState): void {
 }
 
 export function throwTaskNotFound(): never {
-  throw createMcpError(ErrorCode.InvalidParams, 'Task not found');
+  throw createProtocolError(ProtocolErrorCode.InvalidParams, 'Task not found');
 }
 
 /* -------------------------------------------------------------------------------------------------
@@ -348,10 +351,12 @@ function buildTaskFailureState(error: unknown): {
   };
 } {
   const mcpErrorMessage =
-    error instanceof McpError ? stripMcpErrorPrefix(error.message) : undefined;
+    error instanceof ProtocolError
+      ? stripProtocolErrorPrefix(error.message)
+      : undefined;
   const statusMessage = mcpErrorMessage ?? getErrorMessage(error);
 
-  if (error instanceof McpError) {
+  if (error instanceof ProtocolError) {
     return {
       status: 'failed',
       statusMessage,
@@ -367,7 +372,7 @@ function buildTaskFailureState(error: unknown): {
     status: 'failed',
     statusMessage,
     error: {
-      code: ErrorCode.InternalError,
+      code: ProtocolErrorCode.InternalError,
       message: statusMessage,
     },
   };
@@ -391,7 +396,7 @@ function buildTaskCompletionUpdate(
     ...(isError
       ? {
           error: {
-            code: ErrorCode.InternalError,
+            code: ProtocolErrorCode.InternalError,
             message: errorMessage,
           },
         }
@@ -505,7 +510,7 @@ function tryParseArguments(
   try {
     return { ok: true, value: tool.parseArguments(args) };
   } catch (error: unknown) {
-    if (error instanceof McpError) {
+    if (error instanceof ProtocolError) {
       return {
         ok: false,
         response: handleToolError(error, extractRawUrl(args)),
@@ -522,14 +527,14 @@ function validateTaskSupport(
 ): void {
   const support = getTaskCapableToolSupport(server, toolName);
   if (isTaskMode && support === 'forbidden') {
-    throw createMcpError(
-      ErrorCode.MethodNotFound,
+    throw createProtocolError(
+      ProtocolErrorCode.MethodNotFound,
       `Task mode is not supported for tool: ${toolName}`
     );
   }
   if (!isTaskMode && support === 'required') {
-    throw createMcpError(
-      ErrorCode.MethodNotFound,
+    throw createProtocolError(
+      ProtocolErrorCode.MethodNotFound,
       `Task mode is required for tool: ${toolName}`
     );
   }
@@ -604,8 +609,8 @@ export async function handleToolCallRequest(
     // Validate the tool name first so an unknown tool always produces MethodNotFound
     const tool = getTaskCapableTool(server, params.name);
     if (!tool) {
-      throw createMcpError(
-        ErrorCode.MethodNotFound,
+      throw createProtocolError(
+        ProtocolErrorCode.MethodNotFound,
         `Unknown tool: ${params.name}`
       );
     }
@@ -731,11 +736,15 @@ function throwStoredTaskError(task: {
   error?: { code: number; message: string; data?: unknown };
 }): never {
   if (task.error) {
-    throw createMcpError(task.error.code, task.error.message, task.error.data);
+    throw createProtocolError(
+      task.error.code,
+      task.error.message,
+      task.error.data
+    );
   }
 
-  throw createMcpError(
-    ErrorCode.InternalError,
+  throw createProtocolError(
+    ProtocolErrorCode.InternalError,
     task.statusMessage ?? 'Execution failed',
     { taskId: task.taskId }
   );
@@ -745,6 +754,21 @@ export function registerTaskHandlers(
   server: McpServer,
   options?: TaskHandlerRegistrationOptions
 ): TaskHandlerRegistrationResult {
+  type RawRequestHandler = (request: unknown, ctx: ServerContext) => unknown;
+
+  const setRawRequestHandler = server.server.setRequestHandler.bind(
+    server.server
+  ) as unknown as (method: string, handler: RawRequestHandler) => void;
+  const registerRawHandler = Reflect.get(server.server, 'registerHandler') as
+    | ((method: string, handler: RawRequestHandler) => void)
+    | undefined;
+  const registerCustomRequestHandler = registerRawHandler?.bind(
+    server.server
+  ) as ((method: string, handler: RawRequestHandler) => void) | undefined;
+  const privateRequestHandlers = Reflect.get(
+    server.server,
+    '_requestHandlers'
+  ) as Map<string, unknown> | undefined;
   const sdkCallToolHandler = getSdkCallToolHandler(server);
   const taskCapableToolsRegistered = hasRegisteredTaskCapableTools(server);
   const requireInterception = options?.requireInterception ?? true;
@@ -764,59 +788,59 @@ export function registerTaskHandlers(
   }
 
   if (sdkCallToolHandler) {
-    server.server.setRequestHandler(
-      CallToolRequestSchema,
-      async (request, extra) => {
-        const parsedExtra = parseHandlerExtra(extra);
-        const requestId =
-          parsedExtra?.requestId !== undefined
-            ? String(parsedExtra.requestId)
-            : randomUUID();
+    setRawRequestHandler('tools/call', async (request, extra) => {
+      const parsedExtra = parseHandlerExtra(extra);
+      const requestId =
+        parsedExtra?.requestId !== undefined
+          ? String(parsedExtra.requestId)
+          : randomUUID();
 
-        return runWithRequestContext(
-          {
-            requestId,
-            operationId: requestId,
-            ...(parsedExtra?.sessionId
-              ? { sessionId: parsedExtra.sessionId }
-              : {}),
-          },
-          () => {
-            const toolName = request.params.name;
+      return runWithRequestContext(
+        {
+          requestId,
+          operationId: requestId,
+          ...(parsedExtra?.sessionId
+            ? { sessionId: parsedExtra.sessionId }
+            : {}),
+        },
+        () => {
+          const toolName =
+            isObject(request) &&
+            isObject(request['params']) &&
+            typeof request['params']['name'] === 'string'
+              ? request['params']['name']
+              : '';
 
-            // Only intercept task-capable tools managed by the local task registry.
-            // Delegate all other tools to the SDK handler to avoid shadowing future tools.
-            if (!hasTaskCapableTool(server, toolName)) {
-              return sdkCallToolHandler(
-                request,
-                extra
-              ) as Promise<ServerResult>;
-            }
-
-            const parsed = parseExtendedCallToolRequest(request);
-            const context = resolveToolCallContext(
-              parsedExtra,
-              parsed.params._meta
-            );
-            logDebug(
-              'Intercepted task-capable tool call',
-              {
-                tool: toolName,
-                taskRequested: getTaskMeta(parsed.params) !== undefined,
-                hasProgressToken:
-                  parsed.params._meta?.progressToken !== undefined,
-              },
-              Loggers.LOG_TASKS
-            );
-            return handleToolCallRequest(server, parsed, context);
+          // Only intercept task-capable tools managed by the local task registry.
+          // Delegate all other tools to the SDK handler to avoid shadowing future tools.
+          if (!hasTaskCapableTool(server, toolName)) {
+            return sdkCallToolHandler(request, extra) as Promise<ServerResult>;
           }
-        );
-      }
-    );
+
+          const parsed = parseExtendedCallToolRequest(request);
+          const context = resolveToolCallContext(
+            parsedExtra,
+            parsed.params._meta
+          );
+          logDebug(
+            'Intercepted task-capable tool call',
+            {
+              tool: toolName,
+              taskRequested: getTaskMeta(parsed.params) !== undefined,
+              hasProgressToken:
+                parsed.params._meta?.progressToken !== undefined,
+            },
+            Loggers.LOG_TASKS
+          );
+          return handleToolCallRequest(server, parsed, context);
+        }
+      );
+    });
   }
 
-  server.server.setRequestHandler(TaskGetSchema, (request, extra) => {
-    const { taskId } = request.params;
+  setRawRequestHandler('tasks/get', (request, extra) => {
+    const parsedRequest = TaskGetSchema.parse(request);
+    const { taskId } = parsedRequest.params;
     const { ownerKey } = resolveOwnerScopedExtra(extra);
     logDebug('tasks/get requested', { taskId }, Loggers.LOG_TASKS);
     const task = taskManager.getTask(taskId, ownerKey);
@@ -826,23 +850,24 @@ export function registerTaskHandlers(
     return withRelatedTaskSummaryMeta(toTaskSummary(task), task.taskId);
   });
 
-  server.server.setRequestHandler(TaskResultSchema, (request, extra) => {
-    const { taskId } = request.params;
+  setRawRequestHandler('tasks/result', (request, extra) => {
+    const parsedRequest = TaskResultSchema.parse(request);
+    const { taskId } = parsedRequest.params;
     const { ownerKey } = resolveOwnerScopedExtra(extra);
     logDebug('tasks/result requested', { taskId }, Loggers.LOG_TASKS);
 
     const task = taskManager.getTask(taskId, ownerKey);
     if (!task) throwTaskNotFound();
     if (task.status === 'submitted' || task.status === 'working') {
-      throw createMcpError(
-        ErrorCode.InvalidParams,
+      throw createProtocolError(
+        ProtocolErrorCode.InvalidParams,
         'Task result is not available until the task completes',
         { taskId, status: task.status }
       );
     }
     if (task.status === 'input_required') {
-      throw createMcpError(
-        ErrorCode.InvalidParams,
+      throw createProtocolError(
+        ProtocolErrorCode.InvalidParams,
         'Task result is not available while the task is waiting for input',
         { taskId, status: task.status }
       );
@@ -870,9 +895,10 @@ export function registerTaskHandlers(
     }
   });
 
-  server.server.setRequestHandler(TaskListSchema, (request, extra) => {
+  setRawRequestHandler('tasks/list', (request, extra) => {
+    const parsedRequest = TaskListSchema.parse(request);
     const { ownerKey } = resolveOwnerScopedExtra(extra);
-    const cursor = request.params?.cursor;
+    const cursor = parsedRequest.params?.cursor;
     logDebug(
       'tasks/list requested',
       { hasCursor: cursor !== undefined },
@@ -891,8 +917,9 @@ export function registerTaskHandlers(
     };
   });
 
-  server.server.setRequestHandler(TaskCancelSchema, (request, extra) => {
-    const { taskId } = request.params;
+  setRawRequestHandler('tasks/cancel', (request, extra) => {
+    const parsedRequest = TaskCancelSchema.parse(request);
+    const { taskId } = parsedRequest.params;
     const { ownerKey } = resolveOwnerScopedExtra(extra);
     logDebug('tasks/cancel requested', { taskId }, Loggers.LOG_TASKS);
 
@@ -906,8 +933,12 @@ export function registerTaskHandlers(
     return withRelatedTaskSummaryMeta(toTaskSummary(task), task.taskId);
   });
 
-  server.server.setRequestHandler(TaskDeleteSchema, (request, extra) => {
-    const { taskId } = request.params;
+  const tasksDeleteHandler = (
+    request: unknown,
+    extra: unknown
+  ): Record<string, never> => {
+    const parsedRequest = TaskDeleteSchema.parse(request);
+    const { taskId } = parsedRequest.params;
     const { ownerKey } = resolveOwnerScopedExtra(extra);
     logDebug('tasks/delete requested', { taskId }, Loggers.LOG_TASKS);
 
@@ -915,7 +946,17 @@ export function registerTaskHandlers(
     if (!deleted) throwTaskNotFound();
 
     return {};
-  });
+  };
+
+  if (registerCustomRequestHandler) {
+    registerCustomRequestHandler('tasks/delete', tasksDeleteHandler);
+  } else if (privateRequestHandlers instanceof Map) {
+    privateRequestHandlers.set('tasks/delete', tasksDeleteHandler);
+  } else {
+    throw Error(
+      'Custom request handler registration is unavailable; tasks/delete cannot be registered.'
+    );
+  }
 
   return {
     interceptedToolsCall: sdkCallToolHandler !== null,
@@ -933,7 +974,7 @@ interface HandlerExtra {
   signal?: AbortSignal;
   requestId?: string | number;
   sendNotification?: (notification: ProgressNotification) => Promise<void>;
-  requestInfo?: unknown;
+  _meta?: ToolCallRequestMeta;
 }
 
 export interface ToolExecutionContext {
@@ -998,10 +1039,14 @@ function normalizeAuthInfo(
 
 export function parseHandlerExtra(extra: unknown): HandlerExtra | undefined {
   if (!isObject(extra)) return undefined;
+  const ctx = extra as Partial<ServerContext>;
 
   const parsed: HandlerExtra = {};
-  const { authInfo, signal, requestId, sendNotification } = extra;
-  const sessionId = resolveSessionIdFromExtra(extra);
+  const authInfo = ctx.http?.authInfo;
+  const signal = ctx.mcpReq?.signal;
+  const requestId = ctx.mcpReq?.id;
+  const sendNotification = ctx.mcpReq?.notify;
+  const sessionId = resolveSessionIdFromExtra(ctx);
   if (sessionId) parsed.sessionId = sessionId;
 
   const normalizedAuthInfo = normalizeAuthInfo(authInfo);
@@ -1019,6 +1064,10 @@ export function parseHandlerExtra(extra: unknown): HandlerExtra | undefined {
     normalizeSendNotification(sendNotification);
   if (normalizedSendNotification) {
     parsed.sendNotification = normalizedSendNotification;
+  }
+
+  if (isObject(ctx.mcpReq?._meta)) {
+    parsed._meta = ctx.mcpReq._meta as ToolCallRequestMeta;
   }
 
   return parsed;
@@ -1053,37 +1102,29 @@ export function resolveTaskOwnerKey(extra?: HandlerExtra): string {
 }
 
 function resolveRequestIdFromExtra(extra: unknown): string | undefined {
-  if (!isObject(extra)) return undefined;
+  const parsedExtra = parseHandlerExtra(extra);
+  if (!parsedExtra) return undefined;
 
-  const { requestId } = extra;
+  const { requestId } = parsedExtra;
   if (typeof requestId === 'string') return requestId;
   if (typeof requestId === 'number') return String(requestId);
 
   return undefined;
 }
 
-function getHeaderString(
-  headers: Record<PropertyKey, unknown>,
-  name: string
-): string | undefined {
-  const value = headers[name];
-  if (typeof value === 'string') return value;
-  if (!Array.isArray(value)) return undefined;
-
-  return value.find((entry): entry is string => typeof entry === 'string');
+function getHeaderString(headers: Headers, name: string): string | undefined {
+  const value = headers.get(name);
+  return value ?? undefined;
 }
 
-function resolveSessionIdFromExtra(extra: unknown): string | undefined {
-  if (!isObject(extra)) return undefined;
-
-  const { sessionId } = extra;
+function resolveSessionIdFromExtra(
+  extra: Partial<ServerContext> | undefined
+): string | undefined {
+  const { sessionId } = extra ?? {};
   if (typeof sessionId === 'string') return sessionId;
 
-  const { requestInfo } = extra;
-  if (!isObject(requestInfo)) return undefined;
-
-  const { headers } = requestInfo;
-  if (!isObject(headers)) return undefined;
+  const headers = extra?.http?.req?.headers;
+  if (!(headers instanceof Headers)) return undefined;
 
   return (
     getHeaderString(headers, 'mcp-session-id') ??
@@ -1130,18 +1171,16 @@ export function withRequestContextIfMissing<TParams, TResult, TExtra = unknown>(
   return async (params, extra) => {
     const existingRequestId = getRequestId();
     if (existingRequestId) {
-      const traceMeta =
-        isObject(extra) && isObject(extra['_meta'])
-          ? extra['_meta']
-          : undefined;
+      const traceMeta = parseHandlerExtra(extra)?._meta;
       return runWithTraceContext(traceMeta, () => handler(params, extra));
     }
 
     const derivedRequestId = resolveRequestIdFromExtra(extra) ?? randomUUID();
-    const derivedSessionId = resolveSessionIdFromExtra(extra);
+    const derivedSessionId = resolveSessionIdFromExtra(
+      extra as Partial<ServerContext> | undefined
+    );
 
-    const traceMeta =
-      isObject(extra) && isObject(extra['_meta']) ? extra['_meta'] : undefined;
+    const traceMeta = parseHandlerExtra(extra)?._meta;
 
     return runWithRequestContext(
       {

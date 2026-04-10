@@ -1,5 +1,5 @@
-import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { ErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js';
+import { McpServer } from '@modelcontextprotocol/server';
+import { ProtocolError, ProtocolErrorCode } from '@modelcontextprotocol/server';
 
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
@@ -29,7 +29,7 @@ function isUnknownRequestHandler(
   return typeof value === 'function';
 }
 
-function assertMcpErrorLike(
+function assertProtocolErrorLike(
   error: unknown,
   expected: {
     code: number;
@@ -627,8 +627,8 @@ describe('task result availability', () => {
         error = caught;
       }
 
-      assertMcpErrorLike(error, {
-        code: ErrorCode.InvalidParams,
+      assertProtocolErrorLike(error, {
+        code: ProtocolErrorCode.InvalidParams,
         messageIncludes: 'not available',
         data: { taskId: taskResult.task.taskId, status: 'working' },
       });
@@ -704,8 +704,8 @@ describe('task result failure normalization', () => {
         error = caught;
       }
 
-      assertMcpErrorLike(error, {
-        code: ErrorCode.InternalError,
+      assertProtocolErrorLike(error, {
+        code: ProtocolErrorCode.InternalError,
         messageIncludes: 'tool reported failure',
       });
     } finally {
@@ -768,8 +768,8 @@ describe('task result failure normalization', () => {
         error = caught;
       }
 
-      assertMcpErrorLike(error, {
-        code: ErrorCode.InternalError,
+      assertProtocolErrorLike(error, {
+        code: ProtocolErrorCode.InternalError,
         messageIncludes: 'boom',
       });
     } finally {
@@ -778,7 +778,7 @@ describe('task result failure normalization', () => {
     }
   });
 
-  it('preserves McpError code and data for background failures', async () => {
+  it('preserves ProtocolError code and data for background failures', async () => {
     const server = createTaskTestServer();
     const toolName = `mcp-error-task-tool-${randomUUID()}`;
 
@@ -786,9 +786,13 @@ describe('task result failure normalization', () => {
       name: toolName,
       parseArguments: () => ({}),
       execute: async () => {
-        const error = new McpError(ErrorCode.InternalError, 'broken', {
-          reason: 'test',
-        });
+        const error = new ProtocolError(
+          ProtocolErrorCode.InternalError,
+          'broken',
+          {
+            reason: 'test',
+          }
+        );
         throw error;
       },
       taskSupport: 'optional',
@@ -835,8 +839,8 @@ describe('task result failure normalization', () => {
         error = caught;
       }
 
-      assertMcpErrorLike(error, {
-        code: ErrorCode.InternalError,
+      assertProtocolErrorLike(error, {
+        code: ProtocolErrorCode.InternalError,
         messageIncludes: 'broken',
         data: { reason: 'test' },
       });
@@ -904,7 +908,7 @@ describe('task result for cancelled task', () => {
         error = caught;
       }
 
-      assertMcpErrorLike(error, {
+      assertProtocolErrorLike(error, {
         code: -32_000,
         messageIncludes: 'The task was cancelled by request.',
         data: { code: 'ABORTED' },
@@ -944,7 +948,8 @@ describe('required task support enforcement', () => {
             { ownerKey: 'default' }
           ),
         (err: unknown) =>
-          err instanceof McpError && err.code === ErrorCode.MethodNotFound
+          err instanceof ProtocolError &&
+          err.code === ProtocolErrorCode.MethodNotFound
       );
     } finally {
       unregisterTaskCapableTool(server, toolName);
@@ -1110,7 +1115,7 @@ describe('tasks/delete handler', () => {
             { method: 'tasks/get', params: { taskId: taskResult.task.taskId } },
             undefined
           ),
-        (err: unknown) => err instanceof McpError
+        (err: unknown) => err instanceof ProtocolError
       );
     } finally {
       unregisterTaskCapableTool(server, toolName);
@@ -1164,7 +1169,8 @@ describe('tasks/delete handler', () => {
             undefined
           ),
         (err: unknown) =>
-          err instanceof McpError && err.code === ErrorCode.InvalidParams
+          err instanceof ProtocolError &&
+          err.code === ProtocolErrorCode.InvalidParams
       );
 
       // Clean up by cancelling

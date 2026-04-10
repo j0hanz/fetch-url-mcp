@@ -1,4 +1,4 @@
-import { ErrorCode } from '@modelcontextprotocol/sdk/types.js';
+import { ProtocolErrorCode } from '@modelcontextprotocol/server';
 
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { createHmac, randomBytes, randomUUID } from 'node:crypto';
@@ -6,7 +6,7 @@ import { createHmac, randomBytes, randomUUID } from 'node:crypto';
 import { config } from '../lib/config.js';
 import { Loggers, logInfo, logWarn } from '../lib/core.js';
 import { toError } from '../lib/error/index.js';
-import { createMcpError } from '../lib/mcp-interop.js';
+import { createProtocolError } from '../lib/mcp-interop.js';
 import {
   type CancellableTimeout,
   createUnrefTimeout,
@@ -79,6 +79,7 @@ const DEFAULT_PAGE_SIZE = 50;
 
 const CLEANUP_INTERVAL_MS = 60_000;
 const RESULT_DELIVERY_GRACE_MS = 10_000;
+const CONNECTION_CLOSED_ERROR_CODE = -32000;
 const TASK_STATUS_VALUES = new Set<TaskStatus>([
   'submitted',
   'working',
@@ -106,15 +107,15 @@ function resolveNextTaskStatus(
   if (!nextStatus || nextStatus === task.status) return task.status;
 
   if (!TASK_STATUS_VALUES.has(nextStatus)) {
-    throw createMcpError(
-      ErrorCode.InternalError,
+    throw createProtocolError(
+      ProtocolErrorCode.InternalError,
       `Invalid task status: ${nextStatus}`
     );
   }
 
   if (isTerminalStatus(task.status)) {
-    throw createMcpError(
-      ErrorCode.InternalError,
+    throw createProtocolError(
+      ProtocolErrorCode.InternalError,
       `Cannot transition task from ${task.status} to ${nextStatus}`
     );
   }
@@ -240,7 +241,7 @@ class TaskManager {
       status: 'cancelled',
       statusMessage,
       error: {
-        code: ErrorCode.ConnectionClosed,
+        code: CONNECTION_CLOSED_ERROR_CODE,
         message: statusMessage,
         data: { code: 'ABORTED' },
       },
@@ -261,15 +262,15 @@ class TaskManager {
     const { maxPerOwner, maxTotal } = config.tasks;
 
     if (this.tasks.size >= maxTotal) {
-      throw createMcpError(
-        ErrorCode.InvalidRequest,
+      throw createProtocolError(
+        ProtocolErrorCode.InvalidRequest,
         `Server task limit reached (${maxTotal})`
       );
     }
 
     if ((this.ownerCounts.get(ownerKey) ?? 0) >= maxPerOwner) {
-      throw createMcpError(
-        ErrorCode.InvalidRequest,
+      throw createProtocolError(
+        ProtocolErrorCode.InvalidRequest,
         `Task limit reached for this session (${maxPerOwner})`
       );
     }
@@ -286,8 +287,8 @@ class TaskManager {
 
     const taskId = options?.taskId ?? randomUUID();
     if (this.tasks.has(taskId)) {
-      throw createMcpError(
-        ErrorCode.InvalidRequest,
+      throw createProtocolError(
+        ProtocolErrorCode.InvalidRequest,
         `Task already exists: ${taskId}`
       );
     }
@@ -384,8 +385,8 @@ class TaskManager {
     if (!task) return undefined;
 
     if (isTerminalStatus(task.status)) {
-      throw createMcpError(
-        ErrorCode.InvalidParams,
+      throw createProtocolError(
+        ProtocolErrorCode.InvalidParams,
         `Cannot cancel task: already ${task.status}`
       );
     }
@@ -407,8 +408,8 @@ class TaskManager {
     if (!task) return false;
 
     if (!isTerminalStatus(task.status)) {
-      throw createMcpError(
-        ErrorCode.InvalidParams,
+      throw createProtocolError(
+        ProtocolErrorCode.InvalidParams,
         `Cannot delete task: status is ${task.status}`
       );
     }
@@ -470,7 +471,10 @@ class TaskManager {
       (task) => task.taskId === anchorTaskId
     );
     if (anchorIndex === -1) {
-      throw createMcpError(ErrorCode.InvalidParams, 'Invalid cursor');
+      throw createProtocolError(
+        ProtocolErrorCode.InvalidParams,
+        'Invalid cursor'
+      );
     }
 
     return validTasks.slice(anchorIndex + 1, anchorIndex + 1 + pageSize + 1);
@@ -498,7 +502,10 @@ class TaskManager {
     if (!cursor) return null;
     const decoded = decodeTaskCursor(cursor);
     if (!decoded) {
-      throw createMcpError(ErrorCode.InvalidParams, 'Invalid cursor');
+      throw createProtocolError(
+        ProtocolErrorCode.InvalidParams,
+        'Invalid cursor'
+      );
     }
     return decoded.anchorTaskId;
   }
@@ -688,7 +695,10 @@ export async function waitForTerminalTask<TTask extends WaitableTask>(options: {
       cleanup();
       options.registry.remove(options.taskId, waiter);
       rejectInContext(
-        createMcpError(ErrorCode.ConnectionClosed, 'Request was cancelled')
+        createProtocolError(
+          CONNECTION_CLOSED_ERROR_CODE,
+          'Request was cancelled'
+        )
       );
     });
   };
@@ -724,7 +734,7 @@ export async function waitForTerminalTask<TTask extends WaitableTask>(options: {
         options.registry.remove(options.taskId, waiter);
         options.removeTask(options.taskId);
         rejectInContext(
-          createMcpError(ErrorCode.InvalidParams, 'Task expired', {
+          createProtocolError(ProtocolErrorCode.InvalidParams, 'Task expired', {
             taskId: options.taskId,
           })
         );

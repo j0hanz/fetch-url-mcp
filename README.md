@@ -580,7 +580,7 @@ To run the tool in task mode, include `_meta["modelcontextprotocol.io/task"] = {
 | Capability                      | Status    | Notes                                                                                                                                                                                                          |
 | ------------------------------- | --------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | completions                     | confirmed | Advertised in `createServerCapabilities()`.                                                                                                                                                                    |
-| logging                         | confirmed | Advertised in `createServerCapabilities()` and handled through `SetLevelRequestSchema`.                                                                                                                        |
+| logging                         | confirmed | Advertised in `createServerCapabilities()` and handled through `setRequestHandler('logging/setLevel', ...)`.                                                                                                   |
 | resources subscribe/listChanged | confirmed | Advertised in `createServerCapabilities()`.                                                                                                                                                                    |
 | prompts                         | confirmed | `get-help` is registered during server startup.                                                                                                                                                                |
 | tasks                           | confirmed | Advertised in `createServerCapabilities()` and backed by registered task handlers plus optional tool task support.                                                                                             |
@@ -787,14 +787,15 @@ All configuration is through environment variables. For basic stdio usage, nothi
 
 ## Credits
 
-| Dependency                                                                           | Registry |
-| ------------------------------------------------------------------------------------ | -------- |
-| [@modelcontextprotocol/sdk](https://www.npmjs.com/package/@modelcontextprotocol/sdk) | npm      |
-| [@mozilla/readability](https://www.npmjs.com/package/@mozilla/readability)           | npm      |
-| [linkedom](https://www.npmjs.com/package/linkedom)                                   | npm      |
-| [node-html-markdown](https://www.npmjs.com/package/node-html-markdown)               | npm      |
-| [undici](https://www.npmjs.com/package/undici)                                       | npm      |
-| [zod](https://www.npmjs.com/package/zod)                                             | npm      |
+| Dependency                                                                                 | Registry |
+| ------------------------------------------------------------------------------------------ | -------- |
+| [@modelcontextprotocol/server](https://www.npmjs.com/package/@modelcontextprotocol/server) | npm      |
+| [@modelcontextprotocol/node](https://www.npmjs.com/package/@modelcontextprotocol/node)     | npm      |
+| [@mozilla/readability](https://www.npmjs.com/package/@mozilla/readability)                 | npm      |
+| [linkedom](https://www.npmjs.com/package/linkedom)                                         | npm      |
+| [node-html-markdown](https://www.npmjs.com/package/node-html-markdown)                     | npm      |
+| [undici](https://www.npmjs.com/package/undici)                                             | npm      |
+| [zod](https://www.npmjs.com/package/zod)                                                   | npm      |
 
 ## Contributing and License
 

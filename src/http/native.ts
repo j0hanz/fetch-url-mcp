@@ -1,11 +1,11 @@
-import type { AuthInfo } from '@modelcontextprotocol/sdk/server/auth/types.js';
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
-import type { Transport } from '@modelcontextprotocol/sdk/shared/transport.js';
+import { NodeStreamableHTTPServerTransport } from '@modelcontextprotocol/node';
 import {
-  ErrorCode,
+  type AuthInfo,
   isInitializeRequest,
-} from '@modelcontextprotocol/sdk/types.js';
+  type McpServer,
+  ProtocolErrorCode,
+  type Transport,
+} from '@modelcontextprotocol/server';
 
 import { randomUUID } from 'node:crypto';
 import { once } from 'node:events';
@@ -528,7 +528,7 @@ export async function closeMcpServerBestEffort(
 }
 
 export function createTransportAdapter(
-  transportImpl: StreamableHTTPServerTransport
+  transportImpl: NodeStreamableHTTPServerTransport
 ): Transport {
   type OnClose = NonNullable<Transport['onclose']>;
   type OnError = NonNullable<Transport['onerror']>;
@@ -546,7 +546,13 @@ export function createTransportAdapter(
 
   return {
     start: () => transportImpl.start(),
-    send: (message, options) => transportImpl.send(message, options),
+    send: (message, options) =>
+      transportImpl.send(
+        message,
+        options?.relatedRequestId === undefined
+          ? undefined
+          : { relatedRequestId: options.relatedRequestId }
+      ),
     close: () => transportImpl.close(),
 
     get onclose() {
@@ -754,7 +760,7 @@ export const jsonBodyReader = new JsonBodyReader();
 
 interface SessionRecordLike {
   server: McpServer;
-  transport: StreamableHTTPServerTransport;
+  transport: NodeStreamableHTTPServerTransport;
 }
 
 interface SessionTeardownOptions {
@@ -1288,7 +1294,7 @@ class McpSessionGateway {
       });
       sendError(
         ctx.res,
-        ErrorCode.InvalidRequest,
+        ProtocolErrorCode.InvalidRequest,
         'We need you to use "text/event-stream" for this connection.',
         406
       );
@@ -1330,7 +1336,7 @@ class McpSessionGateway {
       });
       sendError(
         ctx.res,
-        ErrorCode.InvalidRequest,
+        ProtocolErrorCode.InvalidRequest,
         'We need the request to accept both "application/json" and "text/event-stream".',
         406
       );
@@ -1349,7 +1355,7 @@ class McpSessionGateway {
       });
       sendError(
         ctx.res,
-        ErrorCode.InvalidRequest,
+        ProtocolErrorCode.InvalidRequest,
         'We need a valid JSON object in the request body for MCP POST requests.',
         400
       );
@@ -1367,7 +1373,7 @@ class McpSessionGateway {
       });
       sendError(
         ctx.res,
-        ErrorCode.InvalidRequest,
+        ProtocolErrorCode.InvalidRequest,
         'JSON-RPC batch requests are not supported on this endpoint.',
         400
       );
@@ -1388,7 +1394,7 @@ class McpSessionGateway {
     });
     sendError(
       ctx.res,
-      ErrorCode.InvalidRequest,
+      ProtocolErrorCode.InvalidRequest,
       'We need a valid JSON object in the request body for MCP POST requests.',
       400
     );
@@ -1510,7 +1516,7 @@ class McpSessionGateway {
   private async getOrCreateTransport(
     ctx: AuthenticatedContext,
     requestId: JsonRpcId
-  ): Promise<StreamableHTTPServerTransport | null> {
+  ): Promise<NodeStreamableHTTPServerTransport | null> {
     const sessionId = getMcpSessionId(ctx.req);
 
     if (sessionId) {
@@ -1642,7 +1648,7 @@ class McpSessionGateway {
     authFingerprint: string | null,
     res: ServerResponse,
     requestId: JsonRpcId
-  ): StreamableHTTPServerTransport | null {
+  ): NodeStreamableHTTPServerTransport | null {
     const session = this.getAuthenticatedSessionById(
       sessionId,
       authFingerprint,
@@ -1783,7 +1789,7 @@ class McpSessionGateway {
     tracker: ReturnType<typeof createSlotTracker>,
     unpublishedSession: {
       server: McpServer;
-      transport: StreamableHTTPServerTransport;
+      transport: NodeStreamableHTTPServerTransport;
     }
   ): NodeJS.Timeout {
     const initTimeout = setTimeout(() => {
@@ -1820,12 +1826,12 @@ class McpSessionGateway {
 
   private async connectTransport(
     sessionServer: McpServer,
-    transportImpl: StreamableHTTPServerTransport,
+    transportImpl: NodeStreamableHTTPServerTransport,
     initTimeout: NodeJS.Timeout,
     tracker: ReturnType<typeof createSlotTracker>,
     unpublishedSession: {
       server: McpServer;
-      transport: StreamableHTTPServerTransport;
+      transport: NodeStreamableHTTPServerTransport;
     },
     sessionId: string
   ): Promise<boolean> {
@@ -1865,7 +1871,7 @@ class McpSessionGateway {
     ctx: AuthenticatedContext,
     requestId: JsonRpcId,
     negotiatedProtocolVersion: string
-  ): Promise<StreamableHTTPServerTransport | null> {
+  ): Promise<NodeStreamableHTTPServerTransport | null> {
     const authFingerprint = buildAuthFingerprint(ctx.auth);
     if (!authFingerprint) {
       logError(
@@ -1922,7 +1928,7 @@ class McpSessionGateway {
       tracker.releaseSlot();
       throw error;
     }
-    const transportImpl = new StreamableHTTPServerTransport({
+    const transportImpl = new NodeStreamableHTTPServerTransport({
       sessionIdGenerator: () => newSessionId,
     });
     const unpublishedSession = {

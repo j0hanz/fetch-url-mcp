@@ -1,8 +1,9 @@
-import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
-import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { McpServer } from '@modelcontextprotocol/server';
 
 import assert from 'node:assert/strict';
 import { after, before, describe, it } from 'node:test';
+
+import { z } from 'zod';
 
 import {
   getSdkCallToolHandler,
@@ -34,8 +35,8 @@ function getPrivateCapabilities(server: McpServer): Record<string, unknown> {
 // ── SDK private API compatibility guard ─────────────────────────────
 //
 // These tests verify that the internal properties the codebase depends on
-// (`_requestHandlers`, `_capabilities`) are present on the SDK's McpServer
-// instance.  When an MCP SDK upgrade changes these internals, these tests
+// (`_requestHandlers`, `_capabilities`) are present on the server package's
+// McpServer instance. When an MCP package upgrade changes these internals, these tests
 // fail *first*, preventing silent runtime breakage.
 // ─────────────────────────────────────────────────────────────────────
 
@@ -58,17 +59,13 @@ describe('SDK compatibility guard', () => {
     );
 
     // Register a dummy tool so the handler map has a 'tools/call' entry.
-    server.tool('test-tool', {}, async () => ({
-      content: [{ type: 'text', text: 'ok' }],
-    }));
-
-    // Connect via an in-memory transport to trigger handler registration.
-    const [clientTransport, serverTransport] =
-      InMemoryTransport.createLinkedPair();
-    await server.connect(serverTransport);
-
-    // We only need the server side; drain the client transport.
-    clientTransport.close();
+    server.registerTool(
+      'test-tool',
+      { inputSchema: z.object({}) },
+      async () => ({
+        content: [{ type: 'text', text: 'ok' }],
+      })
+    );
   });
 
   after(async () => {

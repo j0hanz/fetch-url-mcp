@@ -1,9 +1,8 @@
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import {
-  ListToolsRequestSchema,
-  ListToolsResultSchema,
-  McpError,
-} from '@modelcontextprotocol/sdk/types.js';
+  type ListToolsResult,
+  type McpServer,
+  ProtocolError,
+} from '@modelcontextprotocol/server';
 
 import type { ServerResponse } from 'node:http';
 import { setTimeout as setTimeoutPromise } from 'node:timers/promises';
@@ -14,12 +13,12 @@ import { logError, Loggers, logWarn } from './core.js';
 import { getErrorMessage } from './error/index.js';
 import { formatZodError, isObject } from './utils.js';
 
-export function createMcpError(
+export function createProtocolError(
   code: number,
   message: string,
   data?: unknown
-): McpError {
-  const error = new McpError(code, message, data);
+): ProtocolError {
+  const error = new ProtocolError(code, message, data);
   error.message = message;
   return error;
 }
@@ -157,12 +156,22 @@ interface ToolPresentation {
   icons?: { src: string; mimeType?: string; sizes?: string[] }[];
 }
 
+type ListToolsEntry = ListToolsResult['tools'][number];
+
 function getNestedRecord(
   value: Record<PropertyKey, unknown>,
   key: string
 ): Record<PropertyKey, unknown> | undefined {
   const nested = value[key];
   return isObject(nested) ? nested : undefined;
+}
+
+function isListToolsEntry(value: unknown): value is ListToolsEntry {
+  return isObject(value);
+}
+
+function isListToolsResult(value: unknown): value is ListToolsResult {
+  return isObject(value) && Array.isArray(value['tools']);
 }
 
 const patchedCleanupServers = new WeakSet<McpServer>();
@@ -296,17 +305,18 @@ function patchSdkToolListHandler(server: McpServer): void {
 
   patchedToolListServers.add(server);
   server.server.setRequestHandler(
-    ListToolsRequestSchema,
-    async (request, extra): Promise<z.infer<typeof ListToolsResultSchema>> => {
-      const parsed = ListToolsResultSchema.parse(
-        await sdkListToolsHandler(request, extra)
-      );
+    'tools/list',
+    async (request, extra): Promise<ListToolsResult> => {
+      const rawResult = await sdkListToolsHandler(request, extra);
+      if (!isListToolsResult(rawResult)) {
+        throw Error('SDK tools/list handler returned an invalid response');
+      }
 
       const presentations = getServerToolPresentationMap(server);
       return {
-        ...parsed,
-        tools: parsed.tools.map((tool) => {
-          if (typeof tool.name !== 'string') {
+        ...rawResult,
+        tools: rawResult.tools.map((tool) => {
+          if (!isListToolsEntry(tool) || typeof tool.name !== 'string') {
             return tool;
           }
 
@@ -360,7 +370,6 @@ export interface ToolHandlerExtra {
   signal?: AbortSignal;
   requestId?: string | number;
   sessionId?: unknown;
-  requestInfo?: unknown;
   _meta?: RequestMeta;
   progressState?: { closed: boolean };
   sendNotification?: (notification: ProgressNotification) => Promise<void>;
@@ -594,7 +603,7 @@ export function validateOrThrow<T>(
   if (!result.success) {
     const issues = formatZodError(result.error);
     logWarn(`Zod validation failed: ${msg}`, { issues }, logger);
-    throw createMcpError(errorCode, msg, { issues });
+    throw createProtocolError(errorCode, msg, { issues });
   }
   return result.data;
 }

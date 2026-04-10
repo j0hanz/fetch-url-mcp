@@ -1,4 +1,4 @@
-import type { ServerResult } from '@modelcontextprotocol/sdk/types.js';
+import type { ServerResult } from '@modelcontextprotocol/server';
 
 import assert from 'node:assert/strict';
 import type { IncomingMessage } from 'node:http';

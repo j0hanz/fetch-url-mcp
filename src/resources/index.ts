@@ -1,9 +1,9 @@
-import { completable } from '@modelcontextprotocol/sdk/server/completable.js';
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import type {
-  GetPromptResult,
-  ReadResourceResult,
-} from '@modelcontextprotocol/sdk/types.js';
+import {
+  completable,
+  type GetPromptResult,
+  type McpServer,
+  type ReadResourceResult,
+} from '@modelcontextprotocol/server';
 
 import { z } from 'zod';
 
@@ -163,9 +163,9 @@ export function registerGetHelpPrompt(
     {
       title: 'Get Help',
       description,
-      argsSchema: {
+      argsSchema: z.object({
         topic: buildTopicSchema(),
-      },
+      }),
       ...buildOptionalIcons(iconInfo),
     },
     (args): GetPromptResult => ({

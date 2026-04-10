@@ -47,10 +47,12 @@ describe('parseHandlerExtra', () => {
     assert.equal(result?.sessionId, 'sess-1');
   });
 
-  it('extracts sessionId from requestInfo.headers', () => {
+  it('extracts sessionId from http.req.headers', () => {
     const result = parseHandlerExtra({
-      requestInfo: {
-        headers: { 'mcp-session-id': 'sess-from-header' },
+      http: {
+        req: new Request('https://example.test/mcp', {
+          headers: { 'mcp-session-id': 'sess-from-header' },
+        }),
       },
     });
     assert.equal(result?.sessionId, 'sess-from-header');
@@ -58,8 +60,10 @@ describe('parseHandlerExtra', () => {
 
   it('extracts sessionId from x-mcp-session-id header', () => {
     const result = parseHandlerExtra({
-      requestInfo: {
-        headers: { 'x-mcp-session-id': 'sess-x' },
+      http: {
+        req: new Request('https://example.test/mcp', {
+          headers: { 'x-mcp-session-id': 'sess-x' },
+        }),
       },
     });
     assert.equal(result?.sessionId, 'sess-x');
@@ -67,40 +71,40 @@ describe('parseHandlerExtra', () => {
 
   it('extracts signal when it is an AbortSignal', () => {
     const ac = new AbortController();
-    const result = parseHandlerExtra({ signal: ac.signal });
+    const result = parseHandlerExtra({ mcpReq: { signal: ac.signal } });
     assert.ok(result?.signal instanceof AbortSignal);
   });
 
   it('extracts string requestId', () => {
-    const result = parseHandlerExtra({ requestId: 'req-1' });
+    const result = parseHandlerExtra({ mcpReq: { id: 'req-1' } });
     assert.equal(result?.requestId, 'req-1');
   });
 
   it('extracts numeric requestId', () => {
-    const result = parseHandlerExtra({ requestId: 42 });
+    const result = parseHandlerExtra({ mcpReq: { id: 42 } });
     assert.equal(result?.requestId, 42);
   });
 
   it('normalizes sendNotification function', () => {
     const fn = async () => {};
-    const result = parseHandlerExtra({ sendNotification: fn });
+    const result = parseHandlerExtra({ mcpReq: { notify: fn } });
     assert.equal(typeof result?.sendNotification, 'function');
   });
 
   it('ignores non-function sendNotification', () => {
-    const result = parseHandlerExtra({ sendNotification: 'not-a-fn' });
+    const result = parseHandlerExtra({ mcpReq: { notify: 'not-a-fn' } });
     assert.equal(result?.sendNotification, undefined);
   });
 
   it('extracts authInfo clientId', () => {
     const result = parseHandlerExtra({
-      authInfo: { clientId: 'client-1' },
+      http: { authInfo: { clientId: 'client-1' } },
     });
     assert.equal(result?.authInfo?.clientId, 'client-1');
   });
 
   it('ignores invalid authInfo', () => {
-    const result = parseHandlerExtra({ authInfo: 'not-object' });
+    const result = parseHandlerExtra({ http: { authInfo: 'not-object' } });
     assert.equal(result?.authInfo, undefined);
   });
 });
@@ -306,7 +310,7 @@ describe('withRequestContextIfMissing', () => {
       return 'ok';
     };
     const wrapped = withRequestContextIfMissing(handler);
-    await wrapped({}, { requestId: 'req-99' });
+    await wrapped({}, { mcpReq: { id: 'req-99' } });
     assert.ok(receivedExtra);
   });
 });

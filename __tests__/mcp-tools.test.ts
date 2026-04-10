@@ -1,4 +1,4 @@
-import { ErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js';
+import { ProtocolError, ProtocolErrorCode } from '@modelcontextprotocol/server';
 
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
@@ -344,9 +344,9 @@ describe('handleToolError', () => {
     );
   });
 
-  it('handles McpError with statusCode and strips SDK prefix', () => {
-    const error = new McpError(
-      ErrorCode.InternalError,
+  it('handles ProtocolError with statusCode and strips SDK prefix', () => {
+    const error = new ProtocolError(
+      ProtocolErrorCode.InternalError,
       'Task execution failed'
     );
     const result = handleToolError(error, 'https://example.com');
@@ -358,10 +358,14 @@ describe('handleToolError', () => {
     assert.equal(parsed['statusCode'], -32603);
   });
 
-  it('handles McpError and surfaces data payload', () => {
-    const error = new McpError(ErrorCode.InternalError, 'Validation failed', {
-      issues: ['field required'],
-    });
+  it('handles ProtocolError and surfaces data payload', () => {
+    const error = new ProtocolError(
+      ProtocolErrorCode.InternalError,
+      'Validation failed',
+      {
+        issues: ['field required'],
+      }
+    );
     const result = handleToolError(error, 'https://example.com');
     const parsed = parseToolPayload(result);
     assert.equal(parsed['error'], 'Validation failed');
@@ -369,9 +373,9 @@ describe('handleToolError', () => {
     assert.deepEqual(parsed['data'], { issues: ['field required'] });
   });
 
-  it('handles McpError with clean message (no SDK prefix)', () => {
-    const error = new McpError(
-      ErrorCode.InternalError,
+  it('handles ProtocolError with clean message (no SDK prefix)', () => {
+    const error = new ProtocolError(
+      ProtocolErrorCode.InternalError,
       'Output validation failed'
     );
     error.message = 'Output validation failed';

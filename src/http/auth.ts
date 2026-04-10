@@ -1,8 +1,4 @@
-import {
-  InvalidTokenError,
-  ServerError,
-} from '@modelcontextprotocol/sdk/server/auth/errors.js';
-import type { AuthInfo } from '@modelcontextprotocol/sdk/server/auth/types.js';
+import type { AuthInfo } from '@modelcontextprotocol/server';
 
 import { randomBytes } from 'node:crypto';
 import type { IncomingMessage, ServerResponse } from 'node:http';
@@ -88,6 +84,20 @@ class CorsPolicy {
 }
 
 export const corsPolicy = new CorsPolicy();
+
+class InvalidTokenError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'InvalidTokenError';
+  }
+}
+
+class AuthServerError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'AuthServerError';
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Host / Origin validation
@@ -573,7 +583,7 @@ class AuthService {
       this.stripHash(config.auth.resourceUrl)
     );
     if (!expected) {
-      const error = new ServerError('Configured resource URL is invalid');
+      const error = new AuthServerError('Configured resource URL is invalid');
       throw error;
     }
 
@@ -658,7 +668,7 @@ class AuthService {
         { status: response.status },
         Loggers.LOG_AUTH
       );
-      const error = new ServerError(
+      const error = new AuthServerError(
         `Token introspection failed: ${response.status}`
       );
       throw error;
@@ -722,7 +732,7 @@ class AuthService {
     signal?: AbortSignal
   ): Promise<AuthInfo> {
     if (!config.auth.introspectionUrl) {
-      const error = new ServerError('Introspection not configured');
+      const error = new AuthServerError('Introspection not configured');
       throw error;
     }
 
@@ -875,7 +885,7 @@ export function buildProtectedResourceMetadataDocument(): {
 } {
   const urls = buildRequestScopedProtectedResourceUrls();
   if (!config.auth.issuerUrl) {
-    const error = new ServerError(
+    const error = new AuthServerError(
       'OAuth issuer URL is required for protected resource metadata'
     );
     throw error;

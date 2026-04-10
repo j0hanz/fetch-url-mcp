@@ -1,4 +1,4 @@
-import { ErrorCode } from '@modelcontextprotocol/sdk/types.js';
+import { ProtocolErrorCode } from '@modelcontextprotocol/server';
 
 import type { ServerResponse } from 'node:http';
 
@@ -119,7 +119,7 @@ export class RateLimiter {
         sendJsonRpcError(
           ctx.res,
           429,
-          ErrorCode.InvalidRequest,
+          ProtocolErrorCode.InvalidRequest,
           'Rate limit exceeded',
           null,
           { retryAfter }

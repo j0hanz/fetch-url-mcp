@@ -1,4 +1,4 @@
-import { ErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js';
+import { ProtocolError, ProtocolErrorCode } from '@modelcontextprotocol/server';
 
 import { logError, logWarn } from '../core.js';
 import { FetchError, isAbortError, isSystemError } from './classes.js';
@@ -6,7 +6,7 @@ import { ErrorCategory, SystemErrors } from './codes.js';
 import {
   createToolErrorResponse,
   sanitizeToolErrorDetails,
-  stripMcpErrorPrefix,
+  stripProtocolErrorPrefix,
   type ToolErrorLogMeta,
   type ToolErrorPayload,
   type ToolErrorResponse,
@@ -142,9 +142,9 @@ function mapGenericToolError(
   };
 }
 
-function mapMcpToolError(error: McpError, url: string): ToolErrorPayload {
+function mapMcpToolError(error: ProtocolError, url: string): ToolErrorPayload {
   return {
-    error: stripMcpErrorPrefix(error.message),
+    error: stripProtocolErrorPrefix(error.message),
     url,
     category: ErrorCategory.MCP_ERROR,
     code: error.code,
@@ -162,7 +162,7 @@ function resolveToolErrorPayload(
     return mapFetchToolError(error, url);
   }
 
-  if (error instanceof McpError) {
+  if (error instanceof ProtocolError) {
     return mapMcpToolError(error, url);
   }
 
@@ -186,8 +186,8 @@ export function classifyAndLogToolError(
   toolName: string,
   fallbackMessage: string
 ): ToolErrorResponse {
-  if (error instanceof McpError) {
-    if (error.code === (ErrorCode.MethodNotFound as number)) {
+  if (error instanceof ProtocolError) {
+    if (error.code === (ProtocolErrorCode.MethodNotFound as number)) {
       logError(
         `${toolName} tool protocol error`,
         { url: meta.url, durationMs: meta.durationMs, error },
