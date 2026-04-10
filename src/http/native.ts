@@ -4,7 +4,6 @@ import {
   isInitializeRequest,
   type McpServer,
   ProtocolErrorCode,
-  type Transport,
 } from '@modelcontextprotocol/server';
 
 import { randomUUID } from 'node:crypto';
@@ -525,64 +524,6 @@ export async function closeMcpServerBestEffort(
   } catch (error) {
     logWarn('MCP server close failed', { context, error }, Loggers.LOG_HTTP);
   }
-}
-
-export function createTransportAdapter(
-  transportImpl: NodeStreamableHTTPServerTransport
-): Transport {
-  type OnClose = NonNullable<Transport['onclose']>;
-  type OnError = NonNullable<Transport['onerror']>;
-  type OnMessage = NonNullable<Transport['onmessage']>;
-
-  const noopOnClose: OnClose = () => {};
-  const noopOnError: OnError = () => {};
-  const noopOnMessage: OnMessage = () => {};
-
-  const baseOnClose = transportImpl.onclose;
-
-  let oncloseHandler: OnClose = noopOnClose;
-  let onerrorHandler: OnError = noopOnError;
-  let onmessageHandler: OnMessage = noopOnMessage;
-
-  return {
-    start: () => transportImpl.start(),
-    send: (message, options) =>
-      transportImpl.send(
-        message,
-        options?.relatedRequestId === undefined
-          ? undefined
-          : { relatedRequestId: options.relatedRequestId }
-      ),
-    close: () => transportImpl.close(),
-
-    get sessionId() {
-      return transportImpl.sessionId;
-    },
-
-    get onclose() {
-      return oncloseHandler;
-    },
-    set onclose(handler: OnClose) {
-      oncloseHandler = handler;
-      transportImpl.onclose = composeCloseHandlers(baseOnClose, handler);
-    },
-
-    get onerror() {
-      return onerrorHandler;
-    },
-    set onerror(handler: OnError) {
-      onerrorHandler = handler;
-      transportImpl.onerror = handler;
-    },
-
-    get onmessage() {
-      return onmessageHandler;
-    },
-    set onmessage(handler: OnMessage) {
-      onmessageHandler = handler;
-      transportImpl.onmessage = handler;
-    },
-  };
 }
 
 // ---------------------------------------------------------------------------
@@ -1848,8 +1789,12 @@ class McpSessionGateway {
     };
 
     try {
-      const transport = createTransportAdapter(transportImpl);
-      await sessionServer.connect(transport);
+      const preConnectOnClose = transportImpl.onclose;
+      await sessionServer.connect(transportImpl);
+      transportImpl.onclose = composeCloseHandlers(
+        preConnectOnClose,
+        transportImpl.onclose
+      );
     } catch (err) {
       logWarn(
         'Session transport connect failed',
