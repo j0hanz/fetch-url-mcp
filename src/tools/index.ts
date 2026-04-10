@@ -2,6 +2,7 @@ import {
   type ContentBlock,
   type McpServer,
   ProtocolErrorCode,
+  RELATED_TASK_META_KEY,
   type ServerResult,
   type ToolAnnotations,
 } from '@modelcontextprotocol/server';
@@ -319,8 +320,7 @@ async function executeFetch(
   const { url } = input;
   const signal = buildToolAbortSignal(extra?.signal);
   const startedAt = performance.now();
-  const relatedTaskMeta =
-    extra?._meta?.['modelcontextprotocol.io/related-task'];
+  const relatedTaskMeta = extra?._meta?.[RELATED_TASK_META_KEY];
   const relatedTask = isObject(relatedTaskMeta) ? relatedTaskMeta : undefined;
   const progressPlan = new FetchUrlProgressPlan(
     createProgressReporter(extra),

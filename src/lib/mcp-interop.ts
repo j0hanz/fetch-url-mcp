@@ -2,6 +2,7 @@ import {
   type ListToolsResult,
   type McpServer,
   ProtocolError,
+  RELATED_TASK_META_KEY,
 } from '@modelcontextprotocol/server';
 
 import type { ServerResponse } from 'node:http';
@@ -387,7 +388,7 @@ const PROGRESS_NOTIFICATION_MIN_INTERVAL_MS = 100;
 function resolveRelatedTaskMeta(
   meta?: RequestMeta
 ): { taskId: string } | undefined {
-  const related = meta?.['modelcontextprotocol.io/related-task'];
+  const related = meta?.[RELATED_TASK_META_KEY];
   if (!isObject(related)) return undefined;
   const { taskId } = related;
   return typeof taskId === 'string' ? { taskId } : undefined;
@@ -580,7 +581,7 @@ class ToolProgressReporter implements ProgressReporter {
         message: params.message,
         ...(this.taskMeta && {
           _meta: {
-            'modelcontextprotocol.io/related-task': this.taskMeta,
+            [RELATED_TASK_META_KEY]: this.taskMeta,
           },
         }),
       },

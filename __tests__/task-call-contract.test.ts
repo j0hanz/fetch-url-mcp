@@ -97,14 +97,14 @@ describe('parseExtendedCallToolRequest', () => {
       params: {
         name: 'fetch-url',
         _meta: {
-          'modelcontextprotocol.io/related-task': { taskId: 'task-abc' },
+          'io.modelcontextprotocol/related-task': { taskId: 'task-abc' },
         },
       },
     };
     const parsed = parseExtendedCallToolRequest(request);
     assert.equal(
       getRelatedTaskId(
-        parsed.params._meta?.['modelcontextprotocol.io/related-task']
+        parsed.params._meta?.['io.modelcontextprotocol/related-task']
       ),
       'task-abc'
     );
@@ -222,19 +222,19 @@ describe('sanitizeToolCallMeta', () => {
     assert.equal(sanitizeToolCallMeta(undefined), undefined);
   });
 
-  it('strips modelcontextprotocol.io/related-task key', () => {
+  it('strips io.modelcontextprotocol/related-task key', () => {
     const meta = {
       progressToken: 'tok-1',
-      'modelcontextprotocol.io/related-task': { taskId: 'x' },
+      'io.modelcontextprotocol/related-task': { taskId: 'x' },
     };
     const result = sanitizeToolCallMeta(meta);
     assert.equal(result?.progressToken, 'tok-1');
-    assert.equal(result?.['modelcontextprotocol.io/related-task'], undefined);
+    assert.equal(result?.['io.modelcontextprotocol/related-task'], undefined);
   });
 
   it('returns undefined when only related-task key exists', () => {
     const meta = {
-      'modelcontextprotocol.io/related-task': { taskId: 'x' },
+      'io.modelcontextprotocol/related-task': { taskId: 'x' },
     };
     assert.equal(sanitizeToolCallMeta(meta), undefined);
   });
@@ -245,7 +245,7 @@ describe('sanitizeToolCallMeta', () => {
 describe('buildRelatedTaskMeta', () => {
   it('builds meta with related-task entry', () => {
     const result = buildRelatedTaskMeta('task-123');
-    assert.deepEqual(result['modelcontextprotocol.io/related-task'], {
+    assert.deepEqual(result['io.modelcontextprotocol/related-task'], {
       taskId: 'task-123',
     });
   });
@@ -255,7 +255,7 @@ describe('buildRelatedTaskMeta', () => {
       progressToken: 'tok-x',
     });
     assert.equal(result['progressToken'], 'tok-x');
-    assert.deepEqual(result['modelcontextprotocol.io/related-task'], {
+    assert.deepEqual(result['io.modelcontextprotocol/related-task'], {
       taskId: 'task-123',
     });
   });
@@ -263,9 +263,9 @@ describe('buildRelatedTaskMeta', () => {
   it('strips incoming related-task from base meta', () => {
     const result = buildRelatedTaskMeta('task-new', {
       progressToken: 'tok-1',
-      'modelcontextprotocol.io/related-task': { taskId: 'task-old' },
+      'io.modelcontextprotocol/related-task': { taskId: 'task-old' },
     });
-    assert.deepEqual(result['modelcontextprotocol.io/related-task'], {
+    assert.deepEqual(result['io.modelcontextprotocol/related-task'], {
       taskId: 'task-new',
     });
   });
@@ -279,7 +279,7 @@ describe('withRelatedTaskMeta', () => {
       content: [{ type: 'text' as const, text: 'ok' }],
     };
     const result = withRelatedTaskMeta(original, 'task-456');
-    assert.deepEqual(result._meta?.['modelcontextprotocol.io/related-task'], {
+    assert.deepEqual(result._meta?.['io.modelcontextprotocol/related-task'], {
       taskId: 'task-456',
     });
   });
@@ -291,7 +291,7 @@ describe('withRelatedTaskMeta', () => {
     };
     const result = withRelatedTaskMeta(original, 'task-789');
     assert.equal(result._meta?.['existingKey'], 'value');
-    assert.deepEqual(result._meta?.['modelcontextprotocol.io/related-task'], {
+    assert.deepEqual(result._meta?.['io.modelcontextprotocol/related-task'], {
       taskId: 'task-789',
     });
   });

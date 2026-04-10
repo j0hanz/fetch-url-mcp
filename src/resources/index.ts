@@ -104,7 +104,7 @@ Endpoints:
 - \`tasks/delete\` — remove a terminal task.
 
 Task-linked responses and notifications include
-\`_meta["modelcontextprotocol.io/related-task"] = { taskId }\`.
+\`_meta["io.modelcontextprotocol/related-task"] = { taskId }\`.
 
 Notifications (opt-in via \`TASKS_STATUS_NOTIFICATIONS=true\`):
 - \`notifications/tasks/created\` — emitted on task creation with related-task metadata.

@@ -2,6 +2,7 @@ import {
   type McpServer,
   ProtocolError,
   ProtocolErrorCode,
+  RELATED_TASK_META_KEY,
   type ServerContext,
   type ServerResult,
 } from '@modelcontextprotocol/server';
@@ -61,7 +62,6 @@ import {
 
 const MIN_TASK_KEEP_ALIVE_MS = 1_000;
 const MAX_TASK_KEEP_ALIVE_MS = 86_400_000;
-const RELATED_TASK_META_KEY = 'modelcontextprotocol.io/related-task';
 
 const taskMetaSchema = z.strictObject({
   taskId: z.string().min(1, 'Task id required'),
@@ -759,12 +759,6 @@ export function registerTaskHandlers(
   const setRawRequestHandler = server.server.setRequestHandler.bind(
     server.server
   ) as unknown as (method: string, handler: RawRequestHandler) => void;
-  const registerRawHandler = Reflect.get(server.server, 'registerHandler') as
-    | ((method: string, handler: RawRequestHandler) => void)
-    | undefined;
-  const registerCustomRequestHandler = registerRawHandler?.bind(
-    server.server
-  ) as ((method: string, handler: RawRequestHandler) => void) | undefined;
   const privateRequestHandlers = Reflect.get(
     server.server,
     '_requestHandlers'
@@ -948,13 +942,11 @@ export function registerTaskHandlers(
     return {};
   };
 
-  if (registerCustomRequestHandler) {
-    registerCustomRequestHandler('tasks/delete', tasksDeleteHandler);
-  } else if (privateRequestHandlers instanceof Map) {
+  if (privateRequestHandlers instanceof Map) {
     privateRequestHandlers.set('tasks/delete', tasksDeleteHandler);
   } else {
     throw Error(
-      'Custom request handler registration is unavailable; tasks/delete cannot be registered.'
+      'Private request handler Map is unavailable; tasks/delete cannot be registered.'
     );
   }
 

@@ -22,6 +22,7 @@ import {
   registerGetHelpPrompt,
   registerInstructionResource,
 } from './resources/index.js';
+import { TaskStoreAdapter } from './tasks/adapter.js';
 import { abortAllTaskExecutions, registerTaskHandlers } from './tasks/index.js';
 import { registerTools as registerFetchUrlTool } from './tools/index.js';
 import { shutdownTransformWorkerPool } from './transform/index.js';
@@ -73,6 +74,7 @@ function createServerCapabilities(): McpServerCapabilities {
           call: {},
         },
       },
+      taskStore: new TaskStoreAdapter(),
     },
   };
 }

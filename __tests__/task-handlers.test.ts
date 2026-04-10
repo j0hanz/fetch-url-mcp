@@ -164,7 +164,7 @@ describe('task creation notifications', () => {
       assert.ok(created);
       assert.deepEqual(created['params'], {
         _meta: {
-          'modelcontextprotocol.io/related-task': {
+          'io.modelcontextprotocol/related-task': {
             taskId: result.task.taskId,
           },
         },
@@ -404,13 +404,13 @@ describe('progress notifications', () => {
             notification.params.progressToken === 'tok-task' &&
             notification.params.total === 4 &&
             notification.params._meta?.[
-              'modelcontextprotocol.io/related-task'
+              'io.modelcontextprotocol/related-task'
             ] !== undefined
         )
       );
       assert.deepEqual(
         notifications[0]?.params._meta?.[
-          'modelcontextprotocol.io/related-task'
+          'io.modelcontextprotocol/related-task'
         ],
         { taskId: createTask.task.taskId }
       );
