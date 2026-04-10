@@ -104,9 +104,10 @@ describe('buildServerInstructions completions mention', () => {
   });
 
   it('documents V2 task params instead of legacy task meta', () => {
+    assert.ok(instructions.includes('task: { ttl?: <ms> }'));
     assert.ok(
       instructions.includes(
-        'task: { ttl?: <ms>, pollInterval?: <ms>, context?: { ... } }'
+        'tasks/result` — wait for terminal status, then retrieve the stored result.'
       )
     );
     assert.equal(instructions.includes('modelcontextprotocol.io/task'), false);

@@ -42,6 +42,11 @@ import {
   normalizeExtractedMetadata,
   normalizePageTitle,
 } from '../schemas.js';
+import {
+  attachAbortController,
+  detachAbortController,
+  withRelatedTaskMeta,
+} from '../tasks/index.js';
 
 // Area contract: MCP tool registration and fetch-url response shaping.
 // Export only tool-facing registration and handler primitives; keep transport/session ownership and generic shared helpers out.
@@ -327,11 +332,12 @@ async function writeRequestScopedLog(
 
 async function executeFetch(
   input: FetchUrlInput,
-  ctx?: ServerContext
+  ctx?: ServerContext,
+  executionSignal?: AbortSignal
 ): Promise<CallToolResult> {
   const { url } = input;
   const mcpReq = ctx?.mcpReq;
-  const signal = buildToolAbortSignal(mcpReq?.signal);
+  const signal = buildToolAbortSignal(executionSignal ?? mcpReq?.signal);
   const startedAt = performance.now();
   const meta = mcpReq?._meta;
   const progressToken = meta?.progressToken;
@@ -467,9 +473,10 @@ export function registerTools(server: McpServer): ToolRegistrationControls {
             ? { ttl: ctx.task.requestedTtl }
             : {}
         );
+        const taskSignal = attachAbortController(task.taskId).signal;
 
         // Spin off background execution
-        executeFetch(args, ctx)
+        executeFetch(args, ctx, taskSignal)
           .then(async (result) => {
             try {
               await ctx.task.store.storeTaskResult(
@@ -525,6 +532,9 @@ export function registerTools(server: McpServer): ToolRegistrationControls {
                 getErrorMessage(error)
               );
             }
+          })
+          .finally(() => {
+            detachAbortController(task.taskId);
           });
 
         return { task };
@@ -533,9 +543,10 @@ export function registerTools(server: McpServer): ToolRegistrationControls {
         return ctx.task.store.getTask(ctx.task.id);
       },
       getTaskResult: async (_args, ctx) => {
-        return ctx.task.store.getTaskResult(
+        const result = (await ctx.task.store.getTaskResult(
           ctx.task.id
-        ) as Promise<CallToolResult>;
+        )) as CallToolResult;
+        return withRelatedTaskMeta(result, ctx.task.id) as CallToolResult;
       },
     }
   );

@@ -1,9 +1,11 @@
-import type {
-  RequestId,
-  Result,
-  CreateTaskOptions as SdkCreateTaskOptions,
-  Task,
-  TaskStore,
+import {
+  ProtocolErrorCode,
+  type RequestId,
+  type Result,
+  type CreateTaskOptions as SdkCreateTaskOptions,
+  type ServerResult,
+  type Task,
+  type TaskStore,
 } from '@modelcontextprotocol/server';
 
 import {
@@ -12,12 +14,14 @@ import {
   resolveMcpSessionOwnerKey,
   resolveMcpSessionServer,
 } from '../lib/core.js';
+import { createProtocolError } from '../lib/mcp-interop.js';
 
 import {
   abortTaskExecution,
   emitTaskStatusNotification,
   resolveTaskOwnerKey,
   type ToolCallRequestMeta,
+  withRelatedTaskMeta,
 } from './manager.js';
 import { taskManager, type TaskState } from './store.js';
 
@@ -75,6 +79,40 @@ function emitTaskStatusForSession(taskId: string, sessionId?: string): void {
   }
 }
 
+function isServerResult(value: unknown): value is ServerResult {
+  return (
+    value !== null &&
+    typeof value === 'object' &&
+    !Array.isArray(value) &&
+    Array.isArray((value as Record<string, unknown>)['content'])
+  );
+}
+
+function readStoredTaskResult(
+  state: TaskState | undefined,
+  taskId: string
+): Result {
+  if (!state) {
+    throw createProtocolError(
+      ProtocolErrorCode.ResourceNotFound,
+      `Task not found: ${taskId}`
+    );
+  }
+
+  if (state.result === undefined || state.result === null) {
+    throw createProtocolError(
+      ProtocolErrorCode.InvalidParams,
+      `Task ${taskId} has no result stored`
+    );
+  }
+
+  if (isServerResult(state.result)) {
+    return withRelatedTaskMeta(state.result, taskId) as Result;
+  }
+
+  return state.result as Result;
+}
+
 export class TaskStoreAdapter implements TaskStore {
   createTask(
     taskParams: SdkCreateTaskOptions,
@@ -125,12 +163,19 @@ export class TaskStoreAdapter implements TaskStore {
   getTaskResult(taskId: string, sessionId?: string): Promise<Result> {
     const ownerKey = resolveOwnerKey(sessionId);
     const state = taskManager.getTask(taskId, ownerKey);
-    const result =
-      state?.result !== undefined && state.result !== null
-        ? (state.result as Result)
-        : {};
-    taskManager.shrinkKeepAliveAfterDelivery(taskId);
-    return Promise.resolve(result);
+    if (state?.result !== undefined && state.result !== null) {
+      const result = readStoredTaskResult(state, taskId);
+      taskManager.shrinkKeepAliveAfterDelivery(taskId);
+      return Promise.resolve(result);
+    }
+
+    return taskManager
+      .waitForTerminalTask(taskId, ownerKey)
+      .then((terminalState) => {
+        const result = readStoredTaskResult(terminalState, taskId);
+        taskManager.shrinkKeepAliveAfterDelivery(taskId);
+        return result;
+      });
   }
 
   updateTaskStatus(

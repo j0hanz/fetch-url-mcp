@@ -92,13 +92,13 @@ Call \`${FETCH_URL_TOOL_NAME}\` with \`{ url }\` → read \`markdown\` from resu
 Add \`_meta: { progressToken: "<token>" }\` to \`tools/call\` → receive \`notifications/progress\`.
 
 ## Async (task mode)
-Add \`task: { ttl?: <ms>, pollInterval?: <ms>, context?: { ... } }\` to \`tools/call\`.
+Add \`task: { ttl?: <ms> }\` to \`tools/call\`.
 
 Lifecycle: \`working\` → \`completed\` | \`failed\` | \`cancelled\`.
 
 Endpoints:
 - \`tasks/get\` — poll for \`status\`, \`statusMessage\`, and \`pollInterval\`.
-- \`tasks/result\` — retrieve final output for completed tasks.
+- \`tasks/result\` — wait for terminal status, then retrieve the stored result.
 - \`tasks/list\` — list tasks for the current session.
 - \`tasks/cancel\` — cancel an active task.
 - \`tasks/delete\` — remove a terminal task.

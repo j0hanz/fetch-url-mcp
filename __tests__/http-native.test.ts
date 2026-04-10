@@ -519,6 +519,11 @@ describe('HTTP native gateway routing', () => {
       | Array<Record<string, unknown>>
       | undefined;
     assert.equal(content?.[0]?.['text'], 'persisted result');
+    assert.deepEqual(asRecord(asRecord(resultBody?.['result'])?.['_meta']), {
+      'io.modelcontextprotocol/related-task': {
+        taskId: task.taskId,
+      },
+    });
   });
 
   it('returns 405 for unsupported methods on /mcp', async () => {

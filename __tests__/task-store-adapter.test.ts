@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { afterEach, describe, it } from 'node:test';
+import { setTimeout as setTimeoutPromise } from 'node:timers/promises';
 
 import {
   registerMcpSessionOwnerKey,
@@ -93,7 +94,76 @@ describe('TaskStoreAdapter', () => {
       const result = await adapter.getTaskResult(task.taskId, 'sess-a');
       assert.deepEqual(result, {
         content: [{ type: 'text', text: 'done' }],
+        _meta: {
+          'io.modelcontextprotocol/related-task': {
+            taskId: task.taskId,
+          },
+        },
       });
+    } finally {
+      cleanupTask(task.taskId, 'auth:owner-a');
+    }
+  });
+
+  it('waits for a pending task result before resolving', async () => {
+    registerMcpSessionOwnerKey('sess-a', 'auth:owner-a');
+
+    const task = await adapter.createTask(
+      { ttl: 5_000 },
+      'req-4',
+      { method: 'tools/call', params: {} },
+      'sess-a'
+    );
+
+    try {
+      const pendingResult = adapter.getTaskResult(task.taskId, 'sess-a');
+
+      await setTimeoutPromise(10);
+      await adapter.storeTaskResult(
+        task.taskId,
+        'completed',
+        {
+          content: [{ type: 'text', text: 'delayed' }],
+        },
+        'sess-a'
+      );
+
+      const result = await pendingResult;
+      assert.deepEqual(result, {
+        content: [{ type: 'text', text: 'delayed' }],
+        _meta: {
+          'io.modelcontextprotocol/related-task': {
+            taskId: task.taskId,
+          },
+        },
+      });
+    } finally {
+      cleanupTask(task.taskId, 'auth:owner-a');
+    }
+  });
+
+  it('rejects tasks/result when a terminal task has no stored result', async () => {
+    registerMcpSessionOwnerKey('sess-a', 'auth:owner-a');
+
+    const task = await adapter.createTask(
+      { ttl: 5_000 },
+      'req-5',
+      { method: 'tools/call', params: {} },
+      'sess-a'
+    );
+
+    try {
+      await adapter.updateTaskStatus(
+        task.taskId,
+        'cancelled',
+        'The task was cancelled by request.',
+        'sess-a'
+      );
+
+      await assert.rejects(
+        () => adapter.getTaskResult(task.taskId, 'sess-a'),
+        /has no result stored/
+      );
     } finally {
       cleanupTask(task.taskId, 'auth:owner-a');
     }

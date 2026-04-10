@@ -538,7 +538,7 @@ You get text content back by default. If output validation passes, the response 
 
 To opt into progress updates, include `_meta.progressToken` in the tool call. The token may be a string or number, and the server may emit monotonic `notifications/progress` updates while the fetch runs.
 
-To run the tool in task mode, include `params.task = { ttl?: <ms>, pollInterval?: <ms>, context?: { ... } }`. `tasks/result` returns output only after the task reaches `completed`. Task summaries and final results include `_meta["io.modelcontextprotocol/related-task"] = { "taskId": "<server-task-id>" }`.
+To run the tool in task mode, include `params.task = { ttl?: <ms> }`. `tasks/result` waits until the task reaches a terminal status and then returns the stored output. Task summaries and final results include `_meta["io.modelcontextprotocol/related-task"] = { "taskId": "<server-task-id>" }`.
 
 ```json
 {
