@@ -19,9 +19,7 @@ export function createProtocolError(
   message: string,
   data?: unknown
 ): ProtocolError {
-  const error = new ProtocolError(code, message, data);
-  error.message = message;
-  return error;
+  return ProtocolError.fromError(code, message, data);
 }
 
 interface JsonRpcErrorPayload {

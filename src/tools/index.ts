@@ -16,6 +16,7 @@ import { logError, Loggers, logInfo } from '../lib/core.js';
 import {
   classifyAndLogToolError,
   getErrorMessage,
+  handleToolError,
   isAbortError,
 } from '../lib/error/index.js';
 import {
@@ -472,11 +473,17 @@ export function registerTools(server: McpServer): ToolRegistrationControls {
               { taskId: task.taskId, error: getErrorMessage(error) },
               Loggers.LOG_TASKS
             );
+            const errorResult = handleToolError(
+              error,
+              args.url,
+              'Background execution failed'
+            );
             try {
-              await ctx.task.store.storeTaskResult(task.taskId, 'failed', {
-                isError: true,
-                content: [{ type: 'text', text: getErrorMessage(error) }],
-              });
+              await ctx.task.store.storeTaskResult(
+                task.taskId,
+                'failed',
+                errorResult as ServerResult
+              );
             } catch (storeError: unknown) {
               logError(
                 'Failed to store task error result',

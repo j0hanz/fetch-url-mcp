@@ -275,7 +275,10 @@ export function emitTaskStatusNotification(
 }
 
 export function throwTaskNotFound(): never {
-  throw createProtocolError(ProtocolErrorCode.InvalidParams, 'Task not found');
+  throw createProtocolError(
+    ProtocolErrorCode.ResourceNotFound,
+    'Task not found'
+  );
 }
 
 /* -------------------------------------------------------------------------------------------------

@@ -1,4 +1,4 @@
-import { ProtocolErrorCode } from '@modelcontextprotocol/server';
+import { ProtocolErrorCode, SdkErrorCode } from '@modelcontextprotocol/server';
 
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { createHmac, randomBytes, randomUUID } from 'node:crypto';
@@ -241,7 +241,7 @@ class TaskManager {
       error: {
         code: CONNECTION_CLOSED_ERROR_CODE,
         message: statusMessage,
-        data: { code: 'ABORTED' },
+        data: { code: 'ABORTED', sdkCode: SdkErrorCode.ConnectionClosed },
       },
     });
     this.waiters.notify(task);

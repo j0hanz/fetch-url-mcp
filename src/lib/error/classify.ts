@@ -1,4 +1,9 @@
-import { ProtocolError, ProtocolErrorCode } from '@modelcontextprotocol/server';
+import {
+  ProtocolError,
+  ProtocolErrorCode,
+  SdkError,
+  SdkErrorCode,
+} from '@modelcontextprotocol/server';
 
 import { logError, logWarn } from '../core.js';
 import { FetchError, isAbortError, isSystemError } from './classes.js';
@@ -153,6 +158,19 @@ function mapMcpToolError(error: ProtocolError, url: string): ToolErrorPayload {
   };
 }
 
+function resolveSdkErrorCategory(code: SdkErrorCode): string {
+  switch (code) {
+    case SdkErrorCode.ConnectionClosed:
+      return ErrorCategory.UPSTREAM_ABORTED;
+    case SdkErrorCode.RequestTimeout:
+      return ErrorCategory.UPSTREAM_TIMEOUT;
+    case SdkErrorCode.SendFailed:
+      return ErrorCategory.FETCH_ERROR;
+    default:
+      return ErrorCategory.MCP_ERROR;
+  }
+}
+
 function resolveToolErrorPayload(
   error: unknown,
   url: string,
@@ -164,6 +182,16 @@ function resolveToolErrorPayload(
 
   if (error instanceof ProtocolError) {
     return mapMcpToolError(error, url);
+  }
+
+  if (error instanceof SdkError) {
+    return {
+      error: error.message,
+      url,
+      category: resolveSdkErrorCategory(error.code),
+      code: error.code,
+      ...(error.data !== undefined ? { data: error.data } : {}),
+    };
   }
 
   return mapGenericToolError(error, url, fallbackMessage);
