@@ -1,7 +1,12 @@
 import {
   type McpServer,
+  type Progress,
+  type ProgressNotification,
+  type ProgressNotificationParams,
+  type ProgressToken,
   ProtocolError,
   RELATED_TASK_META_KEY,
+  type RequestMeta,
   type ServerContext,
 } from '@modelcontextprotocol/server';
 
@@ -206,28 +211,10 @@ export function registerServerLifecycleCleanup(
  * Progress reporting
  * ================================================================================================= */
 
-type ProgressToken = string | number;
-
-interface RequestMeta {
-  progressToken?: ProgressToken | undefined;
-  [key: string]: unknown;
-}
-
-export interface ProgressNotificationParams {
-  progressToken: ProgressToken;
-  progress: number;
-  total?: number;
-  message?: string;
-  _meta?: Record<string, unknown>;
-}
-
-export interface ProgressNotification {
-  method: 'notifications/progress';
-  params: ProgressNotificationParams;
-}
+export { type ProgressNotification, type ProgressNotificationParams };
 
 export interface ProgressReporter {
-  report: (progress: number, message: string, total?: number) => void;
+  report: (progress: Progress) => void;
 }
 
 const PROGRESS_NOTIFICATION_TIMEOUT_MS = 5000;
@@ -262,7 +249,7 @@ class ToolProgressReporter implements ProgressReporter {
       return { report: () => {} };
     }
 
-    const meta = ctx.mcpReq._meta as RequestMeta | undefined;
+    const meta = ctx.mcpReq._meta;
     const token = meta?.progressToken ?? null;
 
     if (token === null) {
@@ -284,7 +271,8 @@ class ToolProgressReporter implements ProgressReporter {
    * intermediate steps). Clients should treat progress as "at least this far"
    * rather than expecting every step to fire sequentially.
    */
-  report(progress: number, message: string, total?: number): void {
+  report(input: Progress): void {
+    const { progress, message, total } = input;
     const effectiveProgress = Math.max(progress, this.lastProgress);
     const effectiveTotal =
       total === undefined ? this.lastTotal : Math.max(total, effectiveProgress);
@@ -298,7 +286,7 @@ class ToolProgressReporter implements ProgressReporter {
     this.pendingNotification = this.createProgressNotification({
       token: this.token,
       progress: effectiveProgress,
-      message,
+      ...(message !== undefined ? { message } : {}),
       ...(effectiveTotal !== undefined ? { total: effectiveTotal } : {}),
     });
     this.flushNotifications();
@@ -378,7 +366,7 @@ class ToolProgressReporter implements ProgressReporter {
   private createProgressNotification(params: {
     token: ProgressToken;
     progress: number;
-    message: string;
+    message?: string;
     total?: number;
   }): ProgressNotification {
     return {
@@ -387,7 +375,7 @@ class ToolProgressReporter implements ProgressReporter {
         progressToken: params.token,
         progress: params.progress,
         ...(params.total !== undefined ? { total: params.total } : {}),
-        message: params.message,
+        ...(params.message !== undefined ? { message: params.message } : {}),
         ...(this.taskMeta && {
           _meta: {
             [RELATED_TASK_META_KEY]: this.taskMeta,

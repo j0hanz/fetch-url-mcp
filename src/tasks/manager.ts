@@ -226,8 +226,6 @@ type TaskLifecycleProjection = Pick<
   | 'taskId'
   | 'status'
   | 'statusMessage'
-  | 'progress'
-  | 'total'
   | 'createdAt'
   | 'lastUpdatedAt'
   | 'keepAlive'
@@ -239,8 +237,6 @@ export function toTaskSummary(task: TaskLifecycleProjection): TaskSummary {
     taskId: task.taskId,
     status: task.status,
     ...(task.statusMessage ? { statusMessage: task.statusMessage } : {}),
-    ...(task.progress !== undefined ? { progress: task.progress } : {}),
-    ...(task.total !== undefined ? { total: task.total } : {}),
     createdAt: task.createdAt,
     lastUpdatedAt: task.lastUpdatedAt,
     keepAlive: task.keepAlive,

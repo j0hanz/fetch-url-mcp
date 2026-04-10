@@ -219,29 +219,37 @@ export class FetchUrlProgressPlan {
   ) {}
 
   reportStart(): void {
-    this.reporter.report(Step.START, 'Preparing request', this.total);
+    this.reporter.report({
+      progress: Step.START,
+      message: 'Preparing request',
+      total: this.total,
+    });
   }
 
   reportStage(stage: SharedFetchStage): void {
     const mapped = this.mapStage(stage);
     if (!mapped) return;
-    this.reporter.report(mapped.step, mapped.message, this.total);
+    this.reporter.report({
+      progress: mapped.step,
+      message: mapped.message,
+      total: this.total,
+    });
   }
 
   reportSuccess(contentSize: number): void {
-    this.reporter.report(
-      Step.DONE,
-      buildFetchSuccessSummary(contentSize),
-      this.total
-    );
+    this.reporter.report({
+      progress: Step.DONE,
+      message: buildFetchSuccessSummary(contentSize),
+      total: this.total,
+    });
   }
 
   reportFailure(cancelled: boolean): void {
-    this.reporter.report(
-      Step.DONE,
-      cancelled ? 'Cancelled' : 'Failed',
-      this.total
-    );
+    this.reporter.report({
+      progress: Step.DONE,
+      message: cancelled ? 'Cancelled' : 'Failed',
+      total: this.total,
+    });
   }
 
   private mapStage(
