@@ -25,7 +25,6 @@ import { getErrorMessage } from '../lib/error/index.js';
 import {
   createProtocolError,
   type ProgressNotification,
-  registerServerLifecycleCleanup,
 } from '../lib/mcp-interop.js';
 import { formatZodError, isObject } from '../lib/utils.js';
 
@@ -308,7 +307,7 @@ interface TaskHandlerRegistrationResult {
 export function registerTaskHandlers(
   server: McpServer
 ): TaskHandlerRegistrationResult {
-  const taskCapableToolsRegistered = hasRegisteredTaskCapableTools(server);
+  const taskCapableToolsRegistered = config.tools.enabled.includes('fetch-url');
 
   server.server.fallbackRequestHandler = (request, ctx) => {
     if (request.method !== 'tasks/delete') {
@@ -574,62 +573,4 @@ export function withRequestContextIfMissing<TParams, TResult, TExtra = unknown>(
 
 export function isServerResult(value: unknown): value is ServerResult {
   return isObject(value) && Array.isArray(value['content']);
-}
-
-export type TaskCapableToolSupport = 'required' | 'optional' | 'forbidden';
-
-const taskSupportByServer = new WeakMap<
-  McpServer,
-  Map<string, TaskCapableToolSupport>
->();
-
-function getServerTaskSupportMap(
-  server: McpServer
-): Map<string, TaskCapableToolSupport> {
-  let map = taskSupportByServer.get(server);
-  if (map) return map;
-
-  map = new Map<string, TaskCapableToolSupport>();
-  taskSupportByServer.set(server, map);
-  registerServerLifecycleCleanup(server, () => {
-    taskSupportByServer.delete(server);
-  });
-  return map;
-}
-
-export function registerToolTaskSupport(
-  server: McpServer,
-  name: string,
-  support: TaskCapableToolSupport = 'optional'
-): void {
-  getServerTaskSupportMap(server).set(name, support);
-}
-
-export function unregisterToolTaskSupport(
-  server: McpServer,
-  name: string
-): void {
-  getServerTaskSupportMap(server).delete(name);
-}
-
-export function getTaskCapableToolSupport(
-  server: McpServer,
-  name: string
-): TaskCapableToolSupport | undefined {
-  return getServerTaskSupportMap(server).get(name);
-}
-
-export function hasRegisteredTaskCapableTools(server: McpServer): boolean {
-  return getServerTaskSupportMap(server).size > 0;
-}
-
-export function setTaskCapableToolSupport(
-  server: McpServer,
-  name: string,
-  support: TaskCapableToolSupport
-): void {
-  const map = getServerTaskSupportMap(server);
-  if (map.has(name)) {
-    map.set(name, support);
-  }
 }

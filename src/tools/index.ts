@@ -3,7 +3,6 @@ import {
   type ContentBlock,
   type McpServer,
   ProtocolErrorCode,
-  RELATED_TASK_META_KEY,
   type ServerContext,
   type ServerResult,
   type ToolAnnotations,
@@ -43,25 +42,11 @@ import {
   normalizeExtractedMetadata,
   normalizePageTitle,
 } from '../schemas.js';
-import {
-  registerToolTaskSupport,
-  setTaskCapableToolSupport,
-  type TaskCapableToolSupport,
-  taskManager,
-  unregisterToolTaskSupport,
-} from '../tasks/index.js';
 
 // Area contract: MCP tool registration and fetch-url response shaping.
 // Export only tool-facing registration and handler primitives; keep transport/session ownership and generic shared helpers out.
 
 type FetchUrlInput = z.infer<typeof fetchUrlInputSchema>;
-
-interface ToolResponseBase {
-  [key: string]: unknown;
-  content: ContentBlock[];
-  structuredContent?: Record<string, unknown> | undefined;
-  isError?: boolean;
-}
 
 export const FETCH_URL_TOOL_NAME = 'fetch-url';
 
@@ -163,7 +148,7 @@ function buildResponse(
   pipeline: PipelineResult<MarkdownPipelineResult>,
   inlineResult: InlineContentResult,
   inputUrl: string
-): ToolResponseBase {
+): CallToolResult {
   const structuredContent = buildStructuredContent(
     pipeline,
     inlineResult,
@@ -328,15 +313,14 @@ function buildFetchOptions(
 async function executeFetch(
   input: FetchUrlInput,
   ctx?: ServerContext
-): Promise<ToolResponseBase> {
+): Promise<CallToolResult> {
   const { url } = input;
   const mcpReq = ctx?.mcpReq;
   const signal = buildToolAbortSignal(mcpReq?.signal);
   const startedAt = performance.now();
   const meta = mcpReq?._meta;
-  const relatedTaskMeta = meta?.[RELATED_TASK_META_KEY];
   const progressToken = meta?.progressToken;
-  const relatedTask = isObject(relatedTaskMeta) ? relatedTaskMeta : undefined;
+  const taskId = ctx?.task?.id;
   const progressPlan = new FetchUrlProgressPlan(
     createProgressReporter(ctx),
     formatUrlForDisplay(url)
@@ -348,9 +332,7 @@ async function executeFetch(
       {
         inputUrl: url,
         hasProgressToken: progressToken !== undefined,
-        ...(isObject(relatedTask) && typeof relatedTask['taskId'] === 'string'
-          ? { taskId: relatedTask['taskId'] }
-          : {}),
+        ...(taskId ? { taskId } : {}),
       },
       Loggers.LOG_FETCH_URL
     );
@@ -384,7 +366,7 @@ async function executeFetch(
 export async function fetchUrlToolHandler(
   input: FetchUrlInput,
   ctx?: ServerContext
-): Promise<ToolResponseBase> {
+): Promise<CallToolResult> {
   const startedAt = performance.now();
 
   return executeFetch(input, ctx).catch((error: unknown) => {
@@ -418,19 +400,18 @@ const TOOL_DEFINITION = {
   } satisfies ToolAnnotations,
 };
 
+type TaskCapableToolSupport = 'required' | 'optional' | 'forbidden';
+
 export interface ToolRegistrationControls {
   setTaskSupport: (support: TaskCapableToolSupport) => void;
 }
 
 export function registerTools(server: McpServer): ToolRegistrationControls {
   if (!config.tools.enabled.includes(FETCH_URL_TOOL_NAME)) {
-    unregisterToolTaskSupport(server, FETCH_URL_TOOL_NAME);
     return {
       setTaskSupport: () => {},
     };
   }
-
-  registerToolTaskSupport(server, FETCH_URL_TOOL_NAME, 'optional');
 
   const registeredTool = server.experimental.tasks.registerToolTask(
     TOOL_DEFINITION.name,
@@ -458,7 +439,7 @@ export function registerTools(server: McpServer): ToolRegistrationControls {
               await ctx.task.store.storeTaskResult(
                 task.taskId,
                 'completed',
-                result as ServerResult
+                result
               );
             } catch (storeError: unknown) {
               logError(
@@ -469,10 +450,11 @@ export function registerTools(server: McpServer): ToolRegistrationControls {
                 },
                 Loggers.LOG_TASKS
               );
-              taskManager.updateTask(task.taskId, {
-                status: 'failed',
-                statusMessage: 'Failed to store result',
-              });
+              await ctx.task.store.updateTaskStatus(
+                task.taskId,
+                'failed',
+                'Failed to store result'
+              );
             }
           })
           .catch(async (error: unknown) => {
@@ -490,7 +472,7 @@ export function registerTools(server: McpServer): ToolRegistrationControls {
               await ctx.task.store.storeTaskResult(
                 task.taskId,
                 'failed',
-                errorResult as ServerResult
+                errorResult
               );
             } catch (storeError: unknown) {
               logError(
@@ -501,10 +483,11 @@ export function registerTools(server: McpServer): ToolRegistrationControls {
                 },
                 Loggers.LOG_TASKS
               );
-              taskManager.updateTask(task.taskId, {
-                status: 'failed',
-                statusMessage: getErrorMessage(error),
-              });
+              await ctx.task.store.updateTaskStatus(
+                task.taskId,
+                'failed',
+                getErrorMessage(error)
+              );
             }
           });
 
@@ -522,7 +505,6 @@ export function registerTools(server: McpServer): ToolRegistrationControls {
   );
 
   const updateTaskSupport = (support: TaskCapableToolSupport): void => {
-    setTaskCapableToolSupport(server, FETCH_URL_TOOL_NAME, support);
     registeredTool.execution = { taskSupport: support };
   };
 

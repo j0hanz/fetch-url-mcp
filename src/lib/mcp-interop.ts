@@ -1,12 +1,9 @@
 import {
-  type McpServer,
   type Progress,
   type ProgressNotification,
   type ProgressNotificationParams,
   type ProgressToken,
   ProtocolError,
-  RELATED_TASK_META_KEY,
-  type RequestMeta,
   type ServerContext,
 } from '@modelcontextprotocol/server';
 
@@ -17,7 +14,7 @@ import { z } from 'zod';
 
 import { Loggers, logWarn } from './core.js';
 import { getErrorMessage } from './error/index.js';
-import { formatZodError, isObject } from './utils.js';
+import { formatZodError } from './utils.js';
 
 export function createProtocolError(
   code: number,
@@ -151,63 +148,6 @@ export function acceptsJsonAndEventStream(
 }
 
 /* =================================================================================================
- * SDK interop — server lifecycle & capability patching
- * ================================================================================================= */
-
-type CleanupCallback = () => void;
-const patchedCleanupServers = new WeakSet<McpServer>();
-const serverCleanupCallbacks = new WeakMap<McpServer, Set<CleanupCallback>>();
-
-function getServerCleanupCallbackSet(server: McpServer): Set<CleanupCallback> {
-  let callbacks = serverCleanupCallbacks.get(server);
-  if (!callbacks) {
-    callbacks = new Set<CleanupCallback>();
-    serverCleanupCallbacks.set(server, callbacks);
-  }
-  return callbacks;
-}
-
-function drainServerCleanupCallbacks(server: McpServer): void {
-  const callbacks = serverCleanupCallbacks.get(server);
-  if (!callbacks || callbacks.size === 0) return;
-
-  const pending = [...callbacks];
-  callbacks.clear();
-  for (const callback of pending) {
-    try {
-      callback();
-    } catch (error: unknown) {
-      logWarn('Server cleanup callback failed', { error }, Loggers.LOG_MCP);
-    }
-  }
-}
-
-function ensureServerCleanupHooks(server: McpServer): void {
-  if (patchedCleanupServers.has(server)) return;
-  patchedCleanupServers.add(server);
-
-  const originalOnClose = server.server.onclose;
-  server.server.onclose = () => {
-    drainServerCleanupCallbacks(server);
-    originalOnClose?.();
-  };
-
-  const originalClose = server.close.bind(server);
-  server.close = async (): Promise<void> => {
-    drainServerCleanupCallbacks(server);
-    await originalClose();
-  };
-}
-
-export function registerServerLifecycleCleanup(
-  server: McpServer,
-  callback: CleanupCallback
-): void {
-  ensureServerCleanupHooks(server);
-  getServerCleanupCallbackSet(server).add(callback);
-}
-
-/* =================================================================================================
  * Progress reporting
  * ================================================================================================= */
 
@@ -220,15 +160,6 @@ export interface ProgressReporter {
 const PROGRESS_NOTIFICATION_TIMEOUT_MS = 5000;
 const PROGRESS_NOTIFICATION_MIN_INTERVAL_MS = 100;
 
-function resolveRelatedTaskMeta(
-  meta?: RequestMeta
-): { taskId: string } | undefined {
-  const related = meta?.[RELATED_TASK_META_KEY];
-  if (!isObject(related)) return undefined;
-  const { taskId } = related;
-  return typeof taskId === 'string' ? { taskId } : undefined;
-}
-
 class ToolProgressReporter implements ProgressReporter {
   private lastProgress = -1;
   private lastTotal: number | undefined;
@@ -238,10 +169,7 @@ class ToolProgressReporter implements ProgressReporter {
 
   private constructor(
     private readonly token: ProgressToken,
-    private readonly send: (
-      notification: ProgressNotification
-    ) => Promise<void>,
-    private readonly taskMeta?: { taskId: string }
+    private readonly send: (notification: ProgressNotification) => Promise<void>
   ) {}
 
   static create(ctx?: ServerContext): ProgressReporter {
@@ -262,7 +190,7 @@ class ToolProgressReporter implements ProgressReporter {
         params: { ...notification.params },
       });
 
-    return new ToolProgressReporter(token, send, resolveRelatedTaskMeta(meta));
+    return new ToolProgressReporter(token, send);
   }
 
   /**
@@ -376,11 +304,6 @@ class ToolProgressReporter implements ProgressReporter {
         progress: params.progress,
         ...(params.total !== undefined ? { total: params.total } : {}),
         ...(params.message !== undefined ? { message: params.message } : {}),
-        ...(this.taskMeta && {
-          _meta: {
-            [RELATED_TASK_META_KEY]: this.taskMeta,
-          },
-        }),
       },
     };
   }
