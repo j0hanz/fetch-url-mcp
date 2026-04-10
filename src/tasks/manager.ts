@@ -26,7 +26,7 @@ import {
   createProtocolError,
   type ProgressNotification,
 } from '../lib/mcp-interop.js';
-import { formatZodError, isObject } from '../lib/utils.js';
+import { isObject } from '../lib/utils.js';
 
 import {
   type CreateTaskResult,
@@ -41,54 +41,21 @@ import {
 
 /*
  * Module map:
- * - call-tool request parsing
  * - Abort-controller management for in-flight task executions
  * - Task notification and validation helpers
- * - Execution pipeline
  * - Task handler schemas and registration
  * - Handler extra parsing & owner-key resolution
  * Own task lifecycle and MCP task wiring here. Keep tool business logic and HTTP transport details elsewhere.
  */
 
-const MIN_TASK_KEEP_ALIVE_MS = 1_000;
-const MAX_TASK_KEEP_ALIVE_MS = 86_400_000;
+interface RelatedTaskMeta {
+  taskId: string;
+}
 
-const taskMetaSchema = z.strictObject({
-  taskId: z.string().min(1, 'Task id required'),
-  keepAlive: z
-    .number()
-    .int()
-    .min(MIN_TASK_KEEP_ALIVE_MS, `Minimum ${MIN_TASK_KEEP_ALIVE_MS}ms`)
-    .max(MAX_TASK_KEEP_ALIVE_MS, `Maximum ${MAX_TASK_KEEP_ALIVE_MS}ms`)
-    .optional(),
-});
-
-const relatedTaskMetaSchema = z.strictObject({
-  taskId: z.string(),
-});
-
-const toolCallMetaSchema = z.looseObject({
-  progressToken: z.union([z.string(), z.number()]).optional(),
-  'modelcontextprotocol.io/task': taskMetaSchema.optional(),
-  [RELATED_TASK_META_KEY]: relatedTaskMetaSchema.optional(),
-});
-
-const sdkTaskParamsSchema = z.object({ ttl: z.number().optional() }).optional();
-
-export const extendedCallToolRequestSchema = z.looseObject({
-  method: z.literal('tools/call'),
-  params: z.strictObject({
-    name: z.string().min(1, 'Tool name required'),
-    arguments: z.record(z.string(), z.unknown()).optional(),
-    _meta: toolCallMetaSchema.optional(),
-    task: sdkTaskParamsSchema,
-  }),
-});
-
-export type ExtendedCallToolRequest = z.infer<
-  typeof extendedCallToolRequestSchema
->;
-export type ToolCallRequestMeta = ExtendedCallToolRequest['params']['_meta'];
+export interface ToolCallRequestMeta extends Record<string, unknown> {
+  progressToken?: string | number;
+  [RELATED_TASK_META_KEY]?: RelatedTaskMeta;
+}
 
 export {
   decodeTaskCursor,
@@ -98,18 +65,6 @@ export {
   waitForTerminalTask,
 };
 export type { CreateTaskResult, TaskState, TaskStatus };
-
-export function parseExtendedCallToolRequest(
-  request: unknown
-): ExtendedCallToolRequest {
-  const parsed = extendedCallToolRequestSchema.safeParse(request);
-  if (parsed.success) return parsed.data;
-
-  throw createProtocolError(
-    ProtocolErrorCode.InvalidParams,
-    formatZodError(parsed.error)
-  );
-}
 
 export function sanitizeToolCallMeta(
   meta?: ToolCallRequestMeta

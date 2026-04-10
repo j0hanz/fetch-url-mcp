@@ -266,6 +266,15 @@ export function getMcpSessionId(req: IncomingMessage): string | null {
   );
 }
 
+function attachAuthInfoToRequest(
+  req: IncomingMessage,
+  auth: AuthInfo
+): IncomingMessage & { auth?: AuthInfo } {
+  const requestWithAuth = req as IncomingMessage & { auth?: AuthInfo };
+  requestWithAuth.auth = auth;
+  return requestWithAuth;
+}
+
 const SINGLE_VALUE_HEADER_NAMES: readonly string[] = [
   'authorization',
   'x-api-key',
@@ -1217,7 +1226,11 @@ class McpSessionGateway {
     const transport = await this.getOrCreateTransport(ctx, requestId);
     if (!transport) return;
 
-    await transport.handleRequest(ctx.req, ctx.res, body);
+    await transport.handleRequest(
+      attachAuthInfoToRequest(ctx.req, ctx.auth),
+      ctx.res,
+      body
+    );
   }
 
   async handleGet(ctx: AuthenticatedContext): Promise<void> {
@@ -1248,7 +1261,10 @@ class McpSessionGateway {
 
     logDebug('MCP GET received', { sessionId }, Loggers.LOG_HTTP);
     this.store.touch(sessionId);
-    await session.transport.handleRequest(ctx.req, ctx.res);
+    await session.transport.handleRequest(
+      attachAuthInfoToRequest(ctx.req, ctx.auth),
+      ctx.res
+    );
   }
 
   async handleDelete(ctx: AuthenticatedContext): Promise<void> {

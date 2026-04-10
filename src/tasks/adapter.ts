@@ -6,16 +6,33 @@ import type {
   TaskStore,
 } from '@modelcontextprotocol/server';
 
-import { resolveMcpSessionOwnerKey } from '../lib/core.js';
+import {
+  logError,
+  Loggers,
+  resolveMcpSessionOwnerKey,
+  resolveMcpSessionServer,
+} from '../lib/core.js';
 
-import { abortTaskExecution } from './manager.js';
+import {
+  abortTaskExecution,
+  emitTaskStatusNotification,
+  resolveTaskOwnerKey,
+  type ToolCallRequestMeta,
+} from './manager.js';
 import { taskManager, type TaskState } from './store.js';
 
 type SdkRequest = Parameters<TaskStore['createTask']>[2];
 
-function resolveOwnerKey(sessionId?: string): string {
+function resolveOwnerKey(
+  sessionId?: string,
+  context?: Record<string, unknown>
+): string {
+  const ownerKey = context?.['ownerKey'];
+  if (typeof ownerKey === 'string' && ownerKey.length > 0) return ownerKey;
   if (!sessionId) return 'default';
-  return resolveMcpSessionOwnerKey(sessionId) ?? `session:${sessionId}`;
+  return (
+    resolveMcpSessionOwnerKey(sessionId) ?? resolveTaskOwnerKey({ sessionId })
+  );
 }
 
 function toSdkTask(state: TaskState): Task {
@@ -30,20 +47,59 @@ function toSdkTask(state: TaskState): Task {
   };
 }
 
+function readRequestMeta(request: SdkRequest): ToolCallRequestMeta | undefined {
+  const meta = request.params?._meta;
+  return meta && typeof meta === 'object' && !Array.isArray(meta)
+    ? (meta as ToolCallRequestMeta)
+    : undefined;
+}
+
+function emitTaskStatusForSession(taskId: string, sessionId?: string): void {
+  if (!sessionId) return;
+
+  const server = resolveMcpSessionServer(sessionId);
+  if (!server) return;
+
+  const ownerKey = resolveOwnerKey(sessionId);
+  const task = taskManager.getTask(taskId, ownerKey);
+  if (!task) return;
+
+  try {
+    emitTaskStatusNotification(server, task);
+  } catch (error: unknown) {
+    logError(
+      'Failed to emit task status notification',
+      { taskId, error: error instanceof Error ? error.message : String(error) },
+      Loggers.LOG_TASKS
+    );
+  }
+}
+
 export class TaskStoreAdapter implements TaskStore {
   createTask(
     taskParams: SdkCreateTaskOptions,
-    _requestId: RequestId,
-    _request: SdkRequest,
+    requestId: RequestId,
+    request: SdkRequest,
     sessionId?: string
   ): Promise<Task> {
-    const keepAlive = taskParams.ttl ?? undefined;
-    const ownerKey = resolveOwnerKey(sessionId);
+    const ownerKey = resolveOwnerKey(sessionId, taskParams.context);
+    const requestMeta = readRequestMeta(request);
+    const createTaskOptions = {
+      requestId: String(requestId),
+      requestMethod: request.method,
+      ...(taskParams.ttl !== undefined ? { keepAlive: taskParams.ttl } : {}),
+      ...(taskParams.pollInterval !== undefined
+        ? { pollFrequency: taskParams.pollInterval }
+        : {}),
+      ...(taskParams.context ? { context: taskParams.context } : {}),
+      ...(requestMeta ? { requestMeta } : {}),
+    };
     const state = taskManager.createTask(
-      keepAlive !== undefined ? { keepAlive } : {},
+      createTaskOptions,
       'Task submitted',
       ownerKey
     );
+    emitTaskStatusForSession(state.taskId, sessionId);
     return Promise.resolve(toSdkTask(state));
   }
 
@@ -56,14 +112,19 @@ export class TaskStoreAdapter implements TaskStore {
   storeTaskResult(
     taskId: string,
     status: 'completed' | 'failed',
-    result: Result
+    result: Result,
+    sessionId?: string
   ): Promise<void> {
+    const ownerKey = resolveOwnerKey(sessionId);
+    if (!taskManager.getTask(taskId, ownerKey)) return Promise.resolve();
     taskManager.updateTask(taskId, { status, result });
+    emitTaskStatusForSession(taskId, sessionId);
     return Promise.resolve();
   }
 
-  getTaskResult(taskId: string): Promise<Result> {
-    const state = taskManager.getTask(taskId);
+  getTaskResult(taskId: string, sessionId?: string): Promise<Result> {
+    const ownerKey = resolveOwnerKey(sessionId);
+    const state = taskManager.getTask(taskId, ownerKey);
     const result =
       state?.result !== undefined && state.result !== null
         ? (state.result as Result)
@@ -75,8 +136,11 @@ export class TaskStoreAdapter implements TaskStore {
   updateTaskStatus(
     taskId: string,
     status: Task['status'],
-    statusMessage?: string
+    statusMessage?: string,
+    sessionId?: string
   ): Promise<void> {
+    const ownerKey = resolveOwnerKey(sessionId);
+    if (!taskManager.getTask(taskId, ownerKey)) return Promise.resolve();
     taskManager.updateTask(taskId, {
       status,
       ...(statusMessage ? { statusMessage } : {}),
@@ -84,6 +148,7 @@ export class TaskStoreAdapter implements TaskStore {
     if (status === 'cancelled') {
       abortTaskExecution(taskId);
     }
+    emitTaskStatusForSession(taskId, sessionId);
     return Promise.resolve();
   }
 

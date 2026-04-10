@@ -132,6 +132,11 @@ export function resolveMcpSessionIdByServer(
 ): string | undefined {
   return findSessionIdByServer(server);
 }
+export function resolveMcpSessionServer(
+  sessionId: string
+): McpServer | undefined {
+  return sessionServers.get(sessionId);
+}
 export function runWithRequestContext<T>(
   context: RequestContext,
   fn: () => T

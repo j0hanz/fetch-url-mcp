@@ -92,12 +92,12 @@ Call \`${FETCH_URL_TOOL_NAME}\` with \`{ url }\` → read \`markdown\` from resu
 Add \`_meta: { progressToken: "<token>" }\` to \`tools/call\` → receive \`notifications/progress\`.
 
 ## Async (task mode)
-Add \`_meta: { "modelcontextprotocol.io/task": { taskId: "<client-id>", ttl: <ms> } }\` to \`tools/call\`.
+Add \`task: { ttl?: <ms>, pollInterval?: <ms>, context?: { ... } }\` to \`tools/call\`.
 
 Lifecycle: \`working\` → \`completed\` | \`failed\` | \`cancelled\`.
 
 Endpoints:
-- \`tasks/get\` — poll for \`statusMessage\`, \`progress\`, \`total\`.
+- \`tasks/get\` — poll for \`status\`, \`statusMessage\`, and \`pollInterval\`.
 - \`tasks/result\` — retrieve final output for completed tasks.
 - \`tasks/list\` — list tasks for the current session.
 - \`tasks/cancel\` — cancel an active task.
@@ -107,7 +107,6 @@ Task-linked responses and notifications include
 \`_meta["io.modelcontextprotocol/related-task"] = { taskId }\`.
 
 Notifications (opt-in via \`TASKS_STATUS_NOTIFICATIONS=true\`):
-- \`notifications/tasks/created\` — emitted on task creation with related-task metadata.
 - \`notifications/tasks/status\` — emitted on each status transition with related-task metadata.
 
 HTTP mode: tasks are bound to the authenticated caller and resumable across sessions.

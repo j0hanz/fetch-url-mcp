@@ -310,6 +310,21 @@ function buildFetchOptions(
   };
 }
 
+async function writeRequestScopedLog(
+  ctx: ServerContext | undefined,
+  level: 'info' | 'warning' | 'error',
+  message: string,
+  data: Record<string, unknown>
+): Promise<void> {
+  if (!ctx) return;
+
+  try {
+    await ctx.mcpReq.log(level, { message, ...data }, Loggers.LOG_FETCH_URL);
+  } catch {
+    // Request-scoped logging is best-effort; internal logging remains authoritative.
+  }
+}
+
 async function executeFetch(
   input: FetchUrlInput,
   ctx?: ServerContext
@@ -336,6 +351,10 @@ async function executeFetch(
       },
       Loggers.LOG_FETCH_URL
     );
+    await writeRequestScopedLog(ctx, 'info', 'fetch-url started', {
+      inputUrl: url,
+      ...(taskId ? { taskId } : {}),
+    });
     progressPlan.reportStart();
     const { pipeline, inlineResult } = await performSharedFetch(
       buildFetchOptions(url, signal, progressPlan)
@@ -354,11 +373,28 @@ async function executeFetch(
       },
       Loggers.LOG_FETCH_URL
     );
+    await writeRequestScopedLog(ctx, 'info', 'fetch-url completed', {
+      inputUrl: url,
+      resolvedUrl: pipeline.url,
+      contentSize: inlineResult.contentSize,
+      ...(taskId ? { taskId } : {}),
+      ...(truncated ? { truncated: true } : {}),
+    });
     const response = buildResponse(pipeline, inlineResult, url);
     progressPlan.reportSuccess(inlineResult.contentSize);
     return response;
   } catch (error) {
     progressPlan.reportFailure(isAbortError(error));
+    await writeRequestScopedLog(
+      ctx,
+      isAbortError(error) ? 'warning' : 'error',
+      'fetch-url failed',
+      {
+        inputUrl: url,
+        error: getErrorMessage(error),
+        ...(taskId ? { taskId } : {}),
+      }
+    );
     throw error;
   }
 }

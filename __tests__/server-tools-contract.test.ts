@@ -93,6 +93,32 @@ describe('server tool contract', () => {
     assert.ok(outputSchema.properties?.['contentSize']);
   });
 
+  it('does not advertise unsupported list-changed or resource subscription capabilities', async () => {
+    const server = await createServer();
+    const capabilities = Reflect.get(server.server, '_capabilities') as
+      | Record<string, unknown>
+      | undefined;
+
+    assert.ok(capabilities, 'capabilities should be present');
+    const resources =
+      capabilities?.['resources'] &&
+      typeof capabilities['resources'] === 'object'
+        ? (capabilities['resources'] as Record<string, unknown>)
+        : undefined;
+    const tools =
+      capabilities?.['tools'] && typeof capabilities['tools'] === 'object'
+        ? (capabilities['tools'] as Record<string, unknown>)
+        : undefined;
+    const prompts =
+      capabilities?.['prompts'] && typeof capabilities['prompts'] === 'object'
+        ? (capabilities['prompts'] as Record<string, unknown>)
+        : undefined;
+
+    assert.deepEqual(resources, { listChanged: false });
+    assert.deepEqual(tools, { listChanged: false });
+    assert.deepEqual(prompts, { listChanged: false });
+  });
+
   it('emits markdown as the first content block and JSON as the compatibility block', () => {
     const blocks = buildFetchUrlContentBlocks({
       url: 'https://example.com',

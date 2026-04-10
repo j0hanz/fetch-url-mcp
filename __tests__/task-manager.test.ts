@@ -39,7 +39,7 @@ describe('taskManager', () => {
         assert.ok(task.taskId);
         assert.ok(task.createdAt);
         assert.ok(task.lastUpdatedAt);
-        assert.equal(typeof task.keepAlive, 'number');
+        assert.notEqual(task.keepAlive, null);
         assert.equal(typeof task.pollFrequency, 'number');
       } finally {
         cleanupTask(task.taskId);
@@ -74,7 +74,7 @@ describe('taskManager', () => {
       );
       try {
         assert.ok(
-          task.keepAlive >= 1_000,
+          task.keepAlive !== null && task.keepAlive >= 1_000,
           `keepAlive should be >= 1000, got ${task.keepAlive}`
         );
       } finally {
@@ -90,7 +90,7 @@ describe('taskManager', () => {
       );
       try {
         assert.ok(
-          task.keepAlive <= 86_400_000,
+          task.keepAlive !== null && task.keepAlive <= 86_400_000,
           `keepAlive should be <= 86400000, got ${task.keepAlive}`
         );
       } finally {
@@ -102,6 +102,32 @@ describe('taskManager', () => {
       const task = taskManager.createTask(undefined, 'test', 'ka-test');
       try {
         assert.equal(task.keepAlive, 60_000);
+      } finally {
+        cleanupTask(task.taskId);
+      }
+    });
+
+    it('preserves null keepAlive for unlimited TTL', () => {
+      const task = taskManager.createTask(
+        { keepAlive: null },
+        'test',
+        'ka-test'
+      );
+      try {
+        assert.equal(task.keepAlive, null);
+      } finally {
+        cleanupTask(task.taskId);
+      }
+    });
+
+    it('uses the requested poll interval when supplied', () => {
+      const task = taskManager.createTask(
+        { keepAlive: 10_000, pollFrequency: 2_500 },
+        'test',
+        'poll-owner'
+      );
+      try {
+        assert.equal(task.pollFrequency, 2_500);
       } finally {
         cleanupTask(task.taskId);
       }
@@ -318,6 +344,29 @@ describe('taskManager', () => {
       const cancelled = taskManager.cancelTask(task.taskId);
       assert.equal(cancelled?.status, 'cancelled');
     });
+
+    it('emits status notifications for create, update, and cancel transitions', () => {
+      const observed: Array<Pick<TaskState, 'taskId' | 'status'>> = [];
+      const dispose = taskManager.onStatusChange((task) => {
+        observed.push({ taskId: task.taskId, status: task.status });
+      });
+
+      const task = createTestTask('notify-owner');
+      try {
+        taskManager.updateTask(task.taskId, { status: 'input_required' });
+        taskManager.cancelTask(task.taskId, 'notify-owner');
+
+        assert.deepEqual(
+          observed
+            .filter((entry) => entry.taskId === task.taskId)
+            .map((entry) => entry.status),
+          ['working', 'input_required', 'cancelled']
+        );
+      } finally {
+        dispose();
+        cleanupTask(task.taskId);
+      }
+    });
   });
 
   // ── cancelTask ──────────────────────────────────────────────────
@@ -466,6 +515,17 @@ describe('taskManager', () => {
       taskManager.shrinkKeepAliveAfterDelivery(task.taskId);
       const after = taskManager.getTask(task.taskId)?.keepAlive ?? 0;
       assert.ok(after <= before, 'keepAlive should shrink or stay the same');
+    });
+
+    it('does not shrink unlimited keepAlive', () => {
+      const task = taskManager.createTask(
+        { keepAlive: null },
+        'test',
+        'shrink-owner'
+      );
+      taskManager.updateTask(task.taskId, { status: 'completed' });
+      taskManager.shrinkKeepAliveAfterDelivery(task.taskId);
+      assert.equal(taskManager.getTask(task.taskId)?.keepAlive, null);
     });
 
     it('is a no-op for a non-terminal task', () => {

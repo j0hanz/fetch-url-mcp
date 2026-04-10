@@ -528,7 +528,7 @@ For more info, see [Kilo Code docs](https://kilocode.ai/docs).
 
 #### `fetch-url`
 
-Takes a URL and returns Markdown. Read-only — no JavaScript execution. Supports running as a background MCP task for large or slow pages. When task mode is used, `tasks/get` and `tasks/list` include `statusMessage`, `progress`, and `total` whenever progress has been reported.
+Takes a URL and returns Markdown. Read-only, with no JavaScript execution. Supports running as a background MCP task for large or slow pages. In task mode, `tasks/get` and `tasks/list` expose `status`, `statusMessage`, and `pollInterval`; numeric progress remains out-of-band via `notifications/progress`.
 
 | Parameter | Type     | Required | Description                 |
 | --------- | -------- | -------- | --------------------------- |
@@ -536,9 +536,9 @@ Takes a URL and returns Markdown. Read-only — no JavaScript execution. Support
 
 You get text content back by default. If output validation passes, the response also includes `structuredContent` with typed fields: `url`, `resolvedUrl`, `finalUrl`, `title`, `metadata`, `markdown`, `fetchedAt`, `contentSize`, and `truncated`. A `true` value for `truncated` means the content hit a server-side size limit.
 
-To opt into progress updates, include `_meta.progressToken` in the tool call. The token may be a string or number. The server may then emit monotonic `notifications/progress` updates, and task mode reuses the same token until the task reaches a terminal state.
+To opt into progress updates, include `_meta.progressToken` in the tool call. The token may be a string or number, and the server may emit monotonic `notifications/progress` updates while the fetch runs.
 
-To run the tool in task mode, include `_meta["modelcontextprotocol.io/task"] = { "taskId": "<client-id>", "keepAlive": <ms> }`. `tasks/result` returns output only after the task reaches `completed`. Task-linked progress notifications, task summaries, and final results include `_meta["modelcontextprotocol.io/related-task"] = { "taskId": "<client-id>" }`.
+To run the tool in task mode, include `params.task = { ttl?: <ms>, pollInterval?: <ms>, context?: { ... } }`. `tasks/result` returns output only after the task reaches `completed`. Task summaries and final results include `_meta["io.modelcontextprotocol/related-task"] = { "taskId": "<server-task-id>" }`.
 
 ```json
 {
@@ -547,6 +547,10 @@ To run the tool in task mode, include `_meta["modelcontextprotocol.io/task"] = {
     "name": "fetch-url",
     "arguments": {
       "url": "https://example.com/docs"
+    },
+    "task": {
+      "ttl": 300000,
+      "pollInterval": 1000
     },
     "_meta": {
       "progressToken": 7
@@ -577,14 +581,15 @@ To run the tool in task mode, include `_meta["modelcontextprotocol.io/task"] = {
 
 ## MCP Capabilities
 
-| Capability                      | Status    | Notes                                                                                                                                                                                                          |
-| ------------------------------- | --------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| completions                     | confirmed | Advertised in `createServerCapabilities()`.                                                                                                                                                                    |
-| logging                         | confirmed | Advertised in `createServerCapabilities()` and handled through `setRequestHandler('logging/setLevel', ...)`.                                                                                                   |
-| resources subscribe/listChanged | confirmed | Advertised in `createServerCapabilities()`.                                                                                                                                                                    |
-| prompts                         | confirmed | `get-help` is registered during server startup.                                                                                                                                                                |
-| tasks                           | confirmed | Advertised in `createServerCapabilities()` and backed by registered task handlers plus optional tool task support.                                                                                             |
-| progress notifications          | confirmed | Opt-in via `_meta.progressToken`. Tool execution reports monotonic `notifications/progress` updates during fetch and transform stages, and task-mode progress reuses the caller's token for the task lifetime. |
+| Capability             | Status    | Notes                                                                                                                                  |
+| ---------------------- | --------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| completions            | confirmed | Advertised in `createServerCapabilities()`.                                                                                            |
+| logging                | confirmed | Advertised in `createServerCapabilities()`.                                                                                            |
+| resources              | confirmed | Static instruction resource is registered during server startup. Subscription and list-changed support are not advertised.             |
+| prompts                | confirmed | `get-help` is registered during server startup.                                                                                        |
+| tasks                  | confirmed | Advertised in `createServerCapabilities()` and backed by registered task handlers plus optional tool task support.                     |
+| progress notifications | confirmed | Opt-in via `_meta.progressToken`. Tool execution reports monotonic `notifications/progress` updates during fetch and transform stages. |
+| task status updates    | confirmed | `notifications/tasks/status` is emitted when task status changes and `TASKS_STATUS_NOTIFICATIONS=true`.                                |
 
 ### Tool Annotations
 
