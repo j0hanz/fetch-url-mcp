@@ -7,7 +7,7 @@ import { type ReadableStream as NodeReadableStream } from 'node:stream/web';
 import tls from 'node:tls';
 import { createBrotliDecompress, createGunzip, createInflate } from 'node:zlib';
 
-import { Agent, type Dispatcher } from 'undici';
+import { Agent, type Dispatcher, fetch as undiciFetch } from 'undici';
 
 import { config } from '../config.js';
 import {
@@ -1516,10 +1516,14 @@ const defaultContext = {
 const defaultRedactor = {
   redact: redactUrl,
 };
-const defaultFetch = (
+const defaultFetch = async (
   input: RequestInfo | URL,
   init?: RequestInit
-): Promise<Response> => globalThis.fetch(input, init);
+): Promise<Response> =>
+  undiciFetch(
+    input as Parameters<typeof undiciFetch>[0],
+    init as Parameters<typeof undiciFetch>[1]
+  ) as unknown as Promise<Response>;
 type FetcherConfig = typeof config.fetcher;
 interface FetchBufferResult {
   buffer: Uint8Array;
