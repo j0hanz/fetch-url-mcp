@@ -76,9 +76,10 @@ export function filterInstructions(
 export function buildServerInstructions(): string {
   const maxHtmlSizeMb = config.constants.maxHtmlBytes / 1024 / 1024;
 
-  return `# Fetch public webpages and return clean, readable Markdown.
+  return `# Fetch public webpages and return clean, readable Markdown
 
 # Capabilities
+
 - Tool: \`${FETCH_URL_TOOL_NAME}\` — fetch a URL, return Markdown with metadata.
 - Resource: \`internal://instructions\` — this document.
 - Prompt: \`get-help\` — returns these instructions. Accepts optional \`topic\` filter (${HELP_TOPICS.join(' | ')}).
@@ -86,17 +87,21 @@ export function buildServerInstructions(): string {
 # Workflows
 
 ## Standard
+
 Call \`${FETCH_URL_TOOL_NAME}\` with \`{ url }\` → read \`markdown\` from result. Check \`truncated: true\` for incomplete content.
 
 ## Progress
+
 Add \`_meta: { progressToken: "<token>" }\` to \`tools/call\` → receive \`notifications/progress\`.
 
 ## Async (task mode)
+
 Add \`task: { ttl?: <ms> }\` to \`tools/call\`.
 
 Lifecycle: \`working\` → \`completed\` | \`failed\` | \`cancelled\`.
 
 Endpoints:
+
 - \`tasks/get\` — poll for task summaries with \`status\`, \`statusMessage\`, \`createdAt\`, \`lastUpdatedAt\`, \`ttl\`, and \`pollInterval\`.
 - \`tasks/result\` — wait for terminal status, then retrieve the stored result or terminal error payload.
 - \`tasks/list\` — list tasks visible to the current caller.
@@ -107,11 +112,13 @@ Task-linked responses and notifications include
 \`_meta["io.modelcontextprotocol/related-task"] = { taskId }\`.
 
 Notifications (opt-in via \`TASKS_STATUS_NOTIFICATIONS=true\`):
+
 - \`notifications/tasks/status\` — emitted on each status transition with related-task metadata.
 
 HTTP mode: tasks are bound to the authenticated caller and resumable across sessions for the same authenticated subject.
 
 # Constraints
+
 - Blocked: localhost, private IPs, link-local, cloud metadata endpoints, \`.local\`/\`.internal\` domains.
 - Max HTML: ${maxHtmlSizeMb}MB. Max redirects: ${config.fetcher.maxRedirects}.
 - No JS rendering — client-rendered pages may return incomplete content.
@@ -122,16 +129,17 @@ HTTP mode: tasks are bound to the authenticated caller and resumable across sess
 
 # Errors
 
-| Code | Cause | Action |
-|---|---|---|
-| VALIDATION_ERROR | Invalid or blocked URL | Do not retry |
-| FETCH_ERROR | Network failure | Retry once with backoff |
-| UPSTREAM_HTTP_ERROR | Upstream HTTP error | Retry only for 5xx |
-| UPSTREAM_RATE_LIMITED | 429 from upstream | Back off, then retry |
-| UPSTREAM_TIMEOUT | Upstream timed out | Retry with backoff |
-| UPSTREAM_ABORTED | Request cancelled | Retry if needed |
-| MCP_ERROR | Internal protocol error | Do not retry |
-| queue_full | Worker pool saturated | Wait, retry, or use task mode |`;
+| Code                  | Cause                   | Action                        |
+| --------------------- | ----------------------- | ----------------------------- |
+| VALIDATION_ERROR      | Invalid or blocked URL  | Do not retry                  |
+| FETCH_ERROR           | Network failure         | Retry once with backoff       |
+| UPSTREAM_HTTP_ERROR   | Upstream HTTP error     | Retry only for 5xx            |
+| UPSTREAM_RATE_LIMITED | 429 from upstream       | Back off, then retry          |
+| UPSTREAM_TIMEOUT      | Upstream timed out      | Retry with backoff            |
+| UPSTREAM_ABORTED      | Request cancelled       | Retry if needed               |
+| MCP_ERROR             | Internal protocol error | Do not retry                  |
+| queue_full            | Worker pool saturated   | Wait, retry, or use task mode |
+`;
 }
 
 function buildTopicSchema(): ReturnType<
