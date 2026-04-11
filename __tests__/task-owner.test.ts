@@ -6,6 +6,7 @@ import {
   compact,
   isServerResult,
   parseHandlerExtra,
+  resolveOwnerKeyFromContext,
   resolveTaskOwnerKey,
   resolveToolCallContext,
   withRequestContextIfMissing,
@@ -188,6 +189,73 @@ describe('resolveTaskOwnerKey', () => {
       key,
       resolveTaskOwnerKey({ authInfo: { clientId: 'c-1', token: 'tok-1' } })
     );
+  });
+});
+
+// ── resolveOwnerKeyFromContext (ServerContext-native) ────────────────
+
+describe('resolveOwnerKeyFromContext', () => {
+  const baseCtx = {
+    mcpReq: {
+      signal: new AbortController().signal,
+      id: 'r-1',
+      notify: async () => {},
+      log: () => {},
+      _meta: {},
+    },
+  };
+
+  it('returns auth-based key when authInfo is present', () => {
+    const ctx = {
+      ...baseCtx,
+      sessionId: 'sess-1',
+      http: { authInfo: { clientId: 'c-1', token: 'tok-1', scopes: [] } },
+    };
+    const key = resolveOwnerKeyFromContext(ctx as never);
+    assert.ok(key.startsWith('auth:'));
+  });
+
+  it('returns session-based key when auth is absent', () => {
+    const ctx = { ...baseCtx, sessionId: 'sess-1' };
+    const key = resolveOwnerKeyFromContext(ctx as never);
+    assert.equal(key, 'session:sess-1');
+  });
+
+  it('returns "default" when no auth or session', () => {
+    const ctx = { ...baseCtx };
+    const key = resolveOwnerKeyFromContext(ctx as never);
+    assert.equal(key, 'default');
+  });
+
+  it('matches resolveTaskOwnerKey for same auth identity', () => {
+    const ctx = {
+      ...baseCtx,
+      sessionId: 'sess-1',
+      http: { authInfo: { clientId: 'c-1', token: 'tok-1', scopes: [] } },
+    };
+    const fromCtx = resolveOwnerKeyFromContext(ctx as never);
+    const fromExtra = resolveTaskOwnerKey({
+      authInfo: { clientId: 'c-1', token: 'tok-1' },
+    });
+    assert.equal(fromCtx, fromExtra);
+  });
+
+  it('uses stable subject from extra claims', () => {
+    const ctx = {
+      ...baseCtx,
+      http: {
+        authInfo: {
+          clientId: 'oauth',
+          token: 'alpha',
+          scopes: [],
+          extra: { sub: 'user-99' },
+        },
+      },
+    };
+    const a = resolveOwnerKeyFromContext(ctx as never);
+    ctx.http.authInfo.token = 'beta';
+    const b = resolveOwnerKeyFromContext(ctx as never);
+    assert.equal(a, b);
   });
 });
 

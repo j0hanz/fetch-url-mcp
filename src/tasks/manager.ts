@@ -243,16 +243,6 @@ const TaskDeleteSchema = z.looseObject(
   },
   'Invalid request'
 );
-function resolveOwnerScopedExtra(extra: unknown): {
-  parsedExtra: ReturnType<typeof parseHandlerExtra>;
-  ownerKey: string;
-} {
-  const parsedExtra = parseHandlerExtra(extra);
-  return {
-    parsedExtra,
-    ownerKey: resolveTaskOwnerKey(parsedExtra),
-  };
-}
 interface TaskHandlerRegistrationResult {
   taskCapableToolsRegistered: boolean;
 }
@@ -272,7 +262,7 @@ export function registerTaskHandlers(
 
     const parsedRequest = TaskDeleteSchema.parse(request);
     const { taskId } = parsedRequest.params;
-    const { ownerKey } = resolveOwnerScopedExtra(ctx);
+    const ownerKey = resolveOwnerKeyFromContext(ctx);
     logDebug('tasks/delete requested', { taskId }, Loggers.LOG_TASKS);
 
     const deleted = taskManager.deleteTask(taskId, ownerKey);
@@ -455,15 +445,24 @@ export function resolveTaskOwnerKey(extra?: HandlerExtra): string {
   return 'default';
 }
 
-function resolveRequestIdFromExtra(extra: unknown): string | undefined {
-  const parsedExtra = parseHandlerExtra(extra);
-  if (!parsedExtra) return undefined;
+export function resolveOwnerKeyFromContext(ctx: ServerContext): string {
+  const authInfo = ctx.http?.authInfo;
+  if (authInfo) {
+    const identity: AuthIdentity = {
+      clientId: authInfo.clientId,
+      token: authInfo.token,
+      ...(authInfo.extra ? { extra: authInfo.extra } : {}),
+    };
+    const authenticatedOwnerKey = buildAuthenticatedOwnerKey(identity);
+    if (authenticatedOwnerKey) return authenticatedOwnerKey;
+  }
 
-  const { requestId } = parsedExtra;
-  if (typeof requestId === 'string') return requestId;
-  if (typeof requestId === 'number') return String(requestId);
+  const { sessionId } = ctx;
+  if (typeof sessionId === 'string' && sessionId.length > 0) {
+    return resolveMcpSessionOwnerKey(sessionId) ?? `session:${sessionId}`;
+  }
 
-  return undefined;
+  return 'default';
 }
 
 function getHeaderString(headers: Headers, name: string): string | undefined {
@@ -505,7 +504,14 @@ export function resolveToolCallContext(
   requestMeta?: ToolCallRequestMeta
 ): ToolCallContext {
   if (isServerContextLike(extra)) {
-    return resolveToolExecutionContext(parseHandlerExtra(extra), requestMeta);
+    return compact({
+      ownerKey: resolveOwnerKeyFromContext(extra),
+      sessionId: extra.sessionId,
+      signal: extra.mcpReq.signal,
+      requestId: extra.mcpReq.id,
+      sendNotification: normalizeSendNotification(extra.mcpReq.notify),
+      requestMeta: sanitizeToolCallMeta(requestMeta),
+    }) as ToolCallContext;
   }
 
   if (extra && 'ownerKey' in extra && typeof extra.ownerKey === 'string') {
@@ -522,22 +528,32 @@ export function resolveToolCallContext(
   return resolveToolExecutionContext(extra, requestMeta);
 }
 
+function coerceRequestId(raw: unknown): string | undefined {
+  if (typeof raw === 'string') return raw;
+  if (typeof raw === 'number') return String(raw);
+  return undefined;
+}
+
 export function withRequestContextIfMissing<TParams, TResult, TExtra = unknown>(
   handler: (params: TParams, extra?: TExtra) => Promise<TResult>
 ): (params: TParams, extra?: TExtra) => Promise<TResult> {
   return async (params, extra) => {
+    const ctxLike = extra as Partial<ServerContext> | undefined;
     const existingRequestId = getRequestId();
     if (existingRequestId) {
-      const traceMeta = parseHandlerExtra(extra)?._meta;
+      const traceMeta = isObject(ctxLike?.mcpReq?._meta)
+        ? (ctxLike.mcpReq._meta as ToolCallRequestMeta)
+        : undefined;
       return runWithTraceContext(traceMeta, () => handler(params, extra));
     }
 
-    const derivedRequestId = resolveRequestIdFromExtra(extra) ?? randomUUID();
-    const derivedSessionId = resolveSessionIdFromExtra(
-      extra as Partial<ServerContext> | undefined
-    );
+    const rawId = ctxLike?.mcpReq?.id;
+    const derivedRequestId = coerceRequestId(rawId) ?? randomUUID();
+    const derivedSessionId = resolveSessionIdFromExtra(ctxLike);
 
-    const traceMeta = parseHandlerExtra(extra)?._meta;
+    const traceMeta = isObject(ctxLike?.mcpReq?._meta)
+      ? (ctxLike.mcpReq._meta as ToolCallRequestMeta)
+      : undefined;
 
     return runWithRequestContext(
       {
