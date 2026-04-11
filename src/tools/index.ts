@@ -209,13 +209,16 @@ export class FetchUrlProgressPlan {
 
   constructor(
     private readonly reporter: ProgressReporter,
-    private readonly context: string
+    private readonly context: string,
+    private readonly onStatusMessage?: (message: string) => void
   ) {}
 
   reportStart(): void {
+    const message = 'Preparing';
+    this.onStatusMessage?.(message);
     this.reporter.report({
       progress: Step.START,
-      message: 'Preparing',
+      message,
       total: this.total,
     });
   }
@@ -223,6 +226,7 @@ export class FetchUrlProgressPlan {
   reportStage(stage: SharedFetchStage): void {
     const mapped = this.mapStage(stage);
     if (!mapped) return;
+    this.onStatusMessage?.(mapped.message);
     this.reporter.report({
       progress: mapped.step,
       message: mapped.message,
@@ -231,9 +235,11 @@ export class FetchUrlProgressPlan {
   }
 
   reportSuccess(contentSize: number): void {
+    const message = buildFetchSuccessSummary(contentSize);
+    this.onStatusMessage?.(message);
     this.reporter.report({
       progress: Step.DONE,
-      message: buildFetchSuccessSummary(contentSize),
+      message,
       total: this.total,
     });
   }
@@ -247,6 +253,7 @@ export class FetchUrlProgressPlan {
     } else {
       message = 'Fetch failed';
     }
+    this.onStatusMessage?.(message);
     this.reporter.report({
       progress: Step.DONE,
       message,
@@ -348,7 +355,8 @@ async function writeRequestScopedLog(
 async function executeFetch(
   input: FetchUrlInput,
   ctx?: ServerContext,
-  executionSignal?: AbortSignal
+  executionSignal?: AbortSignal,
+  onStatusMessage?: (message: string) => void
 ): Promise<CallToolResult> {
   const { url } = input;
   const mcpReq = ctx?.mcpReq;
@@ -359,7 +367,8 @@ async function executeFetch(
   const taskId = ctx?.task?.id;
   const progressPlan = new FetchUrlProgressPlan(
     createProgressReporter(ctx),
-    formatUrlForDisplay(url)
+    formatUrlForDisplay(url),
+    onStatusMessage
   );
 
   try {
@@ -489,9 +498,12 @@ export function registerTools(server: McpServer): ToolRegistrationControls {
             : {}
         );
         const taskSignal = attachAbortController(task.taskId).signal;
+        const updateStatus = (message: string): void => {
+          void ctx.task.store.updateTaskStatus(task.taskId, 'working', message);
+        };
 
         // Spin off background execution
-        executeFetch(args, ctx, taskSignal)
+        executeFetch(args, ctx, taskSignal, updateStatus)
           .then(async (result) => {
             try {
               await ctx.task.store.storeTaskResult(
