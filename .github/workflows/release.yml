@@ -104,15 +104,17 @@ jobs:
           VERSION: ${{ steps.ver.outputs.version }}
         run: |
           git add package.json package-lock.json server.json
-          git commit -m "release: v$VERSION"
-          git tag -a "v$VERSION" -m "v$VERSION"
+          git diff --staged --quiet || git commit -m "release: v$VERSION"
+          git tag -a "v$VERSION" -m "v$VERSION" 2>/dev/null || echo "Tag v$VERSION already exists"
           git push origin master --follow-tags
 
       - name: Create GitHub release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VERSION: ${{ steps.ver.outputs.version }}
-        run: gh release create "v$VERSION" --title "v$VERSION" --generate-notes
+        run: |
+          gh release view "v$VERSION" &>/dev/null && echo "Release v$VERSION already exists" \
+            || gh release create "v$VERSION" --title "v$VERSION" --generate-notes
 
   # ──────────────────────────────────────────────
   # 2. Publish to npm (runs in parallel with Docker)
