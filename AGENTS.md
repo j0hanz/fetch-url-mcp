@@ -5,49 +5,54 @@ An MCP server that fetches web pages and converts them to clean, readable Markdo
 ## Tooling
 
 - **Manager**: npm
-- **Frameworks**: TypeScript, ESLint, @modelcontextprotocol/sdk, Prettier, tsx, zod, undici
-- **Infrastructure**: Docker, Docker Compose, GitHub Actions
+- **Language**: TypeScript (ESM, Node >=24)
+- **Linting**: ESLint (sonarjs, unicorn, unused-imports, de-morgan, depend)
+- **Formatting**: Prettier (@trivago/prettier-plugin-sort-imports)
 
 ## Architecture
 
-- Tool-based
+- Tool-based MCP server (MCP SDK v2 alpha)
+- HTTP fetch → HTML parse (linkedom + @mozilla/readability) → Markdown conversion (node-html-markdown)
+- Task system for async tool execution
 
 ## Testing Strategy
 
-- Colocated test directories (**tests**/), 30 test files found
+- 30 test files in `__tests__/` (colocated), run via Node.js built-in test runner
+- `npm run test` for all tests; `npm run test:coverage` for coverage
 
 ## Commands
 
 - **Dev**: `npm run dev`
 - **Test**: `npm run test`
 - **Lint**: `npm run lint`
-- **Type Check**: `npm run type-check`
-- **Format**: `npm run format`
-- **Build**: `npm run build`
+- **Deploy**: `npm run prepublishOnly`
 
 ## Safety Boundaries
 
-- **Always**: `npm run lint`, `npm run type-check`, `npm run test`, `npm run build`
-- **Ask First**: `installing dependencies`, `deleting files`, `running full builds or e2e suites`, `database/schema migrations`, `deploy or infrastructure changes`, `git push / force push`, `npm run build`, `npm run test:coverage`, `npm run prepublishOnly`, `git push origin master --follow-tags`, `gh release create "v$VERSION" --title "v$VERSION" --generate-notes`, `npm publish --access public --provenance --ignore-scripts`
-- **Never**: read or exfiltrate secrets or credentials; edit generated or vendor directories such as `.git`, `dist`, or `node_modules`; change production config without approval
+- **Always**: `npm run lint`, `npm run type-check`, `npm run test`
+- **Ask First**: `installing dependencies`, `deleting files`, `running full builds or e2e suites`, `database/schema migrations`, `deploy or infrastructure changes`, `git push / force push`, `npm run build`, `npm run test:coverage`, `npm run prepublishOnly`, `git push origin master --follow-tags`, `npm publish --access public --provenance --ignore-scripts`
+- **Never**: commit or expose secrets/credentials; edit vendor/generated directories (`dist/`, `.git/`, `node_modules/`); change production config without approval
 
 ## Directory Overview
 
 ```text
+.
 ├── __tests__/          # test suites
-├── .github/            # CI/workflows and repo automation
+├── .agents/            # agent skills and config
+├── .github/            # CI/workflows (release, docker-republish)
 ├── assets/             # static assets
+├── memory_db/          # persistent memory store
 ├── scripts/            # automation scripts
 ├── src/                # application source
 ├── .prettierignore     # formatter config
 ├── .prettierrc         # formatter config
-├── AGENTS.md           # agent guidance
 ├── docker-compose.yml  # local container orchestration
 ├── Dockerfile          # container image build
 ├── eslint.config.mjs   # lint config
 ├── package.json        # scripts and dependencies
 ├── README.md           # usage and setup docs
 └── server.json         # published server metadata
+└── ...                # 3 more top-level items omitted
 ```
 
 ## Navigation
@@ -61,6 +66,7 @@ An MCP server that fetches web pages and converts them to clean, readable Markdo
 - Don't ignore test failures in CI.
 - Don't use unapproved third-party packages without checking package manager manifests.
 - Don't hardcode secrets or sensitive info in code, tests, docs, or config.
+- Don't commit secrets/credentials to the repo.
 - Don't edit generated files directly.
 - Don't trigger releases without approval.
 
@@ -70,5 +76,3 @@ An MCP server that fetches web pages and converts them to clean, readable Markdo
 2. Run `npm run type-check` to verify types.
 3. Run `npm run test` to ensure tests pass.
 4. Run `npm run format` to format code.
-5. Run `npm run build` to verify build success.
-6. Update documentation if needed.
