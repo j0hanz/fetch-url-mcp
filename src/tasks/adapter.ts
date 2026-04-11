@@ -3,22 +3,16 @@ import {
   type RequestId,
   type Result,
   type CreateTaskOptions as SdkCreateTaskOptions,
-  type ServerResult,
   type Task,
   type TaskStore,
 } from '@modelcontextprotocol/server';
 
-import {
-  logError,
-  Loggers,
-  resolveMcpSessionOwnerKey,
-  resolveMcpSessionServer,
-} from '../lib/core.js';
+import { resolveMcpSessionOwnerKey } from '../lib/core.js';
 import { createProtocolError } from '../lib/mcp-interop.js';
 
 import {
   abortTaskExecution,
-  emitTaskStatusNotification,
+  isServerResult,
   resolveTaskOwnerKey,
   type ToolCallRequestMeta,
   withRelatedTaskMeta,
@@ -60,36 +54,6 @@ function readRequestMeta(request: SdkRequest): ToolCallRequestMeta | undefined {
   return meta && typeof meta === 'object' && !Array.isArray(meta)
     ? (meta as ToolCallRequestMeta)
     : undefined;
-}
-
-function emitTaskStatusForSession(taskId: string, sessionId?: string): void {
-  if (!sessionId) return;
-
-  const server = resolveMcpSessionServer(sessionId);
-  if (!server) return;
-
-  const ownerKey = resolveOwnerKey(sessionId);
-  const task = taskManager.getTask(taskId, ownerKey);
-  if (!task) return;
-
-  try {
-    emitTaskStatusNotification(server, task);
-  } catch (error: unknown) {
-    logError(
-      'Failed to emit task status notification',
-      { taskId, error: error instanceof Error ? error.message : String(error) },
-      Loggers.LOG_TASKS
-    );
-  }
-}
-
-function isServerResult(value: unknown): value is ServerResult {
-  return (
-    value !== null &&
-    typeof value === 'object' &&
-    !Array.isArray(value) &&
-    Array.isArray((value as Record<string, unknown>)['content'])
-  );
 }
 
 function readStoredTaskResult(
@@ -154,7 +118,6 @@ export class TaskStoreAdapter implements TaskStore {
       'Task submitted',
       ownerKey
     );
-    emitTaskStatusForSession(state.taskId, sessionId);
     return Promise.resolve(toSdkTask(state));
   }
 
@@ -172,8 +135,7 @@ export class TaskStoreAdapter implements TaskStore {
   ): Promise<void> {
     const ownerKey = resolveOwnerKey(sessionId);
     if (!taskManager.getTask(taskId, ownerKey)) return Promise.resolve();
-    taskManager.updateTask(taskId, { status, result });
-    emitTaskStatusForSession(taskId, sessionId);
+    taskManager.updateTask(taskId, { status, result }, true);
     return Promise.resolve();
   }
 
@@ -203,30 +165,33 @@ export class TaskStoreAdapter implements TaskStore {
   ): Promise<void> {
     const ownerKey = resolveOwnerKey(sessionId);
     if (status === 'cancelled') {
-      if (!taskManager.cancelTask(taskId, ownerKey)) return Promise.resolve();
+      if (!taskManager.cancelTask(taskId, ownerKey, true))
+        return Promise.resolve();
       abortTaskExecution(taskId);
-      emitTaskStatusForSession(taskId, sessionId);
       return Promise.resolve();
     }
 
     const task = taskManager.getTask(taskId, ownerKey);
     if (!task) return Promise.resolve();
 
-    taskManager.updateTask(taskId, {
-      status,
-      ...(statusMessage ? { statusMessage } : {}),
-      ...(status === 'failed'
-        ? {
-            result: createTerminalTaskErrorResult({
-              taskId,
-              status: 'failed',
-              ...(statusMessage ? { statusMessage } : {}),
-              ...(task.error ? { error: task.error } : {}),
-            }),
-          }
-        : {}),
-    });
-    emitTaskStatusForSession(taskId, sessionId);
+    taskManager.updateTask(
+      taskId,
+      {
+        status,
+        ...(statusMessage ? { statusMessage } : {}),
+        ...(status === 'failed'
+          ? {
+              result: createTerminalTaskErrorResult({
+                taskId,
+                status: 'failed',
+                ...(statusMessage ? { statusMessage } : {}),
+                ...(task.error ? { error: task.error } : {}),
+              }),
+            }
+          : {}),
+      },
+      true
+    );
     return Promise.resolve();
   }
 

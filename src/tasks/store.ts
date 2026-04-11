@@ -272,7 +272,8 @@ class TaskManager {
 
   private cancelActiveTask(
     task: InternalTaskState,
-    statusMessage: string
+    statusMessage: string,
+    silent?: boolean
   ): void {
     const error = {
       code: CONNECTION_CLOSED_ERROR_CODE,
@@ -290,7 +291,7 @@ class TaskManager {
         error,
       }),
     });
-    this.emitStatus(task);
+    if (!silent) this.emitStatus(task);
     this.waiters.notify(task);
   }
 
@@ -409,7 +410,8 @@ class TaskManager {
 
   updateTask(
     taskId: string,
-    updates: Partial<Omit<TaskState, 'taskId' | 'createdAt'>>
+    updates: Partial<Omit<TaskState, 'taskId' | 'createdAt'>>,
+    silent?: boolean
   ): void {
     const task = this.tasks.get(taskId);
     if (!task) {
@@ -441,11 +443,15 @@ class TaskManager {
     });
 
     logTaskStatusTransition(task, previousStatus, task.status);
-    this.emitStatus(task);
+    if (!silent) this.emitStatus(task);
     this.waiters.notify(task);
   }
 
-  cancelTask(taskId: string, ownerKey?: string): TaskState | undefined {
+  cancelTask(
+    taskId: string,
+    ownerKey?: string,
+    silent?: boolean
+  ): TaskState | undefined {
     const task = this.lookupActiveTask(taskId, ownerKey);
     if (!task) return undefined;
 
@@ -456,7 +462,7 @@ class TaskManager {
       );
     }
 
-    this.cancelActiveTask(task, 'The task was cancelled by request.');
+    this.cancelActiveTask(task, 'The task was cancelled by request.', silent);
     logInfo(
       'Task cancelled by request',
       {
