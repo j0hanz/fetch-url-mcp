@@ -6,26 +6,20 @@ import {
   type ServerResult,
 } from '@modelcontextprotocol/server';
 
-import { hash, randomUUID } from 'node:crypto';
+import { hash } from 'node:crypto';
 
 import { z } from 'zod';
 
 import { config } from '../lib/config.js';
 import {
-  getRequestId,
   logDebug,
   logError,
   Loggers,
   logWarn,
   resolveMcpSessionOwnerKey,
-  runWithRequestContext,
-  runWithTraceContext,
 } from '../lib/core.js';
 import { getErrorMessage } from '../lib/error/index.js';
-import {
-  createProtocolError,
-  type ProgressNotification,
-} from '../lib/mcp-interop.js';
+import { createProtocolError } from '../lib/mcp-interop.js';
 import { isObject } from '../lib/utils.js';
 
 import {
@@ -44,7 +38,7 @@ import {
  * - Abort-controller management for in-flight task executions
  * - Task notification and validation helpers
  * - Task handler schemas and registration
- * - Handler extra parsing & owner-key resolution
+ * - Owner-key resolution
  * Own task lifecycle and MCP task wiring here. Keep tool business logic and HTTP transport details elsewhere.
  */
 
@@ -277,82 +271,13 @@ export function registerTaskHandlers(
 }
 
 /* -------------------------------------------------------------------------------------------------
- * Handler extra parsing & owner-key resolution
+ * Owner-key resolution
  * ------------------------------------------------------------------------------------------------- */
-
-interface HandlerExtra {
-  sessionId?: string;
-  authInfo?: {
-    clientId?: string;
-    token?: string;
-    extra?: Record<string, unknown>;
-  };
-  signal?: AbortSignal;
-  requestId?: string | number;
-  sendNotification?: (notification: ProgressNotification) => Promise<void>;
-  _meta?: ToolCallRequestMeta;
-}
-
-export interface ToolExecutionContext {
-  ownerKey: string;
-  sessionId?: string;
-  signal?: AbortSignal;
-  requestId?: string | number;
-  sendNotification?: (notification: ProgressNotification) => Promise<void>;
-  requestMeta?: ToolCallRequestMeta;
-}
-
-export type ToolCallContext = ToolExecutionContext;
 
 interface AuthIdentity {
   clientId?: string;
   token?: string;
   extra?: Record<string, unknown>;
-}
-
-/** Strip keys whose value is `undefined`, returning an object with only the
- * present keys. Return type correctly omits the `undefined` union so the result
- * is compatible with `exactOptionalPropertyTypes`. */
-type Compacted<T extends object> = {
-  [K in keyof T as Exclude<T[K], undefined> extends never
-    ? never
-    : K]?: Exclude<T[K], undefined>;
-};
-
-export function compact<T extends object>(obj: T): Compacted<T> {
-  const result: Compacted<T> = {};
-  for (const key of Object.keys(obj) as (keyof T)[]) {
-    if (obj[key] !== undefined) {
-      (result as Record<string, unknown>)[key as string] = obj[key];
-    }
-  }
-  return result;
-}
-
-function normalizeSendNotification(
-  sendNotification: unknown
-): ((notification: ProgressNotification) => Promise<void>) | undefined {
-  if (typeof sendNotification !== 'function') return undefined;
-  const notify = sendNotification as (
-    notification: ProgressNotification
-  ) => Promise<void> | void;
-  return async (notification: ProgressNotification): Promise<void> => {
-    await Promise.resolve(notify(notification));
-  };
-}
-
-function normalizeAuthInfo(
-  authInfo: unknown
-): NonNullable<HandlerExtra['authInfo']> | undefined {
-  if (!isObject(authInfo)) return undefined;
-
-  const { clientId, token, extra } = authInfo;
-  const normalized: NonNullable<HandlerExtra['authInfo']> = {};
-  if (typeof clientId === 'string') normalized.clientId = clientId;
-  if (typeof token === 'string') normalized.token = token;
-  if (isObject(extra)) normalized.extra = { ...extra };
-
-  return Object.keys(normalized).length > 0 ? normalized : undefined;
 }
 
 function resolveAuthenticatedSubject(
@@ -367,48 +292,6 @@ function resolveAuthenticatedSubject(
   }
 
   return typeof sub === 'string' && sub.length > 0 ? sub : undefined;
-}
-
-function isServerContextLike(
-  extra: unknown
-): extra is Pick<ServerContext, 'mcpReq' | 'http' | 'sessionId'> {
-  return isObject(extra) && 'mcpReq' in extra;
-}
-
-export function parseHandlerExtra(extra: unknown): HandlerExtra | undefined {
-  if (!isServerContextLike(extra) && !isObject(extra)) return undefined;
-  const ctx = extra as Partial<ServerContext>;
-
-  const parsed: HandlerExtra = {};
-  const authInfo = ctx.http?.authInfo;
-  const signal = ctx.mcpReq?.signal;
-  const requestId = ctx.mcpReq?.id;
-  const sendNotification = ctx.mcpReq?.notify;
-  const sessionId = resolveSessionIdFromExtra(ctx);
-  if (sessionId) parsed.sessionId = sessionId;
-
-  const normalizedAuthInfo = normalizeAuthInfo(authInfo);
-  if (normalizedAuthInfo) {
-    parsed.authInfo = normalizedAuthInfo;
-  }
-
-  if (signal instanceof AbortSignal) parsed.signal = signal;
-
-  if (typeof requestId === 'string' || typeof requestId === 'number') {
-    parsed.requestId = requestId;
-  }
-
-  const normalizedSendNotification =
-    normalizeSendNotification(sendNotification);
-  if (normalizedSendNotification) {
-    parsed.sendNotification = normalizedSendNotification;
-  }
-
-  if (isObject(ctx.mcpReq?._meta)) {
-    parsed._meta = ctx.mcpReq._meta as ToolCallRequestMeta;
-  }
-
-  return parsed;
 }
 
 export function buildAuthenticatedOwnerKey(
@@ -432,19 +315,6 @@ export function buildAuthenticatedOwnerKey(
   return undefined;
 }
 
-export function resolveTaskOwnerKey(extra?: HandlerExtra): string {
-  const authenticatedOwnerKey = buildAuthenticatedOwnerKey(extra?.authInfo);
-  if (authenticatedOwnerKey) return authenticatedOwnerKey;
-
-  if (extra?.sessionId) {
-    return (
-      resolveMcpSessionOwnerKey(extra.sessionId) ?? `session:${extra.sessionId}`
-    );
-  }
-
-  return 'default';
-}
-
 export function resolveOwnerKeyFromContext(ctx: ServerContext): string {
   const authInfo = ctx.http?.authInfo;
   if (authInfo) {
@@ -463,107 +333,6 @@ export function resolveOwnerKeyFromContext(ctx: ServerContext): string {
   }
 
   return 'default';
-}
-
-function getHeaderString(headers: Headers, name: string): string | undefined {
-  const value = headers.get(name);
-  return value ?? undefined;
-}
-
-function resolveSessionIdFromExtra(
-  extra: Partial<ServerContext> | undefined
-): string | undefined {
-  const { sessionId } = extra ?? {};
-  if (typeof sessionId === 'string') return sessionId;
-
-  const headers = extra?.http?.req?.headers;
-  if (!(headers instanceof Headers)) return undefined;
-
-  return (
-    getHeaderString(headers, 'mcp-session-id') ??
-    getHeaderString(headers, 'x-mcp-session-id')
-  );
-}
-
-function resolveToolExecutionContext(
-  extra?: HandlerExtra,
-  requestMeta?: ToolCallRequestMeta
-): ToolExecutionContext {
-  return compact({
-    ownerKey: resolveTaskOwnerKey(extra),
-    sessionId: extra?.sessionId,
-    signal: extra?.signal,
-    requestId: extra?.requestId,
-    sendNotification: extra?.sendNotification,
-    requestMeta: sanitizeToolCallMeta(requestMeta),
-  }) as ToolExecutionContext;
-}
-
-export function resolveToolCallContext(
-  extra?: HandlerExtra | ToolCallContext | ServerContext,
-  requestMeta?: ToolCallRequestMeta
-): ToolCallContext {
-  if (isServerContextLike(extra)) {
-    return compact({
-      ownerKey: resolveOwnerKeyFromContext(extra),
-      sessionId: extra.sessionId,
-      signal: extra.mcpReq.signal,
-      requestId: extra.mcpReq.id,
-      sendNotification: normalizeSendNotification(extra.mcpReq.notify),
-      requestMeta: sanitizeToolCallMeta(requestMeta),
-    }) as ToolCallContext;
-  }
-
-  if (extra && 'ownerKey' in extra && typeof extra.ownerKey === 'string') {
-    return compact({
-      ownerKey: extra.ownerKey,
-      sessionId: extra.sessionId,
-      signal: extra.signal,
-      requestId: extra.requestId,
-      sendNotification: extra.sendNotification,
-      requestMeta: sanitizeToolCallMeta(requestMeta ?? extra.requestMeta),
-    }) as ToolCallContext;
-  }
-
-  return resolveToolExecutionContext(extra, requestMeta);
-}
-
-function coerceRequestId(raw: unknown): string | undefined {
-  if (typeof raw === 'string') return raw;
-  if (typeof raw === 'number') return String(raw);
-  return undefined;
-}
-
-export function withRequestContextIfMissing<TParams, TResult, TExtra = unknown>(
-  handler: (params: TParams, extra?: TExtra) => Promise<TResult>
-): (params: TParams, extra?: TExtra) => Promise<TResult> {
-  return async (params, extra) => {
-    const ctxLike = extra as Partial<ServerContext> | undefined;
-    const existingRequestId = getRequestId();
-    if (existingRequestId) {
-      const traceMeta = isObject(ctxLike?.mcpReq?._meta)
-        ? (ctxLike.mcpReq._meta as ToolCallRequestMeta)
-        : undefined;
-      return runWithTraceContext(traceMeta, () => handler(params, extra));
-    }
-
-    const rawId = ctxLike?.mcpReq?.id;
-    const derivedRequestId = coerceRequestId(rawId) ?? randomUUID();
-    const derivedSessionId = resolveSessionIdFromExtra(ctxLike);
-
-    const traceMeta = isObject(ctxLike?.mcpReq?._meta)
-      ? (ctxLike.mcpReq._meta as ToolCallRequestMeta)
-      : undefined;
-
-    return runWithRequestContext(
-      {
-        requestId: derivedRequestId,
-        operationId: derivedRequestId,
-        ...(derivedSessionId ? { sessionId: derivedSessionId } : {}),
-      },
-      () => runWithTraceContext(traceMeta, () => handler(params, extra))
-    );
-  };
 }
 
 export function isServerResult(value: unknown): value is ServerResult {

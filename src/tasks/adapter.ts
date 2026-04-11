@@ -13,7 +13,6 @@ import { createProtocolError } from '../lib/mcp-interop.js';
 import {
   abortTaskExecution,
   isServerResult,
-  resolveTaskOwnerKey,
   type ToolCallRequestMeta,
   withRelatedTaskMeta,
 } from './manager.js';
@@ -32,9 +31,7 @@ function resolveOwnerKey(
   const ownerKey = context?.['ownerKey'];
   if (typeof ownerKey === 'string' && ownerKey.length > 0) return ownerKey;
   if (!sessionId) return 'default';
-  return (
-    resolveMcpSessionOwnerKey(sessionId) ?? resolveTaskOwnerKey({ sessionId })
-  );
+  return resolveMcpSessionOwnerKey(sessionId) ?? `session:${sessionId}`;
 }
 
 function toSdkTask(state: TaskState): Task {

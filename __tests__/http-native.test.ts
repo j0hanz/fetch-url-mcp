@@ -12,7 +12,10 @@ import {
   startHttpServer,
 } from '../src/http/index.js';
 import { config } from '../src/lib/config.js';
-import { resolveTaskOwnerKey, taskManager } from '../src/tasks/manager.js';
+import {
+  buildAuthenticatedOwnerKey,
+  taskManager,
+} from '../src/tasks/manager.js';
 
 const TEST_API_KEY = 'test-api-key';
 
@@ -460,13 +463,11 @@ describe('HTTP native gateway routing', () => {
       extra: { sub: 'user-123' },
     });
 
-    const ownerKey = resolveTaskOwnerKey({
-      authInfo: {
-        clientId: 'oauth-client',
-        token: 'rotated-token-1',
-        extra: { sub: 'user-123' },
-      },
-    });
+    const ownerKey = buildAuthenticatedOwnerKey({
+      clientId: 'oauth-client',
+      token: 'rotated-token-1',
+      extra: { sub: 'user-123' },
+    })!;
     const task = taskManager.createTask(
       { ttl: 5_000 },
       'Task completed',
