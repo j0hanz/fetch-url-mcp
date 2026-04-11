@@ -38,8 +38,8 @@ export interface TaskState {
   statusMessage?: string;
   createdAt: string;
   lastUpdatedAt: string;
-  keepAlive: number | null;
-  pollFrequency: number;
+  ttl: number | null;
+  pollInterval: number;
   result?: unknown;
   error?: TaskError;
   requestId?: string;
@@ -55,8 +55,8 @@ interface InternalTaskState extends TaskState {
 
 interface CreateTaskOptions {
   taskId?: string;
-  keepAlive?: number | null;
-  pollFrequency?: number;
+  ttl?: number | null;
+  pollInterval?: number;
   requestId?: string;
   requestMethod?: string;
   requestMeta?: Record<string, unknown>;
@@ -71,8 +71,6 @@ export interface CreateTaskResult {
     statusMessage?: string;
     createdAt: string;
     lastUpdatedAt: string;
-    keepAlive: number | null;
-    pollFrequency: number;
     ttl: number | null;
     pollInterval: number;
   };
@@ -83,10 +81,10 @@ interface TerminalTaskErrorResult {
   isError: true;
 }
 
-const DEFAULT_KEEP_ALIVE_MS = 60_000;
-const MIN_KEEP_ALIVE_MS = 1_000;
-const MAX_KEEP_ALIVE_MS = 86_400_000;
-const DEFAULT_POLL_FREQUENCY_MS = 1_000;
+const DEFAULT_TTL_MS = 60_000;
+const MIN_TTL_MS = 1_000;
+const MAX_TTL_MS = 86_400_000;
+const DEFAULT_POLL_INTERVAL_MS = 1_000;
 const DEFAULT_OWNER_KEY = 'default';
 const DEFAULT_PAGE_SIZE = 50;
 
@@ -150,28 +148,23 @@ function resolveNextTaskStatus(
   return nextStatus;
 }
 
-function normalizeKeepAlive(keepAlive: number | undefined): number {
-  if (keepAlive === undefined || !Number.isFinite(keepAlive)) {
-    return DEFAULT_KEEP_ALIVE_MS;
+function normalizeTtl(ttl: number | undefined): number {
+  if (ttl === undefined || !Number.isFinite(ttl)) {
+    return DEFAULT_TTL_MS;
   }
-  return Math.max(
-    MIN_KEEP_ALIVE_MS,
-    Math.min(Math.trunc(keepAlive), MAX_KEEP_ALIVE_MS)
-  );
+  return Math.max(MIN_TTL_MS, Math.min(Math.trunc(ttl), MAX_TTL_MS));
 }
 
-function normalizeOptionalKeepAlive(
-  keepAlive: number | null | undefined
-): number | null {
-  if (keepAlive === null) return null;
-  return normalizeKeepAlive(keepAlive);
+function normalizeOptionalTtl(ttl: number | null | undefined): number | null {
+  if (ttl === null) return null;
+  return normalizeTtl(ttl);
 }
 
-function normalizePollFrequency(pollFrequency: number | undefined): number {
-  if (pollFrequency === undefined || !Number.isFinite(pollFrequency)) {
-    return DEFAULT_POLL_FREQUENCY_MS;
+function normalizePollInterval(pollInterval: number | undefined): number {
+  if (pollInterval === undefined || !Number.isFinite(pollInterval)) {
+    return DEFAULT_POLL_INTERVAL_MS;
   }
-  return Math.max(1, Math.trunc(pollFrequency));
+  return Math.max(1, Math.trunc(pollInterval));
 }
 
 function logTaskStatusTransition(
@@ -221,11 +214,11 @@ class TaskManager {
   }
 
   private isTaskExpired(task: InternalTaskState, nowMs: number): boolean {
-    if (task.keepAlive === null) return false;
+    if (task.ttl === null) return false;
     if (task._terminalAtMs !== undefined) {
-      return nowMs - task._terminalAtMs > task.keepAlive;
+      return nowMs - task._terminalAtMs > task.ttl;
     }
-    return nowMs - task._createdAtMs > MAX_KEEP_ALIVE_MS;
+    return nowMs - task._createdAtMs > MAX_TTL_MS;
   }
 
   private removeExpiredTasks(): void {
@@ -367,8 +360,8 @@ class TaskManager {
       statusMessage,
       createdAt,
       lastUpdatedAt: createdAt,
-      keepAlive: normalizeOptionalKeepAlive(options?.keepAlive),
-      pollFrequency: normalizePollFrequency(options?.pollFrequency),
+      ttl: normalizeOptionalTtl(options?.ttl),
+      pollInterval: normalizePollInterval(options?.pollInterval),
       ...(options?.requestId ? { requestId: options.requestId } : {}),
       ...(options?.requestMethod
         ? { requestMethod: options.requestMethod }
@@ -385,8 +378,8 @@ class TaskManager {
       {
         taskId: task.taskId,
         ownerKey,
-        keepAlive: task.keepAlive,
-        pollFrequency: task.pollFrequency,
+        ttl: task.ttl,
+        pollInterval: task.pollInterval,
       },
       Loggers.LOG_TASKS
     );
@@ -601,13 +594,13 @@ class TaskManager {
     });
   }
 
-  shrinkKeepAliveAfterDelivery(taskId: string): void {
+  shrinkTtlAfterDelivery(taskId: string): void {
     const task = this.tasks.get(taskId);
     if (!task || !isTerminal(task.status)) return;
-    if (task.keepAlive === null) return;
+    if (task.ttl === null) return;
 
-    if (RESULT_DELIVERY_GRACE_MS < task.keepAlive) {
-      task.keepAlive = RESULT_DELIVERY_GRACE_MS;
+    if (RESULT_DELIVERY_GRACE_MS < task.ttl) {
+      task.ttl = RESULT_DELIVERY_GRACE_MS;
       task.lastUpdatedAt = new Date().toISOString();
     }
   }
@@ -672,7 +665,7 @@ interface WaitableTask {
   taskId: string;
   ownerKey: string;
   status: TaskStatus;
-  keepAlive: number | null;
+  ttl: number | null;
   _createdAtMs: number;
 }
 
@@ -731,7 +724,7 @@ export async function waitForTerminalTask<TTask extends WaitableTask>(options: {
   if (options.isTerminal(task.status)) return task;
   return createWaitForTaskPromise(
     options,
-    task.keepAlive === null ? null : task._createdAtMs + task.keepAlive
+    task.ttl === null ? null : task._createdAtMs + task.ttl
   );
 }
 

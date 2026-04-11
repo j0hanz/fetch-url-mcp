@@ -47,10 +47,10 @@ function toSdkTask(state: TaskState): Task {
   return {
     taskId: state.taskId,
     status: state.status,
-    ttl: state.keepAlive,
+    ttl: state.ttl,
     createdAt: state.createdAt,
     lastUpdatedAt: state.lastUpdatedAt,
-    pollInterval: state.pollFrequency,
+    pollInterval: state.pollInterval,
     ...(state.statusMessage ? { statusMessage: state.statusMessage } : {}),
   };
 }
@@ -142,9 +142,9 @@ export class TaskStoreAdapter implements TaskStore {
     const createTaskOptions = {
       requestId: String(requestId),
       requestMethod: request.method,
-      ...(taskParams.ttl !== undefined ? { keepAlive: taskParams.ttl } : {}),
+      ...(taskParams.ttl !== undefined ? { ttl: taskParams.ttl } : {}),
       ...(taskParams.pollInterval !== undefined
-        ? { pollFrequency: taskParams.pollInterval }
+        ? { pollInterval: taskParams.pollInterval }
         : {}),
       ...(taskParams.context ? { context: taskParams.context } : {}),
       ...(requestMeta ? { requestMeta } : {}),
@@ -182,7 +182,7 @@ export class TaskStoreAdapter implements TaskStore {
     const state = taskManager.getTask(taskId, ownerKey);
     if (state?.result !== undefined && state.result !== null) {
       const result = readStoredTaskResult(state, taskId);
-      taskManager.shrinkKeepAliveAfterDelivery(taskId);
+      taskManager.shrinkTtlAfterDelivery(taskId);
       return Promise.resolve(result);
     }
 
@@ -190,7 +190,7 @@ export class TaskStoreAdapter implements TaskStore {
       .waitForTerminalTask(taskId, ownerKey)
       .then((terminalState) => {
         const result = readStoredTaskResult(terminalState, taskId);
-        taskManager.shrinkKeepAliveAfterDelivery(taskId);
+        taskManager.shrinkTtlAfterDelivery(taskId);
         return result;
       });
   }

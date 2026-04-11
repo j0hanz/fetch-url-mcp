@@ -182,8 +182,8 @@ type TaskLifecycleProjection = Pick<
   | 'statusMessage'
   | 'createdAt'
   | 'lastUpdatedAt'
-  | 'keepAlive'
-  | 'pollFrequency'
+  | 'ttl'
+  | 'pollInterval'
 >;
 
 export function toTaskSummary(task: TaskLifecycleProjection): TaskSummary {
@@ -193,10 +193,8 @@ export function toTaskSummary(task: TaskLifecycleProjection): TaskSummary {
     ...(task.statusMessage ? { statusMessage: task.statusMessage } : {}),
     createdAt: task.createdAt,
     lastUpdatedAt: task.lastUpdatedAt,
-    keepAlive: task.keepAlive,
-    pollFrequency: task.pollFrequency,
-    ttl: task.keepAlive,
-    pollInterval: task.pollFrequency,
+    ttl: task.ttl,
+    pollInterval: task.pollInterval,
   };
 }
 

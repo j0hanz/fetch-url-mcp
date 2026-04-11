@@ -61,25 +61,12 @@ function getCharsetFromContentType(
   }
   return charset.trim();
 }
-const MAX_CACHED_DECODERS = 50;
-const decoderCache = new Map<string, TextDecoder>();
 function createDecoder(encoding: string | undefined): TextDecoder {
   const label = normalizeEncodingLabel(encoding) || 'utf-8';
-  const cached = decoderCache.get(label);
-  if (cached) return cached;
-
   try {
-    const decoder = new TextDecoder(label);
-    if (decoderCache.size < MAX_CACHED_DECODERS) {
-      decoderCache.set(label, decoder);
-    }
-    return decoder;
+    return new TextDecoder(label);
   } catch {
-    const fallback = decoderCache.get('utf-8') ?? new TextDecoder('utf-8');
-    if (decoderCache.size < MAX_CACHED_DECODERS) {
-      decoderCache.set('utf-8', fallback);
-    }
-    return fallback;
+    return new TextDecoder('utf-8');
   }
 }
 function decodeBuffer(buffer: Uint8Array, encoding: string): string {

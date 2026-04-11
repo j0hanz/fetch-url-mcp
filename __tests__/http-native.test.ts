@@ -468,7 +468,7 @@ describe('HTTP native gateway routing', () => {
       },
     });
     const task = taskManager.createTask(
-      { keepAlive: 5_000 },
+      { ttl: 5_000 },
       'Task completed',
       ownerKey
     );

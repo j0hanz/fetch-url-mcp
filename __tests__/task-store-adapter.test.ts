@@ -51,8 +51,8 @@ describe('TaskStoreAdapter', () => {
 
       const state = taskManager.getTask(task.taskId, 'owner-from-context');
       assert.ok(state);
-      assert.equal(state.keepAlive, null);
-      assert.equal(state.pollFrequency, 2_500);
+      assert.equal(state.ttl, null);
+      assert.equal(state.pollInterval, 2_500);
       assert.equal(state.requestId, 'req-1');
       assert.equal(state.requestMethod, 'tools/call');
       assert.deepEqual(state.requestMeta, { progressToken: 'tok-1' });
