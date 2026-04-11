@@ -681,7 +681,15 @@ class AuthService {
     token: string,
     payload: Record<string, unknown>
   ): AuthInfo {
-    const { exp, client_id: clientIdRaw, scope: scopeRaw } = payload;
+    const {
+      exp,
+      client_id: clientIdRaw,
+      scope: scopeRaw,
+      sub,
+      subject,
+      username,
+      preferred_username: preferredUsername,
+    } = payload;
     const expiresAt = typeof exp === 'number' ? exp : undefined;
     const clientId = typeof clientIdRaw === 'string' ? clientIdRaw : 'unknown';
 
@@ -693,6 +701,18 @@ class AuthService {
     };
 
     if (expiresAt !== undefined) info.expiresAt = expiresAt;
+    const extra: Record<string, unknown> = {};
+    if (typeof sub === 'string' && sub.length > 0) extra['sub'] = sub;
+    if (typeof subject === 'string' && subject.length > 0) {
+      extra['subject'] = subject;
+    }
+    if (typeof username === 'string' && username.length > 0) {
+      extra['username'] = username;
+    }
+    if (typeof preferredUsername === 'string' && preferredUsername.length > 0) {
+      extra['preferred_username'] = preferredUsername;
+    }
+    if (Object.keys(extra).length > 0) info.extra = extra;
     return info;
   }
 

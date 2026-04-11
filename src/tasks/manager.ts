@@ -294,7 +294,11 @@ export function registerTaskHandlers(
 
 interface HandlerExtra {
   sessionId?: string;
-  authInfo?: { clientId?: string; token?: string };
+  authInfo?: {
+    clientId?: string;
+    token?: string;
+    extra?: Record<string, unknown>;
+  };
   signal?: AbortSignal;
   requestId?: string | number;
   sendNotification?: (notification: ProgressNotification) => Promise<void>;
@@ -315,6 +319,7 @@ export type ToolCallContext = ToolExecutionContext;
 interface AuthIdentity {
   clientId?: string;
   token?: string;
+  extra?: Record<string, unknown>;
 }
 
 /** Strip keys whose value is `undefined`, returning an object with only the
@@ -353,12 +358,27 @@ function normalizeAuthInfo(
 ): NonNullable<HandlerExtra['authInfo']> | undefined {
   if (!isObject(authInfo)) return undefined;
 
-  const { clientId, token } = authInfo;
+  const { clientId, token, extra } = authInfo;
   const normalized: NonNullable<HandlerExtra['authInfo']> = {};
   if (typeof clientId === 'string') normalized.clientId = clientId;
   if (typeof token === 'string') normalized.token = token;
+  if (isObject(extra)) normalized.extra = { ...extra };
 
-  return normalized.clientId || normalized.token ? normalized : undefined;
+  return Object.keys(normalized).length > 0 ? normalized : undefined;
+}
+
+function resolveAuthenticatedSubject(
+  authInfo?: AuthIdentity
+): string | undefined {
+  const extra = isObject(authInfo?.extra) ? authInfo.extra : undefined;
+  if (!extra) return undefined;
+
+  const { subject, sub } = extra;
+  if (typeof subject === 'string' && subject.length > 0) {
+    return subject;
+  }
+
+  return typeof sub === 'string' && sub.length > 0 ? sub : undefined;
 }
 
 function isServerContextLike(
@@ -406,6 +426,12 @@ export function parseHandlerExtra(extra: unknown): HandlerExtra | undefined {
 export function buildAuthenticatedOwnerKey(
   authInfo?: AuthIdentity
 ): string | undefined {
+  const authSubject = resolveAuthenticatedSubject(authInfo);
+  if (authSubject) {
+    const hashInput = `subject:${authSubject}`;
+    return `auth:${hash('sha256', hashInput, 'hex')}`;
+  }
+
   const authClientId =
     typeof authInfo?.clientId === 'string' ? authInfo.clientId : '';
   const authToken = typeof authInfo?.token === 'string' ? authInfo.token : '';

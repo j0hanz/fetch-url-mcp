@@ -18,7 +18,7 @@ By default it runs over stdio. Pass `--http` if you need a proper HTTP endpoint 
 
 - **HTML to Markdown** — Turns any public web page into clean, readable Markdown with metadata like `title`, `url`, `contentSize`, and `truncated`.
 - **Smart URL handling** — Recognizes GitHub, GitLab, Bitbucket, and Gist page URLs and rewrites them to raw-content endpoints before fetching.
-- **Task mode** — Big or slow pages can run as async MCP tasks with progress updates, instead of blocking. In HTTP mode, tasks are bound to the authenticated caller rather than a single MCP session, so they can be resumed after reconnecting with the same credentials. Polling task state also exposes `progress` and `total` when available.
+- **Task mode** — Big or slow pages can run as async MCP tasks with progress updates, instead of blocking. In HTTP mode, tasks are bound to the authenticated caller rather than a single MCP session, so they can be resumed after reconnecting as the same authenticated subject. Polling task state exposes task summaries; numeric progress remains out-of-band via `notifications/progress`.
 - **Self-documenting** — Includes an `internal://instructions` resource and a `get-help` prompt so clients know how to use it.
 - **HTTP mode** — Optionally serves over Streamable HTTP with host/origin validation, bearer or OAuth auth, rate limiting, health checks, and TLS.
 
@@ -482,7 +482,7 @@ For more info, see [Kilo Code docs](https://kilocode.ai/docs).
 
 - **Documentation for LLMs** — Grab a docs page, blog post, or reference article as Markdown and pass it straight into a context window.
 - **Repository content** — Hand it a GitHub, GitLab, or Bitbucket URL and it resolves the raw content endpoint. Works with Gists too.
-- **Slow or large pages** — Task mode lets big fetches run in the background while sending monotonic progress updates back to the client, while `tasks/get` exposes the latest `statusMessage`, `progress`, and `total`.
+- **Slow or large pages** — Task mode lets big fetches run in the background while sending monotonic progress updates back to the client, while `tasks/get` exposes the latest task summary fields such as `statusMessage`, `createdAt`, `lastUpdatedAt`, `ttl`, and `pollInterval`.
 
 ## Architecture
 
@@ -528,7 +528,7 @@ For more info, see [Kilo Code docs](https://kilocode.ai/docs).
 
 #### `fetch-url`
 
-Takes a URL and returns Markdown. Read-only, with no JavaScript execution. Supports running as a background MCP task for large or slow pages. In task mode, `tasks/get` and `tasks/list` expose `status`, `statusMessage`, and `pollInterval`; numeric progress remains out-of-band via `notifications/progress`.
+Takes a URL and returns Markdown. Read-only, with no JavaScript execution. Supports running as a background MCP task for large or slow pages. In task mode, `tasks/get` and `tasks/list` expose task summaries including `status`, `statusMessage`, `createdAt`, `lastUpdatedAt`, `ttl`, and `pollInterval`; numeric progress remains out-of-band via `notifications/progress`.
 
 | Parameter | Type     | Required | Description                 |
 | --------- | -------- | -------- | --------------------------- |
@@ -538,7 +538,7 @@ You get text content back by default. If output validation passes, the response 
 
 To opt into progress updates, include `_meta.progressToken` in the tool call. The token may be a string or number, and the server may emit monotonic `notifications/progress` updates while the fetch runs.
 
-To run the tool in task mode, include `params.task = { ttl?: <ms> }`. `tasks/result` waits until the task reaches a terminal status and then returns the stored output. Task summaries and final results include `_meta["io.modelcontextprotocol/related-task"] = { "taskId": "<server-task-id>" }`.
+To run the tool in task mode, include `params.task = { ttl?: <ms> }`. `tasks/result` waits until the task reaches a terminal status and then returns the stored output or a terminal error payload for cancelled or failed tasks. Task summaries and final results include `_meta["io.modelcontextprotocol/related-task"] = { "taskId": "<server-task-id>" }`.
 
 ```json
 {
@@ -575,9 +575,9 @@ To run the tool in task mode, include `params.task = { ttl?: <ms> }`. `tasks/res
 
 ### Prompts
 
-| Prompt     | Arguments | Description                                                                     |
-| ---------- | --------- | ------------------------------------------------------------------------------- |
-| `get-help` | none      | Return Fetch URL server instructions: workflows, task mode, and error handling. |
+| Prompt     | Arguments | Description                                                                                                                                            |
+| ---------- | --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `get-help` | `topic?`  | Return Fetch URL server instructions: workflows, task mode, and error handling. Optional values: `capabilities`, `workflows`, `constraints`, `errors`. |
 
 ## MCP Capabilities
 

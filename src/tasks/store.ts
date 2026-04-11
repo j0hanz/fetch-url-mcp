@@ -74,6 +74,11 @@ export interface CreateTaskResult {
   };
 }
 
+interface TerminalTaskErrorResult {
+  content: [{ type: 'text'; text: string }];
+  isError: true;
+}
+
 const DEFAULT_KEEP_ALIVE_MS = 60_000;
 const MIN_KEEP_ALIVE_MS = 1_000;
 const MAX_KEEP_ALIVE_MS = 86_400_000;
@@ -100,6 +105,31 @@ const TERMINAL_STATUSES = new Set<TaskStatus>([
 
 function isTerminalStatus(status: TaskStatus): boolean {
   return TERMINAL_STATUSES.has(status);
+}
+
+export function createTerminalTaskErrorResult(
+  task: Pick<TaskState, 'taskId' | 'status' | 'statusMessage' | 'error'>
+): TerminalTaskErrorResult | undefined {
+  if (task.status !== 'cancelled' && task.status !== 'failed') {
+    return undefined;
+  }
+
+  const message =
+    task.statusMessage ??
+    (task.status === 'cancelled' ? 'The task was cancelled.' : 'Task failed.');
+  const payload: Record<string, unknown> = {
+    error: message,
+    taskId: task.taskId,
+    status: task.status,
+  };
+
+  if (task.error?.code !== undefined) payload['code'] = task.error.code;
+  if (task.error?.data !== undefined) payload['data'] = task.error.data;
+
+  return {
+    content: [{ type: 'text', text: JSON.stringify(payload) }],
+    isError: true,
+  };
 }
 
 function resolveNextTaskStatus(
@@ -257,14 +287,21 @@ class TaskManager {
     task: InternalTaskState,
     statusMessage: string
   ): void {
+    const error = {
+      code: CONNECTION_CLOSED_ERROR_CODE,
+      message: statusMessage,
+      data: { code: 'ABORTED', sdkCode: SdkErrorCode.ConnectionClosed },
+    };
     this.applyTaskUpdate(task, {
       status: 'cancelled',
       statusMessage,
-      error: {
-        code: CONNECTION_CLOSED_ERROR_CODE,
-        message: statusMessage,
-        data: { code: 'ABORTED', sdkCode: SdkErrorCode.ConnectionClosed },
-      },
+      error,
+      result: createTerminalTaskErrorResult({
+        taskId: task.taskId,
+        status: 'cancelled',
+        statusMessage,
+        error,
+      }),
     });
     this.emitStatus(task);
     this.waiters.notify(task);

@@ -97,9 +97,9 @@ Add \`task: { ttl?: <ms> }\` to \`tools/call\`.
 Lifecycle: \`working\` → \`completed\` | \`failed\` | \`cancelled\`.
 
 Endpoints:
-- \`tasks/get\` — poll for \`status\`, \`statusMessage\`, and \`pollInterval\`.
-- \`tasks/result\` — wait for terminal status, then retrieve the stored result.
-- \`tasks/list\` — list tasks for the current session.
+- \`tasks/get\` — poll for task summaries with \`status\`, \`statusMessage\`, \`createdAt\`, \`lastUpdatedAt\`, \`ttl\`, and \`pollInterval\`.
+- \`tasks/result\` — wait for terminal status, then retrieve the stored result or terminal error payload.
+- \`tasks/list\` — list tasks visible to the current caller.
 - \`tasks/cancel\` — cancel an active task.
 - \`tasks/delete\` — remove a terminal task.
 
@@ -109,7 +109,7 @@ Task-linked responses and notifications include
 Notifications (opt-in via \`TASKS_STATUS_NOTIFICATIONS=true\`):
 - \`notifications/tasks/status\` — emitted on each status transition with related-task metadata.
 
-HTTP mode: tasks are bound to the authenticated caller and resumable across sessions.
+HTTP mode: tasks are bound to the authenticated caller and resumable across sessions for the same authenticated subject.
 
 # Constraints
 - Blocked: localhost, private IPs, link-local, cloud metadata endpoints, \`.local\`/\`.internal\` domains.

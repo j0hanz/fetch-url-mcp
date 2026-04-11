@@ -102,6 +102,13 @@ describe('parseHandlerExtra', () => {
     assert.equal(result?.authInfo?.clientId, 'client-1');
   });
 
+  it('preserves authInfo extra claims', () => {
+    const result = parseHandlerExtra({
+      http: { authInfo: { clientId: 'client-1', extra: { sub: 'user-123' } } },
+    });
+    assert.deepEqual(result?.authInfo?.extra, { sub: 'user-123' });
+  });
+
   it('ignores invalid authInfo', () => {
     const result = parseHandlerExtra({ http: { authInfo: 'not-object' } });
     assert.equal(result?.authInfo, undefined);
@@ -152,6 +159,24 @@ describe('resolveTaskOwnerKey', () => {
       authInfo: { clientId: 'static-token', token: 'beta' },
     });
     assert.notEqual(a, b);
+  });
+
+  it('uses a stable subject when available across token rotation', () => {
+    const a = resolveTaskOwnerKey({
+      authInfo: {
+        clientId: 'oauth-client',
+        token: 'alpha',
+        extra: { sub: 'user-123' },
+      },
+    });
+    const b = resolveTaskOwnerKey({
+      authInfo: {
+        clientId: 'oauth-client',
+        token: 'beta',
+        extra: { sub: 'user-123' },
+      },
+    });
+    assert.equal(a, b);
   });
 
   it('prefers auth context over sessionId', () => {

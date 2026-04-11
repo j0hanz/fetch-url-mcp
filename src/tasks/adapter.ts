@@ -23,7 +23,11 @@ import {
   type ToolCallRequestMeta,
   withRelatedTaskMeta,
 } from './manager.js';
-import { taskManager, type TaskState } from './store.js';
+import {
+  createTerminalTaskErrorResult,
+  taskManager,
+  type TaskState,
+} from './store.js';
 
 type SdkRequest = Parameters<TaskStore['createTask']>[2];
 
@@ -100,6 +104,19 @@ function readStoredTaskResult(
   }
 
   if (state.result === undefined || state.result === null) {
+    const terminalResult = createTerminalTaskErrorResult(state);
+    if (terminalResult) {
+      const result: Result = {
+        ...terminalResult,
+        _meta: {
+          'io.modelcontextprotocol/related-task': {
+            taskId,
+          },
+        },
+      };
+      return result;
+    }
+
     throw createProtocolError(
       ProtocolErrorCode.InvalidParams,
       `Task ${taskId} has no result stored`
@@ -185,14 +202,30 @@ export class TaskStoreAdapter implements TaskStore {
     sessionId?: string
   ): Promise<void> {
     const ownerKey = resolveOwnerKey(sessionId);
-    if (!taskManager.getTask(taskId, ownerKey)) return Promise.resolve();
+    if (status === 'cancelled') {
+      if (!taskManager.cancelTask(taskId, ownerKey)) return Promise.resolve();
+      abortTaskExecution(taskId);
+      emitTaskStatusForSession(taskId, sessionId);
+      return Promise.resolve();
+    }
+
+    const task = taskManager.getTask(taskId, ownerKey);
+    if (!task) return Promise.resolve();
+
     taskManager.updateTask(taskId, {
       status,
       ...(statusMessage ? { statusMessage } : {}),
+      ...(status === 'failed'
+        ? {
+            result: createTerminalTaskErrorResult({
+              taskId,
+              status: 'failed',
+              ...(statusMessage ? { statusMessage } : {}),
+              ...(task.error ? { error: task.error } : {}),
+            }),
+          }
+        : {}),
     });
-    if (status === 'cancelled') {
-      abortTaskExecution(taskId);
-    }
     emitTaskStatusForSession(taskId, sessionId);
     return Promise.resolve();
   }

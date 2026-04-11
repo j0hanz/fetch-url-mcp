@@ -142,7 +142,7 @@ describe('TaskStoreAdapter', () => {
     }
   });
 
-  it('rejects tasks/result when a terminal task has no stored result', async () => {
+  it('returns a terminal cancelled payload when a task is cancelled', async () => {
     registerMcpSessionOwnerKey('sess-a', 'auth:owner-a');
 
     const task = await adapter.createTask(
@@ -160,10 +160,30 @@ describe('TaskStoreAdapter', () => {
         'sess-a'
       );
 
-      await assert.rejects(
-        () => adapter.getTaskResult(task.taskId, 'sess-a'),
-        /has no result stored/
-      );
+      const result = await adapter.getTaskResult(task.taskId, 'sess-a');
+      assert.deepEqual(result, {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify({
+              error: 'The task was cancelled by request.',
+              taskId: task.taskId,
+              status: 'cancelled',
+              code: -32000,
+              data: {
+                code: 'ABORTED',
+                sdkCode: 'CONNECTION_CLOSED',
+              },
+            }),
+          },
+        ],
+        isError: true,
+        _meta: {
+          'io.modelcontextprotocol/related-task': {
+            taskId: task.taskId,
+          },
+        },
+      });
     } finally {
       cleanupTask(task.taskId, 'auth:owner-a');
     }
