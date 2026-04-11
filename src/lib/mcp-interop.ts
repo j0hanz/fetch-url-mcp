@@ -1,4 +1,9 @@
 import {
+  isJSONRPCErrorResponse,
+  isJSONRPCNotification,
+  isJSONRPCRequest,
+  isJSONRPCResultResponse,
+  type JSONRPCRequest,
   type Progress,
   type ProgressNotification,
   type ProgressNotificationParams,
@@ -10,7 +15,7 @@ import {
 import type { ServerResponse } from 'node:http';
 import { setTimeout as setTimeoutPromise } from 'node:timers/promises';
 
-import { z } from 'zod';
+import type { z } from 'zod';
 
 import { Loggers, logWarn } from './core.js';
 import { getErrorMessage } from './error/index.js';
@@ -71,54 +76,22 @@ export function sendJsonRpcError(
  * ================================================================================================= */
 
 export type JsonRpcId = string | number | null;
-const paramsSchema = z.looseObject({
-  _meta: z.record(z.string(), z.unknown()).optional(),
-});
-const jsonRpcRequestIdSchema = z.union([z.string(), z.number()]);
-const jsonRpcRequestSchema = z.strictObject({
-  jsonrpc: z.literal('2.0'),
-  method: z.string().min(1),
-  id: jsonRpcRequestIdSchema.optional(),
-  params: paramsSchema.optional(),
-});
-const jsonRpcResultResponseSchema = z.strictObject({
-  jsonrpc: z.literal('2.0'),
-  id: jsonRpcRequestIdSchema,
-  result: z.record(z.string(), z.unknown()),
-});
-const jsonRpcErrorResponseSchema = z.strictObject({
-  jsonrpc: z.literal('2.0'),
-  id: jsonRpcRequestIdSchema.or(z.null()).optional(),
-  error: z.strictObject({
-    code: z.number().int(),
-    message: z.string(),
-    data: z.unknown().optional(),
-  }),
-});
-const jsonRpcResponseSchema = z.union([
-  jsonRpcResultResponseSchema,
-  jsonRpcErrorResponseSchema,
-]);
-const jsonRpcMessageSchema = z.union([
-  jsonRpcRequestSchema,
-  jsonRpcResponseSchema,
-]);
-type McpRequestBody = z.infer<typeof jsonRpcRequestSchema>;
-type JsonRpcResponseBody = z.infer<typeof jsonRpcResponseSchema>;
-type JsonRpcMessageBody = z.infer<typeof jsonRpcMessageSchema>;
 export function isJsonRpcBatchRequest(body: unknown): boolean {
   return Array.isArray(body);
 }
-export function isMcpRequestBody(body: unknown): body is McpRequestBody {
-  return jsonRpcRequestSchema.safeParse(body).success;
+export function isMcpRequestBody(body: unknown): body is JSONRPCRequest {
+  return isJSONRPCRequest(body);
 }
-export function isJsonRpcResponseBody(
-  body: unknown
-): body is JsonRpcResponseBody {
-  return jsonRpcResponseSchema.safeParse(body).success;
+export function isJsonRpcResponseBody(body: unknown): boolean {
+  return isJSONRPCResultResponse(body) || isJSONRPCErrorResponse(body);
 }
-export function isMcpMessageBody(body: unknown): body is JsonRpcMessageBody {
-  return jsonRpcMessageSchema.safeParse(body).success;
+export function isMcpMessageBody(body: unknown): boolean {
+  return (
+    isJSONRPCRequest(body) ||
+    isJSONRPCNotification(body) ||
+    isJSONRPCResultResponse(body) ||
+    isJSONRPCErrorResponse(body)
+  );
 }
 function parseAcceptMediaTypes(
   header: string | null | undefined

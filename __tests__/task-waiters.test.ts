@@ -1,8 +1,11 @@
+import { isTerminal } from '@modelcontextprotocol/server';
+
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 import { getRequestId, runWithRequestContext } from '../src/lib/core.js';
 import {
+  type TaskStatus,
   TaskWaiterRegistry,
   waitForTerminalTask,
 } from '../src/tasks/manager.js';
@@ -12,8 +15,8 @@ import {
 interface TestTask {
   taskId: string;
   ownerKey: string;
-  status: string;
-  keepAlive: number;
+  status: TaskStatus;
+  keepAlive: number | null;
   _createdAtMs: number;
 }
 
@@ -26,12 +29,6 @@ function makeTask(overrides?: Partial<TestTask>): TestTask {
     _createdAtMs: Date.now(),
     ...overrides,
   };
-}
-
-function isTerminal(status: string): boolean {
-  return (
-    status === 'completed' || status === 'failed' || status === 'cancelled'
-  );
 }
 
 // ── TaskWaiterRegistry ──────────────────────────────────────────────
@@ -130,7 +127,7 @@ describe('waitForTerminalTask', () => {
       lookupTask: () => task,
       removeTask: () => {},
       registry,
-      isTerminalStatus: isTerminal,
+      isTerminal,
     });
 
     assert.ok(result);
@@ -146,7 +143,7 @@ describe('waitForTerminalTask', () => {
       lookupTask: () => undefined,
       removeTask: () => {},
       registry,
-      isTerminalStatus: isTerminal,
+      isTerminal,
     });
 
     assert.equal(result, undefined);
@@ -162,7 +159,7 @@ describe('waitForTerminalTask', () => {
       lookupTask: () => task,
       removeTask: () => {},
       registry,
-      isTerminalStatus: isTerminal,
+      isTerminal,
     });
 
     // Simulate the task completing after a short delay.
@@ -188,7 +185,7 @@ describe('waitForTerminalTask', () => {
       lookupTask: () => task,
       removeTask: () => {},
       registry,
-      isTerminalStatus: isTerminal,
+      isTerminal,
     });
 
     // Abort immediately.
@@ -219,7 +216,7 @@ describe('waitForTerminalTask', () => {
           removed = true;
         },
         registry,
-        isTerminalStatus: isTerminal,
+        isTerminal,
       }),
       (err: unknown) => err instanceof Error
     );
@@ -236,7 +233,7 @@ describe('waitForTerminalTask', () => {
       lookupTask: () => task,
       removeTask: () => {},
       registry,
-      isTerminalStatus: isTerminal,
+      isTerminal,
     });
 
     // Notify with a different ownerKey.
@@ -269,7 +266,7 @@ describe('waitForTerminalTask', () => {
           lookupTask: () => task,
           removeTask: () => {},
           registry,
-          isTerminalStatus: isTerminal,
+          isTerminal,
         });
 
         observedRequestId = getRequestId();

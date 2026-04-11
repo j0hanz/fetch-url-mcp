@@ -1,4 +1,8 @@
-import { ProtocolErrorCode, SdkErrorCode } from '@modelcontextprotocol/server';
+import {
+  isTerminal,
+  ProtocolErrorCode,
+  SdkErrorCode,
+} from '@modelcontextprotocol/server';
 
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { createHmac, randomBytes, randomUUID } from 'node:crypto';
@@ -97,16 +101,6 @@ const TASK_STATUS_VALUES = new Set<TaskStatus>([
   'cancelled',
 ]);
 
-const TERMINAL_STATUSES = new Set<TaskStatus>([
-  'completed',
-  'failed',
-  'cancelled',
-]);
-
-function isTerminalStatus(status: TaskStatus): boolean {
-  return TERMINAL_STATUSES.has(status);
-}
-
 export function createTerminalTaskErrorResult(
   task: Pick<TaskState, 'taskId' | 'status' | 'statusMessage' | 'error'>
 ): TerminalTaskErrorResult | undefined {
@@ -146,7 +140,7 @@ function resolveNextTaskStatus(
     );
   }
 
-  if (isTerminalStatus(task.status)) {
+  if (isTerminal(task.status)) {
     throw createProtocolError(
       ProtocolErrorCode.InternalError,
       `Cannot transition task from ${task.status} to ${nextStatus}`
@@ -207,7 +201,7 @@ class TaskManager {
   private tasks = new Map<string, InternalTaskState>();
   private ownerCounts = new Map<string, number>();
   private readonly waiters = new TaskWaiterRegistry<InternalTaskState>(
-    isTerminalStatus
+    isTerminal
   );
   private readonly statusListeners = new Set<(task: TaskState) => void>();
   private cleanupInterval: ReturnType<typeof setInterval> | null = null;
@@ -255,7 +249,7 @@ class TaskManager {
     const task = this.tasks.get(taskId);
     if (!task) return;
 
-    if (!isTerminalStatus(task.status)) {
+    if (!isTerminal(task.status)) {
       this.applyTaskUpdate(task, {
         status: 'failed',
         statusMessage: 'Task removed due to expiration',
@@ -276,7 +270,7 @@ class TaskManager {
     task.lastUpdatedAt = new Date().toISOString();
     if (
       updates.status &&
-      isTerminalStatus(updates.status) &&
+      isTerminal(updates.status) &&
       task._terminalAtMs === undefined
     ) {
       task._terminalAtMs = Date.now();
@@ -433,7 +427,7 @@ class TaskManager {
       );
       return;
     }
-    if (isTerminalStatus(task.status)) {
+    if (isTerminal(task.status)) {
       logWarn(
         'updateTask called for terminal task',
         {
@@ -462,7 +456,7 @@ class TaskManager {
     const task = this.lookupActiveTask(taskId, ownerKey);
     if (!task) return undefined;
 
-    if (isTerminalStatus(task.status)) {
+    if (isTerminal(task.status)) {
       throw createProtocolError(
         ProtocolErrorCode.InvalidParams,
         `Cannot cancel task: already ${task.status}`
@@ -485,7 +479,7 @@ class TaskManager {
     const task = this.lookupActiveTask(taskId, ownerKey);
     if (!task) return false;
 
-    if (!isTerminalStatus(task.status)) {
+    if (!isTerminal(task.status)) {
       throw createProtocolError(
         ProtocolErrorCode.InvalidParams,
         `Cannot delete task: status is ${task.status}`
@@ -510,7 +504,7 @@ class TaskManager {
 
     const cancelled: TaskState[] = [];
     for (const task of this.tasks.values()) {
-      if (task.ownerKey !== ownerKey || isTerminalStatus(task.status)) continue;
+      if (task.ownerKey !== ownerKey || isTerminal(task.status)) continue;
       this.cancelActiveTask(task, statusMessage);
       cancelled.push(task);
     }
@@ -603,13 +597,13 @@ class TaskManager {
         this.removeTask(id);
       },
       registry: this.waiters,
-      isTerminalStatus,
+      isTerminal,
     });
   }
 
   shrinkKeepAliveAfterDelivery(taskId: string): void {
     const task = this.tasks.get(taskId);
-    if (!task || !isTerminalStatus(task.status)) return;
+    if (!task || !isTerminal(task.status)) return;
     if (task.keepAlive === null) return;
 
     if (RESULT_DELIVERY_GRACE_MS < task.keepAlive) {
@@ -677,7 +671,7 @@ export function decodeTaskCursor(
 interface WaitableTask {
   taskId: string;
   ownerKey: string;
-  status: string;
+  status: TaskStatus;
   keepAlive: number | null;
   _createdAtMs: number;
 }
@@ -688,7 +682,7 @@ export class TaskWaiterRegistry<TTask extends WaitableTask> {
   private waiters = new Map<string, Set<TaskWaiter<TTask>>>();
 
   constructor(
-    private readonly isTerminalStatus: (status: TTask['status']) => boolean
+    private readonly isTerminal: (status: TTask['status']) => boolean
   ) {}
 
   add(taskId: string, waiter: TaskWaiter<TTask>): void {
@@ -713,7 +707,7 @@ export class TaskWaiterRegistry<TTask extends WaitableTask> {
   }
 
   notify(task: TTask): void {
-    if (!this.isTerminalStatus(task.status)) return;
+    if (!this.isTerminal(task.status)) return;
 
     const waiters = this.waiters.get(task.taskId);
     if (!waiters) return;
@@ -730,11 +724,11 @@ export async function waitForTerminalTask<TTask extends WaitableTask>(options: {
   lookupTask: (taskId: string, ownerKey: string) => TTask | undefined;
   removeTask: (taskId: string) => void;
   registry: TaskWaiterRegistry<TTask>;
-  isTerminalStatus: (status: TTask['status']) => boolean;
+  isTerminal: (status: TTask['status']) => boolean;
 }): Promise<TTask | undefined> {
   const task = options.lookupTask(options.taskId, options.ownerKey);
   if (!task) return undefined;
-  if (options.isTerminalStatus(task.status)) return task;
+  if (options.isTerminal(task.status)) return task;
   return createWaitForTaskPromise(
     options,
     task.keepAlive === null ? null : task._createdAtMs + task.keepAlive
@@ -750,7 +744,7 @@ function createWaitForTaskPromise<TTask extends WaitableTask>(
     lookupTask: (taskId: string, ownerKey: string) => TTask | undefined;
     removeTask: (taskId: string) => void;
     registry: TaskWaiterRegistry<TTask>;
-    isTerminalStatus: (status: TTask['status']) => boolean;
+    isTerminal: (status: TTask['status']) => boolean;
   },
   deadlineMs: number | null
 ): Promise<TTask | undefined> {
