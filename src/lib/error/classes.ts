@@ -117,20 +117,18 @@ export function throwIfAborted(
   if (!signal?.aborted) return;
 
   if (signal.reason instanceof Error && signal.reason.name === 'TimeoutError') {
-    const error = new FetchError('Request timeout', url, 504, {
+    throw new FetchError('Request timeout', url, 504, {
       reason: 'timeout',
       stage,
     });
-    throw error;
   }
 
   throw createAbortError(url, stage);
 }
 
 export function createAbortError(url: string, stage: string): FetchError {
-  const error = new FetchError('Request was canceled', url, 499, {
+  return new FetchError('Request was canceled', url, 499, {
     reason: 'aborted',
     stage,
   });
-  return error;
 }

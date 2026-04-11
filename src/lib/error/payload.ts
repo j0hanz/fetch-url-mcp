@@ -114,15 +114,23 @@ export function createToolErrorPayload(
 function normalizeToolErrorPayload(
   value: z.infer<typeof toolErrorPayloadSchema>
 ): ToolErrorPayload {
-  return createToolErrorPayload(value.error, value.url, {
-    ...(value.category !== undefined ? { category: value.category } : {}),
-    ...(value.code !== undefined ? { code: value.code } : {}),
-    ...(value.statusCode !== undefined ? { statusCode: value.statusCode } : {}),
-    ...(value.upstreamMessage !== undefined
-      ? { upstreamMessage: value.upstreamMessage }
-      : {}),
-    ...(value.details ? { details: value.details } : {}),
-    ...(value.data !== undefined ? { data: value.data } : {}),
+  const {
+    error,
+    url,
+    category,
+    code,
+    statusCode,
+    upstreamMessage,
+    details,
+    data,
+  } = value;
+  return createToolErrorPayload(error, url, {
+    ...(category !== undefined ? { category } : {}),
+    ...(code !== undefined ? { code } : {}),
+    ...(statusCode !== undefined ? { statusCode } : {}),
+    ...(upstreamMessage !== undefined ? { upstreamMessage } : {}),
+    ...(details ? { details } : {}),
+    ...(data !== undefined ? { data } : {}),
   });
 }
 

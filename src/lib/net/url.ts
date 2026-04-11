@@ -592,8 +592,7 @@ export interface Logger {
   error(message: string, data?: Record<string, unknown>): void;
 }
 function createValidationError(message: string): Error {
-  const error = new CodedError(message, SystemErrors.VALIDATION_ERROR);
-  return error;
+  return new CodedError(message, SystemErrors.VALIDATION_ERROR);
 }
 export const BLOCKED_HOST_SUFFIXES: readonly string[] = ['.local', '.internal'];
 function isLocalFetchAllowed(): boolean {

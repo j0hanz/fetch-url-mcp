@@ -167,6 +167,19 @@ class HostOriginPolicy {
     return normalizeHost(host);
   }
 
+  private resolveOriginParts(
+    parsed: URL,
+    scheme: 'http' | 'https'
+  ): { scheme: 'http' | 'https'; host: string; port: string } | null {
+    const normalizedHost = normalizeHost(parsed.host);
+    if (!normalizedHost) return null;
+    return {
+      scheme,
+      host: normalizedHost,
+      port: parsed.port || this.defaultPortForScheme(scheme),
+    };
+  }
+
   private resolveRequestOrigin(
     req: IncomingMessage
   ): { scheme: 'http' | 'https'; host: string; port: string } | null {
@@ -176,16 +189,7 @@ class HostOriginPolicy {
     const isEncrypted = Reflect.get(req.socket, 'encrypted') === true;
     const scheme = isEncrypted ? 'https' : 'http';
     const parsed = URL.parse(`${scheme}://${hostHeader}`);
-    if (!parsed) return null;
-
-    const normalizedHost = normalizeHost(parsed.host);
-    if (!normalizedHost) return null;
-
-    return {
-      scheme,
-      host: normalizedHost,
-      port: parsed.port || this.defaultPortForScheme(scheme),
-    };
+    return parsed ? this.resolveOriginParts(parsed, scheme) : null;
   }
 
   private resolveOrigin(
@@ -200,14 +204,7 @@ class HostOriginPolicy {
       return null;
     }
 
-    const normalizedHost = normalizeHost(parsed.host);
-    if (!normalizedHost) return null;
-
-    return {
-      scheme,
-      host: normalizedHost,
-      port: parsed.port || this.defaultPortForScheme(scheme),
-    };
+    return this.resolveOriginParts(parsed, scheme);
   }
 
   private defaultPortForScheme(scheme: 'http' | 'https'): string {
@@ -449,8 +446,7 @@ class AuthService {
         {},
         Loggers.LOG_AUTH
       );
-      const error = new InvalidTokenError('X-API-Key not supported for OAuth');
-      throw error;
+      throw new InvalidTokenError('X-API-Key not supported for OAuth');
     }
 
     logWarn(
@@ -458,27 +454,20 @@ class AuthService {
       { authMode: config.auth.mode },
       Loggers.LOG_AUTH
     );
-    const error = new InvalidTokenError(
+    throw new InvalidTokenError(
       config.auth.mode === 'static'
         ? 'Missing Authorization or X-API-Key header'
         : 'Missing Authorization header'
     );
-    throw error;
   }
 
   private resolveBearerToken(authHeader: string): string {
     if (!authHeader.startsWith('Bearer ')) {
-      const error = new InvalidTokenError(
-        'Invalid Authorization header format'
-      );
-      throw error;
+      throw new InvalidTokenError('Invalid Authorization header format');
     }
     const token = authHeader.substring(7);
     if (!token) {
-      const error = new InvalidTokenError(
-        'Invalid Authorization header format'
-      );
-      throw error;
+      throw new InvalidTokenError('Invalid Authorization header format');
     }
     return token;
   }
@@ -495,8 +484,7 @@ class AuthService {
 
   private verifyStaticToken(token: string): AuthInfo {
     if (this.staticTokenDigests.length === 0) {
-      const error = new InvalidTokenError('No static tokens configured');
-      throw error;
+      throw new InvalidTokenError('No static tokens configured');
     }
 
     const tokenDigest = hmacSha256Hex(STATIC_TOKEN_HMAC_KEY, token);
@@ -504,8 +492,7 @@ class AuthService {
 
     if (!matched) {
       logWarn('Auth failed: invalid static token', {}, Loggers.LOG_AUTH);
-      const error = new InvalidTokenError('Invalid token');
-      throw error;
+      throw new InvalidTokenError('Invalid token');
     }
     return this.buildStaticAuthInfo(token);
   }
@@ -554,8 +541,7 @@ class AuthService {
       this.stripHash(config.auth.resourceUrl)
     );
     if (!expected) {
-      const error = new AuthServerError('Configured resource URL is invalid');
-      throw error;
+      throw new AuthServerError('Configured resource URL is invalid');
     }
 
     const audiences = this.readAudienceValues(payload)
@@ -568,15 +554,13 @@ class AuthService {
         {},
         Loggers.LOG_AUTH
       );
-      const error = new InvalidTokenError('Token missing audience binding');
-      throw error;
+      throw new InvalidTokenError('Token missing audience binding');
     }
     if (!audiences.includes(expected)) {
       logWarn('Auth failed: audience mismatch', {}, Loggers.LOG_AUTH);
-      const error = new InvalidTokenError(
+      throw new InvalidTokenError(
         'Token audience does not match this MCP server'
       );
-      throw error;
     }
   }
 
@@ -639,10 +623,9 @@ class AuthService {
         { status: response.status },
         Loggers.LOG_AUTH
       );
-      const error = new AuthServerError(
+      throw new AuthServerError(
         `Token introspection failed: ${response.status}`
       );
-      throw error;
     }
 
     return response.json();
@@ -699,8 +682,7 @@ class AuthService {
         { missingCount: missing.length },
         Loggers.LOG_AUTH
       );
-      const error = new InsufficientScopeError(missing);
-      throw error;
+      throw new InsufficientScopeError(missing);
     }
   }
 
@@ -723,8 +705,7 @@ class AuthService {
     signal?: AbortSignal
   ): Promise<AuthInfo> {
     if (!config.auth.introspectionUrl) {
-      const error = new AuthServerError('Introspection not configured');
-      throw error;
+      throw new AuthServerError('Introspection not configured');
     }
 
     const cacheKey = hmacSha256Hex(STATIC_TOKEN_HMAC_KEY, token);
@@ -761,8 +742,7 @@ class AuthService {
     if (!isObject(payload) || payload['active'] !== true) {
       this.introspectionCache.delete(cacheKey);
       logWarn('Auth failed: token inactive', {}, Loggers.LOG_AUTH);
-      const error = new InvalidTokenError('Token is inactive');
-      throw error;
+      throw new InvalidTokenError('Token is inactive');
     }
 
     this.assertTokenAudience(payload);
@@ -772,8 +752,7 @@ class AuthService {
     if (this.isExpiredAuthInfo(info, verifiedAt)) {
       this.introspectionCache.delete(cacheKey);
       logWarn('Auth failed: token expired', {}, Loggers.LOG_AUTH);
-      const error = new InvalidTokenError('Token is expired');
-      throw error;
+      throw new InvalidTokenError('Token is expired');
     }
     this.assertRequiredScopes(info.scopes);
 
@@ -876,10 +855,9 @@ export function buildProtectedResourceMetadataDocument(): {
 } {
   const urls = buildRequestScopedProtectedResourceUrls();
   if (!config.auth.issuerUrl) {
-    const error = new AuthServerError(
+    throw new AuthServerError(
       'OAuth issuer URL is required for protected resource metadata'
     );
-    throw error;
   }
 
   return {

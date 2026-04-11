@@ -4794,13 +4794,12 @@ class StageTracker {
 
   private checkBudget(url: string, stage: string, budget?: StageBudget): void {
     if (budget && budget.elapsedMs >= budget.totalBudgetMs) {
-      const error = new FetchError('Transform budget exhausted', url, 504, {
+      throw new FetchError('Transform budget exhausted', url, 504, {
         reason: 'timeout',
         stage: `${stage}:budget_exhausted`,
         elapsedMs: budget.elapsedMs,
         totalBudgetMs: budget.totalBudgetMs,
       });
-      throw error;
     }
   }
 
@@ -6155,13 +6154,12 @@ export function transformHtmlToMarkdownInProcess(
 
 function validateBinaryContent(html: string, url: string): void {
   if (hasBinaryIndicators(html)) {
-    const error = new FetchError(
+    throw new FetchError(
       'Content appears to be binary data (high replacement character ratio or null bytes)',
       url,
       415,
       { reason: 'binary_content_detected', stage: 'transform:validate' }
     );
-    throw error;
   }
 }
 

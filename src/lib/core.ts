@@ -148,6 +148,19 @@ function isTraceContextValue(value: unknown): value is string {
   return typeof value === 'string' && value.trim().length > 0;
 }
 
+function buildTraceContext(
+  traceparent?: string,
+  tracestate?: string,
+  baggage?: string
+): TraceContext | undefined {
+  if (!traceparent && !tracestate && !baggage) return undefined;
+  return {
+    ...(traceparent ? { traceparent } : {}),
+    ...(tracestate ? { tracestate } : {}),
+    ...(baggage ? { baggage } : {}),
+  };
+}
+
 export function extractTraceContext(meta: unknown): TraceContext | undefined {
   if (meta === null || typeof meta !== 'object' || Array.isArray(meta)) {
     return undefined;
@@ -155,22 +168,15 @@ export function extractTraceContext(meta: unknown): TraceContext | undefined {
 
   const traceMeta = meta as Record<string, unknown>;
 
-  const traceparent = isTraceContextValue(traceMeta['traceparent'])
-    ? traceMeta['traceparent']
-    : undefined;
-  const tracestate = isTraceContextValue(traceMeta['tracestate'])
-    ? traceMeta['tracestate']
-    : undefined;
-  const baggage = isTraceContextValue(traceMeta['baggage'])
-    ? traceMeta['baggage']
-    : undefined;
-
-  if (!traceparent && !tracestate && !baggage) return undefined;
-  return {
-    ...(traceparent ? { traceparent } : {}),
-    ...(tracestate ? { tracestate } : {}),
-    ...(baggage ? { baggage } : {}),
-  };
+  return buildTraceContext(
+    isTraceContextValue(traceMeta['traceparent'])
+      ? traceMeta['traceparent']
+      : undefined,
+    isTraceContextValue(traceMeta['tracestate'])
+      ? traceMeta['tracestate']
+      : undefined,
+    isTraceContextValue(traceMeta['baggage']) ? traceMeta['baggage'] : undefined
+  );
 }
 
 export function runWithTraceContext<T>(meta: unknown, fn: () => T): T {
@@ -205,15 +211,11 @@ export function getOperationId(): string | undefined {
 export function getTraceContext(): TraceContext | undefined {
   const context = getRequestContext();
   if (!context) return undefined;
-
-  const { traceparent, tracestate, baggage } = context;
-  if (!traceparent && !tracestate && !baggage) return undefined;
-
-  return {
-    ...(traceparent ? { traceparent } : {}),
-    ...(tracestate ? { tracestate } : {}),
-    ...(baggage ? { baggage } : {}),
-  };
+  return buildTraceContext(
+    context.traceparent,
+    context.tracestate,
+    context.baggage
+  );
 }
 function isDebugEnabled(): boolean {
   return config.logging.level === 'debug';
@@ -408,7 +410,6 @@ function sanitizeLogValue(
 
   const primitive = sanitizePrimitiveOrString(value, key);
   if (primitive !== undefined || value === undefined) return primitive;
-  if (value === null) return null;
 
   return sanitizeComplexValue(value, options);
 }

@@ -541,8 +541,7 @@ class JsonBodyReader {
     this.validateContentLength(req, limit);
 
     if (signal?.aborted || isRequestReadAborted(req)) {
-      const error = new JsonBodyError('read-failed', 'Request aborted');
-      throw error;
+      throw new JsonBodyError('read-failed', 'Request aborted');
     }
 
     const body = await this.readBody(req, limit, signal);
@@ -642,8 +641,7 @@ class JsonBodyReader {
 
     try {
       if (signal?.aborted || isRequestReadAborted(req)) {
-        const error = new JsonBodyError('read-failed', 'Request aborted');
-        throw error;
+        throw new JsonBodyError('read-failed', 'Request aborted');
       }
 
       await pipeline(req, sink, signal ? { signal } : undefined);
@@ -651,11 +649,9 @@ class JsonBodyReader {
     } catch (err: unknown) {
       if (err instanceof JsonBodyError) throw err;
       if (signal?.aborted || isRequestReadAborted(req)) {
-        const error = new JsonBodyError('read-failed', 'Request aborted');
-        throw error;
+        throw new JsonBodyError('read-failed', 'Request aborted');
       }
-      const error = new JsonBodyError('read-failed', getErrorMessage(err));
-      throw error;
+      throw new JsonBodyError('read-failed', getErrorMessage(err));
     }
   }
 

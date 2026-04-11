@@ -273,10 +273,9 @@ function isBinaryContent(buffer: Uint8Array, encoding?: string): boolean {
   return hasNullByte(buffer, BINARY_SCAN_LIMIT);
 }
 function createBinaryContentError(url: string): FetchError {
-  const error = new FetchError('Binary content detected', url, 500, {
+  return new FetchError('Binary content detected', url, 500, {
     reason: 'binary_content_detected',
   });
-  return error;
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -312,64 +311,41 @@ type FetchErrorInput =
   | { kind: 'unknown'; message?: string };
 function createFetchError(input: FetchErrorInput, url: string): FetchError {
   switch (input.kind) {
-    case 'canceled': {
-      const error = new FetchError('Request canceled', url, 499, {
+    case 'canceled':
+      return new FetchError('Request canceled', url, 499, {
         reason: 'aborted',
       });
-      return error;
-    }
-    case 'aborted': {
-      const error = new FetchError(
-        'Request aborted during response read',
-        url,
-        499,
-        {
-          reason: 'aborted',
-        }
-      );
-      return error;
-    }
-    case 'timeout': {
-      const error = new FetchError(
+    case 'aborted':
+      return new FetchError('Request aborted during response read', url, 499, {
+        reason: 'aborted',
+      });
+    case 'timeout':
+      return new FetchError(
         `Request timed out after ${input.timeout}ms`,
         url,
         504,
         { timeout: input.timeout }
       );
-      return error;
-    }
-    case 'rate-limited': {
-      const error = new FetchError('Too many requests', url, 429, {
+    case 'rate-limited':
+      return new FetchError('Too many requests', url, 429, {
         retryAfter: parseRetryAfter(input.retryAfter),
       });
-      return error;
-    }
-    case 'http': {
-      const error = new FetchError(
+    case 'http':
+      return new FetchError(
         `HTTP ${input.status}: ${input.statusText}`,
         url,
         input.status
       );
-      return error;
-    }
-    case 'too-many-redirects': {
-      const error = new FetchError('Too many redirects', url);
-      return error;
-    }
-    case 'missing-redirect-location': {
-      const error = new FetchError('Redirect missing Location header', url);
-      return error;
-    }
-    case 'network': {
-      const error = new FetchError('Network error', url, undefined, {
+    case 'too-many-redirects':
+      return new FetchError('Too many redirects', url);
+    case 'missing-redirect-location':
+      return new FetchError('Redirect missing Location header', url);
+    case 'network':
+      return new FetchError('Network error', url, undefined, {
         message: input.message,
       });
-      return error;
-    }
-    case 'unknown': {
-      const error = new FetchError(input.message ?? 'Unexpected error', url);
-      return error;
-    }
+    case 'unknown':
+      return new FetchError(input.message ?? 'Unexpected error', url);
     default: {
       const _exhaustive: never = input;
       return _exhaustive;
@@ -408,13 +384,11 @@ function mapSystemError(error: NodeJS.ErrnoException, url: string): FetchError {
   const { code, message } = error;
 
   if (code === SystemErrors.ETIMEOUT) {
-    const fetchError = new FetchError(message, url, 504, { code });
-    return fetchError;
+    return new FetchError(message, url, 504, { code });
   }
 
   if (code && CLIENT_ERROR_CODES.has(code)) {
-    const fetchError = new FetchError(message, url, 400, { code });
-    return fetchError;
+    return new FetchError(message, url, 400, { code });
   }
 
   return createFetchError({ kind: 'network', message }, url);
@@ -727,8 +701,7 @@ function assertSupportedContentType(
   }
 
   if (!isTextLikeMediaType(mediaType)) {
-    const error = new FetchError(`Unsupported content type: ${mediaType}`, url);
-    throw error;
+    throw new FetchError(`Unsupported content type: ${mediaType}`, url);
   }
 }
 function extractEncodingTokens(value: string): string[] {
@@ -753,7 +726,7 @@ function createUnsupportedContentEncodingError(
   url: string,
   encodingHeader: string
 ): FetchError {
-  const error = new FetchError(
+  return new FetchError(
     `Unsupported Content-Encoding: ${encodingHeader}`,
     url,
     415,
@@ -762,7 +735,6 @@ function createUnsupportedContentEncodingError(
       encoding: encodingHeader,
     }
   );
-  return error;
 }
 function createDecompressor(
   encoding: ContentEncoding
@@ -1251,11 +1223,10 @@ function assertReadableStreamLike(
   stage: string
 ): asserts stream is CompatibleReadableStream {
   if (isReadableStreamLike(stream)) return;
-  const error = new FetchError('Invalid response stream', url, 500, {
+  throw new FetchError('Invalid response stream', url, 500, {
     reason: 'invalid_stream',
     stage,
   });
-  throw error;
 }
 function toNodeReadableStream(
   stream: ReadableStream<Uint8Array>,

@@ -268,8 +268,7 @@ const EnvParser = {
     if (!value) return undefined;
     const parsed = URL.parse(value);
     if (!parsed) {
-      const error = new ConfigError(`Invalid ${name} value: ${value}`);
-      throw error;
+      throw new ConfigError(`Invalid ${name} value: ${value}`);
     }
     return parsed;
   },
@@ -464,10 +463,9 @@ function buildHttpsConfig(): HttpsConfig {
   const caFile = EnvParser.optionalFilePath(env['SERVER_TLS_CA_FILE']);
 
   if ((keyFile && !certFile) || (!keyFile && certFile)) {
-    const error = new ConfigError(
+    throw new ConfigError(
       'Both SERVER_TLS_KEY_FILE and SERVER_TLS_CERT_FILE must be set together'
     );
-    throw error;
   }
 
   return {

@@ -54,41 +54,36 @@ function mapFetchToolError(
   const code = resolveFetchErrorCode(error);
   const url = error.url || fallbackUrl;
   const details = sanitizeToolErrorDetails(error.details);
-  const detailsSpread = details ? { details } : {};
+
+  const base: ToolErrorPayload = {
+    error: error.message,
+    url,
+    category: ErrorCategory.FETCH_ERROR,
+    code,
+    statusCode: error.statusCode,
+    ...(details ? { details } : {}),
+  };
 
   if (reason === 'timeout') {
     return {
+      ...base,
       error: 'The request to the target timed out.',
-      url,
       category: ErrorCategory.UPSTREAM_TIMEOUT,
-      code,
-      statusCode: error.statusCode,
       upstreamMessage: error.message,
-      ...detailsSpread,
     };
   }
 
   if (reason === 'aborted') {
     return {
+      ...base,
       error: 'The request to the target was cancelled.',
-      url,
       category: ErrorCategory.UPSTREAM_ABORTED,
-      code,
-      statusCode: error.statusCode,
       upstreamMessage: error.message,
-      ...detailsSpread,
     };
   }
 
   if (reason === SystemErrors.QUEUE_FULL) {
-    return {
-      error: error.message,
-      url,
-      category: ErrorCategory.QUEUE_FULL,
-      code,
-      statusCode: error.statusCode,
-      ...detailsSpread,
-    };
+    return { ...base, category: ErrorCategory.QUEUE_FULL };
   }
 
   const isRealHttpError = typeof error.details['httpStatus'] === 'number';
@@ -99,24 +94,14 @@ function mapFetchToolError(
         ? ErrorCategory.UPSTREAM_RATE_LIMITED
         : ErrorCategory.UPSTREAM_HTTP_ERROR;
     return {
+      ...base,
       error: buildUpstreamHttpMessage(error),
-      url,
       category,
-      code,
-      statusCode: error.statusCode,
       upstreamMessage: error.message,
-      ...detailsSpread,
     };
   }
 
-  return {
-    error: error.message,
-    url,
-    category: ErrorCategory.FETCH_ERROR,
-    code,
-    statusCode: error.statusCode,
-    ...detailsSpread,
-  };
+  return base;
 }
 
 function mapGenericToolError(
@@ -230,26 +215,17 @@ export function classifyAndLogToolError(
     );
     return handleToolError(error, meta.url, fallbackMessage);
   }
+  const errorMessage = error instanceof Error ? error.message : String(error);
+  const logMeta = {
+    url: meta.url,
+    error: errorMessage,
+    durationMs: meta.durationMs,
+  };
+
   if (error instanceof FetchError || isAbortError(error)) {
-    logWarn(
-      `${toolName} request failed`,
-      {
-        url: meta.url,
-        error: error instanceof Error ? error.message : String(error),
-        durationMs: meta.durationMs,
-      },
-      loggerName
-    );
+    logWarn(`${toolName} request failed`, logMeta, loggerName);
   } else {
-    logError(
-      `${toolName} request failed unexpectedly`,
-      {
-        url: meta.url,
-        error: error instanceof Error ? error.message : String(error),
-        durationMs: meta.durationMs,
-      },
-      loggerName
-    );
+    logError(`${toolName} request failed unexpectedly`, logMeta, loggerName);
   }
   return handleToolError(error, meta.url, fallbackMessage);
 }
