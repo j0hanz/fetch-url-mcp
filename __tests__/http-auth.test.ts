@@ -149,4 +149,39 @@ describe('OAuth auth handling', () => {
     );
     assert.equal(fetchCount, 2);
   });
+
+  it('preserves stable subject claims from introspection in authInfo.extra', async () => {
+    config.auth.mode = 'oauth';
+    config.auth.introspectionUrl = new URL(
+      'https://issuer.example.com/introspect'
+    );
+    config.auth.resourceUrl = new URL('https://resource.example.com/mcp');
+    config.auth.clientId = undefined;
+    config.auth.clientSecret = undefined;
+    config.auth.requiredScopes.splice(0, config.auth.requiredScopes.length);
+
+    Object.defineProperty(globalThis, 'fetch', {
+      value: async () =>
+        mockJsonResponse({
+          active: true,
+          aud: config.auth.resourceUrl.href,
+          exp: Math.floor(Date.now() / 1000) + 60,
+          client_id: 'oauth-client',
+          scope: '',
+          sub: 'user-123',
+          subject: 'user-123',
+        }),
+      configurable: true,
+      writable: true,
+    });
+
+    const info = await authService.authenticate(
+      createBearerRequest('stable-subject-token')
+    );
+
+    assert.deepEqual(info.extra, {
+      sub: 'user-123',
+      subject: 'user-123',
+    });
+  });
 });

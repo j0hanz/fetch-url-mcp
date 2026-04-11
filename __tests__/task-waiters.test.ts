@@ -1,8 +1,11 @@
+import { isTerminal } from '@modelcontextprotocol/server';
+
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 import { getRequestId, runWithRequestContext } from '../src/lib/core.js';
 import {
+  type TaskStatus,
   TaskWaiterRegistry,
   waitForTerminalTask,
 } from '../src/tasks/manager.js';
@@ -12,8 +15,8 @@ import {
 interface TestTask {
   taskId: string;
   ownerKey: string;
-  status: string;
-  keepAlive: number;
+  status: TaskStatus;
+  ttl: number | null;
   _createdAtMs: number;
 }
 
@@ -22,16 +25,10 @@ function makeTask(overrides?: Partial<TestTask>): TestTask {
     taskId: 'task-1',
     ownerKey: 'owner-1',
     status: 'working',
-    keepAlive: 30_000,
+    ttl: 30_000,
     _createdAtMs: Date.now(),
     ...overrides,
   };
-}
-
-function isTerminal(status: string): boolean {
-  return (
-    status === 'completed' || status === 'failed' || status === 'cancelled'
-  );
 }
 
 // ── TaskWaiterRegistry ──────────────────────────────────────────────
@@ -130,7 +127,7 @@ describe('waitForTerminalTask', () => {
       lookupTask: () => task,
       removeTask: () => {},
       registry,
-      isTerminalStatus: isTerminal,
+      isTerminal,
     });
 
     assert.ok(result);
@@ -146,7 +143,7 @@ describe('waitForTerminalTask', () => {
       lookupTask: () => undefined,
       removeTask: () => {},
       registry,
-      isTerminalStatus: isTerminal,
+      isTerminal,
     });
 
     assert.equal(result, undefined);
@@ -154,7 +151,7 @@ describe('waitForTerminalTask', () => {
 
   it('resolves when task becomes terminal', async () => {
     const registry = new TaskWaiterRegistry<TestTask>(isTerminal);
-    const task = makeTask({ status: 'working', keepAlive: 30_000 });
+    const task = makeTask({ status: 'working', ttl: 30_000 });
 
     const promise = waitForTerminalTask({
       taskId: 'task-1',
@@ -162,7 +159,7 @@ describe('waitForTerminalTask', () => {
       lookupTask: () => task,
       removeTask: () => {},
       registry,
-      isTerminalStatus: isTerminal,
+      isTerminal,
     });
 
     // Simulate the task completing after a short delay.
@@ -178,7 +175,7 @@ describe('waitForTerminalTask', () => {
 
   it('rejects on abort signal', async () => {
     const registry = new TaskWaiterRegistry<TestTask>(isTerminal);
-    const task = makeTask({ status: 'working', keepAlive: 30_000 });
+    const task = makeTask({ status: 'working', ttl: 30_000 });
     const ac = new AbortController();
 
     const promise = waitForTerminalTask({
@@ -188,7 +185,7 @@ describe('waitForTerminalTask', () => {
       lookupTask: () => task,
       removeTask: () => {},
       registry,
-      isTerminalStatus: isTerminal,
+      isTerminal,
     });
 
     // Abort immediately.
@@ -201,11 +198,11 @@ describe('waitForTerminalTask', () => {
   // internal promise but returns void, causing an unhandled rejection.
   // This is a known implementation quirk — tracked separately.
 
-  it('rejects on keepAlive expiry with short keepAlive', async () => {
+  it('rejects on ttl expiry with short ttl', async () => {
     const registry = new TaskWaiterRegistry<TestTask>(isTerminal);
     const task = makeTask({
       status: 'working',
-      keepAlive: 50, // 50ms — will expire very quickly.
+      ttl: 50, // 50ms — will expire very quickly.
       _createdAtMs: Date.now(),
     });
 
@@ -219,7 +216,7 @@ describe('waitForTerminalTask', () => {
           removed = true;
         },
         registry,
-        isTerminalStatus: isTerminal,
+        isTerminal,
       }),
       (err: unknown) => err instanceof Error
     );
@@ -228,7 +225,7 @@ describe('waitForTerminalTask', () => {
 
   it('returns undefined when owner mismatch on notification', async () => {
     const registry = new TaskWaiterRegistry<TestTask>(isTerminal);
-    const task = makeTask({ status: 'working', keepAlive: 30_000 });
+    const task = makeTask({ status: 'working', ttl: 30_000 });
 
     const promise = waitForTerminalTask({
       taskId: 'task-1',
@@ -236,7 +233,7 @@ describe('waitForTerminalTask', () => {
       lookupTask: () => task,
       removeTask: () => {},
       registry,
-      isTerminalStatus: isTerminal,
+      isTerminal,
     });
 
     // Notify with a different ownerKey.
@@ -254,7 +251,7 @@ describe('waitForTerminalTask', () => {
 
   it('preserves request context when the waiter resolves asynchronously', async () => {
     const registry = new TaskWaiterRegistry<TestTask>(isTerminal);
-    const task = makeTask({ status: 'working', keepAlive: 30_000 });
+    const task = makeTask({ status: 'working', ttl: 30_000 });
     let observedRequestId: string | undefined;
 
     const promise = runWithRequestContext(
@@ -269,7 +266,7 @@ describe('waitForTerminalTask', () => {
           lookupTask: () => task,
           removeTask: () => {},
           registry,
-          isTerminalStatus: isTerminal,
+          isTerminal,
         });
 
         observedRequestId = getRequestId();

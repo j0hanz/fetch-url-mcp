@@ -1,4 +1,8 @@
-import { ErrorCode } from '@modelcontextprotocol/sdk/types.js';
+import {
+  isTerminal,
+  ProtocolErrorCode,
+  SdkErrorCode,
+} from '@modelcontextprotocol/server';
 
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { createHmac, randomBytes, randomUUID } from 'node:crypto';
@@ -6,7 +10,7 @@ import { createHmac, randomBytes, randomUUID } from 'node:crypto';
 import { config } from '../lib/config.js';
 import { Loggers, logInfo, logWarn } from '../lib/core.js';
 import { toError } from '../lib/error/index.js';
-import { createMcpError } from '../lib/mcp-interop.js';
+import { createProtocolError } from '../lib/mcp-interop.js';
 import {
   type CancellableTimeout,
   createUnrefTimeout,
@@ -15,7 +19,6 @@ import {
 } from '../lib/utils.js';
 
 export type TaskStatus =
-  | 'submitted'
   | 'working'
   | 'input_required'
   | 'completed'
@@ -33,14 +36,16 @@ export interface TaskState {
   ownerKey: string;
   status: TaskStatus;
   statusMessage?: string;
-  progress?: number;
-  total?: number;
   createdAt: string;
   lastUpdatedAt: string;
-  keepAlive: number;
-  pollFrequency: number;
+  ttl: number | null;
+  pollInterval: number;
   result?: unknown;
   error?: TaskError;
+  requestId?: string;
+  requestMethod?: string;
+  requestMeta?: Record<string, unknown>;
+  context?: Record<string, unknown>;
 }
 
 interface InternalTaskState extends TaskState {
@@ -50,7 +55,12 @@ interface InternalTaskState extends TaskState {
 
 interface CreateTaskOptions {
   taskId?: string;
-  keepAlive?: number;
+  ttl?: number | null;
+  pollInterval?: number;
+  requestId?: string;
+  requestMethod?: string;
+  requestMeta?: Record<string, unknown>;
+  context?: Record<string, unknown>;
 }
 
 export interface CreateTaskResult {
@@ -59,28 +69,29 @@ export interface CreateTaskResult {
     taskId: string;
     status: TaskStatus;
     statusMessage?: string;
-    progress?: number;
-    total?: number;
     createdAt: string;
     lastUpdatedAt: string;
-    keepAlive: number;
-    pollFrequency: number;
-    ttl: number;
+    ttl: number | null;
     pollInterval: number;
   };
 }
 
-const DEFAULT_KEEP_ALIVE_MS = 60_000;
-const MIN_KEEP_ALIVE_MS = 1_000;
-const MAX_KEEP_ALIVE_MS = 86_400_000;
-const DEFAULT_POLL_FREQUENCY_MS = 1_000;
+interface TerminalTaskErrorResult {
+  content: [{ type: 'text'; text: string }];
+  isError: true;
+}
+
+const DEFAULT_TTL_MS = 60_000;
+const MIN_TTL_MS = 1_000;
+const MAX_TTL_MS = 86_400_000;
+const DEFAULT_POLL_INTERVAL_MS = 1_000;
 const DEFAULT_OWNER_KEY = 'default';
 const DEFAULT_PAGE_SIZE = 50;
 
 const CLEANUP_INTERVAL_MS = 60_000;
 const RESULT_DELIVERY_GRACE_MS = 10_000;
+const CONNECTION_CLOSED_ERROR_CODE = -32000;
 const TASK_STATUS_VALUES = new Set<TaskStatus>([
-  'submitted',
   'working',
   'input_required',
   'completed',
@@ -88,14 +99,29 @@ const TASK_STATUS_VALUES = new Set<TaskStatus>([
   'cancelled',
 ]);
 
-const TERMINAL_STATUSES = new Set<TaskStatus>([
-  'completed',
-  'failed',
-  'cancelled',
-]);
+export function createTerminalTaskErrorResult(
+  task: Pick<TaskState, 'taskId' | 'status' | 'statusMessage' | 'error'>
+): TerminalTaskErrorResult | undefined {
+  if (task.status !== 'cancelled' && task.status !== 'failed') {
+    return undefined;
+  }
 
-function isTerminalStatus(status: TaskStatus): boolean {
-  return TERMINAL_STATUSES.has(status);
+  const message =
+    task.statusMessage ??
+    (task.status === 'cancelled' ? 'The task was cancelled.' : 'Task failed.');
+  const payload: Record<string, unknown> = {
+    error: message,
+    taskId: task.taskId,
+    status: task.status,
+  };
+
+  if (task.error?.code !== undefined) payload['code'] = task.error.code;
+  if (task.error?.data !== undefined) payload['data'] = task.error.data;
+
+  return {
+    content: [{ type: 'text', text: JSON.stringify(payload) }],
+    isError: true,
+  };
 }
 
 function resolveNextTaskStatus(
@@ -106,15 +132,15 @@ function resolveNextTaskStatus(
   if (!nextStatus || nextStatus === task.status) return task.status;
 
   if (!TASK_STATUS_VALUES.has(nextStatus)) {
-    throw createMcpError(
-      ErrorCode.InternalError,
+    throw createProtocolError(
+      ProtocolErrorCode.InternalError,
       `Invalid task status: ${nextStatus}`
     );
   }
 
-  if (isTerminalStatus(task.status)) {
-    throw createMcpError(
-      ErrorCode.InternalError,
+  if (isTerminal(task.status)) {
+    throw createProtocolError(
+      ProtocolErrorCode.InternalError,
       `Cannot transition task from ${task.status} to ${nextStatus}`
     );
   }
@@ -122,14 +148,23 @@ function resolveNextTaskStatus(
   return nextStatus;
 }
 
-function normalizeKeepAlive(keepAlive: number | undefined): number {
-  if (keepAlive === undefined || !Number.isFinite(keepAlive)) {
-    return DEFAULT_KEEP_ALIVE_MS;
+function normalizeTtl(ttl: number | undefined): number {
+  if (ttl === undefined || !Number.isFinite(ttl)) {
+    return DEFAULT_TTL_MS;
   }
-  return Math.max(
-    MIN_KEEP_ALIVE_MS,
-    Math.min(Math.trunc(keepAlive), MAX_KEEP_ALIVE_MS)
-  );
+  return Math.max(MIN_TTL_MS, Math.min(Math.trunc(ttl), MAX_TTL_MS));
+}
+
+function normalizeOptionalTtl(ttl: number | null | undefined): number | null {
+  if (ttl === null) return null;
+  return normalizeTtl(ttl);
+}
+
+function normalizePollInterval(pollInterval: number | undefined): number {
+  if (pollInterval === undefined || !Number.isFinite(pollInterval)) {
+    return DEFAULT_POLL_INTERVAL_MS;
+  }
+  return Math.max(1, Math.trunc(pollInterval));
 }
 
 function logTaskStatusTransition(
@@ -159,8 +194,9 @@ class TaskManager {
   private tasks = new Map<string, InternalTaskState>();
   private ownerCounts = new Map<string, number>();
   private readonly waiters = new TaskWaiterRegistry<InternalTaskState>(
-    isTerminalStatus
+    isTerminal
   );
+  private readonly statusListeners = new Set<(task: TaskState) => void>();
   private cleanupInterval: ReturnType<typeof setInterval> | null = null;
 
   private ensureCleanupLoop(): void {
@@ -178,10 +214,11 @@ class TaskManager {
   }
 
   private isTaskExpired(task: InternalTaskState, nowMs: number): boolean {
+    if (task.ttl === null) return false;
     if (task._terminalAtMs !== undefined) {
-      return nowMs - task._terminalAtMs > task.keepAlive;
+      return nowMs - task._terminalAtMs > task.ttl;
     }
-    return nowMs - task._createdAtMs > MAX_KEEP_ALIVE_MS;
+    return nowMs - task._createdAtMs > MAX_TTL_MS;
   }
 
   private removeExpiredTasks(): void {
@@ -205,11 +242,12 @@ class TaskManager {
     const task = this.tasks.get(taskId);
     if (!task) return;
 
-    if (!isTerminalStatus(task.status)) {
+    if (!isTerminal(task.status)) {
       this.applyTaskUpdate(task, {
         status: 'failed',
         statusMessage: 'Task removed due to expiration',
       });
+      this.emitStatus(task);
       this.waiters.notify(task);
     }
 
@@ -225,7 +263,7 @@ class TaskManager {
     task.lastUpdatedAt = new Date().toISOString();
     if (
       updates.status &&
-      isTerminalStatus(updates.status) &&
+      isTerminal(updates.status) &&
       task._terminalAtMs === undefined
     ) {
       task._terminalAtMs = Date.now();
@@ -234,18 +272,38 @@ class TaskManager {
 
   private cancelActiveTask(
     task: InternalTaskState,
-    statusMessage: string
+    statusMessage: string,
+    silent?: boolean
   ): void {
+    const error = {
+      code: CONNECTION_CLOSED_ERROR_CODE,
+      message: statusMessage,
+      data: { code: 'ABORTED', sdkCode: SdkErrorCode.ConnectionClosed },
+    };
     this.applyTaskUpdate(task, {
       status: 'cancelled',
       statusMessage,
-      error: {
-        code: ErrorCode.ConnectionClosed,
-        message: statusMessage,
-        data: { code: 'ABORTED' },
-      },
+      error,
+      result: createTerminalTaskErrorResult({
+        taskId: task.taskId,
+        status: 'cancelled',
+        statusMessage,
+        error,
+      }),
     });
+    if (!silent) this.emitStatus(task);
     this.waiters.notify(task);
+  }
+
+  private emitStatus(task: InternalTaskState): void {
+    for (const listener of this.statusListeners) listener(task);
+  }
+
+  onStatusChange(listener: (task: TaskState) => void): () => void {
+    this.statusListeners.add(listener);
+    return () => {
+      this.statusListeners.delete(listener);
+    };
   }
 
   private releaseTaskCapacity(task: InternalTaskState | TaskState): void {
@@ -261,15 +319,15 @@ class TaskManager {
     const { maxPerOwner, maxTotal } = config.tasks;
 
     if (this.tasks.size >= maxTotal) {
-      throw createMcpError(
-        ErrorCode.InvalidRequest,
+      throw createProtocolError(
+        ProtocolErrorCode.InvalidRequest,
         `Server task limit reached (${maxTotal})`
       );
     }
 
     if ((this.ownerCounts.get(ownerKey) ?? 0) >= maxPerOwner) {
-      throw createMcpError(
-        ErrorCode.InvalidRequest,
+      throw createProtocolError(
+        ProtocolErrorCode.InvalidRequest,
         `Task limit reached for this session (${maxPerOwner})`
       );
     }
@@ -286,8 +344,8 @@ class TaskManager {
 
     const taskId = options?.taskId ?? randomUUID();
     if (this.tasks.has(taskId)) {
-      throw createMcpError(
-        ErrorCode.InvalidRequest,
+      throw createProtocolError(
+        ProtocolErrorCode.InvalidRequest,
         `Task already exists: ${taskId}`
       );
     }
@@ -299,12 +357,18 @@ class TaskManager {
     const task: InternalTaskState = {
       taskId,
       ownerKey,
-      status: 'submitted',
+      status: 'working',
       statusMessage,
       createdAt,
       lastUpdatedAt: createdAt,
-      keepAlive: normalizeKeepAlive(options?.keepAlive),
-      pollFrequency: DEFAULT_POLL_FREQUENCY_MS,
+      ttl: normalizeOptionalTtl(options?.ttl),
+      pollInterval: normalizePollInterval(options?.pollInterval),
+      ...(options?.requestId ? { requestId: options.requestId } : {}),
+      ...(options?.requestMethod
+        ? { requestMethod: options.requestMethod }
+        : {}),
+      ...(options?.requestMeta ? { requestMeta: options.requestMeta } : {}),
+      ...(options?.context ? { context: options.context } : {}),
       _createdAtMs: now.getTime(),
     };
 
@@ -315,10 +379,12 @@ class TaskManager {
       {
         taskId: task.taskId,
         ownerKey,
-        keepAlive: task.keepAlive,
+        ttl: task.ttl,
+        pollInterval: task.pollInterval,
       },
       Loggers.LOG_TASKS
     );
+    this.emitStatus(task);
     return task;
   }
 
@@ -344,7 +410,8 @@ class TaskManager {
 
   updateTask(
     taskId: string,
-    updates: Partial<Omit<TaskState, 'taskId' | 'createdAt'>>
+    updates: Partial<Omit<TaskState, 'taskId' | 'createdAt'>>,
+    silent?: boolean
   ): void {
     const task = this.tasks.get(taskId);
     if (!task) {
@@ -355,7 +422,7 @@ class TaskManager {
       );
       return;
     }
-    if (isTerminalStatus(task.status)) {
+    if (isTerminal(task.status)) {
       logWarn(
         'updateTask called for terminal task',
         {
@@ -376,21 +443,26 @@ class TaskManager {
     });
 
     logTaskStatusTransition(task, previousStatus, task.status);
+    if (!silent) this.emitStatus(task);
     this.waiters.notify(task);
   }
 
-  cancelTask(taskId: string, ownerKey?: string): TaskState | undefined {
+  cancelTask(
+    taskId: string,
+    ownerKey?: string,
+    silent?: boolean
+  ): TaskState | undefined {
     const task = this.lookupActiveTask(taskId, ownerKey);
     if (!task) return undefined;
 
-    if (isTerminalStatus(task.status)) {
-      throw createMcpError(
-        ErrorCode.InvalidParams,
+    if (isTerminal(task.status)) {
+      throw createProtocolError(
+        ProtocolErrorCode.InvalidParams,
         `Cannot cancel task: already ${task.status}`
       );
     }
 
-    this.cancelActiveTask(task, 'The task was cancelled by request.');
+    this.cancelActiveTask(task, 'The task was cancelled by request.', silent);
     logInfo(
       'Task cancelled by request',
       {
@@ -406,9 +478,9 @@ class TaskManager {
     const task = this.lookupActiveTask(taskId, ownerKey);
     if (!task) return false;
 
-    if (!isTerminalStatus(task.status)) {
-      throw createMcpError(
-        ErrorCode.InvalidParams,
+    if (!isTerminal(task.status)) {
+      throw createProtocolError(
+        ProtocolErrorCode.InvalidParams,
         `Cannot delete task: status is ${task.status}`
       );
     }
@@ -431,7 +503,7 @@ class TaskManager {
 
     const cancelled: TaskState[] = [];
     for (const task of this.tasks.values()) {
-      if (task.ownerKey !== ownerKey || isTerminalStatus(task.status)) continue;
+      if (task.ownerKey !== ownerKey || isTerminal(task.status)) continue;
       this.cancelActiveTask(task, statusMessage);
       cancelled.push(task);
     }
@@ -470,7 +542,10 @@ class TaskManager {
       (task) => task.taskId === anchorTaskId
     );
     if (anchorIndex === -1) {
-      throw createMcpError(ErrorCode.InvalidParams, 'Invalid cursor');
+      throw createProtocolError(
+        ProtocolErrorCode.InvalidParams,
+        'Invalid cursor'
+      );
     }
 
     return validTasks.slice(anchorIndex + 1, anchorIndex + 1 + pageSize + 1);
@@ -498,7 +573,10 @@ class TaskManager {
     if (!cursor) return null;
     const decoded = decodeTaskCursor(cursor);
     if (!decoded) {
-      throw createMcpError(ErrorCode.InvalidParams, 'Invalid cursor');
+      throw createProtocolError(
+        ProtocolErrorCode.InvalidParams,
+        'Invalid cursor'
+      );
     }
     return decoded.anchorTaskId;
   }
@@ -518,16 +596,17 @@ class TaskManager {
         this.removeTask(id);
       },
       registry: this.waiters,
-      isTerminalStatus,
+      isTerminal,
     });
   }
 
-  shrinkKeepAliveAfterDelivery(taskId: string): void {
+  shrinkTtlAfterDelivery(taskId: string): void {
     const task = this.tasks.get(taskId);
-    if (!task || !isTerminalStatus(task.status)) return;
+    if (!task || !isTerminal(task.status)) return;
+    if (task.ttl === null) return;
 
-    if (RESULT_DELIVERY_GRACE_MS < task.keepAlive) {
-      task.keepAlive = RESULT_DELIVERY_GRACE_MS;
+    if (RESULT_DELIVERY_GRACE_MS < task.ttl) {
+      task.ttl = RESULT_DELIVERY_GRACE_MS;
       task.lastUpdatedAt = new Date().toISOString();
     }
   }
@@ -591,8 +670,8 @@ export function decodeTaskCursor(
 interface WaitableTask {
   taskId: string;
   ownerKey: string;
-  status: string;
-  keepAlive: number;
+  status: TaskStatus;
+  ttl: number | null;
   _createdAtMs: number;
 }
 
@@ -602,7 +681,7 @@ export class TaskWaiterRegistry<TTask extends WaitableTask> {
   private waiters = new Map<string, Set<TaskWaiter<TTask>>>();
 
   constructor(
-    private readonly isTerminalStatus: (status: TTask['status']) => boolean
+    private readonly isTerminal: (status: TTask['status']) => boolean
   ) {}
 
   add(taskId: string, waiter: TaskWaiter<TTask>): void {
@@ -627,7 +706,7 @@ export class TaskWaiterRegistry<TTask extends WaitableTask> {
   }
 
   notify(task: TTask): void {
-    if (!this.isTerminalStatus(task.status)) return;
+    if (!this.isTerminal(task.status)) return;
 
     const waiters = this.waiters.get(task.taskId);
     if (!waiters) return;
@@ -644,13 +723,30 @@ export async function waitForTerminalTask<TTask extends WaitableTask>(options: {
   lookupTask: (taskId: string, ownerKey: string) => TTask | undefined;
   removeTask: (taskId: string) => void;
   registry: TaskWaiterRegistry<TTask>;
-  isTerminalStatus: (status: TTask['status']) => boolean;
+  isTerminal: (status: TTask['status']) => boolean;
 }): Promise<TTask | undefined> {
   const task = options.lookupTask(options.taskId, options.ownerKey);
   if (!task) return undefined;
-  if (options.isTerminalStatus(task.status)) return task;
+  if (options.isTerminal(task.status)) return task;
+  return createWaitForTaskPromise(
+    options,
+    task.ttl === null ? null : task._createdAtMs + task.ttl
+  );
+}
 
-  const deadlineMs = task._createdAtMs + task.keepAlive;
+// eslint-disable-next-line sonarjs/no-invariant-returns -- this helper intentionally returns the shared pending promise it wires up below.
+function createWaitForTaskPromise<TTask extends WaitableTask>(
+  options: {
+    taskId: string;
+    ownerKey: string;
+    signal?: AbortSignal;
+    lookupTask: (taskId: string, ownerKey: string) => TTask | undefined;
+    removeTask: (taskId: string) => void;
+    registry: TaskWaiterRegistry<TTask>;
+    isTerminal: (status: TTask['status']) => boolean;
+  },
+  deadlineMs: number | null
+): Promise<TTask | undefined> {
   const { promise, resolve, reject } = Promise.withResolvers<
     TTask | undefined
   >();
@@ -678,9 +774,10 @@ export async function waitForTerminalTask<TTask extends WaitableTask>(options: {
   };
 
   const settleOnce = (fn: () => void): void => {
-    if (settled) return;
-    settled = true;
-    fn();
+    if (!settled) {
+      settled = true;
+      fn();
+    }
   };
 
   const onAbort = (): void => {
@@ -688,7 +785,10 @@ export async function waitForTerminalTask<TTask extends WaitableTask>(options: {
       cleanup();
       options.registry.remove(options.taskId, waiter);
       rejectInContext(
-        createMcpError(ErrorCode.ConnectionClosed, 'Request was cancelled')
+        createProtocolError(
+          CONNECTION_CLOSED_ERROR_CODE,
+          'Request was cancelled'
+        )
       );
     });
   };
@@ -715,22 +815,28 @@ export async function waitForTerminalTask<TTask extends WaitableTask>(options: {
     options.signal.addEventListener('abort', onAbort, { once: true });
   }
 
-  const timeoutMs = Math.max(0, deadlineMs - Date.now());
-  deadlineTimeout = createUnrefTimeout(timeoutMs, { timeout: true });
-  void deadlineTimeout.promise
-    .then(() => {
-      settleOnce(() => {
-        cleanup();
-        options.registry.remove(options.taskId, waiter);
-        options.removeTask(options.taskId);
-        rejectInContext(
-          createMcpError(ErrorCode.InvalidParams, 'Task expired', {
-            taskId: options.taskId,
-          })
-        );
-      });
-    })
-    .catch(rejectInContext);
+  if (deadlineMs !== null) {
+    const timeoutMs = Math.max(0, deadlineMs - Date.now());
+    deadlineTimeout = createUnrefTimeout(timeoutMs, { timeout: true });
+    void deadlineTimeout.promise
+      .then(() => {
+        settleOnce(() => {
+          cleanup();
+          options.registry.remove(options.taskId, waiter);
+          options.removeTask(options.taskId);
+          rejectInContext(
+            createProtocolError(
+              ProtocolErrorCode.InvalidParams,
+              'Task expired',
+              {
+                taskId: options.taskId,
+              }
+            )
+          );
+        });
+      })
+      .catch(rejectInContext);
+  }
 
   return promise;
 }

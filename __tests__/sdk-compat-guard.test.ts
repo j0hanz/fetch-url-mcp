@@ -1,49 +1,21 @@
-import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
-import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { McpServer } from '@modelcontextprotocol/server';
 
 import assert from 'node:assert/strict';
-import { after, before, describe, it } from 'node:test';
+import { afterEach, describe, it } from 'node:test';
 
-import {
-  getSdkCallToolHandler,
-  setTaskToolCallCapability,
-} from '../src/lib/mcp-interop.js';
+import { z } from 'zod';
 
-function assertRecord(
-  value: unknown,
-  message: string
-): asserts value is Record<string, unknown> {
-  assert.ok(
-    value !== null && typeof value === 'object' && !Array.isArray(value),
-    message
-  );
-}
+import { registerTaskHandlers } from '../src/tasks/manager.js';
 
-function getPrivateHandlerMap(server: McpServer): Map<string, unknown> {
-  const handlers: unknown = Reflect.get(server.server, '_requestHandlers');
-  assert.ok(handlers instanceof Map, '_requestHandlers should be a Map');
-  return handlers;
-}
+describe('public MCP handler registration', () => {
+  const servers: McpServer[] = [];
 
-function getPrivateCapabilities(server: McpServer): Record<string, unknown> {
-  const caps: unknown = Reflect.get(server.server, '_capabilities');
-  assertRecord(caps, '_capabilities should be a plain object');
-  return caps;
-}
+  afterEach(async () => {
+    await Promise.allSettled(servers.splice(0).map((server) => server.close()));
+  });
 
-// ── SDK private API compatibility guard ─────────────────────────────
-//
-// These tests verify that the internal properties the codebase depends on
-// (`_requestHandlers`, `_capabilities`) are present on the SDK's McpServer
-// instance.  When an MCP SDK upgrade changes these internals, these tests
-// fail *first*, preventing silent runtime breakage.
-// ─────────────────────────────────────────────────────────────────────
-
-describe('SDK compatibility guard', () => {
-  let server: McpServer;
-
-  before(async () => {
-    server = new McpServer(
+  function createServer(): McpServer {
+    const server = new McpServer(
       { name: 'compat-test', version: '0.0.0' },
       {
         capabilities: {
@@ -51,111 +23,40 @@ describe('SDK compatibility guard', () => {
           tasks: {
             list: {},
             cancel: {},
+            delete: {},
             requests: { tools: { call: {} } },
           },
         },
       }
     );
+    servers.push(server);
+    return server;
+  }
 
-    // Register a dummy tool so the handler map has a 'tools/call' entry.
-    server.tool('test-tool', {}, async () => ({
-      content: [{ type: 'text', text: 'ok' }],
-    }));
+  it('registers tasks/delete through the public fallback request handler', async () => {
+    const server = createServer();
+    registerTaskHandlers(server);
 
-    // Connect via an in-memory transport to trigger handler registration.
-    const [clientTransport, serverTransport] =
-      InMemoryTransport.createLinkedPair();
-    await server.connect(serverTransport);
-
-    // We only need the server side; drain the client transport.
-    clientTransport.close();
+    assert.equal(typeof server.server.fallbackRequestHandler, 'function');
   });
 
-  after(async () => {
-    await server.close();
-  });
+  it('still supports normal tool registration on the same server', () => {
+    const server = createServer();
 
-  // ── _requestHandlers ────────────────────────────────────────────
+    const registeredTool = server.registerTool(
+      'registered-tool',
+      {
+        inputSchema: z.object({}),
+        outputSchema: z.object({ ok: z.boolean() }),
+      },
+      async () => ({
+        content: [{ type: 'text', text: '{"ok":true}' }],
+        structuredContent: { ok: true },
+      })
+    );
 
-  describe('_requestHandlers', () => {
-    it('is a Map on the inner Server instance', () => {
-      const handlers = getPrivateHandlerMap(server);
-      assert.ok(handlers instanceof Map, '_requestHandlers should be a Map');
-    });
+    registeredTool.execution = { taskSupport: 'optional' };
 
-    it('contains a tools/call handler after tool registration', () => {
-      const handlers = getPrivateHandlerMap(server);
-      const handler = handlers.get('tools/call');
-      assert.equal(
-        typeof handler,
-        'function',
-        'tools/call handler should be a function'
-      );
-    });
-
-    it('contains a tools/list handler after tool registration', () => {
-      const handlers = getPrivateHandlerMap(server);
-      const handler = handlers.get('tools/list');
-      assert.equal(
-        typeof handler,
-        'function',
-        'tools/list handler should be a function'
-      );
-    });
-
-    it('getSdkCallToolHandler returns the handler function', () => {
-      const handler = getSdkCallToolHandler(server);
-      assert.equal(
-        typeof handler,
-        'function',
-        'getSdkCallToolHandler should return a function'
-      );
-    });
-  });
-
-  // ── _capabilities ───────────────────────────────────────────────
-
-  describe('_capabilities', () => {
-    it('is a plain object on the inner Server instance', () => {
-      const caps = getPrivateCapabilities(server);
-      assertRecord(caps, '_capabilities should be a plain object');
-    });
-
-    it('setTaskToolCallCapability(enabled=true) adds tasks.requests.tools.call', () => {
-      setTaskToolCallCapability(server, true);
-
-      const caps = getPrivateCapabilities(server);
-      const tasks = caps['tasks'];
-      assertRecord(tasks, 'capabilities.tasks should exist');
-      assert.ok(tasks, 'capabilities.tasks should exist');
-
-      const requests = tasks['requests'];
-      assertRecord(requests, 'capabilities.tasks.requests should exist');
-      assert.ok(requests, 'capabilities.tasks.requests should exist');
-      assert.ok(
-        requests['tools'],
-        'capabilities.tasks.requests.tools should exist'
-      );
-    });
-
-    it('setTaskToolCallCapability(enabled=false) removes tasks.requests.tools', () => {
-      // Ensure it's enabled first.
-      setTaskToolCallCapability(server, true);
-      setTaskToolCallCapability(server, false);
-
-      const caps = getPrivateCapabilities(server);
-      const tasks = caps['tasks'];
-      assertRecord(tasks, 'capabilities.tasks should still exist');
-      assert.ok(tasks, 'capabilities.tasks should still exist');
-
-      const requests = tasks['requests'];
-      assertRecord(requests, 'capabilities.tasks.requests should still exist');
-      assert.ok(requests, 'capabilities.tasks.requests should still exist');
-      assert.equal(
-        requests['tools'],
-        undefined,
-        'capabilities.tasks.requests.tools should be removed'
-      );
-    });
+    assert.deepEqual(registeredTool.execution, { taskSupport: 'optional' });
   });
 });

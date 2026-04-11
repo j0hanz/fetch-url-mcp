@@ -1,22 +1,28 @@
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import {
+  type CallToolResult,
   type ContentBlock,
-  ErrorCode,
+  type McpServer,
+  ProtocolErrorCode,
+  type ServerContext,
   type ServerResult,
   type ToolAnnotations,
-} from '@modelcontextprotocol/sdk/types.js';
+} from '@modelcontextprotocol/server';
 
 import type { z } from 'zod';
 
 import { config } from '../lib/config.js';
-import { Loggers, logInfo } from '../lib/core.js';
-import { classifyAndLogToolError, isAbortError } from '../lib/error/index.js';
+import { logError, Loggers, logInfo } from '../lib/core.js';
 import {
-  createMcpError,
+  classifyAndLogToolError,
+  FetchError,
+  getErrorMessage,
+  handleToolError,
+  isAbortError,
+} from '../lib/error/index.js';
+import {
   createProgressReporter,
+  createProtocolError,
   type ProgressReporter,
-  registerToolPresentation,
-  type ToolHandlerExtra,
   validateOrThrow,
 } from '../lib/mcp-interop.js';
 import {
@@ -38,25 +44,15 @@ import {
   normalizePageTitle,
 } from '../schemas.js';
 import {
-  registerTaskCapableTool,
-  setTaskCapableToolSupport,
-  type TaskCapableToolDescriptor,
-  type TaskCapableToolSupport,
-  unregisterTaskCapableTool,
-  withRequestContextIfMissing,
+  attachAbortController,
+  detachAbortController,
+  withRelatedTaskMeta,
 } from '../tasks/index.js';
 
 // Area contract: MCP tool registration and fetch-url response shaping.
 // Export only tool-facing registration and handler primitives; keep transport/session ownership and generic shared helpers out.
 
 type FetchUrlInput = z.infer<typeof fetchUrlInputSchema>;
-
-interface ToolResponseBase {
-  [key: string]: unknown;
-  content: ContentBlock[];
-  structuredContent?: Record<string, unknown> | undefined;
-  isError?: boolean;
-}
 
 export const FETCH_URL_TOOL_NAME = 'fetch-url';
 
@@ -134,7 +130,7 @@ function validateStructuredContent(
   validateOrThrow(
     fetchUrlOutputSchema,
     structuredContent,
-    ErrorCode.InternalError,
+    ProtocolErrorCode.InternalError,
     'Output validation failed',
     Loggers.LOG_FETCH_URL
   );
@@ -158,7 +154,7 @@ function buildResponse(
   pipeline: PipelineResult<MarkdownPipelineResult>,
   inlineResult: InlineContentResult,
   inputUrl: string
-): ToolResponseBase {
+): CallToolResult {
   const structuredContent = buildStructuredContent(
     pipeline,
     inlineResult,
@@ -182,13 +178,16 @@ const Step = {
 } as const;
 
 function formatContentSize(contentSize: number): string {
-  if (contentSize < 1000) return `${contentSize} chars`;
-  if (contentSize < 1_000_000) return `${(contentSize / 1024).toFixed(1)} KB`;
-  return `${(contentSize / (1024 * 1024)).toFixed(1)} MB`;
+  if (contentSize < 1024) return `${contentSize} B`;
+  if (contentSize < 1_048_576) {
+    const kb = contentSize / 1024;
+    return kb < 10 ? `${kb.toFixed(1)} KB` : `${kb.toFixed(0)} KB`;
+  }
+  return `${(contentSize / 1_048_576).toFixed(1)} MB`;
 }
 
 function buildFetchSuccessSummary(contentSize: number): string {
-  return `Done — ${formatContentSize(contentSize)}`;
+  return `Fetch completed \u2022 ${formatContentSize(contentSize)}`;
 }
 
 export function getFetchCompletionStatusMessage(
@@ -214,29 +213,45 @@ export class FetchUrlProgressPlan {
   ) {}
 
   reportStart(): void {
-    this.reporter.report(Step.START, 'Preparing request', this.total);
+    this.reporter.report({
+      progress: Step.START,
+      message: 'Preparing',
+      total: this.total,
+    });
   }
 
   reportStage(stage: SharedFetchStage): void {
     const mapped = this.mapStage(stage);
     if (!mapped) return;
-    this.reporter.report(mapped.step, mapped.message, this.total);
+    this.reporter.report({
+      progress: mapped.step,
+      message: mapped.message,
+      total: this.total,
+    });
   }
 
   reportSuccess(contentSize: number): void {
-    this.reporter.report(
-      Step.DONE,
-      buildFetchSuccessSummary(contentSize),
-      this.total
-    );
+    this.reporter.report({
+      progress: Step.DONE,
+      message: buildFetchSuccessSummary(contentSize),
+      total: this.total,
+    });
   }
 
-  reportFailure(cancelled: boolean): void {
-    this.reporter.report(
-      Step.DONE,
-      cancelled ? 'Cancelled' : 'Failed',
-      this.total
-    );
+  reportFailure(cancelled: boolean, error?: unknown): void {
+    let message: string;
+    if (cancelled) {
+      message = 'Cancelled';
+    } else if (error instanceof FetchError && error.statusCode > 0) {
+      message = `Fetch failed \u2022 ${String(error.statusCode)}`;
+    } else {
+      message = 'Fetch failed';
+    }
+    this.reporter.report({
+      progress: Step.DONE,
+      message,
+      total: this.total,
+    });
   }
 
   private mapStage(
@@ -256,20 +271,23 @@ export class FetchUrlProgressPlan {
       case 'response_ready':
         return {
           step: Step.RESPONSE,
-          message: 'Received response',
+          message: 'Processing response',
         };
       case 'transform_start':
         return {
           step: Step.TRANSFORM,
-          message: 'Parsing HTML -> Markdown',
+          message: 'Converting to Markdown',
         };
       case 'prepare_output':
         return {
           step: Step.PREPARE,
-          message: 'Fetch completed',
+          message: 'Finalizing',
         };
       case 'finalize_output':
-        return undefined;
+        return {
+          step: Step.DONE,
+          message: 'Fetch completed',
+        };
     }
   }
 }
@@ -283,8 +301,8 @@ function buildToolAbortSignal(extraSignal?: AbortSignal): AbortSignal {
     config.tools.timeoutMs > 0 ? config.tools.timeoutMs : HARD_TOOL_TIMEOUT_MS;
   const signal = composeAbortSignal(extraSignal, timeout);
   if (!signal) {
-    throw createMcpError(
-      ErrorCode.InternalError,
+    throw createProtocolError(
+      ProtocolErrorCode.InternalError,
       'Failed to create timeout signal'
     );
   }
@@ -312,18 +330,35 @@ function buildFetchOptions(
   };
 }
 
+async function writeRequestScopedLog(
+  ctx: ServerContext | undefined,
+  level: 'info' | 'warning' | 'error',
+  message: string,
+  data: Record<string, unknown>
+): Promise<void> {
+  if (!ctx) return;
+
+  try {
+    await ctx.mcpReq.log(level, { message, ...data }, Loggers.LOG_FETCH_URL);
+  } catch {
+    // Request-scoped logging is best-effort; internal logging remains authoritative.
+  }
+}
+
 async function executeFetch(
   input: FetchUrlInput,
-  extra?: ToolHandlerExtra
-): Promise<ToolResponseBase> {
+  ctx?: ServerContext,
+  executionSignal?: AbortSignal
+): Promise<CallToolResult> {
   const { url } = input;
-  const signal = buildToolAbortSignal(extra?.signal);
+  const mcpReq = ctx?.mcpReq;
+  const signal = buildToolAbortSignal(executionSignal ?? mcpReq?.signal);
   const startedAt = performance.now();
-  const relatedTaskMeta =
-    extra?._meta?.['modelcontextprotocol.io/related-task'];
-  const relatedTask = isObject(relatedTaskMeta) ? relatedTaskMeta : undefined;
+  const meta = mcpReq?._meta;
+  const progressToken = meta?.progressToken;
+  const taskId = ctx?.task?.id;
   const progressPlan = new FetchUrlProgressPlan(
-    createProgressReporter(extra),
+    createProgressReporter(ctx),
     formatUrlForDisplay(url)
   );
 
@@ -332,13 +367,15 @@ async function executeFetch(
       'fetch-url started',
       {
         inputUrl: url,
-        hasProgressToken: extra?._meta?.progressToken !== undefined,
-        ...(isObject(relatedTask) && typeof relatedTask['taskId'] === 'string'
-          ? { taskId: relatedTask['taskId'] }
-          : {}),
+        hasProgressToken: progressToken !== undefined,
+        ...(taskId ? { taskId } : {}),
       },
       Loggers.LOG_FETCH_URL
     );
+    await writeRequestScopedLog(ctx, 'info', 'fetch-url started', {
+      inputUrl: url,
+      ...(taskId ? { taskId } : {}),
+    });
     progressPlan.reportStart();
     const { pipeline, inlineResult } = await performSharedFetch(
       buildFetchOptions(url, signal, progressPlan)
@@ -357,22 +394,39 @@ async function executeFetch(
       },
       Loggers.LOG_FETCH_URL
     );
+    await writeRequestScopedLog(ctx, 'info', 'fetch-url completed', {
+      inputUrl: url,
+      resolvedUrl: pipeline.url,
+      contentSize: inlineResult.contentSize,
+      ...(taskId ? { taskId } : {}),
+      ...(truncated ? { truncated: true } : {}),
+    });
     const response = buildResponse(pipeline, inlineResult, url);
     progressPlan.reportSuccess(inlineResult.contentSize);
     return response;
   } catch (error) {
-    progressPlan.reportFailure(isAbortError(error));
+    progressPlan.reportFailure(isAbortError(error), error);
+    await writeRequestScopedLog(
+      ctx,
+      isAbortError(error) ? 'warning' : 'error',
+      'fetch-url failed',
+      {
+        inputUrl: url,
+        error: getErrorMessage(error),
+        ...(taskId ? { taskId } : {}),
+      }
+    );
     throw error;
   }
 }
 
 export async function fetchUrlToolHandler(
   input: FetchUrlInput,
-  extra?: ToolHandlerExtra
-): Promise<ToolResponseBase> {
+  ctx?: ServerContext
+): Promise<CallToolResult> {
   const startedAt = performance.now();
 
-  return executeFetch(input, extra).catch((error: unknown) => {
+  return executeFetch(input, ctx).catch((error: unknown) => {
     const durationMs = Math.round(performance.now() - startedAt);
     return classifyAndLogToolError(
       error,
@@ -403,40 +457,20 @@ const TOOL_DEFINITION = {
   } satisfies ToolAnnotations,
 };
 
+type TaskCapableToolSupport = 'required' | 'optional' | 'forbidden';
+
 export interface ToolRegistrationControls {
   setTaskSupport: (support: TaskCapableToolSupport) => void;
 }
 
-function createTaskCapableDescriptor(): TaskCapableToolDescriptor<FetchUrlInput> {
-  return {
-    name: TOOL_DEFINITION.name,
-    parseArguments: (args: unknown) => {
-      return validateOrThrow(
-        TOOL_DEFINITION.inputSchema,
-        args,
-        ErrorCode.InvalidParams,
-        'Invalid parameters for fetch-url',
-        Loggers.LOG_FETCH_URL
-      );
-    },
-    execute: TOOL_DEFINITION.handler,
-    getCompletionStatusMessage: getFetchCompletionStatusMessage,
-    taskSupport: 'optional',
-  };
-}
-
 export function registerTools(server: McpServer): ToolRegistrationControls {
   if (!config.tools.enabled.includes(FETCH_URL_TOOL_NAME)) {
-    unregisterTaskCapableTool(server, FETCH_URL_TOOL_NAME);
     return {
       setTaskSupport: () => {},
     };
   }
 
-  const descriptor = createTaskCapableDescriptor();
-  registerTaskCapableTool(server, descriptor);
-
-  const registeredTool = server.registerTool(
+  const registeredTool = server.experimental.tasks.registerToolTask(
     TOOL_DEFINITION.name,
     {
       title: TOOL_DEFINITION.title,
@@ -444,24 +478,97 @@ export function registerTools(server: McpServer): ToolRegistrationControls {
       inputSchema: TOOL_DEFINITION.inputSchema,
       outputSchema: TOOL_DEFINITION.outputSchema,
       annotations: TOOL_DEFINITION.annotations,
-      execution: { taskSupport: 'optional' as const },
-      icons: [TOOL_ICON],
-    } as {
-      inputSchema: typeof fetchUrlInputSchema;
-      outputSchema: typeof fetchUrlOutputSchema;
-    } & Record<string, unknown>,
-    withRequestContextIfMissing(TOOL_DEFINITION.handler)
+      execution: { taskSupport: 'optional' },
+      _meta: { icons: [TOOL_ICON] },
+    },
+    {
+      createTask: async (args, ctx) => {
+        const task = await ctx.task.store.createTask(
+          ctx.task.requestedTtl !== undefined
+            ? { ttl: ctx.task.requestedTtl }
+            : {}
+        );
+        const taskSignal = attachAbortController(task.taskId).signal;
+
+        // Spin off background execution
+        executeFetch(args, ctx, taskSignal)
+          .then(async (result) => {
+            try {
+              await ctx.task.store.storeTaskResult(
+                task.taskId,
+                'completed',
+                result
+              );
+            } catch (storeError: unknown) {
+              logError(
+                'Failed to store completed task result',
+                {
+                  taskId: task.taskId,
+                  error: getErrorMessage(storeError),
+                },
+                Loggers.LOG_TASKS
+              );
+              await ctx.task.store.updateTaskStatus(
+                task.taskId,
+                'failed',
+                'Failed to store result'
+              );
+            }
+          })
+          .catch(async (error: unknown) => {
+            logError(
+              'Background execution crashed',
+              { taskId: task.taskId, error: getErrorMessage(error) },
+              Loggers.LOG_TASKS
+            );
+            const errorResult = handleToolError(
+              error,
+              args.url,
+              'Background execution failed'
+            );
+            try {
+              await ctx.task.store.storeTaskResult(
+                task.taskId,
+                'failed',
+                errorResult
+              );
+            } catch (storeError: unknown) {
+              logError(
+                'Failed to store task error result',
+                {
+                  taskId: task.taskId,
+                  error: getErrorMessage(storeError),
+                },
+                Loggers.LOG_TASKS
+              );
+              await ctx.task.store.updateTaskStatus(
+                task.taskId,
+                'failed',
+                getErrorMessage(error)
+              );
+            }
+          })
+          .finally(() => {
+            detachAbortController(task.taskId);
+          });
+
+        return { task };
+      },
+      getTask: async (_args, ctx) => {
+        return ctx.task.store.getTask(ctx.task.id);
+      },
+      getTaskResult: async (_args, ctx) => {
+        const result = (await ctx.task.store.getTaskResult(
+          ctx.task.id
+        )) as CallToolResult;
+        return withRelatedTaskMeta(result, ctx.task.id) as CallToolResult;
+      },
+    }
   );
-  registerToolPresentation(server, TOOL_DEFINITION.name, {
-    icons: [TOOL_ICON],
-  });
 
   const updateTaskSupport = (support: TaskCapableToolSupport): void => {
-    setTaskCapableToolSupport(server, FETCH_URL_TOOL_NAME, support);
     registeredTool.execution = { taskSupport: support };
   };
-
-  updateTaskSupport('optional');
 
   return { setTaskSupport: updateTaskSupport };
 }

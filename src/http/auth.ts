@@ -1,15 +1,10 @@
-import {
-  InvalidTokenError,
-  ServerError,
-} from '@modelcontextprotocol/sdk/server/auth/errors.js';
-import type { AuthInfo } from '@modelcontextprotocol/sdk/server/auth/types.js';
+import type { AuthInfo } from '@modelcontextprotocol/server';
 
 import { randomBytes } from 'node:crypto';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 
 import { config } from '../lib/config.js';
 import { logDebug, Loggers, logWarn } from '../lib/core.js';
-import { type JsonRpcId, sendJsonRpcError } from '../lib/mcp-interop.js';
 import { normalizeHost } from '../lib/net/index.js';
 import {
   composeAbortSignal,
@@ -18,41 +13,13 @@ import {
   timingSafeEqualUtf8,
 } from '../lib/utils.js';
 
-import type { RequestContext } from './native.js';
-
-function setNoStoreHeaders(res: ServerResponse): void {
-  res.setHeader('X-Content-Type-Options', 'nosniff');
-  res.setHeader('Cache-Control', 'no-store');
-}
-
-function sendJson(res: ServerResponse, status: number, body: unknown): void {
-  res.statusCode = status;
-  res.setHeader('Content-Type', 'application/json; charset=utf-8');
-  setNoStoreHeaders(res);
-  res.end(JSON.stringify(body));
-}
-
-function sendEmpty(res: ServerResponse, status: number): void {
-  res.statusCode = status;
-  res.setHeader('Content-Length', '0');
-  res.end();
-}
-
-function sendError(
-  res: ServerResponse,
-  code: number,
-  message: string,
-  status = 400,
-  id?: JsonRpcId | null
-): void {
-  sendJsonRpcError(res, status, code, message, id ?? null);
-}
-
-function getHeaderValue(req: IncomingMessage, name: string): string | null {
-  const value = req.headers[name];
-  if (!value) return null;
-  return Array.isArray(value) ? (value[0] ?? null) : value;
-}
+import {
+  getHeaderValue,
+  type RequestContext,
+  sendEmpty,
+  sendError,
+  sendJson,
+} from './helpers.js';
 
 // ---------------------------------------------------------------------------
 // CORS
@@ -88,6 +55,20 @@ class CorsPolicy {
 }
 
 export const corsPolicy = new CorsPolicy();
+
+class InvalidTokenError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'InvalidTokenError';
+  }
+}
+
+class AuthServerError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'AuthServerError';
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Host / Origin validation
@@ -573,7 +554,7 @@ class AuthService {
       this.stripHash(config.auth.resourceUrl)
     );
     if (!expected) {
-      const error = new ServerError('Configured resource URL is invalid');
+      const error = new AuthServerError('Configured resource URL is invalid');
       throw error;
     }
 
@@ -658,7 +639,7 @@ class AuthService {
         { status: response.status },
         Loggers.LOG_AUTH
       );
-      const error = new ServerError(
+      const error = new AuthServerError(
         `Token introspection failed: ${response.status}`
       );
       throw error;
@@ -671,7 +652,15 @@ class AuthService {
     token: string,
     payload: Record<string, unknown>
   ): AuthInfo {
-    const { exp, client_id: clientIdRaw, scope: scopeRaw } = payload;
+    const {
+      exp,
+      client_id: clientIdRaw,
+      scope: scopeRaw,
+      sub,
+      subject,
+      username,
+      preferred_username: preferredUsername,
+    } = payload;
     const expiresAt = typeof exp === 'number' ? exp : undefined;
     const clientId = typeof clientIdRaw === 'string' ? clientIdRaw : 'unknown';
 
@@ -683,6 +672,18 @@ class AuthService {
     };
 
     if (expiresAt !== undefined) info.expiresAt = expiresAt;
+    const extra: Record<string, unknown> = {};
+    if (typeof sub === 'string' && sub.length > 0) extra['sub'] = sub;
+    if (typeof subject === 'string' && subject.length > 0) {
+      extra['subject'] = subject;
+    }
+    if (typeof username === 'string' && username.length > 0) {
+      extra['username'] = username;
+    }
+    if (typeof preferredUsername === 'string' && preferredUsername.length > 0) {
+      extra['preferred_username'] = preferredUsername;
+    }
+    if (Object.keys(extra).length > 0) info.extra = extra;
     return info;
   }
 
@@ -722,7 +723,7 @@ class AuthService {
     signal?: AbortSignal
   ): Promise<AuthInfo> {
     if (!config.auth.introspectionUrl) {
-      const error = new ServerError('Introspection not configured');
+      const error = new AuthServerError('Introspection not configured');
       throw error;
     }
 
@@ -875,7 +876,7 @@ export function buildProtectedResourceMetadataDocument(): {
 } {
   const urls = buildRequestScopedProtectedResourceUrls();
   if (!config.auth.issuerUrl) {
-    const error = new ServerError(
+    const error = new AuthServerError(
       'OAuth issuer URL is required for protected resource metadata'
     );
     throw error;

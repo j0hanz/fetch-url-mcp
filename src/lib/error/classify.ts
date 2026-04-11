@@ -1,4 +1,9 @@
-import { ErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js';
+import {
+  ProtocolError,
+  ProtocolErrorCode,
+  SdkError,
+  SdkErrorCode,
+} from '@modelcontextprotocol/server';
 
 import { logError, logWarn } from '../core.js';
 import { FetchError, isAbortError, isSystemError } from './classes.js';
@@ -6,7 +11,7 @@ import { ErrorCategory, SystemErrors } from './codes.js';
 import {
   createToolErrorResponse,
   sanitizeToolErrorDetails,
-  stripMcpErrorPrefix,
+  stripProtocolErrorPrefix,
   type ToolErrorLogMeta,
   type ToolErrorPayload,
   type ToolErrorResponse,
@@ -142,15 +147,28 @@ function mapGenericToolError(
   };
 }
 
-function mapMcpToolError(error: McpError, url: string): ToolErrorPayload {
+function mapMcpToolError(error: ProtocolError, url: string): ToolErrorPayload {
   return {
-    error: stripMcpErrorPrefix(error.message),
+    error: stripProtocolErrorPrefix(error.message),
     url,
     category: ErrorCategory.MCP_ERROR,
     code: error.code,
     statusCode: error.code,
     ...(error.data !== undefined ? { data: error.data } : {}),
   };
+}
+
+function resolveSdkErrorCategory(code: SdkErrorCode): string {
+  switch (code) {
+    case SdkErrorCode.ConnectionClosed:
+      return ErrorCategory.UPSTREAM_ABORTED;
+    case SdkErrorCode.RequestTimeout:
+      return ErrorCategory.UPSTREAM_TIMEOUT;
+    case SdkErrorCode.SendFailed:
+      return ErrorCategory.FETCH_ERROR;
+    default:
+      return ErrorCategory.MCP_ERROR;
+  }
 }
 
 function resolveToolErrorPayload(
@@ -162,8 +180,18 @@ function resolveToolErrorPayload(
     return mapFetchToolError(error, url);
   }
 
-  if (error instanceof McpError) {
+  if (error instanceof ProtocolError) {
     return mapMcpToolError(error, url);
+  }
+
+  if (error instanceof SdkError) {
+    return {
+      error: error.message,
+      url,
+      category: resolveSdkErrorCategory(error.code),
+      code: error.code,
+      ...(error.data !== undefined ? { data: error.data } : {}),
+    };
   }
 
   return mapGenericToolError(error, url, fallbackMessage);
@@ -186,8 +214,8 @@ export function classifyAndLogToolError(
   toolName: string,
   fallbackMessage: string
 ): ToolErrorResponse {
-  if (error instanceof McpError) {
-    if (error.code === (ErrorCode.MethodNotFound as number)) {
+  if (error instanceof ProtocolError) {
+    if (error.code === (ProtocolErrorCode.MethodNotFound as number)) {
       logError(
         `${toolName} tool protocol error`,
         { url: meta.url, durationMs: meta.durationMs, error },

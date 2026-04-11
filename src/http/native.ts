@@ -1,11 +1,10 @@
-import type { AuthInfo } from '@modelcontextprotocol/sdk/server/auth/types.js';
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
-import type { Transport } from '@modelcontextprotocol/sdk/shared/transport.js';
+import { NodeStreamableHTTPServerTransport } from '@modelcontextprotocol/node';
 import {
-  ErrorCode,
+  type AuthInfo,
   isInitializeRequest,
-} from '@modelcontextprotocol/sdk/types.js';
+  type McpServer,
+  ProtocolErrorCode,
+} from '@modelcontextprotocol/server';
 
 import { randomUUID } from 'node:crypto';
 import { once } from 'node:events';
@@ -57,7 +56,6 @@ import {
   isJsonRpcBatchRequest,
   isMcpRequestBody,
   type JsonRpcId,
-  sendJsonRpcError,
 } from '../lib/mcp-interop.js';
 import {
   createDefaultBlockList,
@@ -83,7 +81,25 @@ import {
   isProtectedResourceMetadataPath,
   SUPPORTED_MCP_PROTOCOL_VERSIONS,
 } from './auth.js';
+import {
+  type AuthenticatedContext,
+  getHeaderValue,
+  type RequestContext,
+  sendEmpty,
+  sendError,
+  sendJson,
+} from './helpers.js';
 import { RateLimiter } from './rate-limit.js';
+
+export {
+  type AuthenticatedContext,
+  getHeaderValue,
+  type RequestContext,
+  sendEmpty,
+  sendError,
+  sendJson,
+  setNoStoreHeaders,
+} from './helpers.js';
 
 /*
  * Module map:
@@ -197,74 +213,24 @@ function drainConnectionsOnShutdown(server: TunableHttpServer): void {
   }
 }
 
-export interface RequestContext {
-  req: IncomingMessage;
-  res: ServerResponse;
-  url: URL;
-  method: string | undefined;
-  ip: string | null;
-  body: unknown;
-  signal?: AbortSignal;
-}
-
-export interface AuthenticatedContext extends RequestContext {
-  auth: AuthInfo;
-}
-
-// ---------------------------------------------------------------------------
-// Response helpers
-// ---------------------------------------------------------------------------
-
-function setNoStoreHeaders(res: ServerResponse): void {
-  res.setHeader('X-Content-Type-Options', 'nosniff');
-  res.setHeader('Cache-Control', 'no-store');
-}
-
-export function sendJson(
-  res: ServerResponse,
-  status: number,
-  body: unknown
-): void {
-  res.statusCode = status;
-  res.setHeader('Content-Type', 'application/json; charset=utf-8');
-  setNoStoreHeaders(res);
-  res.end(JSON.stringify(body));
-}
-
-export function sendEmpty(res: ServerResponse, status: number): void {
-  res.statusCode = status;
-  res.setHeader('Content-Length', '0');
-  res.end();
-}
-
-export function sendError(
-  res: ServerResponse,
-  code: number,
-  message: string,
-  status = 400,
-  id?: JsonRpcId | null
-): void {
-  sendJsonRpcError(res, status, code, message, id ?? null);
-}
-
 // ---------------------------------------------------------------------------
 // Request helpers
 // ---------------------------------------------------------------------------
-
-export function getHeaderValue(
-  req: IncomingMessage,
-  name: string
-): string | null {
-  const val = req.headers[name];
-  if (!val) return null;
-  return Array.isArray(val) ? (val[0] ?? null) : val;
-}
 
 export function getMcpSessionId(req: IncomingMessage): string | null {
   return (
     getHeaderValue(req, 'mcp-session-id') ??
     getHeaderValue(req, 'x-mcp-session-id')
   );
+}
+
+function attachAuthInfoToRequest(
+  req: IncomingMessage,
+  auth: AuthInfo
+): IncomingMessage & { auth?: AuthInfo } {
+  const requestWithAuth = req as IncomingMessage & { auth?: AuthInfo };
+  requestWithAuth.auth = auth;
+  return requestWithAuth;
 }
 
 const SINGLE_VALUE_HEADER_NAMES: readonly string[] = [
@@ -527,54 +493,6 @@ export async function closeMcpServerBestEffort(
   }
 }
 
-export function createTransportAdapter(
-  transportImpl: StreamableHTTPServerTransport
-): Transport {
-  type OnClose = NonNullable<Transport['onclose']>;
-  type OnError = NonNullable<Transport['onerror']>;
-  type OnMessage = NonNullable<Transport['onmessage']>;
-
-  const noopOnClose: OnClose = () => {};
-  const noopOnError: OnError = () => {};
-  const noopOnMessage: OnMessage = () => {};
-
-  const baseOnClose = transportImpl.onclose;
-
-  let oncloseHandler: OnClose = noopOnClose;
-  let onerrorHandler: OnError = noopOnError;
-  let onmessageHandler: OnMessage = noopOnMessage;
-
-  return {
-    start: () => transportImpl.start(),
-    send: (message, options) => transportImpl.send(message, options),
-    close: () => transportImpl.close(),
-
-    get onclose() {
-      return oncloseHandler;
-    },
-    set onclose(handler: OnClose) {
-      oncloseHandler = handler;
-      transportImpl.onclose = composeCloseHandlers(baseOnClose, handler);
-    },
-
-    get onerror() {
-      return onerrorHandler;
-    },
-    set onerror(handler: OnError) {
-      onerrorHandler = handler;
-      transportImpl.onerror = handler;
-    },
-
-    get onmessage() {
-      return onmessageHandler;
-    },
-    set onmessage(handler: OnMessage) {
-      onmessageHandler = handler;
-      transportImpl.onmessage = handler;
-    },
-  };
-}
-
 // ---------------------------------------------------------------------------
 // JSON body reading
 // ---------------------------------------------------------------------------
@@ -754,7 +672,7 @@ export const jsonBodyReader = new JsonBodyReader();
 
 interface SessionRecordLike {
   server: McpServer;
-  transport: StreamableHTTPServerTransport;
+  transport: NodeStreamableHTTPServerTransport;
 }
 
 interface SessionTeardownOptions {
@@ -1266,7 +1184,11 @@ class McpSessionGateway {
     const transport = await this.getOrCreateTransport(ctx, requestId);
     if (!transport) return;
 
-    await transport.handleRequest(ctx.req, ctx.res, body);
+    await transport.handleRequest(
+      attachAuthInfoToRequest(ctx.req, ctx.auth),
+      ctx.res,
+      body
+    );
   }
 
   async handleGet(ctx: AuthenticatedContext): Promise<void> {
@@ -1288,7 +1210,7 @@ class McpSessionGateway {
       });
       sendError(
         ctx.res,
-        ErrorCode.InvalidRequest,
+        ProtocolErrorCode.InvalidRequest,
         'We need you to use "text/event-stream" for this connection.',
         406
       );
@@ -1297,7 +1219,10 @@ class McpSessionGateway {
 
     logDebug('MCP GET received', { sessionId }, Loggers.LOG_HTTP);
     this.store.touch(sessionId);
-    await session.transport.handleRequest(ctx.req, ctx.res);
+    await session.transport.handleRequest(
+      attachAuthInfoToRequest(ctx.req, ctx.auth),
+      ctx.res
+    );
   }
 
   async handleDelete(ctx: AuthenticatedContext): Promise<void> {
@@ -1330,7 +1255,7 @@ class McpSessionGateway {
       });
       sendError(
         ctx.res,
-        ErrorCode.InvalidRequest,
+        ProtocolErrorCode.InvalidRequest,
         'We need the request to accept both "application/json" and "text/event-stream".',
         406
       );
@@ -1349,7 +1274,7 @@ class McpSessionGateway {
       });
       sendError(
         ctx.res,
-        ErrorCode.InvalidRequest,
+        ProtocolErrorCode.InvalidRequest,
         'We need a valid JSON object in the request body for MCP POST requests.',
         400
       );
@@ -1367,7 +1292,7 @@ class McpSessionGateway {
       });
       sendError(
         ctx.res,
-        ErrorCode.InvalidRequest,
+        ProtocolErrorCode.InvalidRequest,
         'JSON-RPC batch requests are not supported on this endpoint.',
         400
       );
@@ -1388,7 +1313,7 @@ class McpSessionGateway {
     });
     sendError(
       ctx.res,
-      ErrorCode.InvalidRequest,
+      ProtocolErrorCode.InvalidRequest,
       'We need a valid JSON object in the request body for MCP POST requests.',
       400
     );
@@ -1510,7 +1435,7 @@ class McpSessionGateway {
   private async getOrCreateTransport(
     ctx: AuthenticatedContext,
     requestId: JsonRpcId
-  ): Promise<StreamableHTTPServerTransport | null> {
+  ): Promise<NodeStreamableHTTPServerTransport | null> {
     const sessionId = getMcpSessionId(ctx.req);
 
     if (sessionId) {
@@ -1642,7 +1567,7 @@ class McpSessionGateway {
     authFingerprint: string | null,
     res: ServerResponse,
     requestId: JsonRpcId
-  ): StreamableHTTPServerTransport | null {
+  ): NodeStreamableHTTPServerTransport | null {
     const session = this.getAuthenticatedSessionById(
       sessionId,
       authFingerprint,
@@ -1783,7 +1708,7 @@ class McpSessionGateway {
     tracker: ReturnType<typeof createSlotTracker>,
     unpublishedSession: {
       server: McpServer;
-      transport: StreamableHTTPServerTransport;
+      transport: NodeStreamableHTTPServerTransport;
     }
   ): NodeJS.Timeout {
     const initTimeout = setTimeout(() => {
@@ -1820,12 +1745,12 @@ class McpSessionGateway {
 
   private async connectTransport(
     sessionServer: McpServer,
-    transportImpl: StreamableHTTPServerTransport,
+    transportImpl: NodeStreamableHTTPServerTransport,
     initTimeout: NodeJS.Timeout,
     tracker: ReturnType<typeof createSlotTracker>,
     unpublishedSession: {
       server: McpServer;
-      transport: StreamableHTTPServerTransport;
+      transport: NodeStreamableHTTPServerTransport;
     },
     sessionId: string
   ): Promise<boolean> {
@@ -1838,8 +1763,12 @@ class McpSessionGateway {
     };
 
     try {
-      const transport = createTransportAdapter(transportImpl);
-      await sessionServer.connect(transport);
+      const preConnectOnClose = transportImpl.onclose;
+      await sessionServer.connect(transportImpl);
+      transportImpl.onclose = composeCloseHandlers(
+        preConnectOnClose,
+        transportImpl.onclose
+      );
     } catch (err) {
       logWarn(
         'Session transport connect failed',
@@ -1865,7 +1794,7 @@ class McpSessionGateway {
     ctx: AuthenticatedContext,
     requestId: JsonRpcId,
     negotiatedProtocolVersion: string
-  ): Promise<StreamableHTTPServerTransport | null> {
+  ): Promise<NodeStreamableHTTPServerTransport | null> {
     const authFingerprint = buildAuthFingerprint(ctx.auth);
     if (!authFingerprint) {
       logError(
@@ -1922,7 +1851,7 @@ class McpSessionGateway {
       tracker.releaseSlot();
       throw error;
     }
-    const transportImpl = new StreamableHTTPServerTransport({
+    const transportImpl = new NodeStreamableHTTPServerTransport({
       sessionIdGenerator: () => newSessionId,
     });
     const unpublishedSession = {
@@ -2273,17 +2202,6 @@ class HttpRequestPipeline {
     const path = resolveRequestPath(rawReq);
     const startTime = performance.now();
 
-    rawRes.once('finish', () => {
-      logRequestCompletion({
-        path,
-        statusCode: rawRes.statusCode,
-        durationMs: performance.now() - startTime,
-        requestId,
-        ...(rawReq.method ? { method: rawReq.method } : {}),
-        ...(sessionId ? { sessionId } : {}),
-      });
-    });
-
     try {
       await runWithRequestContext(
         {
@@ -2292,6 +2210,17 @@ class HttpRequestPipeline {
           ...(sessionId ? { sessionId } : {}),
         },
         async () => {
+          rawRes.once('finish', () => {
+            logRequestCompletion({
+              path,
+              statusCode: rawRes.statusCode,
+              durationMs: performance.now() - startTime,
+              requestId,
+              ...(rawReq.method ? { method: rawReq.method } : {}),
+              ...(sessionId ? { sessionId } : {}),
+            });
+          });
+
           if (this.rejectDuplicateHeaders(rawReq, rawRes)) return;
 
           const ctx = this.buildContext(rawReq, rawRes, signal);

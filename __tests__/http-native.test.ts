@@ -1,4 +1,4 @@
-import type { ServerResult } from '@modelcontextprotocol/sdk/types.js';
+import type { ServerResult } from '@modelcontextprotocol/server';
 
 import assert from 'node:assert/strict';
 import type { IncomingMessage } from 'node:http';
@@ -12,7 +12,10 @@ import {
   startHttpServer,
 } from '../src/http/index.js';
 import { config } from '../src/lib/config.js';
-import { resolveTaskOwnerKey, taskManager } from '../src/tasks/manager.js';
+import {
+  buildAuthenticatedOwnerKey,
+  taskManager,
+} from '../src/tasks/manager.js';
 
 const TEST_API_KEY = 'test-api-key';
 
@@ -446,15 +449,27 @@ describe('HTTP native gateway routing', () => {
       idempotentHint: true,
       openWorldHint: true,
     });
-    assert.equal(Array.isArray(tool['icons']), true);
+    assert.equal(Array.isArray(asRecord(tool['_meta'])?.['icons']), true);
   });
 
-  it('keeps auth-bound tasks accessible after the original session closes', async () => {
-    const ownerKey = resolveTaskOwnerKey({
-      authInfo: { clientId: 'static-token', token: TEST_API_KEY },
+  it('keeps subject-bound tasks accessible after reconnecting with rotated tokens', async () => {
+    const originalAuthenticateForTest = authService.authenticate;
+    let authCallCount = 0;
+    authService.authenticate = async () => ({
+      token: ++authCallCount <= 2 ? 'rotated-token-1' : 'rotated-token-2',
+      clientId: 'oauth-client',
+      scopes: [],
+      resource: config.auth.resourceUrl,
+      extra: { sub: 'user-123' },
     });
+
+    const ownerKey = buildAuthenticatedOwnerKey({
+      clientId: 'oauth-client',
+      token: 'rotated-token-1',
+      extra: { sub: 'user-123' },
+    })!;
     const task = taskManager.createTask(
-      { keepAlive: 5_000 },
+      { ttl: 5_000 },
       'Task completed',
       ownerKey
     );
@@ -465,60 +480,60 @@ describe('HTTP native gateway routing', () => {
       } satisfies ServerResult,
     });
 
-    const firstSessionId = await initializeSession(baseUrl);
-    const closeResponse = await fetch(`${baseUrl}/mcp`, {
-      method: 'DELETE',
-      headers: createSessionHeaders({
-        sessionId: firstSessionId,
-        protocolVersion: '2025-11-25',
-      }),
-    });
-    assert.equal(closeResponse.status, 200);
+    try {
+      await initializeSession(baseUrl);
+      const secondSessionId = await initializeSession(baseUrl);
 
-    const secondSessionId = await initializeSession(baseUrl);
+      const getBody = asRecord(
+        await postSessionRpc(baseUrl, secondSessionId, {
+          jsonrpc: '2.0',
+          id: 10,
+          method: 'tasks/get',
+          params: { taskId: task.taskId },
+        })
+      );
+      assert.equal(getBody?.['result'] && typeof getBody['result'], 'object');
+      assert.equal(asRecord(getBody?.['result'])?.['taskId'], task.taskId);
 
-    const getBody = asRecord(
-      await postSessionRpc(baseUrl, secondSessionId, {
-        jsonrpc: '2.0',
-        id: 10,
-        method: 'tasks/get',
-        params: { taskId: task.taskId },
-      })
-    );
-    assert.equal(getBody?.['result'] && typeof getBody['result'], 'object');
-    assert.equal(asRecord(getBody?.['result'])?.['taskId'], task.taskId);
+      const listBody = asRecord(
+        await postSessionRpc(baseUrl, secondSessionId, {
+          jsonrpc: '2.0',
+          id: 11,
+          method: 'tasks/list',
+          params: {},
+        })
+      );
+      const tasks = Array.isArray(asRecord(listBody?.['result'])?.['tasks'])
+        ? (asRecord(listBody?.['result'])?.['tasks'] as Array<
+            Record<string, unknown>
+          >)
+        : [];
+      assert.ok(tasks.some((entry) => entry['taskId'] === task.taskId));
 
-    const listBody = asRecord(
-      await postSessionRpc(baseUrl, secondSessionId, {
-        jsonrpc: '2.0',
-        id: 11,
-        method: 'tasks/list',
-        params: {},
-      })
-    );
-    const tasks = Array.isArray(asRecord(listBody?.['result'])?.['tasks'])
-      ? (asRecord(listBody?.['result'])?.['tasks'] as Array<
-          Record<string, unknown>
-        >)
-      : [];
-    assert.ok(tasks.some((entry) => entry['taskId'] === task.taskId));
-
-    const resultBody = asRecord(
-      await postSessionRpc(baseUrl, secondSessionId, {
-        jsonrpc: '2.0',
-        id: 12,
-        method: 'tasks/result',
-        params: { taskId: task.taskId },
-      })
-    );
-    assert.equal(
-      asRecord(resultBody?.['result'])?.['content'] instanceof Array,
-      true
-    );
-    const content = asRecord(resultBody?.['result'])?.['content'] as
-      | Array<Record<string, unknown>>
-      | undefined;
-    assert.equal(content?.[0]?.['text'], 'persisted result');
+      const resultBody = asRecord(
+        await postSessionRpc(baseUrl, secondSessionId, {
+          jsonrpc: '2.0',
+          id: 12,
+          method: 'tasks/result',
+          params: { taskId: task.taskId },
+        })
+      );
+      assert.equal(
+        asRecord(resultBody?.['result'])?.['content'] instanceof Array,
+        true
+      );
+      const content = asRecord(resultBody?.['result'])?.['content'] as
+        | Array<Record<string, unknown>>
+        | undefined;
+      assert.equal(content?.[0]?.['text'], 'persisted result');
+      assert.deepEqual(asRecord(asRecord(resultBody?.['result'])?.['_meta']), {
+        'io.modelcontextprotocol/related-task': {
+          taskId: task.taskId,
+        },
+      });
+    } finally {
+      authService.authenticate = originalAuthenticateForTest;
+    }
   });
 
   it('returns 405 for unsupported methods on /mcp', async () => {

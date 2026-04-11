@@ -18,7 +18,7 @@ By default it runs over stdio. Pass `--http` if you need a proper HTTP endpoint 
 
 - **HTML to Markdown** — Turns any public web page into clean, readable Markdown with metadata like `title`, `url`, `contentSize`, and `truncated`.
 - **Smart URL handling** — Recognizes GitHub, GitLab, Bitbucket, and Gist page URLs and rewrites them to raw-content endpoints before fetching.
-- **Task mode** — Big or slow pages can run as async MCP tasks with progress updates, instead of blocking. In HTTP mode, tasks are bound to the authenticated caller rather than a single MCP session, so they can be resumed after reconnecting with the same credentials. Polling task state also exposes `progress` and `total` when available.
+- **Task mode** — Big or slow pages can run as async MCP tasks with progress updates, instead of blocking. In HTTP mode, tasks are bound to the authenticated caller rather than a single MCP session, so they can be resumed after reconnecting as the same authenticated subject. Polling task state exposes task summaries; numeric progress remains out-of-band via `notifications/progress`.
 - **Self-documenting** — Includes an `internal://instructions` resource and a `get-help` prompt so clients know how to use it.
 - **HTTP mode** — Optionally serves over Streamable HTTP with host/origin validation, bearer or OAuth auth, rate limiting, health checks, and TLS.
 
@@ -482,7 +482,7 @@ For more info, see [Kilo Code docs](https://kilocode.ai/docs).
 
 - **Documentation for LLMs** — Grab a docs page, blog post, or reference article as Markdown and pass it straight into a context window.
 - **Repository content** — Hand it a GitHub, GitLab, or Bitbucket URL and it resolves the raw content endpoint. Works with Gists too.
-- **Slow or large pages** — Task mode lets big fetches run in the background while sending monotonic progress updates back to the client, while `tasks/get` exposes the latest `statusMessage`, `progress`, and `total`.
+- **Slow or large pages** — Task mode lets big fetches run in the background while sending monotonic progress updates back to the client, while `tasks/get` exposes the latest task summary fields such as `statusMessage`, `createdAt`, `lastUpdatedAt`, `ttl`, and `pollInterval`.
 
 ## Architecture
 
@@ -528,7 +528,7 @@ For more info, see [Kilo Code docs](https://kilocode.ai/docs).
 
 #### `fetch-url`
 
-Takes a URL and returns Markdown. Read-only — no JavaScript execution. Supports running as a background MCP task for large or slow pages. When task mode is used, `tasks/get` and `tasks/list` include `statusMessage`, `progress`, and `total` whenever progress has been reported.
+Takes a URL and returns Markdown. Read-only, with no JavaScript execution. Supports running as a background MCP task for large or slow pages. In task mode, `tasks/get` and `tasks/list` expose task summaries including `status`, `statusMessage`, `createdAt`, `lastUpdatedAt`, `ttl`, and `pollInterval`; numeric progress remains out-of-band via `notifications/progress`.
 
 | Parameter | Type     | Required | Description                 |
 | --------- | -------- | -------- | --------------------------- |
@@ -536,9 +536,9 @@ Takes a URL and returns Markdown. Read-only — no JavaScript execution. Support
 
 You get text content back by default. If output validation passes, the response also includes `structuredContent` with typed fields: `url`, `resolvedUrl`, `finalUrl`, `title`, `metadata`, `markdown`, `fetchedAt`, `contentSize`, and `truncated`. A `true` value for `truncated` means the content hit a server-side size limit.
 
-To opt into progress updates, include `_meta.progressToken` in the tool call. The token may be a string or number. The server may then emit monotonic `notifications/progress` updates, and task mode reuses the same token until the task reaches a terminal state.
+To opt into progress updates, include `_meta.progressToken` in the tool call. The token may be a string or number, and the server may emit monotonic `notifications/progress` updates while the fetch runs.
 
-To run the tool in task mode, include `_meta["modelcontextprotocol.io/task"] = { "taskId": "<client-id>", "keepAlive": <ms> }`. `tasks/result` returns output only after the task reaches `completed`. Task-linked progress notifications, task summaries, and final results include `_meta["modelcontextprotocol.io/related-task"] = { "taskId": "<client-id>" }`.
+To run the tool in task mode, include `params.task = { ttl?: <ms> }`. `tasks/result` waits until the task reaches a terminal status and then returns the stored output or a terminal error payload for cancelled or failed tasks. Task summaries and final results include `_meta["io.modelcontextprotocol/related-task"] = { "taskId": "<server-task-id>" }`.
 
 ```json
 {
@@ -547,6 +547,10 @@ To run the tool in task mode, include `_meta["modelcontextprotocol.io/task"] = {
     "name": "fetch-url",
     "arguments": {
       "url": "https://example.com/docs"
+    },
+    "task": {
+      "ttl": 300000,
+      "pollInterval": 1000
     },
     "_meta": {
       "progressToken": 7
@@ -571,20 +575,21 @@ To run the tool in task mode, include `_meta["modelcontextprotocol.io/task"] = {
 
 ### Prompts
 
-| Prompt     | Arguments | Description                                                                     |
-| ---------- | --------- | ------------------------------------------------------------------------------- |
-| `get-help` | none      | Return Fetch URL server instructions: workflows, task mode, and error handling. |
+| Prompt     | Arguments | Description                                                                                                                                            |
+| ---------- | --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `get-help` | `topic?`  | Return Fetch URL server instructions: workflows, task mode, and error handling. Optional values: `capabilities`, `workflows`, `constraints`, `errors`. |
 
 ## MCP Capabilities
 
-| Capability                      | Status    | Notes                                                                                                                                                                                                          |
-| ------------------------------- | --------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| completions                     | confirmed | Advertised in `createServerCapabilities()`.                                                                                                                                                                    |
-| logging                         | confirmed | Advertised in `createServerCapabilities()` and handled through `SetLevelRequestSchema`.                                                                                                                        |
-| resources subscribe/listChanged | confirmed | Advertised in `createServerCapabilities()`.                                                                                                                                                                    |
-| prompts                         | confirmed | `get-help` is registered during server startup.                                                                                                                                                                |
-| tasks                           | confirmed | Advertised in `createServerCapabilities()` and backed by registered task handlers plus optional tool task support.                                                                                             |
-| progress notifications          | confirmed | Opt-in via `_meta.progressToken`. Tool execution reports monotonic `notifications/progress` updates during fetch and transform stages, and task-mode progress reuses the caller's token for the task lifetime. |
+| Capability             | Status    | Notes                                                                                                                                  |
+| ---------------------- | --------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| completions            | confirmed | Advertised in `createServerCapabilities()`.                                                                                            |
+| logging                | confirmed | Advertised in `createServerCapabilities()`.                                                                                            |
+| resources              | confirmed | Static instruction resource is registered during server startup. Subscription and list-changed support are not advertised.             |
+| prompts                | confirmed | `get-help` is registered during server startup.                                                                                        |
+| tasks                  | confirmed | Advertised in `createServerCapabilities()` and backed by registered task handlers plus optional tool task support.                     |
+| progress notifications | confirmed | Opt-in via `_meta.progressToken`. Tool execution reports monotonic `notifications/progress` updates during fetch and transform stages. |
+| task status updates    | confirmed | `notifications/tasks/status` is emitted when task status changes and `TASKS_STATUS_NOTIFICATIONS=true`.                                |
 
 ### Tool Annotations
 
@@ -787,14 +792,15 @@ All configuration is through environment variables. For basic stdio usage, nothi
 
 ## Credits
 
-| Dependency                                                                           | Registry |
-| ------------------------------------------------------------------------------------ | -------- |
-| [@modelcontextprotocol/sdk](https://www.npmjs.com/package/@modelcontextprotocol/sdk) | npm      |
-| [@mozilla/readability](https://www.npmjs.com/package/@mozilla/readability)           | npm      |
-| [linkedom](https://www.npmjs.com/package/linkedom)                                   | npm      |
-| [node-html-markdown](https://www.npmjs.com/package/node-html-markdown)               | npm      |
-| [undici](https://www.npmjs.com/package/undici)                                       | npm      |
-| [zod](https://www.npmjs.com/package/zod)                                             | npm      |
+| Dependency                                                                                 | Registry |
+| ------------------------------------------------------------------------------------------ | -------- |
+| [@modelcontextprotocol/server](https://www.npmjs.com/package/@modelcontextprotocol/server) | npm      |
+| [@modelcontextprotocol/node](https://www.npmjs.com/package/@modelcontextprotocol/node)     | npm      |
+| [@mozilla/readability](https://www.npmjs.com/package/@mozilla/readability)                 | npm      |
+| [linkedom](https://www.npmjs.com/package/linkedom)                                         | npm      |
+| [node-html-markdown](https://www.npmjs.com/package/node-html-markdown)                     | npm      |
+| [undici](https://www.npmjs.com/package/undici)                                             | npm      |
+| [zod](https://www.npmjs.com/package/zod)                                                   | npm      |
 
 ## Contributing and License
 

@@ -7,7 +7,7 @@ import { type ReadableStream as NodeReadableStream } from 'node:stream/web';
 import tls from 'node:tls';
 import { createBrotliDecompress, createGunzip, createInflate } from 'node:zlib';
 
-import { Agent, type Dispatcher } from 'undici';
+import { Agent, type Dispatcher, fetch as undiciFetch } from 'undici';
 
 import { config } from '../config.js';
 import {
@@ -61,25 +61,12 @@ function getCharsetFromContentType(
   }
   return charset.trim();
 }
-const MAX_CACHED_DECODERS = 50;
-const decoderCache = new Map<string, TextDecoder>();
 function createDecoder(encoding: string | undefined): TextDecoder {
   const label = normalizeEncodingLabel(encoding) || 'utf-8';
-  const cached = decoderCache.get(label);
-  if (cached) return cached;
-
   try {
-    const decoder = new TextDecoder(label);
-    if (decoderCache.size < MAX_CACHED_DECODERS) {
-      decoderCache.set(label, decoder);
-    }
-    return decoder;
+    return new TextDecoder(label);
   } catch {
-    const fallback = decoderCache.get('utf-8') ?? new TextDecoder('utf-8');
-    if (decoderCache.size < MAX_CACHED_DECODERS) {
-      decoderCache.set('utf-8', fallback);
-    }
-    return fallback;
+    return new TextDecoder('utf-8');
   }
 }
 function decodeBuffer(buffer: Uint8Array, encoding: string): string {
@@ -1516,10 +1503,14 @@ const defaultContext = {
 const defaultRedactor = {
   redact: redactUrl,
 };
-const defaultFetch = (
+const defaultFetch = async (
   input: RequestInfo | URL,
   init?: RequestInit
-): Promise<Response> => globalThis.fetch(input, init);
+): Promise<Response> =>
+  undiciFetch(
+    input as Parameters<typeof undiciFetch>[0],
+    init as Parameters<typeof undiciFetch>[1]
+  ) as unknown as Promise<Response>;
 type FetcherConfig = typeof config.fetcher;
 interface FetchBufferResult {
   buffer: Uint8Array;

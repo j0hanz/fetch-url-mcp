@@ -1,22 +1,18 @@
-import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
-import { SetLevelRequestSchema } from '@modelcontextprotocol/sdk/types.js';
+import { McpServer, StdioServerTransport } from '@modelcontextprotocol/server';
 
-import * as fs from 'node:fs/promises';
+import { readFile } from 'node:fs/promises';
 import process from 'node:process';
 
 import { config } from './lib/config.js';
 import {
-  getSessionId,
   logError,
   Loggers,
   logInfo,
-  logNotice,
-  setLogLevel,
+  resolveMcpSessionIdByServer,
+  resolveMcpSessionOwnerKey,
   setMcpServer,
 } from './lib/core.js';
 import { toError } from './lib/error/index.js';
-import { setTaskToolCallCapability } from './lib/mcp-interop.js';
 import type { IconInfo } from './lib/utils.js';
 
 import {
@@ -24,7 +20,13 @@ import {
   registerGetHelpPrompt,
   registerInstructionResource,
 } from './resources/index.js';
-import { abortAllTaskExecutions, registerTaskHandlers } from './tasks/index.js';
+import { TaskStoreAdapter } from './tasks/adapter.js';
+import {
+  abortAllTaskExecutions,
+  emitTaskStatusNotification,
+  registerTaskHandlers,
+  taskManager,
+} from './tasks/index.js';
 import { registerTools as registerFetchUrlTool } from './tools/index.js';
 import { shutdownTransformWorkerPool } from './transform/index.js';
 
@@ -40,7 +42,7 @@ async function getLocalIconInfo(): Promise<IconInfo | undefined> {
     const mime = 'image/svg+xml';
     try {
       const iconPath = new URL(`../assets/${name}`, import.meta.url);
-      const buffer = await fs.readFile(iconPath);
+      const buffer = await readFile(iconPath);
       return {
         src: `data:${mime};base64,${buffer.toString('base64')}`,
         mimeType: mime,
@@ -59,31 +61,30 @@ type McpServerCapabilities = NonNullable<
 >;
 
 function createServerCapabilities(): McpServerCapabilities {
+  const taskCapableToolCalls = config.tools.enabled.includes('fetch-url');
+
   return {
     completions: {},
     logging: {},
-    resources: { subscribe: true, listChanged: true },
-    // SDK auto-adds listChanged to tools capability at runtime.
+    resources: {},
     tools: {},
     prompts: {},
     tasks: {
       list: {},
       cancel: {},
       delete: {},
-      requests: {
-        tools: {
-          call: {},
-        },
-      },
+      ...(taskCapableToolCalls
+        ? {
+            requests: {
+              tools: {
+                call: {},
+              },
+            },
+          }
+        : {}),
+      taskStore: new TaskStoreAdapter(),
     },
   };
-}
-
-function syncTaskCapabilityAdvertisement(
-  server: McpServer,
-  taskToolCallEnabled: boolean
-): void {
-  setTaskToolCallCapability(server, taskToolCallEnabled);
 }
 
 interface ServerInfo {
@@ -145,13 +146,29 @@ async function createMcpServerWithOptions(
   const toolControls = registerFetchUrlTool(server);
   registerGetHelpPrompt(server, serverInstructions, localIcon);
   registerInstructionResource(server, serverInstructions, localIcon);
-  const taskRegistration = registerTaskHandlers(server, {
-    requireInterception: config.tasks.requireInterception,
+  server.server.registerCapabilities({
+    resources: { listChanged: false },
+    prompts: { listChanged: false },
+    tools: { listChanged: false },
   });
-  const taskToolCallEnabled = taskRegistration.interceptedToolsCall;
+  const taskRegistration = registerTaskHandlers(server);
+  const taskToolCallEnabled = taskRegistration.taskCapableToolsRegistered;
   toolControls.setTaskSupport(taskToolCallEnabled ? 'optional' : 'forbidden');
-  syncTaskCapabilityAdvertisement(server, taskToolCallEnabled);
-  registerLoggingSetLevelHandler(server);
+  const disposeTaskStatusListener = taskManager.onStatusChange((task) => {
+    const sessionId = resolveMcpSessionIdByServer(server);
+    if (sessionId) {
+      const ownerKey = resolveMcpSessionOwnerKey(sessionId);
+      if (ownerKey && task.ownerKey !== ownerKey) {
+        return;
+      }
+    }
+    emitTaskStatusNotification(server, task);
+  });
+  const close = server.close.bind(server);
+  server.close = async (): Promise<void> => {
+    disposeTaskStatusListener();
+    await close();
+  };
   attachServerErrorHandler(server);
 
   // Set global ref only after all registrations succeed so callers
@@ -165,22 +182,6 @@ async function createMcpServerWithOptions(
 
 export async function createMcpServerForHttpSession(): Promise<McpServer> {
   return createMcpServerWithOptions({ registerObservabilityServer: false });
-}
-
-function registerLoggingSetLevelHandler(server: McpServer): void {
-  server.server.setRequestHandler(SetLevelRequestSchema, (request) => {
-    const sessionId = getSessionId();
-    setLogLevel(request.params.level, sessionId);
-    logNotice(
-      'Logging level updated',
-      {
-        level: request.params.level,
-        scope: sessionId ? 'session' : 'stdio',
-      },
-      'logging'
-    );
-    return {};
-  });
 }
 
 function attachServerErrorHandler(server: McpServer): void {

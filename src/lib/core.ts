@@ -1,5 +1,5 @@
-import { type McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import type { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
+import type { NodeStreamableHTTPServerTransport } from '@modelcontextprotocol/node';
+import { type McpServer } from '@modelcontextprotocol/server';
 
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { randomUUID } from 'node:crypto';
@@ -131,6 +131,11 @@ export function resolveMcpSessionIdByServer(
   server: McpServer
 ): string | undefined {
   return findSessionIdByServer(server);
+}
+export function resolveMcpSessionServer(
+  sessionId: string
+): McpServer | undefined {
+  return sessionServers.get(sessionId);
 }
 export function runWithRequestContext<T>(
   context: RequestContext,
@@ -989,7 +994,7 @@ export const Loggers = {
 
 export interface SessionEntry {
   readonly server: McpServer;
-  readonly transport: StreamableHTTPServerTransport;
+  readonly transport: NodeStreamableHTTPServerTransport;
   createdAt: number;
   lastSeen: number;
   protocolInitialized: boolean;

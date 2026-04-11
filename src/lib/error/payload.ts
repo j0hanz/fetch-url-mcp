@@ -1,4 +1,4 @@
-import { type CallToolResult } from '@modelcontextprotocol/sdk/types.js';
+import { type CallToolResult } from '@modelcontextprotocol/server';
 
 import { z } from 'zod';
 
@@ -163,6 +163,6 @@ export function tryReadToolErrorMessage(value: unknown): string | undefined {
 
 const mcpErrorPrefixPattern = /^MCP error -?\d+:\s*/;
 
-export function stripMcpErrorPrefix(message: string): string {
+export function stripProtocolErrorPrefix(message: string): string {
   return message.replace(mcpErrorPrefixPattern, '');
 }

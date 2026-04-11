@@ -3,199 +3,76 @@ import { describe, it } from 'node:test';
 
 import { tryReadToolErrorMessage } from '../src/lib/error/index.js';
 import {
-  buildToolHandlerExtra,
-  compact,
+  buildAuthenticatedOwnerKey,
   isServerResult,
-  parseHandlerExtra,
-  resolveTaskOwnerKey,
-  resolveToolCallContext,
-  withRequestContextIfMissing,
+  resolveOwnerKeyFromContext,
 } from '../src/tasks/manager.js';
 
-// ── compact ─────────────────────────────────────────────────────────
+// ── resolveOwnerKeyFromContext (ServerContext-native) ────────────────
 
-describe('compact', () => {
-  it('strips undefined values', () => {
-    const result = compact({ a: 1, b: undefined, c: 'x' });
-    assert.equal(result.a, 1);
-    assert.equal(result.c, 'x');
-    assert.equal('b' in result, false);
-  });
+describe('resolveOwnerKeyFromContext', () => {
+  const baseCtx = {
+    mcpReq: {
+      signal: new AbortController().signal,
+      id: 'r-1',
+      notify: async () => {},
+      log: () => {},
+      _meta: {},
+    },
+  };
 
-  it('returns empty object for all-undefined input', () => {
-    const result = compact({ a: undefined, b: undefined });
-    assert.deepEqual(result, {});
-  });
-
-  it('keeps null values', () => {
-    const result = compact({ a: null });
-    assert.equal(result.a, null);
-  });
-});
-
-// ── parseHandlerExtra ───────────────────────────────────────────────
-
-describe('parseHandlerExtra', () => {
-  it('returns undefined for non-object input', () => {
-    assert.equal(parseHandlerExtra(null), undefined);
-    assert.equal(parseHandlerExtra('string'), undefined);
-    assert.equal(parseHandlerExtra(42), undefined);
-  });
-
-  it('extracts sessionId from top-level property', () => {
-    const result = parseHandlerExtra({ sessionId: 'sess-1' });
-    assert.equal(result?.sessionId, 'sess-1');
-  });
-
-  it('extracts sessionId from requestInfo.headers', () => {
-    const result = parseHandlerExtra({
-      requestInfo: {
-        headers: { 'mcp-session-id': 'sess-from-header' },
-      },
-    });
-    assert.equal(result?.sessionId, 'sess-from-header');
-  });
-
-  it('extracts sessionId from x-mcp-session-id header', () => {
-    const result = parseHandlerExtra({
-      requestInfo: {
-        headers: { 'x-mcp-session-id': 'sess-x' },
-      },
-    });
-    assert.equal(result?.sessionId, 'sess-x');
-  });
-
-  it('extracts signal when it is an AbortSignal', () => {
-    const ac = new AbortController();
-    const result = parseHandlerExtra({ signal: ac.signal });
-    assert.ok(result?.signal instanceof AbortSignal);
-  });
-
-  it('extracts string requestId', () => {
-    const result = parseHandlerExtra({ requestId: 'req-1' });
-    assert.equal(result?.requestId, 'req-1');
-  });
-
-  it('extracts numeric requestId', () => {
-    const result = parseHandlerExtra({ requestId: 42 });
-    assert.equal(result?.requestId, 42);
-  });
-
-  it('normalizes sendNotification function', () => {
-    const fn = async () => {};
-    const result = parseHandlerExtra({ sendNotification: fn });
-    assert.equal(typeof result?.sendNotification, 'function');
-  });
-
-  it('ignores non-function sendNotification', () => {
-    const result = parseHandlerExtra({ sendNotification: 'not-a-fn' });
-    assert.equal(result?.sendNotification, undefined);
-  });
-
-  it('extracts authInfo clientId', () => {
-    const result = parseHandlerExtra({
-      authInfo: { clientId: 'client-1' },
-    });
-    assert.equal(result?.authInfo?.clientId, 'client-1');
-  });
-
-  it('ignores invalid authInfo', () => {
-    const result = parseHandlerExtra({ authInfo: 'not-object' });
-    assert.equal(result?.authInfo, undefined);
-  });
-});
-
-// ── resolveTaskOwnerKey ─────────────────────────────────────────────
-
-describe('resolveTaskOwnerKey', () => {
-  it('returns "default" when no extra is provided', () => {
-    assert.equal(resolveTaskOwnerKey(), 'default');
-    assert.equal(resolveTaskOwnerKey(undefined), 'default');
-  });
-
-  it('returns session-based key when auth context is absent', () => {
-    assert.equal(
-      resolveTaskOwnerKey({ sessionId: 'sess-1' }),
-      'session:sess-1'
-    );
-  });
-
-  it('returns auth-based key when clientId is present', () => {
-    const key = resolveTaskOwnerKey({ authInfo: { clientId: 'c-1' } });
-    assert.ok(key.startsWith('auth:'));
-  });
-
-  it('returns auth-based key when only token is present', () => {
-    const key = resolveTaskOwnerKey({ authInfo: { token: 'secret' } });
-    assert.ok(key.startsWith('auth:'));
-    assert.ok(key.length > 'auth:'.length);
-  });
-
-  it('is deterministic for the same auth context', () => {
-    const a = resolveTaskOwnerKey({
-      authInfo: { clientId: 'client-a', token: 'same' },
-    });
-    const b = resolveTaskOwnerKey({
-      authInfo: { clientId: 'client-a', token: 'same' },
-    });
-    assert.equal(a, b);
-  });
-
-  it('differs for different tokens even when clientId is shared', () => {
-    const a = resolveTaskOwnerKey({
-      authInfo: { clientId: 'static-token', token: 'alpha' },
-    });
-    const b = resolveTaskOwnerKey({
-      authInfo: { clientId: 'static-token', token: 'beta' },
-    });
-    assert.notEqual(a, b);
-  });
-
-  it('prefers auth context over sessionId', () => {
-    const key = resolveTaskOwnerKey({
+  it('returns auth-based key when authInfo is present', () => {
+    const ctx = {
+      ...baseCtx,
       sessionId: 'sess-1',
-      authInfo: { clientId: 'c-1', token: 'tok-1' },
+      http: { authInfo: { clientId: 'c-1', token: 'tok-1', scopes: [] } },
+    };
+    const key = resolveOwnerKeyFromContext(ctx as never);
+    assert.ok(key.startsWith('auth:'));
+  });
+
+  it('returns session-based key when auth is absent', () => {
+    const ctx = { ...baseCtx, sessionId: 'sess-1' };
+    const key = resolveOwnerKeyFromContext(ctx as never);
+    assert.equal(key, 'session:sess-1');
+  });
+
+  it('returns "default" when no auth or session', () => {
+    const ctx = { ...baseCtx };
+    const key = resolveOwnerKeyFromContext(ctx as never);
+    assert.equal(key, 'default');
+  });
+
+  it('matches buildAuthenticatedOwnerKey for same auth identity', () => {
+    const ctx = {
+      ...baseCtx,
+      sessionId: 'sess-1',
+      http: { authInfo: { clientId: 'c-1', token: 'tok-1', scopes: [] } },
+    };
+    const fromCtx = resolveOwnerKeyFromContext(ctx as never);
+    const fromBuild = buildAuthenticatedOwnerKey({
+      clientId: 'c-1',
+      token: 'tok-1',
     });
-    assert.equal(
-      key,
-      resolveTaskOwnerKey({ authInfo: { clientId: 'c-1', token: 'tok-1' } })
-    );
-  });
-});
-
-// ── resolveToolCallContext ───────────────────────────────────────────
-
-describe('resolveToolCallContext', () => {
-  it('returns context with ownerKey', () => {
-    const ctx = resolveToolCallContext({ sessionId: 'sess-1' });
-    assert.equal(ctx.ownerKey, 'session:sess-1');
-    assert.equal(ctx.sessionId, 'sess-1');
+    assert.equal(fromCtx, fromBuild);
   });
 
-  it('returns default ownerKey when no extra', () => {
-    const ctx = resolveToolCallContext();
-    assert.equal(ctx.ownerKey, 'default');
-  });
-});
-
-// ── buildToolHandlerExtra ───────────────────────────────────────────
-
-describe('buildToolHandlerExtra', () => {
-  it('builds extra from context', () => {
-    const ac = new AbortController();
-    const extra = buildToolHandlerExtra({
-      ownerKey: 'session:x',
-      signal: ac.signal,
-      requestId: 'req-1',
-    });
-    assert.ok(extra.signal instanceof AbortSignal);
-    assert.equal(extra.requestId, 'req-1');
-  });
-
-  it('omits undefined fields', () => {
-    const extra = buildToolHandlerExtra({ ownerKey: 'default' });
-    assert.equal('signal' in extra, false);
-    assert.equal('requestId' in extra, false);
+  it('uses stable subject from extra claims', () => {
+    const ctx = {
+      ...baseCtx,
+      http: {
+        authInfo: {
+          clientId: 'oauth',
+          token: 'alpha',
+          scopes: [],
+          extra: { sub: 'user-99' },
+        },
+      },
+    };
+    const a = resolveOwnerKeyFromContext(ctx as never);
+    ctx.http.authInfo.token = 'beta';
+    const b = resolveOwnerKeyFromContext(ctx as never);
+    assert.equal(a, b);
   });
 });
 
@@ -281,32 +158,5 @@ describe('tryReadToolErrorMessage', () => {
       ],
     };
     assert.equal(tryReadToolErrorMessage(value), undefined);
-  });
-});
-
-// ── withRequestContextIfMissing ─────────────────────────────────────
-
-describe('withRequestContextIfMissing', () => {
-  it('wraps handler and calls it', async () => {
-    let called = false;
-    const handler = async (params: { x: number }) => {
-      called = true;
-      return params.x * 2;
-    };
-    const wrapped = withRequestContextIfMissing(handler);
-    const result = await wrapped({ x: 5 });
-    assert.equal(result, 10);
-    assert.equal(called, true);
-  });
-
-  it('forwards extra to handler', async () => {
-    let receivedExtra: unknown;
-    const handler = async (_params: unknown, extra?: unknown) => {
-      receivedExtra = extra;
-      return 'ok';
-    };
-    const wrapped = withRequestContextIfMissing(handler);
-    await wrapped({}, { requestId: 'req-99' });
-    assert.ok(receivedExtra);
   });
 });

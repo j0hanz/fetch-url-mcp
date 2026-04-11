@@ -1,4 +1,4 @@
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import type { McpServer } from '@modelcontextprotocol/server';
 
 import assert from 'node:assert/strict';
 import { afterEach, describe, it } from 'node:test';
@@ -64,10 +64,14 @@ describe('server tool contract', () => {
       openWorldHint: true,
     });
 
-    const icons = Array.isArray(tool['icons']) ? tool['icons'] : [];
+    const meta = asRecord(tool['_meta']);
+    const icons = Array.isArray(meta?.['icons']) ? meta?.['icons'] : [];
     assert.equal(icons.length, 1);
-    assert.equal(icons[0]?.mimeType, 'image/svg+xml');
-    assert.match(String(icons[0]?.src), /^data:image\/svg\+xml;base64,/);
+    assert.equal(asRecord(icons[0])?.['mimeType'], 'image/svg+xml');
+    assert.match(
+      String(asRecord(icons[0])?.['src']),
+      /^data:image\/svg\+xml;base64,/
+    );
 
     const outputSchema =
       tool['outputSchema'] && typeof tool['outputSchema'] === 'object'
@@ -87,6 +91,32 @@ describe('server tool contract', () => {
     ]);
     assert.ok(outputSchema.properties?.['markdown']);
     assert.ok(outputSchema.properties?.['contentSize']);
+  });
+
+  it('does not advertise unsupported list-changed or resource subscription capabilities', async () => {
+    const server = await createServer();
+    const capabilities = Reflect.get(server.server, '_capabilities') as
+      | Record<string, unknown>
+      | undefined;
+
+    assert.ok(capabilities, 'capabilities should be present');
+    const resources =
+      capabilities?.['resources'] &&
+      typeof capabilities['resources'] === 'object'
+        ? (capabilities['resources'] as Record<string, unknown>)
+        : undefined;
+    const tools =
+      capabilities?.['tools'] && typeof capabilities['tools'] === 'object'
+        ? (capabilities['tools'] as Record<string, unknown>)
+        : undefined;
+    const prompts =
+      capabilities?.['prompts'] && typeof capabilities['prompts'] === 'object'
+        ? (capabilities['prompts'] as Record<string, unknown>)
+        : undefined;
+
+    assert.deepEqual(resources, { listChanged: false });
+    assert.deepEqual(tools, { listChanged: false });
+    assert.deepEqual(prompts, { listChanged: false });
   });
 
   it('emits markdown as the first content block and JSON as the compatibility block', () => {

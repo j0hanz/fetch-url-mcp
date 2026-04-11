@@ -78,7 +78,9 @@
     "prepublishOnly": "npm run lint && npm run type-check && npm run build"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.29",
+    "@cfworker/json-schema": "^4.1.1",
+    "@modelcontextprotocol/node": "^2.0.0-alpha.2",
+    "@modelcontextprotocol/server": "^2.0.0-alpha.2",
     "@mozilla/readability": "^0.6.0",
     "linkedom": "^0.18.12",
     "node-html-markdown": "^2.0.0",

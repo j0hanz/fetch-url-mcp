@@ -1,13 +1,11 @@
-import { ErrorCode } from '@modelcontextprotocol/sdk/types.js';
-
-import type { ServerResponse } from 'node:http';
+import { ProtocolErrorCode } from '@modelcontextprotocol/server';
 
 import { Loggers, logWarn } from '../lib/core.js';
 import { isAbortError } from '../lib/error/index.js';
 import { sendJsonRpcError } from '../lib/mcp-interop.js';
 import { startAbortableIntervalLoop } from '../lib/utils.js';
 
-import type { RequestContext } from './native.js';
+import { type RequestContext, sendJson } from './helpers.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -24,14 +22,6 @@ interface RateLimitConfig {
   windowMs: number;
   cleanupIntervalMs: number;
   enabled: boolean;
-}
-
-function sendJson(res: ServerResponse, status: number, body: unknown): void {
-  res.statusCode = status;
-  res.setHeader('Content-Type', 'application/json; charset=utf-8');
-  res.setHeader('X-Content-Type-Options', 'nosniff');
-  res.setHeader('Cache-Control', 'no-store');
-  res.end(JSON.stringify(body));
 }
 
 function isMcpEndpoint(pathname: string): boolean {
@@ -119,7 +109,7 @@ export class RateLimiter {
         sendJsonRpcError(
           ctx.res,
           429,
-          ErrorCode.InvalidRequest,
+          ProtocolErrorCode.InvalidRequest,
           'Rate limit exceeded',
           null,
           { retryAfter }

@@ -102,4 +102,15 @@ describe('buildServerInstructions completions mention', () => {
       );
     }
   });
+
+  it('documents V2 task params instead of legacy task meta', () => {
+    assert.ok(instructions.includes('task: { ttl?: <ms> }'));
+    assert.ok(
+      instructions.includes(
+        'tasks/result` — wait for terminal status, then retrieve the stored result or terminal error payload.'
+      )
+    );
+    assert.equal(instructions.includes('modelcontextprotocol.io/task'), false);
+    assert.equal(instructions.includes('notifications/tasks/created'), false);
+  });
 });
