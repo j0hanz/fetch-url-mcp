@@ -2244,17 +2244,6 @@ class HttpRequestPipeline {
     const path = resolveRequestPath(rawReq);
     const startTime = performance.now();
 
-    rawRes.once('finish', () => {
-      logRequestCompletion({
-        path,
-        statusCode: rawRes.statusCode,
-        durationMs: performance.now() - startTime,
-        requestId,
-        ...(rawReq.method ? { method: rawReq.method } : {}),
-        ...(sessionId ? { sessionId } : {}),
-      });
-    });
-
     try {
       await runWithRequestContext(
         {
@@ -2263,6 +2252,17 @@ class HttpRequestPipeline {
           ...(sessionId ? { sessionId } : {}),
         },
         async () => {
+          rawRes.once('finish', () => {
+            logRequestCompletion({
+              path,
+              statusCode: rawRes.statusCode,
+              durationMs: performance.now() - startTime,
+              requestId,
+              ...(rawReq.method ? { method: rawReq.method } : {}),
+              ...(sessionId ? { sessionId } : {}),
+            });
+          });
+
           if (this.rejectDuplicateHeaders(rawReq, rawRes)) return;
 
           const ctx = this.buildContext(rawReq, rawRes, signal);
