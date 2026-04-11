@@ -183,7 +183,7 @@ function formatContentSize(contentSize: number): string {
 }
 
 function buildFetchSuccessSummary(contentSize: number): string {
-  return `Done — ${formatContentSize(contentSize)}`;
+  return `Fetch completed — ${formatContentSize(contentSize)}`;
 }
 
 export function getFetchCompletionStatusMessage(
@@ -211,7 +211,7 @@ export class FetchUrlProgressPlan {
   reportStart(): void {
     this.reporter.report({
       progress: Step.START,
-      message: 'Preparing request',
+      message: 'Preparing',
       total: this.total,
     });
   }
@@ -259,20 +259,23 @@ export class FetchUrlProgressPlan {
       case 'response_ready':
         return {
           step: Step.RESPONSE,
-          message: 'Received response',
+          message: 'Processing response',
         };
       case 'transform_start':
         return {
           step: Step.TRANSFORM,
-          message: 'Parsing HTML -> Markdown',
+          message: 'Converting to Markdown',
         };
       case 'prepare_output':
         return {
           step: Step.PREPARE,
-          message: 'Fetch completed',
+          message: 'Finalizing',
         };
       case 'finalize_output':
-        return undefined;
+        return {
+          step: Step.DONE,
+          message: 'Fetch completed',
+        };
     }
   }
 }
