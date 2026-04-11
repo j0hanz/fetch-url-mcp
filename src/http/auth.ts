@@ -5,7 +5,6 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 
 import { config } from '../lib/config.js';
 import { logDebug, Loggers, logWarn } from '../lib/core.js';
-import { type JsonRpcId, sendJsonRpcError } from '../lib/mcp-interop.js';
 import { normalizeHost } from '../lib/net/index.js';
 import {
   composeAbortSignal,
@@ -14,41 +13,13 @@ import {
   timingSafeEqualUtf8,
 } from '../lib/utils.js';
 
-import type { RequestContext } from './native.js';
-
-function setNoStoreHeaders(res: ServerResponse): void {
-  res.setHeader('X-Content-Type-Options', 'nosniff');
-  res.setHeader('Cache-Control', 'no-store');
-}
-
-function sendJson(res: ServerResponse, status: number, body: unknown): void {
-  res.statusCode = status;
-  res.setHeader('Content-Type', 'application/json; charset=utf-8');
-  setNoStoreHeaders(res);
-  res.end(JSON.stringify(body));
-}
-
-function sendEmpty(res: ServerResponse, status: number): void {
-  res.statusCode = status;
-  res.setHeader('Content-Length', '0');
-  res.end();
-}
-
-function sendError(
-  res: ServerResponse,
-  code: number,
-  message: string,
-  status = 400,
-  id?: JsonRpcId | null
-): void {
-  sendJsonRpcError(res, status, code, message, id ?? null);
-}
-
-function getHeaderValue(req: IncomingMessage, name: string): string | null {
-  const value = req.headers[name];
-  if (!value) return null;
-  return Array.isArray(value) ? (value[0] ?? null) : value;
-}
+import {
+  getHeaderValue,
+  type RequestContext,
+  sendEmpty,
+  sendError,
+  sendJson,
+} from './helpers.js';
 
 // ---------------------------------------------------------------------------
 // CORS

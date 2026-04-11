@@ -56,7 +56,6 @@ import {
   isJsonRpcBatchRequest,
   isMcpRequestBody,
   type JsonRpcId,
-  sendJsonRpcError,
 } from '../lib/mcp-interop.js';
 import {
   createDefaultBlockList,
@@ -82,7 +81,25 @@ import {
   isProtectedResourceMetadataPath,
   SUPPORTED_MCP_PROTOCOL_VERSIONS,
 } from './auth.js';
+import {
+  type AuthenticatedContext,
+  getHeaderValue,
+  type RequestContext,
+  sendEmpty,
+  sendError,
+  sendJson,
+} from './helpers.js';
 import { RateLimiter } from './rate-limit.js';
+
+export {
+  type AuthenticatedContext,
+  getHeaderValue,
+  type RequestContext,
+  sendEmpty,
+  sendError,
+  sendJson,
+  setNoStoreHeaders,
+} from './helpers.js';
 
 /*
  * Module map:
@@ -196,68 +213,9 @@ function drainConnectionsOnShutdown(server: TunableHttpServer): void {
   }
 }
 
-export interface RequestContext {
-  req: IncomingMessage;
-  res: ServerResponse;
-  url: URL;
-  method: string | undefined;
-  ip: string | null;
-  body: unknown;
-  signal?: AbortSignal;
-}
-
-export interface AuthenticatedContext extends RequestContext {
-  auth: AuthInfo;
-}
-
-// ---------------------------------------------------------------------------
-// Response helpers
-// ---------------------------------------------------------------------------
-
-function setNoStoreHeaders(res: ServerResponse): void {
-  res.setHeader('X-Content-Type-Options', 'nosniff');
-  res.setHeader('Cache-Control', 'no-store');
-}
-
-export function sendJson(
-  res: ServerResponse,
-  status: number,
-  body: unknown
-): void {
-  res.statusCode = status;
-  res.setHeader('Content-Type', 'application/json; charset=utf-8');
-  setNoStoreHeaders(res);
-  res.end(JSON.stringify(body));
-}
-
-export function sendEmpty(res: ServerResponse, status: number): void {
-  res.statusCode = status;
-  res.setHeader('Content-Length', '0');
-  res.end();
-}
-
-export function sendError(
-  res: ServerResponse,
-  code: number,
-  message: string,
-  status = 400,
-  id?: JsonRpcId | null
-): void {
-  sendJsonRpcError(res, status, code, message, id ?? null);
-}
-
 // ---------------------------------------------------------------------------
 // Request helpers
 // ---------------------------------------------------------------------------
-
-export function getHeaderValue(
-  req: IncomingMessage,
-  name: string
-): string | null {
-  const val = req.headers[name];
-  if (!val) return null;
-  return Array.isArray(val) ? (val[0] ?? null) : val;
-}
 
 export function getMcpSessionId(req: IncomingMessage): string | null {
   return (
