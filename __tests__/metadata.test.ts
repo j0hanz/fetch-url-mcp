@@ -355,11 +355,11 @@ describe('buildMetadataFooter', () => {
     assert.ok(result.includes('_Jane_'));
   });
 
-  it('includes description as sub', () => {
+  it('includes description', () => {
     const result = buildMetadataFooter({
       ...base,
       description: 'A description',
     });
-    assert.ok(result.includes('<sub>A description</sub>'));
+    assert.ok(result.includes('A description'));
   });
 });

@@ -891,7 +891,7 @@ export function buildMetadataFooter(
   }
 
   if (parts.length > 0) lines.push(` ${parts.join(' | ')}`);
-  if (metadata.description) lines.push(` <sub>${metadata.description}</sub>`);
+  if (metadata.description) lines.push(` ${metadata.description}`);
 
   return lines.join('\n');
 }

@@ -14,6 +14,7 @@ import { config } from '../lib/config.js';
 import { logError, Loggers, logInfo } from '../lib/core.js';
 import {
   classifyAndLogToolError,
+  FetchError,
   getErrorMessage,
   handleToolError,
   isAbortError,
@@ -177,13 +178,16 @@ const Step = {
 } as const;
 
 function formatContentSize(contentSize: number): string {
-  if (contentSize < 1000) return `${contentSize} chars`;
-  if (contentSize < 1_000_000) return `${(contentSize / 1024).toFixed(1)} KB`;
-  return `${(contentSize / (1024 * 1024)).toFixed(1)} MB`;
+  if (contentSize < 1024) return `${contentSize} B`;
+  if (contentSize < 1_048_576) {
+    const kb = contentSize / 1024;
+    return kb < 10 ? `${kb.toFixed(1)} KB` : `${kb.toFixed(0)} KB`;
+  }
+  return `${(contentSize / 1_048_576).toFixed(1)} MB`;
 }
 
 function buildFetchSuccessSummary(contentSize: number): string {
-  return `Fetch completed — ${formatContentSize(contentSize)}`;
+  return `Fetch completed \u2022 ${formatContentSize(contentSize)}`;
 }
 
 export function getFetchCompletionStatusMessage(
@@ -234,10 +238,18 @@ export class FetchUrlProgressPlan {
     });
   }
 
-  reportFailure(cancelled: boolean): void {
+  reportFailure(cancelled: boolean, error?: unknown): void {
+    let message: string;
+    if (cancelled) {
+      message = 'Cancelled';
+    } else if (error instanceof FetchError && error.statusCode > 0) {
+      message = `Fetch failed \u2022 ${String(error.statusCode)}`;
+    } else {
+      message = 'Fetch failed';
+    }
     this.reporter.report({
       progress: Step.DONE,
-      message: cancelled ? 'Cancelled' : 'Failed',
+      message,
       total: this.total,
     });
   }
@@ -393,7 +405,7 @@ async function executeFetch(
     progressPlan.reportSuccess(inlineResult.contentSize);
     return response;
   } catch (error) {
-    progressPlan.reportFailure(isAbortError(error));
+    progressPlan.reportFailure(isAbortError(error), error);
     await writeRequestScopedLog(
       ctx,
       isAbortError(error) ? 'warning' : 'error',
