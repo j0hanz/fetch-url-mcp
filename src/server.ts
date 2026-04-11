@@ -1,6 +1,6 @@
 import { McpServer, StdioServerTransport } from '@modelcontextprotocol/server';
 
-import * as fs from 'node:fs/promises';
+import { readFile } from 'node:fs/promises';
 import process from 'node:process';
 
 import { config } from './lib/config.js';
@@ -42,7 +42,7 @@ async function getLocalIconInfo(): Promise<IconInfo | undefined> {
     const mime = 'image/svg+xml';
     try {
       const iconPath = new URL(`../assets/${name}`, import.meta.url);
-      const buffer = await fs.readFile(iconPath);
+      const buffer = await readFile(iconPath);
       return {
         src: `data:${mime};base64,${buffer.toString('base64')}`,
         mimeType: mime,
